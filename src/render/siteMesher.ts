@@ -1,12 +1,12 @@
 import { Vector3 } from 'three';
 import { fbm2, Rng } from '../core/rng';
-import { Place, Side, Site, Way } from '../core/site';
+import { Place, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { carveRock, smin } from './geom/rock';
-import { ashlar, beam, coping, dressed, flag, hallFlag, plank, vaultStone } from './geom/styles';
+import { beam, plank, stoneStyles } from './geom/styles';
 import { DoorDesc, SceneDescription, TorchSpec } from './scene';
 
 /**
@@ -32,6 +32,8 @@ export function meshSite(site: Site): SceneDescription {
   const rng = new Rng(site.seed).fork('mesh');
   const T = site.wallThickness;
   const places = site.places;
+  const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint } = stoneStyles(site.setting.stone);
+  const sky = SKIES[site.setting.hour];
 
   // ------------------------------------------------------------------ helpers
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
@@ -245,7 +247,7 @@ export function meshSite(site: Site): SceneDescription {
           const bed = fbm2((q.y + q.x * 0.18) * 2.6, q.z * 0.15 + s1, 3);
           const blot = fbm2(q.x * 0.9 + s2, q.z * 0.9 + q.y * 0.7, 3);
           const tone = 0.72 + 0.4 * bed + 0.24 * blot;
-          return [0.8 * tone, 0.74 * tone, 0.65 * tone];
+          return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
         },
       });
       kit.mass(V(p.x0 - T / 2, p.floor + p.wall + 1.25, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
@@ -408,6 +410,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground } },
     doors,
     anchors,
   };

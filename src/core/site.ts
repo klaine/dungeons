@@ -96,11 +96,30 @@ export interface Site {
   top: number;
   entrance: number;
   goal: number;
+  setting: Setting;
   /** Unit vector towards the sun. */
   sun: [number, number, number];
   /** One sentence describing the place. */
   title: string;
 }
+
+export type Stone = 'limestone' | 'sandstone' | 'greystone' | 'basalt';
+export type Hour = 'morning' | 'midday' | 'evening';
+
+/** Where and when: what the place is built of, what it is called, and the time of day. */
+export interface Setting {
+  stone: Stone;
+  hour: Hour;
+  /** What kind of house it is, for its name. */
+  kind: string;
+}
+
+/** The sun and sky at each time of day, in the renderer's light units. */
+export const SKIES: Record<Hour, { sun: [number, number, number]; colour: [number, number, number]; intensity: number; zenith: number[]; horizon: number[]; ground: number[] }> = {
+  morning: { sun: [0.5, 0.62, 0.6], colour: [1.0, 0.88, 0.72], intensity: 11, zenith: [0.16, 0.3, 0.62], horizon: [0.66, 0.72, 0.8], ground: [0.09, 0.08, 0.07] },
+  midday: { sun: [-0.12, 0.9, 0.42], colour: [1.0, 0.96, 0.9], intensity: 12.5, zenith: [0.14, 0.28, 0.66], horizon: [0.6, 0.72, 0.88], ground: [0.1, 0.09, 0.08] },
+  evening: { sun: [-0.62, 0.5, 0.6], colour: [1.0, 0.7, 0.46], intensity: 9.5, zenith: [0.14, 0.22, 0.5], horizon: [0.8, 0.62, 0.48], ground: [0.08, 0.07, 0.06] },
+};
 
 export const OPPOSITE: Record<Side, Side> = { n: 's', s: 'n', e: 'w', w: 'e' };
 

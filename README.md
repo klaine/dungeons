@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+Each place has its own stone and time of day:
+
+![Four forecourts: different stone, different light](docs/images/settings.jpg)
+
 Some dead ends are natural caves, unlit, walled off behind a door:
 
 ![A cave seen from its doorway, and the door set in masonry in the rock](docs/images/cave.jpg)

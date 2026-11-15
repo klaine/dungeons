@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { allReachable, neighbours, Place, Role, Roof, Side, Site, Way } from './site';
+import { allReachable, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -19,7 +19,8 @@ const T = 1.0;          // wall thickness
 const STEP = 0.17;      // height of one stair
 const MAX_STEPS = 3;    // most stairs that fit in a doorway
 const NX = 6, NZ = 5;   // plan grid; the entrance is on the south row
-const MAX_ROOMS = 12;
+const MAX_ROOMS = 11;
+const CANDIDATES = 6;  // sites drafted per seed; the best is kept
 
 interface Cell { i: number; j: number }
 
@@ -150,8 +151,52 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
   return list;
 }
 
+/**
+ * Generates the site for a seed. Several are drafted and the one with the richest structure is
+ * kept: early layers are cheap, so it pays to make many and choose.
+ */
 export function generateSite(seed: string): Site {
-  const rng = new Rng(seed).fork('site');
+  const base = new Rng(seed);
+  const pickFrom = base.fork('setting');
+  const setting: Setting = {
+    stone: pickFrom.pick<Stone>(['limestone', 'limestone', 'sandstone', 'greystone', 'basalt']),
+    hour: pickFrom.pick<Hour>(['morning', 'midday', 'evening', 'evening']),
+    kind: pickFrom.pick(['priory', 'abbey', 'charterhouse', 'hospice', 'preceptory']),
+  };
+  let best: Site | null = null;
+  let bestScore = -Infinity;
+  for (let attempt = 0; attempt < CANDIDATES; attempt++) {
+    let site: Site;
+    try {
+      site = draftSite(seed, setting, base.fork(`site/${attempt}`));
+    } catch {
+      continue;
+    }
+    const s = score(site);
+    if (s > bestScore) { bestScore = s; best = site; }
+  }
+  if (!best) throw new Error(`no site could be generated (seed ${seed})`);
+  return best;
+}
+
+/** How much there is to a site: loops, gating, things to find, variety. Higher is better. */
+export function score(site: Site): number {
+  const solution = solve(site);
+  const rooms = site.places.filter((p) => p.roof !== 'sky').length;
+  const dark = site.places.filter((p) => p.light === 'dark').length;
+  const roofs = new Set(site.places.map((p) => p.roof));
+  return Math.min(loopCount(site), 3)
+    + 1.2 * Math.min(solution.moves.length / Math.max(1, solution.direct), 3)
+    + 0.8 * site.items.length
+    + (site.ways.some((w) => w.door?.barredFrom !== undefined) ? 1 : 0)
+    + (roofs.has('sky') && site.places.some((p) => p.role === 'court') ? 0.8 : 0)
+    + (roofs.has('cave') ? 0.8 : 0)
+    + (roofs.has('timber') && roofs.has('barrel') ? 0.5 : 0)
+    + (dark >= 1 && dark <= 3 ? 1 : 0)
+    - 0.25 * Math.abs(rooms - 9);
+}
+
+function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   const pick = rng.next();
   const draft = pick < 0.34 ? draftRing(rng) : pick < 0.58 ? draftDouble(rng) : pick < 0.8 ? draftStack(rng) : draftSpine(rng);
   const court = draft.court;
@@ -376,7 +421,7 @@ export function generateSite(seed: string): Site {
   // ---- depth from the start, roofline
   const site: Site = {
     seed, places, ways, items: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
-    sun: normalise([-0.3, 0.6, 0.9]), title: '',
+    setting, sun: normalise(SKIES[setting.hour].sun), title: '',
   };
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
@@ -411,7 +456,8 @@ export function generateSite(seed: string): Site {
   if (caves) parts.push(caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
   const dark = places.filter((p) => p.light === 'dark').length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
-  site.title = `A walled house of ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  const when = { morning: 'in the morning', midday: 'at midday', evening: 'at evening' }[setting.hour];
+  site.title = `A ${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

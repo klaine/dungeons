@@ -70,9 +70,9 @@ function toast(message: string): void {
 const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
-const SUN_COLOR = new Color(1.0, 0.84, 0.64);
-const SUN_INTENSITY = 11;
-const SKY = { zenith: [0.16, 0.3, 0.62], horizon: [0.62, 0.7, 0.8], ground: [0.09, 0.08, 0.07] };
+let SUN_COLOR = new Color(1.0, 0.84, 0.64);
+let SUN_INTENSITY = 11;
+let SKY = { zenith: [0.16, 0.3, 0.62], horizon: [0.62, 0.7, 0.8], ground: [0.09, 0.08, 0.07] };
 const TORCH_INTENSITY = 3.2;
 
 async function start(): Promise<void> {
@@ -110,6 +110,11 @@ async function start(): Promise<void> {
   const site = params.get('scene') === 'test' ? null : generateSite(seed);
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
+  if (desc.sun) {
+    SUN_COLOR = new Color(desc.sun.colour[0], desc.sun.colour[1], desc.sun.colour[2]);
+    SUN_INTENSITY = desc.sun.intensity;
+    SKY = desc.sun.sky;
+  }
   const map = document.getElementById('map') as HTMLCanvasElement;
   map.hidden = !site;
   map.addEventListener('click', () => map.classList.toggle('big'));

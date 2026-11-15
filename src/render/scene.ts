@@ -46,6 +46,8 @@ export interface SceneDescription {
   spawn: { position: Vector3; yaw: number };
   bounds: { min: Vector3; max: Vector3 };
   blocks: number;
+  /** The sun's colour and strength and the sky's radiance, if they differ from the defaults. */
+  sun?: { colour: [number, number, number]; intensity: number; sky: { zenith: number[]; horizon: number[]; ground: number[] } };
   /** A one-line description to show the player. */
   title?: string;
   /** Doors to hang in the doorways. */

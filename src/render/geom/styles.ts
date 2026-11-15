@@ -29,3 +29,22 @@ export const plank: MasonryStyle = {
   maxSeg: 0.5, chip: 0, tint: [1, 1, 1], tintVar: 0.2, hueVar: 0.04, mortar: [0.1, 0.07, 0.05], uvScale: 0.55,
 };
 export const beam: MasonryStyle = { ...plank, course: [0.3, 0.4], length: [5, 6], bevel: 0.012, tint: [0.8, 0.78, 0.75], tintVar: 0.1 };
+
+/** How each kind of stone tints the masonry, and its mortar. */
+const STONE_TINT: Record<string, { stone: [number, number, number]; mortar: [number, number, number] }> = {
+  limestone: { stone: [1, 1, 1], mortar: [1, 1, 1] },
+  sandstone: { stone: [1.08, 0.86, 0.64], mortar: [1.05, 0.9, 0.72] },
+  greystone: { stone: [0.76, 0.8, 0.86], mortar: [0.8, 0.82, 0.86] },
+  basalt: { stone: [0.47, 0.48, 0.53], mortar: [0.62, 0.6, 0.58] },
+};
+
+/** The masonry styles for a site built of the given stone. */
+export function stoneStyles(stone: string): { ashlar: MasonryStyle; dressed: MasonryStyle; vaultStone: MasonryStyle; flag: MasonryStyle; hallFlag: MasonryStyle; coping: MasonryStyle; tint: [number, number, number] } {
+  const t = STONE_TINT[stone] ?? STONE_TINT.limestone;
+  const of = (style: MasonryStyle): MasonryStyle => ({
+    ...style,
+    tint: [style.tint[0] * t.stone[0], style.tint[1] * t.stone[1], style.tint[2] * t.stone[2]],
+    mortar: [style.mortar[0] * t.mortar[0], style.mortar[1] * t.mortar[1], style.mortar[2] * t.mortar[2]],
+  });
+  return { ashlar: of(ashlar), dressed: of(dressed), vaultStone: of(vaultStone), flag: of(flag), hallFlag: of(hallFlag), coping: of(coping), tint: t.stone };
+}
