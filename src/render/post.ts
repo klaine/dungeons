@@ -249,7 +249,8 @@ float phaseHG(float c, float g) {
 }
 
 void main() {
-  vec3 col = texture2D(tColor, vUv).rgb;
+  // The sun's disc is thousands of times brighter than anything else; left alone, bloom spreads it over the whole view.
+  vec3 col = min(texture2D(tColor, vUv).rgb, vec3(6.0));
   if (uEnabled < 0.5) { gl_FragColor = vec4(col, 1.0); return; }
   float depth = texture2D(tDepth, vUv).x;
   vec4 v = uInvProj * vec4(vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
@@ -257,11 +258,11 @@ void main() {
   vec3 rd = wp - uCamPos;
   float dist = length(rd);
   rd /= dist;
-  float tMax = min(dist, 80.0);
+  float tMax = min(dist, 45.0);
   float dt = tMax / float(STEPS);
   float t = dt * ign(gl_FragCoord.xy + uFrame * 5.588);
   float c = dot(rd, uSunDir);
-  float phase = mix(phaseHG(c, 0.72), 0.0796, 0.35);
+  float phase = mix(phaseHG(c, 0.55), 0.0796, 0.35);
   vec3 scatter = vec3(0.0);
   float trans = 1.0;
   for (int i = 0; i < STEPS; i++) {
@@ -269,7 +270,7 @@ void main() {
     float sky = seen(tSkyDepth, uSkyVP, p, 0.0006);
     float sun = seen(tSunDepth, uSunVP, p, 0.0006);
     // Still air indoors holds more dust than the open courtyard.
-    float dens = uDensity * mix(uIndoorDensity, 1.0, sky) * exp(-max(p.y, 0.0) * 0.03);
+    float dens = uDensity * mix(uIndoorDensity, 1.0, sky) * exp(-max(p.y, 0.0) * 0.06);
     vec3 light = uSunColor * sun * phase + uSkyColor * sky * 0.0796;
     scatter += trans * light * dens * dt;
     trans *= exp(-dens * dt);

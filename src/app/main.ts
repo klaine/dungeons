@@ -180,12 +180,12 @@ async function start(): Promise<void> {
   const atmosphere = new AtmospherePass(scene, camera, size.x, size.y);
   atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
   atmosphere.uniforms.uSkyColor.value.set(0.42, 0.52, 0.7).multiplyScalar(1.6);
-  atmosphere.uniforms.uDensity.value = num('fog', 0.006);
-  atmosphere.uniforms.uIndoorDensity.value = num('dust', 7);
+  atmosphere.uniforms.uDensity.value = num('fog', 0.003);
+  atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
   atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
   atmosphere.setLights(torches.map((t) => ({ position: t.flamePosition, color: new Vector3(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16) })));
-  const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.22, 0.7, 1.6);
+  const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.14, 0.5, 1.8);
   composer.addPass(atmosphere);
   if (num('bloom', 1)) composer.addPass(bloom);
   composer.addPass(new OutputPass());

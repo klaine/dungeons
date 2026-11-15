@@ -137,11 +137,11 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   const south = kit.frame(AX, CZ1, CX0 - 0.1, CZ1);
   kit.wallFace('stone', south, -0.1, 3.9, ashlar);
   kit.wallMass(south, 1.2, -1, 3.9);
-  kit.box('stone', V(CX0 - 0.1, 3.9, CZ1 - 0.12), V(AX, 4.02, CZ1 + 0.6), 'zY', coping, coping);
+  kit.box('stone', V(CX0 - 0.1, 3.9, CZ1 - 0.12), V(AX, 4.02, CZ1 + 0.6), 'zYy', coping, coping);
   for (let x = 0.5; x < AX - 1; x += 1.9) {
     kit.box('stone', V(x, 4.02, CZ1 - 0.04), V(x + 1.0, 4.9, CZ1 + 0.5), 'xXzY', ashlar, coping);
   }
-  kit.box('stone', V(CX0 - 0.6, 6.0, -0.1), V(CX0 + 0.12, 6.12, CZ1 + 0.1), 'XY', coping, coping);
+  kit.box('stone', V(CX0 - 0.6, 6.0, -0.1), V(CX0 + 0.12, 6.12, CZ1 + 0.1), 'XYy', coping, coping);
   for (let z = 0.6; z < CZ1 - 1; z += 1.9) {
     kit.box('stone', V(CX0 - 0.5, 6.12, z), V(CX0 + 0.04, 7.0, z + 1.0), 'XzZY', ashlar, coping);
   }
@@ -154,7 +154,7 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   kit.wallMass(arcade, AT, -1, 4.7, arches);
   kit.mass(V(AXB + 0.035, -1, -0.1), V(AXB + 1.4, 5.7, CZ1 + 0.1));
   kit.mass(V(AX + AT, -1, CZ1 + 0.035), V(AXB + 1.4, 4.7, CZ1 + 1.2));
-  kit.box('stone', V(AX - 0.1, 4.7, -0.1), V(AX + AT, 4.82, CZ1 + 0.1), 'xY', coping, coping);
+  kit.box('stone', V(AX - 0.1, 4.7, -0.1), V(AX + AT, 4.82, CZ1 + 0.1), 'xYy', coping, coping);
   const arcadeIn = kit.frame(AX + AT, CZ1 + 0.1, AX + AT, -0.1);
   kit.wallFace('stone', arcadeIn, -0.1, 4.2, ashlar, { openings: arches.map((a) => ({ ...a, c: arcade.length - a.c })) });
   kit.wallFace('stone', kit.frame(AXB, -0.1, AXB, CZ1 + 0.1), -0.1, 4.2, ashlar);
