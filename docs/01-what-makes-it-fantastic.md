@@ -2,6 +2,20 @@
 
 This document defines the target. Everything the generator does should be traceable to something here, and everything here should eventually be something the generator can either build on purpose or measure after the fact.
 
+## What "dungeon" means here
+
+"Dungeon" is shorthand for **any bounded place built for adventure and exploration**. Underground is one case among several.
+
+| Kind | Examples | Its natural structure | Its particular pleasure |
+|---|---|---|---|
+| **Delve** | Crypt, mine, cavern, sewer | Rooms and passages, darkness, descent | Enclosure and reveal |
+| **Stronghold** | Castle, keep, tower, monastery | Rings of defence: gates, wards, towers, a keep; wall-walks above and cellars below | Getting in. Defence in depth is lock-and-key design that real architects already did |
+| **Settlement** | Village, town quarter, harbour, ruined city | Streets, squares, blocks, landmark buildings; rooftops and cellars as extra layers | Density of story, many doors, routes at several heights |
+| **Wild place** | Gorge, grove, marsh, coast, mountain pass, a ruin in the forest | Terrain: ridges, water, cliffs, thickets, trails, clearings | Long views, the landmark on the horizon, weather and light |
+| **Composite** | A castle on a crag above its village, with caves beneath | Parts of different kinds joined by ways | The journey between kinds: approach, enter, descend |
+
+The principles below apply to all of them. Sections 1 to 7 use the vocabulary of rooms and corridors because it is the clearest; section 8 covers what changes under an open sky.
+
 ## The core claim
 
 A fantastic dungeon is **a place with a past, a shape you can learn, and a rhythm you can feel.**
@@ -98,13 +112,27 @@ A good test: the dungeon's premise fits in one sentence, and that sentence expla
 
 ## 7. Visual impression
 
-- **Light is the primary material.** Underground, light defines space, mood and direction. Darkness is the default and every light source is a decision. Light guides: players walk towards it.
-- **Silhouette and shape language.** Each area should be recognisable in outline: angular and regular, soft and bulbous, shattered and leaning.
+- **Light is the primary material.** Light defines space, mood and direction. Underground, darkness is the default and every light source is a decision. Outdoors, the sun's angle, the sky and the weather set the whole mood. In both, light guides: players walk towards it.
+- **Surfaces you could touch.** Stone that is rough, damp or worn smooth; timber with grain; metal that catches a highlight. Materials respond to light physically, and they carry the place's history: moss where water seeps, soot above the torches, polish on the steps where feet have passed.
+- **Silhouette and shape language.** Each area should be recognisable in outline: angular and regular, soft and bulbous, shattered and leaning. Surface detail cannot rescue a flat wall; form comes first.
 - **Palette discipline.** Few colours per area, one accent. The accent marks what matters.
 - **Density gradients.** Detail gathers where attention should go and thins out elsewhere. Uniform clutter reads as noise.
 - **Scale cues.** A vast space needs something of known size in it to read as vast.
 - **Atmosphere.** Fog, dust, drips, spores, heat shimmer. Depth cues make spaces feel large and continuous.
 - **The postcard.** Every dungeon needs at least one view worth a screenshot.
+
+## 8. Under an open sky
+
+Castles, towns and wild places follow the same principles, realised differently.
+
+- **Walls become edges.** Outdoors nothing forces a route, so structure comes from terrain and construction: cliffs, rivers, ravines, thickets, ramparts, moats. The site is still a graph of places joined by ways; the gaps in the graph are made of landscape. Some edges are hard (a cliff) and some are soft (dense forest that slows and hides, against a trail that invites).
+- **Sight goes far.** The player can see much of the site at once, so landmarks and vistas do the work that corridors do underground. The reverse problem appears: mystery has to be manufactured with folds in the terrain, trees, fog, walls and buildings.
+- **The approach.** The first sight of the whole place from outside is the first postcard and the first planning moment. A good site shows several possible ways in: the gate, the breach in the wall, the sewer outflow, the climb.
+- **Inside and outside.** The strongest compression and release available: a tunnel mouth opening onto a valley, a bright courtyard after a dark gate passage, a cellar stair leading down from a sunlit kitchen. Sites should alternate.
+- **Sky is the light regime.** Time of day and weather are art direction. A low sun gives long shadows and warm stone; fog gives mystery and shortens sight; night makes a lit window a beacon.
+- **Layers stack.** Rooftops and wall-walks, street level, cellars and sewers. A town or castle is three dungeons sharing one footprint, and the connections between layers are its best shortcuts.
+- **Boundaries need fiction.** The site ends at the sea, a cliff, a river, a wall of forest or a bank of fog. Never at an invisible wall.
+- **Not every lock is hostile.** In an inhabited place the locks are social: the guarded gate, the private house, the shop that is shut. The structure is the same; the fiction differs.
 
 ---
 
@@ -128,35 +156,48 @@ Instead of a fixed catalogue, a biome is a point in a space of independent axes.
 
 | Axis | Examples | Mainly drives |
 |---|---|---|
-| **Substrate** | Limestone, basalt, ice, salt, living wood, bone, crystal | Materials, natural cave shapes, palette base |
+| **Setting** | Open air, interior, underground | Whether there is a sky; how far the player can see |
+| **Substrate** | Limestone, basalt, ice, salt, peat, sand, living wood, bone, crystal | Materials, landforms and cave shapes, palette base |
+| **Climate** | Temperate, alpine, arid, boreal, coastal, sodden | Vegetation, ground cover, weathering |
 | **Origin** | Natural, hewn, built, grown, wrong | Shape language: organic, rough-regular, architectural, branching, impossible |
-| **Builder culture** | Tomb-makers, miners, monks, engineers | Room types, layout rules, ornament |
-| **Condition** | Flooded, frozen, burnt, collapsed, overgrown, corrupted | Hazards, what is blocked, state puzzles |
-| **Inhabitants** | Vermin, a faction, a lone horror, nothing at all | Encounters, lairs, traces, barricades |
-| **Light regime** | Pitch dark, torchlit, bioluminescent, glowing from below, shafts of daylight | Mood, visibility rules |
+| **Builder culture** | Tomb-makers, miners, monks, engineers, lords, townsfolk | Room and building types, layout rules, ornament, materials |
+| **Condition** | Intact, ruined, flooded, frozen, burnt, overgrown, besieged, corrupted | Hazards, what is blocked, state puzzles |
+| **Inhabitants** | Vermin, a faction, townsfolk, a lone horror, nothing at all | Encounters, lairs, traces, barricades, whether locks are social |
+| **Light regime** | Pitch dark, torchlit, bioluminescent, glowing from below; noon sun, low sun, overcast, fog, moonlight | Mood, visibility rules |
 
-"A frozen miners' gallery in basalt, infested, pitch dark" is generated from the axes. Named biomes are curated presets: points in this space where the combination has a strong big idea and has been tuned.
+"A frozen miners' gallery in basalt, infested, pitch dark" and "a burnt harbour quarter in fog at dusk" both come from the axes. Named biomes are curated presets: points in this space where the combination has a strong big idea and has been tuned.
 
 ## Starter set
 
-Chosen to be maximally distinct from one another and to exercise different generation techniques.
+Chosen to be maximally distinct from one another, to span the kinds of site and to exercise different generation techniques.
 
-| Biome | Big idea | Shape | Light | Mechanic it adds |
+**Enclosed**
+
+| Biome | Big idea | Shape | Light | What it adds to play |
 |---|---|---|---|---|
 | **Hewn crypt** | Order imposed on stone; the dead are filed away | Orthogonal, symmetric, tight | Sparse warm torchlight | Doors, keys, pressure plates — the baseline |
 | **Living cavern** | Water made this; follow the water | Organic, varied scale, streamways | Pitch dark | Carried light as a resource; climbing and squeezes |
 | **Fungal deep** | The only light comes from living things | Soft, bulbous, branching growth | Cool bioluminescence | Spores, growth that reacts to light and fire |
 | **Drowned halls** | The water level is the map | Any architecture, half submerged | Caustics, reflections | Raise and drain water to open and close routes |
 | **Magma forge** | Light and danger come from below | Industrial, vertical, bridges | Hot glow from beneath | Heat timers, flows that can be diverted or cooled |
-| **Crystal geode** | Light travels, bends and can be carried | Faceted, angular, glittering | Refracted beams | Beam-routing puzzles, fragile floors |
-| **Root-bound ruin** | The surface is breaking in | Built geometry cracked by organic growth | Shafts of daylight | Growth as bridge and barrier; a second entrance from above |
 | **The underneath** | This part was not built for you | Wrong scale, wrong angles | Sourceless | Rules established elsewhere are broken here |
 
-The last one is the designated rule-breaker: a rare deep layer whose job is to be the structural twist.
+**Open air and built**
+
+| Biome | Big idea | Shape | Light | What it adds to play |
+|---|---|---|---|---|
+| **Crag keep** | Every wall exists to stop you; find where it fails | Concentric, massive, vertical | Hard sun and deep shadow; arrow-slit shafts indoors | Gates, heights, wall-walks, the way in that is not the gate |
+| **Crooked town** | Three towns stacked: roofs, streets, cellars | Dense, irregular, overhanging | Narrow strips of sky; lantern pools at night | Many doors, rooftop and cellar routes, social locks |
+| **Old-growth forest** | You cannot see far; the trees decide the paths | Trunks as columns, canopy as ceiling, clearings as rooms | Dappled green, shafts through gaps | Soft edges, trails, losing and finding the way |
+| **Fen** | The ground is not to be trusted | Flat, open, broken by water and reed | Low sun, mist | Uncertain footing, causeways, sight without reach |
+| **High pass** | The mountain is the map | Ridges, ledges, scree, exposure | Thin clear light; weather that closes in | Height, exposure, long views, routes that weather shuts |
+| **Root-bound ruin** | The wild is taking it back | Built geometry cracked by growth | Daylight through broken roofs | Growth as bridge and barrier; the border between kinds |
+
+"The underneath" is the designated rule-breaker: a rare deep layer whose job is to be the structural twist. "Root-bound ruin" is the designated border, where built and wild meet.
 
 ## The biome arc
 
-A dungeon should travel. Descent is a journey through biomes, and the order tells the story: crypt, then the mine the crypt-builders sealed, then the cavern the miners broke into, then whatever was in the cavern. Two to four biomes per dungeon, with one dominant and one reserved for a late reveal, is a good default.
+A site should travel, and the order of biomes tells its story. Underground the journey is a descent: crypt, then the mine the crypt-builders sealed, then the cavern the miners broke into, then whatever was in the cavern. Above ground it is approach, entry and descent: the forest trail, the ruined outer ward, the keep, the cellars, what lies under the cellars. Two to four biomes per site, with one dominant and one reserved for a late reveal, is a good default.
 
 ---
 
@@ -169,6 +210,8 @@ Informal acceptance tests to apply to generated output. The metrics in document 
 | **Sentence** | Can the dungeon be described in one sentence that distinguishes it from the last five? |
 | **Sketch** | After exploring, can the player sketch the rough layout from memory? |
 | **Postcard** | Is there at least one view worth a screenshot? |
+| **Approach** | For open-air sites: does the first sight of the place make the player want to go there, and suggest more than one way in? |
+| **Touch** | Do surfaces look like what they are, and show what has happened to them? |
 | **Fork** | At each junction, did the player have a reason to prefer one way? |
 | **Return** | Did the player come back to a known place by an unknown route at least once? |
 | **Question** | Was the player carrying an unanswered question (a locked door, a glimpsed place) for most of the run? |
