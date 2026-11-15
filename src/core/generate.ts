@@ -189,6 +189,7 @@ export function score(site: Site): number {
     + 1.2 * Math.min(solution.moves.length / Math.max(1, solution.direct), 3)
     + 0.8 * site.items.length
     + (site.ways.some((w) => w.door?.barredFrom !== undefined) ? 1 : 0)
+    + (site.levers.length ? 1.2 : 0)
     + (roofs.has('sky') && site.places.some((p) => p.role === 'court') ? 0.8 : 0)
     + (roofs.has('cave') ? 0.8 : 0)
     + (roofs.has('timber') && roofs.has('barrel') ? 0.5 : 0)
@@ -420,7 +421,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
 
   // ---- depth from the start, roofline
   const site: Site = {
-    seed, places, ways, items: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
+    seed, places, ways, items: [], levers: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
   };
   const adj = neighbours(site);

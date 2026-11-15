@@ -385,7 +385,7 @@ export function meshSite(site: Site): SceneDescription {
         }
         doors.push({
           way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: 0.07,
-          leaf: buildDoorLeaf(`${site.seed}/door${site.ways.indexOf(w)}`, lw, 2.0, 0.07),
+          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(`${site.seed}/door${site.ways.indexOf(w)}`, lw, 2.0, 0.07),
           blocker: block,
           centre: f.a.clone().addScaledVector(f.dir, c).addScaledVector(f.normal, -t).setY(hi + 1.2),
           barSide: barred === undefined ? 0 : (barred === (highIsHere ? p.id : q.id) ? faces : -faces),

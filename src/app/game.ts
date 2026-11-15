@@ -2,7 +2,7 @@ import {
   BoxGeometry, BufferAttribute, Color, CylinderGeometry, Group, Material, Mesh, Scene, TorusGeometry, Vector3,
 } from 'three';
 import { makePropMaterial } from '../render/siteMaterial';
-import { DoorSpec, Item, KeyId, Site } from '../core/site';
+import { DoorSpec, Item, KeyId, Lever, Site } from '../core/site';
 import { placeAt } from '../maps/plan';
 import { DoorDesc, SceneDescription } from '../render/scene';
 import { Player } from './player';
@@ -25,14 +25,26 @@ interface Door {
   desc: DoorDesc;
   spec: DoorSpec;
   group: Group;
-  leaf: Mesh;
+  /** The plank leaf, for a door; nothing for a gate. */
+  leaf: Mesh | null;
   bar: Mesh | null;
+  gate: boolean;
   open: boolean;
   angle: number;
   blocker: { min: Vector3; max: Vector3; active: boolean };
   /** Unit vector along the leaf's z when shut, in the world. */
   facing: Vector3;
   quietUntil: number;
+  /** For a rising gate: the game time at which the way is clear. */
+  clearAt: number;
+}
+
+interface LeverThing {
+  lever: Lever;
+  handle: Group;
+  at: Vector3;
+  thrown: boolean;
+  swing: number;
 }
 
 interface KeyThing {
@@ -47,6 +59,7 @@ export class Game {
   readonly visited = new Set<number>();
   readonly doors: Door[] = [];
   readonly things: KeyThing[] = [];
+  readonly levers: LeverThing[] = [];
   won = false;
   private elapsed = 0;
   private goalAt: Vector3 | null;
@@ -59,36 +72,61 @@ export class Game {
       const spec = site.ways[d.way].door!;
       const group = new Group();
       group.position.copy(d.hinge);
-      const leaf = new Mesh(d.leaf.build(), wood);
-      leaf.receiveShadow = true;
-      group.add(leaf);
-
       const W = d.halfWidth * 2;
       const t = d.thickness;
-      // Iron straps and a ring pull on both faces.
-      for (const y of [0.42, 1.5]) {
-        const strap = new Mesh(new BoxGeometry(W - 0.12, 0.075, t + 0.024), iron);
-        strap.position.set(W / 2 - 0.03, y, 0);
-        group.add(strap);
-      }
-      for (const side of [1, -1]) {
-        const ring = new Mesh(new TorusGeometry(0.055, 0.011, 6, 14), iron);
-        ring.position.set(W - 0.16, 1.02, side * (t / 2 + 0.014));
-        group.add(ring);
-      }
-      // The lock plate takes the colour of its key, so a locked door says what it wants.
-      if (spec.lock) {
-        const plate = new Mesh(new BoxGeometry(0.13, 0.19, t + 0.04), makePropMaterial({
-          color: METAL[spec.lock], metalness: 0.8, roughness: 0.5, emissive: METAL[spec.lock], emissiveIntensity: 0.1,
-        }));
-        plate.position.set(W - 0.16, 1.22, 0);
-        group.add(plate);
-      }
+      const gate = spec.leaf === 'gate';
+      let leaf: Mesh | null = null;
       let bar: Mesh | null = null;
-      if (d.barSide !== 0) {
-        bar = new Mesh(new BoxGeometry(W + 0.5, 0.13, 0.09), timber);
-        bar.position.set(W / 2, 1.0, d.barSide * (t / 2 + 0.06));
-        group.add(bar);
+      if (gate || !d.leaf) {
+        // A portcullis: upright bars cut to the arch, tied by three rails. It can be seen through.
+        const spacing = 0.19;
+        const count = Math.max(2, Math.round(W / spacing));
+        for (let k = 0; k <= count; k++) {
+          const x = (W * k) / count;
+          const height = d.spring + Math.sqrt(Math.max(0, d.halfWidth * d.halfWidth - (x - d.halfWidth) * (x - d.halfWidth)));
+          const upright = new Mesh(new BoxGeometry(0.035, height, 0.035), iron);
+          upright.position.set(x, height / 2, 0);
+          upright.rotation.y = Math.PI / 4;
+          group.add(upright);
+          // Each bar ends in a point, as if it could be dropped into the floor.
+          const point = new Mesh(new CylinderGeometry(0, 0.03, 0.09, 4), iron);
+          point.position.set(x, -0.03, 0);
+          point.rotation.x = Math.PI;
+          group.add(point);
+        }
+        for (const y of [0.35, 1.15, 1.95]) {
+          const rail = new Mesh(new BoxGeometry(W, 0.05, 0.02), iron);
+          rail.position.set(W / 2, y, 0);
+          group.add(rail);
+        }
+      } else {
+        leaf = new Mesh(d.leaf.build(), wood);
+        leaf.receiveShadow = true;
+        group.add(leaf);
+        // Iron straps and a ring pull on both faces.
+        for (const y of [0.42, 1.5]) {
+          const strap = new Mesh(new BoxGeometry(W - 0.12, 0.075, t + 0.024), iron);
+          strap.position.set(W / 2 - 0.03, y, 0);
+          group.add(strap);
+        }
+        for (const side of [1, -1]) {
+          const ring = new Mesh(new TorusGeometry(0.055, 0.011, 6, 14), iron);
+          ring.position.set(W - 0.16, 1.02, side * (t / 2 + 0.014));
+          group.add(ring);
+        }
+        // The lock plate takes the colour of its key, so a locked door says what it wants.
+        if (spec.lock) {
+          const plate = new Mesh(new BoxGeometry(0.13, 0.19, t + 0.04), makePropMaterial({
+            color: METAL[spec.lock], metalness: 0.8, roughness: 0.5, emissive: METAL[spec.lock], emissiveIntensity: 0.1,
+          }));
+          plate.position.set(W - 0.16, 1.22, 0);
+          group.add(plate);
+        }
+        if (d.barSide !== 0) {
+          bar = new Mesh(new BoxGeometry(W + 0.5, 0.13, 0.09), timber);
+          bar.position.set(W / 2, 1.0, d.barSide * (t / 2 + 0.06));
+          group.add(bar);
+        }
       }
 
       const open = spec.leaf === 'open';
@@ -98,7 +136,7 @@ export class Game {
       const blocker = { min: d.blocker.min, max: d.blocker.max, active: !open };
       player.blockers.push(blocker);
       this.doors.push({
-        desc: d, spec, group, leaf, bar, open, angle, blocker, quietUntil: 0,
+        desc: d, spec, group, leaf, bar, gate, open, angle, blocker, quietUntil: 0, clearAt: Infinity,
         facing: new Vector3(Math.sin(d.yaw), 0, Math.cos(d.yaw)),
       });
     }
@@ -111,6 +149,26 @@ export class Game {
       group.position.copy(at);
       scene.add(group);
       this.things.push({ item, group, at, taken: false });
+    }
+    // Levers: an iron handle in a stone foot, standing on the floor.
+    for (const lever of site.levers) {
+      const stone = makePropMaterial({ color: new Color(0.42, 0.39, 0.34), roughness: 0.95, metalness: 0 });
+      const at = new Vector3(lever.x, site.places[lever.place].floor, lever.z);
+      const group = new Group();
+      group.position.copy(at);
+      const foot = new Mesh(new BoxGeometry(0.34, 0.3, 0.26), stone);
+      foot.position.y = 0.15;
+      const handle = new Group();
+      handle.position.y = 0.28;
+      const rod = new Mesh(new CylinderGeometry(0.018, 0.022, 0.85, 8), iron);
+      rod.position.y = 0.42;
+      const grip = new Mesh(new CylinderGeometry(0.035, 0.035, 0.16, 8), timber);
+      grip.position.y = 0.86;
+      handle.add(rod, grip);
+      handle.rotation.z = 0.55;
+      group.add(foot, handle);
+      scene.add(group);
+      this.levers.push({ lever, handle, at, thrown: false, swing: 0 });
     }
     this.goalAt = desc.anchors?.get(site.goal) ?? null;
     this.visited.add(site.start);
@@ -128,12 +186,31 @@ export class Game {
         const near = Math.hypot(p.x - c.x, p.z - c.z) < 1.7 && Math.abs(p.y + 1.2 - c.y) < 1.6;
         if (near) this.tryDoor(d, time);
       }
+      if (d.blocker.active && this.elapsed >= d.clearAt) d.blocker.active = false;
       const target = d.open ? 1 : 0;
       if (d.angle !== target) {
-        d.angle = Math.min(1, Math.max(0, d.angle + Math.sign(target - d.angle) * dt * 1.5));
+        d.angle = Math.min(1, Math.max(0, d.angle + Math.sign(target - d.angle) * dt * (d.gate ? 0.6 : 1.5)));
         // Ease in and out, so the door has some weight.
         const e = d.angle * d.angle * (3 - 2 * d.angle);
-        d.group.rotation.y = d.desc.yaw + d.desc.swing * e;
+        if (d.gate) d.group.position.y = d.desc.hinge.y + e * (d.desc.spring + d.desc.halfWidth + 0.15);
+        else d.group.rotation.y = d.desc.yaw + d.desc.swing * e;
+      }
+    }
+
+    for (const l of this.levers) {
+      if (!l.thrown && Math.hypot(p.x - l.at.x, p.z - l.at.z) < 1.25 && Math.abs(p.y - l.at.y) < 1.2) {
+        l.thrown = true;
+        const gate = this.doors.find((d) => d.desc.way === l.lever.opens);
+        if (gate) {
+          gate.open = true;
+          // The way clears once the gate is most of the way up, not the moment the lever moves.
+          gate.clearAt = this.elapsed + 1.2;
+        }
+        this.ui.toast('You throw the lever. Iron grinds, and the portcullis rises.');
+      }
+      if (l.thrown && l.swing < 1) {
+        l.swing = Math.min(1, l.swing + dt * 2.5);
+        l.handle.rotation.z = 0.55 - 1.1 * l.swing;
       }
     }
 
@@ -163,6 +240,10 @@ export class Game {
       this.ui.toast(message);
     };
     const { lock, barredFrom } = d.spec;
+    if (d.gate) {
+      say('A portcullis, down. Something must raise it; look for a lever.');
+      return;
+    }
     if (lock && !this.keys.has(lock)) {
       say(`Locked. The plate on it is ${lock === 'iron' ? 'iron' : 'gold'}; it wants a key to match.`);
       return;
@@ -189,6 +270,7 @@ export class Game {
    */
   applyBake(sample: (at: Vector3) => { e: [number, number, number]; sky: number; sun: number }): void {
     for (const d of this.doors) {
+      if (!d.leaf) continue;
       const probes = [1, -1].map((s) => sample(d.desc.centre.clone().addScaledVector(d.facing, s * 0.7)));
       const g = d.leaf.geometry;
       const pos = g.getAttribute('position');

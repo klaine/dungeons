@@ -85,19 +85,26 @@ export function planMission(site: Site, rng: Rng): void {
     if (place('iron', [goldAt]) === undefined) delete ironDoor.door;
   }
 
-  // 4. A shortcut: one of the doors out of the entrance hall is barred from its far side. The
-  // player meets it first as a door that will not open, and later opens it from behind. Only a
-  // door that lies on a loop can be barred, or the far side could never be reached.
-  if (rng.chance(0.75)) {
+  // 4. A shortcut: one of the doors out of the entrance hall cannot be passed from this side. The
+  // player meets it first as a way that is shut, and later opens it from behind. It is either a
+  // door barred on its far side, or a portcullis whose lever stands just beyond it, in plain
+  // sight through the bars. Only a way that lies on a loop can be shut like this, or the far side
+  // could never be reached.
+  if (rng.chance(0.85)) {
     const options = doors.filter((w) => w !== entry && !w.door && (w.a === site.entrance || w.b === site.entrance));
     for (const w of options.sort(() => rng.next() - 0.5)) {
       const far = other(w, site.entrance);
       const round = distances(site, site.start, (x) => x === w || isLocked(x));
       const needed = [far, ...site.items.map((i) => i.place), ...(goldDoor ? [other(goldDoor, site.goal)] : [site.goal])];
-      if (needed.every((p) => round.has(p)) && round.get(far)! >= 3) {
+      if (!needed.every((p) => round.has(p)) || round.get(far)! < 3) continue;
+      if (rng.chance(0.55)) {
+        const [x, z] = leverSpot(site, w, far);
+        w.door = { leaf: 'gate', lever: site.levers.length };
+        site.levers.push({ place: far, opens: site.ways.indexOf(w), x, z });
+      } else {
         w.door = { leaf: 'shut', barredFrom: far };
-        break;
       }
+      break;
     }
   }
 
@@ -111,17 +118,32 @@ export function planMission(site: Site, rng: Rng): void {
   }
 }
 
-/** Plays the site: a breadth-first search over where the player is, what they hold and what they have unbarred. */
+/** Where a gate's lever stands: a pace or two inside the far room, to one side of the gateway. */
+function leverSpot(site: Site, w: Way, far: number): [number, number] {
+  const p = site.places[far];
+  const side = w.a === far ? w.side : ({ n: 's', s: 'n', e: 'w', w: 'e' } as const)[w.side];
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi - 0.6, Math.max(lo + 0.6, v));
+  const along = w.at + (w.at < ((side === 'n' || side === 's' ? p.x0 + p.x1 : p.z0 + p.z1) / 2) ? 1 : -1) * (w.halfWidth + 1.0);
+  switch (side) {
+    case 'n': return [clamp(along, p.x0, p.x1), clamp(p.z0 + 1.5, p.z0, p.z1)];
+    case 's': return [clamp(along, p.x0, p.x1), clamp(p.z1 - 1.5, p.z0, p.z1)];
+    case 'w': return [clamp(p.x0 + 1.5, p.x0, p.x1), clamp(along, p.z0, p.z1)];
+    case 'e': return [clamp(p.x1 - 1.5, p.x0, p.x1), clamp(along, p.z0, p.z1)];
+  }
+}
+
+/** Plays the site: a breadth-first search over where the player is, what they hold, what they have unbarred and which levers they have thrown. */
 export function solve(site: Site): Solution {
   const keyBit: Record<KeyId, number> = { iron: 1, gold: 2 };
   const bars = site.ways.map((w, i) => (w.door?.barredFrom !== undefined ? i : -1)).filter((i) => i >= 0);
   const pickUp = (place: number, keys: number) => site.items.reduce((k, it) => (it.place === place ? k | keyBit[it.key] : k), keys);
-  const encode = (place: number, keys: number, open: number) => place * 64 + keys * 16 + open;
+  const pull = (place: number, pulled: number) => site.levers.reduce((m, l, k) => (l.place === place ? m | (1 << k) : m), pulled);
+  const encode = (place: number, keys: number, open: number, pulled: number) => ((place * 4 + keys) * 16 + open) * 16 + pulled;
 
   const startKeys = pickUp(site.start, 0);
-  type Node = { place: number; keys: number; open: number; prev?: Node; move?: Move };
-  const first: Node = { place: site.start, keys: startKeys, open: 0 };
-  const seen = new Set<number>([encode(first.place, first.keys, first.open)]);
+  type Node = { place: number; keys: number; open: number; pulled: number; prev?: Node; move?: Move };
+  const first: Node = { place: site.start, keys: startKeys, open: 0, pulled: pull(site.start, 0) };
+  const seen = new Set<number>([encode(first.place, first.keys, first.open, first.pulled)]);
   const queue: Node[] = [first];
   const direct = distances(site, site.start).get(site.goal) ?? -1;
 
@@ -149,13 +171,16 @@ export function solve(site: Site): Solution {
           events.push('lift the bar');
         }
       }
+      if (d?.lever !== undefined && !(n.pulled & (1 << d.lever))) return;
       const to = other(w, n.place);
       const keys = pickUp(to, n.keys);
+      const pulled = pull(to, n.pulled);
       for (const it of site.items) if (it.place === to && !(n.keys & keyBit[it.key])) events.push(`take the ${it.key} key`);
-      const code = encode(to, keys, open);
+      if (pulled !== n.pulled) events.push('throw the lever');
+      const code = encode(to, keys, open, pulled);
       if (seen.has(code)) return;
       seen.add(code);
-      queue.push({ place: to, keys, open, prev: n, move: { way: i, to, events } });
+      queue.push({ place: to, keys, open, pulled, prev: n, move: { way: i, to, events } });
     });
   }
   return { ok: false, moves: [], direct };

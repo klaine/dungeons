@@ -55,8 +55,13 @@ export type KeyId = 'iron' | 'gold';
 
 /** A door leaf hung in a doorway, and what stops it opening. */
 export interface DoorSpec {
-  /** Shut doors open when approached, unless something holds them. Open ones are just standing open. */
-  leaf: 'shut' | 'open';
+  /**
+   * Shut doors open when approached, unless something holds them. Open ones are just standing open.
+   * A gate is a portcullis: it can be seen through, and only its lever raises it.
+   */
+  leaf: 'shut' | 'open' | 'gate';
+  /** Index into the site's levers of the one that raises this gate. */
+  lever?: number;
   /** Needs this key. */
   lock?: KeyId;
   /** Barred on the side of this place: it opens only from there, and stays open afterwards. */
@@ -68,6 +73,15 @@ export interface Item {
   kind: 'key';
   key: KeyId;
   place: number;
+}
+
+/** A lever standing on the floor of a place, which raises a gate somewhere. */
+export interface Lever {
+  place: number;
+  /** Index into the site's ways of the gate it raises. */
+  opens: number;
+  x: number;
+  z: number;
 }
 
 export interface Way {
@@ -88,6 +102,7 @@ export interface Site {
   places: Place[];
   ways: Way[];
   items: Item[];
+  levers: Lever[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

@@ -459,6 +459,7 @@ async function start(): Promise<void> {
         visited: revealAll || !game ? undefined : game.visited,
         shut: new Set(game?.doors.filter((d) => !d.open).map((d) => d.desc.way)),
         items: game?.things.filter((k) => !k.taken).map((k) => k.item),
+        levers: game?.levers.filter((l) => !l.thrown).map((l) => l.lever),
       });
       const here = placeAt(site, player.position.x, player.position.z);
       if (here && here.id !== lastPlace) {
@@ -559,6 +560,11 @@ async function start(): Promise<void> {
       const ok = walkTo(point(near)[0], point(near)[1], 0.3) && walkTo(point(far)[0], point(far)[1], 0.3);
       if (!ok) { log.push(`stuck going from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
       at = m.to;
+      for (const l of game.levers) {
+        if (!l.thrown && l.lever.place === at && !walkTo(l.at.x, l.at.z, 0.9)) { log.push(`could not reach the lever in the ${site.places[at].name}`); return { won: false, log }; }
+      }
+      // Give a rising gate time to clear before walking on.
+      for (let i = 0; i < 100; i++) game.update(1 / 60, (clock += 1 / 60));
       const anchor = desc.anchors?.get(at);
       if (anchor && (at === site.goal || game.things.some((k) => !k.taken && k.item.place === at))) {
         if (!walkTo(anchor.x, anchor.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }

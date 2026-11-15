@@ -1,4 +1,4 @@
-import { Item, Place, Site, Way } from '../core/site';
+import { Item, Lever, Place, Site, Way } from '../core/site';
 
 /**
  * The plan map: a clean drawing of a site from above, north up. Drawn from the site document, so
@@ -17,6 +17,8 @@ export interface PlanOptions {
   shut?: Set<number>;
   /** Keys still lying where they were left. */
   items?: Item[];
+  /** Levers not yet thrown. */
+  levers?: Lever[];
   /** Draw at exactly this many pixels square, ignoring the canvas's size on the page. */
   pixels?: number;
 }
@@ -155,6 +157,19 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     const p = site.places[it.place];
     if (!known(p)) continue;
     diamond(ctx, X((p.x0 + p.x1) / 2), Z((p.z0 + p.z1) / 2), Math.max(3.5 * ratio, 0.6 * scale), KEY_COLOUR[it.key]);
+  }
+  for (const l of opts.levers ?? []) {
+    if (!known(site.places[l.place])) continue;
+    // A lever: a small square with a stroke leaning out of it.
+    const r = Math.max(3 * ratio, 0.34 * scale);
+    ctx.fillStyle = INK;
+    ctx.fillRect(X(l.x) - r / 2, Z(l.z) - r / 2, r, r);
+    ctx.strokeStyle = ACCENT;
+    ctx.lineWidth = Math.max(1.5 * ratio, 0.14 * scale);
+    ctx.beginPath();
+    ctx.moveTo(X(l.x), Z(l.z));
+    ctx.lineTo(X(l.x) + r * 1.3, Z(l.z) - r * 1.3);
+    ctx.stroke();
   }
   for (const p of site.places) {
     if (!known(p)) continue;
