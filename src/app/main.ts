@@ -117,7 +117,7 @@ async function start(): Promise<void> {
   });
   hud.seed.textContent = seed;
   const statics: Mesh[] = [];
-  const parts: { mesh: Mesh; offset: number; count: number; albedo: number }[] = [];
+  const parts: { mesh: Mesh; offset: number; count: number; albedo: number; plan: { source: Int32Array; scale: Float32Array } }[] = [];
   let vertexTotal = 0, triTotal = 0;
   for (const [name, builder] of desc.meshes) {
     const geometry = builder.build();
@@ -128,7 +128,7 @@ async function start(): Promise<void> {
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     statics.push(mesh);
-    parts.push({ mesh, offset: vertexTotal, count: builder.vertexCount, albedo: MEAN_ALBEDO[material] ?? 0.5 });
+    parts.push({ mesh, offset: vertexTotal, count: builder.vertexCount, albedo: MEAN_ALBEDO[material] ?? 0.5, plan: builder.bakePlan() });
     vertexTotal += builder.vertexCount;
     triTotal += builder.triangleCount;
   }
@@ -138,7 +138,8 @@ async function start(): Promise<void> {
   const positions = new Float32Array(vertexTotal * 3);
   const normals = new Float32Array(vertexTotal * 3);
   const albedo = new Float32Array(vertexTotal * 3);
-  const mortar = new Float32Array(vertexTotal);
+  const bakeSource = new Int32Array(vertexTotal);
+  const bakeScale = new Float32Array(vertexTotal);
   const index = new Uint32Array(triTotal * 3);
   let io = 0;
   for (const p of parts) {
@@ -146,10 +147,10 @@ async function start(): Promise<void> {
     positions.set(g.getAttribute('position').array as Float32Array, p.offset * 3);
     normals.set(g.getAttribute('normal').array as Float32Array, p.offset * 3);
     const col = g.getAttribute('color').array as Float32Array;
-    const fld = g.getAttribute('aField').array as Float32Array;
     for (let i = 0; i < p.count; i++) {
       for (let c = 0; c < 3; c++) albedo[(p.offset + i) * 3 + c] = Math.min(0.95, col[i * 3 + c] * p.albedo);
-      mortar[p.offset + i] = fld[i * 4 + 3];
+      bakeSource[p.offset + i] = p.plan.source[i] + p.offset;
+      bakeScale[p.offset + i] = p.plan.scale[i];
     }
     const src = g.getIndex()!.array;
     for (let i = 0; i < src.length; i++) index[io++] = src[i] + p.offset;
@@ -347,7 +348,7 @@ async function start(): Promise<void> {
     const bakeStart = performance.now();
     bake(
       {
-        positions, normals, albedo, index, mortar, lights,
+        positions, normals, albedo, index, source: bakeSource, scale: bakeScale, lights,
         masses: new Float32Array(desc.masses.flatMap((m) => [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z])),
         // Phones and tablets have fewer and slower cores; halve the work unless asked otherwise.
         rays: num('rays', window.matchMedia('(pointer: coarse)').matches ? 16 : 32),

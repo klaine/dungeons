@@ -14,6 +14,8 @@ let bvh: MeshBVH;
 let lights: BakeLights;
 /** Triangles whose vertices start at or after this index belong to solid masses. */
 let firstMassVertex = Infinity;
+/** The vertices that are traced. Requests give ranges into this list. */
+let carriers: Uint32Array;
 
 const ray = new Ray();
 const O = new Vector3();
@@ -64,7 +66,8 @@ function direct(start: number, end: number, salt: number) {
     const el = (14 + 36 * Math.sin(phi)) * (Math.PI / 180);
     day.push([Math.cos(phi) * Math.cos(el), Math.sin(el), Math.sin(phi) * Math.cos(el)]);
   }
-  for (let i = start; i < end; i++) {
+  for (let slot = start; slot < end; slot++) {
+    const i = carriers[slot];
     const k = i * 3;
     const nx = nrm[k], ny = nrm[k + 1], nz = nrm[k + 2];
     O.set(pos[k] + nx * EPS, pos[k + 1] + ny * EPS, pos[k + 2] + nz * EPS);
@@ -81,7 +84,7 @@ function direct(start: number, end: number, salt: number) {
       ray.direction.set(day[k][0], day[k][1], day[k][2]);
       if (!occluded(Infinity)) hours++;
     }
-    sunVis[i - start] = hours / DAY;
+    sunVis[slot - start] = hours / DAY;
     const ndl = nx * D.x + ny * D.y + nz * D.z;
     if (sunSeen && ndl > 0) {
       r += lights.sunE[0] * ndl; g += lights.sunE[1] * ndl; b += lights.sunE[2] * ndl;
@@ -104,7 +107,7 @@ function direct(start: number, end: number, salt: number) {
       const a = nl / Math.max(d2, 0.04);
       r += L.intensity[0] * a; g += L.intensity[1] * a; b += L.intensity[2] * a;
     }
-    const o = (i - start) * 3;
+    const o = (slot - start) * 3;
     E[o] = r; E[o + 1] = g; E[o + 2] = b;
   }
   return { E, sunVis };
@@ -120,7 +123,8 @@ function gather(start: number, end: number, radiosity: Float32Array, rays: numbe
   const sh = new Float32Array(n * 12);
   const skyVis = new Float32Array(n);
   const valid = new Uint8Array(n);
-  for (let i = start; i < end; i++) {
+  for (let slot = start; slot < end; slot++) {
+    const i = carriers[slot];
     const k = i * 3;
     Nn.set(nrm[k], nrm[k + 1], nrm[k + 2]);
     O.set(pos[k] + Nn.x * EPS, pos[k + 1] + Nn.y * EPS, pos[k + 2] + Nn.z * EPS);
@@ -182,12 +186,12 @@ function gather(start: number, end: number, radiosity: Float32Array, rays: numbe
     }
     // Irradiance for a normal n is E0 + dot(E1, n); see docs/04-look.md.
     const c0 = Math.PI / 2 / rays, c1 = Math.PI / rays;
-    const o = (i - start) * 12;
+    const o = (slot - start) * 12;
     sh[o] = sR * c0; sh[o + 1] = dRx * c1; sh[o + 2] = dRy * c1; sh[o + 3] = dRz * c1;
     sh[o + 4] = sG * c0; sh[o + 5] = dGx * c1; sh[o + 6] = dGy * c1; sh[o + 7] = dGz * c1;
     sh[o + 8] = sB * c0; sh[o + 9] = dBx * c1; sh[o + 10] = dBy * c1; sh[o + 11] = dBz * c1;
-    skyVis[i - start] = Math.min(1, (skyCount / rays) * 2);
-    valid[i - start] = backCount / rays < 0.35 ? 1 : 0;
+    skyVis[slot - start] = Math.min(1, (skyCount / rays) * 2);
+    valid[slot - start] = backCount / rays < 0.35 ? 1 : 0;
   }
   return { sh, skyVis, valid };
 }
@@ -201,6 +205,7 @@ self.onmessage = (e: MessageEvent) => {
     nrm = m.normals;
     lights = m.lights;
     firstMassVertex = m.firstMassVertex ?? Infinity;
+    carriers = m.carriers;
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(pos, 3));
     g.setIndex(new BufferAttribute(m.index, 1));

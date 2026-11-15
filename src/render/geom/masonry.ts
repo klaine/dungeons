@@ -159,6 +159,7 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
       const px = new Float32Array(nu * nv * 3);
       const sn = new Float32Array(nu * nv * 3);
       const mort = new Float32Array(nu * nv);
+      const rises = new Float32Array(nu * nv);
       const uvs = new Float32Array(nu * nv * 2);
       const holed = opts.hole ? new Uint8Array(nu * nv) : null;
 
@@ -200,11 +201,13 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
           px[k] = P.x + N.x * h; px[k + 1] = P.y + N.y * h; px[k + 2] = P.z + N.z * h;
           sn[k] = N.x; sn[k + 1] = N.y; sn[k + 2] = N.z;
           mort[j * nu + i] = sink;
+          rises[j * nu + i] = rise;
           uvs[(j * nu + i) * 2] = u * s.uvScale + uvOffU;
           uvs[(j * nu + i) * 2 + 1] = v * s.uvScale + uvOffV;
         }
       }
 
+      const backingStart = mesh.vertexCount;
       // Backing: a plain sheet just behind the mortar, slightly larger than the block. Neighbouring
       // blocks do not share vertices, so without it single pixels of whatever lies behind show
       // through along joints and at corners.
@@ -317,6 +320,33 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
             mesh.addTriangle(b, d, c);
           }
         }
+      }
+      // Baked light is traced only for the vertices on the stone's face. Its bevel, its mortar
+      // edge and its backing sheet copy from the nearest of those, darkened towards the joint.
+      {
+        const carriers: number[] = [];
+        let best = 0;
+        for (let k = 0; k < nu * nv; k++) {
+          if (rises[k] > 0.999) carriers.push(k);
+          if (rises[k] > rises[best]) best = k;
+        }
+        if (!carriers.length) carriers.push(best);
+        const isCarrier = new Uint8Array(nu * nv);
+        for (const k of carriers) isCarrier[k] = 1;
+        for (let j = 0; j < nv; j++) {
+          for (let i = 0; i < nu; i++) {
+            const k = j * nu + i;
+            if (isCarrier[k]) continue;
+            let near = carriers[0], nearD = Infinity;
+            for (const c of carriers) {
+              const di = (c % nu) - i, dj = Math.floor(c / nu) - j;
+              const d = di * di + dj * dj;
+              if (d < nearD) { nearD = d; near = c; }
+            }
+            mesh.setBakeSource(base + k, base + near, 1 - 0.5 * mort[k]);
+          }
+        }
+        for (let v = backingStart; v < base; v++) mesh.setBakeSource(v, base + carriers[0], 0.35);
       }
       blocks++;
     }

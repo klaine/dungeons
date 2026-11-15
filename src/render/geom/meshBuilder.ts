@@ -33,6 +33,13 @@ export class MeshBuilder {
   private col = new GrowF32(3 << 14);
   private fld = new GrowF32(4 << 14);
   private idx: number[] = [];
+  /**
+   * Which vertices carry baked light. Tracing light for every vertex is wasteful: a stone's bevel
+   * and mortar edge can take their light from the stone's face. A vertex with a source copies that
+   * vertex's baked light, scaled; a vertex without one is traced itself.
+   */
+  private bakeSource: number[] = [];
+  private bakeScale: number[] = [];
   vertexCount = 0;
 
   addVertex(
@@ -55,6 +62,24 @@ export class MeshBuilder {
     c.data[c.length++] = r; c.data[c.length++] = g; c.data[c.length++] = b;
     f.data[f.length++] = f0; f.data[f.length++] = f1; f.data[f.length++] = f2; f.data[f.length++] = f3;
     return i;
+  }
+
+  /** Makes vertex `i` take its baked light from vertex `source`, multiplied by `scale`. */
+  setBakeSource(i: number, source: number, scale: number): void {
+    this.bakeSource[i] = source;
+    this.bakeScale[i] = scale;
+  }
+
+  /** For each vertex, the vertex its baked light comes from (itself if it is traced) and the multiplier. */
+  bakePlan(): { source: Int32Array; scale: Float32Array } {
+    const source = new Int32Array(this.vertexCount);
+    const scale = new Float32Array(this.vertexCount);
+    for (let i = 0; i < this.vertexCount; i++) {
+      const s = this.bakeSource[i];
+      source[i] = s === undefined ? i : s;
+      scale[i] = s === undefined ? 1 : this.bakeScale[i];
+    }
+    return { source, scale };
   }
 
   addTriangle(a: number, b: number, c: number): void {

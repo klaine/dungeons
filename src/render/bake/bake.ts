@@ -25,8 +25,9 @@ export interface BakeInput {
   /** Diffuse reflectance per vertex, linear RGB. */
   albedo: Float32Array;
   index: Uint32Array;
-  /** Mortar flag per vertex, so smoothing keeps joints dark. */
-  mortar: Float32Array;
+  /** For each vertex, the vertex whose baked light it takes (itself if it is traced), and a multiplier. */
+  source: Int32Array;
+  scale: Float32Array;
   /** Axis-aligned solid volumes, six numbers each: min then max. */
   masses: Float32Array;
   lights: BakeLights;
@@ -92,34 +93,58 @@ class Pool {
 
 export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (r: BakeResult) => void): Promise<BakeResult> {
   const n = input.positions.length / 3;
+  // Only some vertices are traced; the rest copy from one of those. See MeshBuilder.bakePlan.
+  const carriers: number[] = [];
+  const slot = new Int32Array(n).fill(-1);
+  for (let i = 0; i < n; i++) {
+    if (input.source[i] === i) {
+      slot[i] = carriers.length;
+      carriers.push(i);
+    }
+  }
+  const m = carriers.length;
+  const carrierList = new Uint32Array(carriers);
   const pool = new Pool(input.workers);
-  const chunk = 6000;
+  const chunk = 3000;
   const ranges: [number, number][] = [];
-  for (let s = 0; s < n; s += chunk) ranges.push([s, Math.min(n, s + chunk)]);
+  for (let s = 0; s < m; s += chunk) ranges.push([s, Math.min(m, s + chunk)]);
+  /** Spreads per-carrier values, `width` numbers each, to every vertex. */
+  const spread = (from: Float32Array, to: Float32Array, width: number, scaled: boolean) => {
+    for (let i = 0; i < n; i++) {
+      const c = slot[input.source[i]] * width;
+      const k = scaled ? input.scale[i] : 1;
+      for (let j = 0; j < width; j++) to[i * width + j] = from[c + j] * k;
+    }
+  };
 
   try {
     onProgress('Preparing light bake', 0);
     const solid = withMasses(input);
     await pool.broadcast(() => ({
-      msg: { type: 'init', positions: solid.positions.slice(), normals: input.normals.slice(), index: solid.index.slice(), lights: input.lights, firstMassVertex: n },
+      msg: { type: 'init', positions: solid.positions.slice(), normals: input.normals.slice(), index: solid.index.slice(), lights: input.lights, firstMassVertex: n, carriers: carrierList.slice() },
     }));
 
     // Direct light, needed only as the source of the first bounce.
-    const direct = new Float32Array(n * 3);
-    const sunVis = new Float32Array(n);
+    const directC = new Float32Array(m * 3);
+    const sunVisC = new Float32Array(m);
     let done = 0;
     await pool.run(
       ranges.map(([start, end]) => ({ type: 'direct', start, end, salt: 11 })),
       (r: { start: number; E: Float32Array; sunVis: Float32Array }) => {
-        direct.set(r.E, r.start * 3);
-        sunVis.set(r.sunVis, r.start);
+        directC.set(r.E, r.start * 3);
+        sunVisC.set(r.sunVis, r.start);
         onProgress('Tracing direct light', ++done / ranges.length);
       },
     );
+    const direct = new Float32Array(n * 3);
+    const sunVis = new Float32Array(n);
+    spread(directC, direct, 3, true);
+    spread(sunVisC, sunVis, 1, false);
 
-    let sh: Float32Array = new Float32Array(n * 12);
-    let skyVis = new Float32Array(n);
-    let valid = new Uint8Array(n);
+    const sh = new Float32Array(n * 12);
+    const skyVis = new Float32Array(n);
+    const skyVisC = new Float32Array(m);
+    const validC = new Uint8Array(m);
     const indirect = new Float32Array(n * 3);
     const radiosity = new Float32Array(n * 3);
 
@@ -127,17 +152,18 @@ export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (
       for (let i = 0; i < n * 3; i++) radiosity[i] = ((direct[i] + indirect[i]) * input.albedo[i]) / Math.PI;
       await pool.broadcast(() => ({ msg: { type: 'radiosity', radiosity: radiosity.slice() } }));
       done = 0;
-      const nextSh = new Float32Array(n * 12);
+      const shC = new Float32Array(m * 12);
       await pool.run(
         ranges.map(([start, end]) => ({ type: 'gather', start, end, rays: input.rays, salt: 101 + bounce * 13 })),
         (r: { start: number; sh: Float32Array; skyVis: Float32Array; valid: Uint8Array }) => {
-          nextSh.set(r.sh, r.start * 12);
-          skyVis.set(r.skyVis, r.start);
-          valid.set(r.valid, r.start);
+          shC.set(r.sh, r.start * 12);
+          skyVisC.set(r.skyVis, r.start);
+          validC.set(r.valid, r.start);
           onProgress(`Gathering bounced light, pass ${bounce + 1} of ${input.bounces}`, ++done / ranges.length);
         },
       );
-      sh = smooth(input, nextSh, valid);
+      spread(smooth(input, carrierList, shC, validC), sh, 12, true);
+      spread(skyVisC, skyVis, 1, false);
       for (let i = 0; i < n; i++) {
         const nx = input.normals[i * 3], ny = input.normals[i * 3 + 1], nz = input.normals[i * 3 + 2];
         for (let c = 0; c < 3; c++) {
@@ -145,7 +171,7 @@ export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (
           indirect[i * 3 + c] = Math.max(0, sh[o] + sh[o + 1] * nx + sh[o + 2] * ny + sh[o + 3] * nz);
         }
       }
-      if (onPartial && bounce < input.bounces - 1) onPartial({ sh, skyVis, sunVis });
+      if (onPartial && bounce < input.bounces - 1) onPartial({ sh: sh.slice(), skyVis, sunVis });
     }
     return { sh, skyVis, sunVis };
   } finally {
@@ -180,28 +206,30 @@ function withMasses(input: BakeInput): { positions: Float32Array; index: Uint32A
 }
 
 /**
- * Removes sampling noise by averaging each vertex with close neighbours that face the same way,
- * and fills vertices buried inside other geometry from visible neighbours. Mortar joints only
- * average with other joints, so they keep their occlusion.
+ * Removes sampling noise by averaging each traced vertex with close neighbours that face the same
+ * way, and fills vertices buried inside other geometry from visible neighbours. Works on the
+ * traced vertices only; `sh` and `valid` are indexed by position in `carriers`.
  */
-function smooth(input: BakeInput, sh: Float32Array, valid: Uint8Array): Float32Array {
-  const { positions: p, normals: nr, mortar } = input;
-  const n = p.length / 3;
-  const cell = 0.2;
+function smooth(input: BakeInput, carriers: Uint32Array, sh: Float32Array, valid: Uint8Array): Float32Array {
+  const { positions: p, normals: nr } = input;
+  const m = carriers.length;
+  const cell = 0.25;
   const grid = new Map<number, number[]>();
   const key = (x: number, y: number, z: number) => (Math.floor(x / cell) * 73856093) ^ (Math.floor(y / cell) * 19349663) ^ (Math.floor(z / cell) * 83492791);
-  for (let i = 0; i < n; i++) {
-    const k = key(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
-    let list = grid.get(k);
-    if (!list) grid.set(k, (list = []));
-    list.push(i);
+  for (let k = 0; k < m; k++) {
+    if (valid[k] !== 1) continue;
+    const i = carriers[k];
+    const h = key(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
+    let list = grid.get(h);
+    if (!list) grid.set(h, (list = []));
+    list.push(k);
   }
   const out = new Float32Array(sh.length);
   const acc = new Float64Array(12);
-  for (let i = 0; i < n; i++) {
+  for (let k = 0; k < m; k++) {
+    const i = carriers[k];
     const x = p[i * 3], y = p[i * 3 + 1], z = p[i * 3 + 2];
-    const isValid = valid[i] === 1;
-    const radius = isValid ? 0.42 : 0.5;
+    const radius = valid[k] === 1 ? 0.42 : 0.6;
     const r2 = radius * radius;
     const reach = Math.ceil(radius / cell);
     acc.fill(0);
@@ -210,21 +238,20 @@ function smooth(input: BakeInput, sh: Float32Array, valid: Uint8Array): Float32A
     for (let dx = -reach; dx <= reach; dx++) for (let dy = -reach; dy <= reach; dy++) for (let dz = -reach; dz <= reach; dz++) {
       const list = grid.get(((cx + dx) * 73856093) ^ ((cy + dy) * 19349663) ^ ((cz + dz) * 83492791));
       if (!list) continue;
-      for (const j of list) {
-        if (valid[j] !== 1) continue;
+      for (const q of list) {
+        const j = carriers[q];
         const ex = p[j * 3] - x, ey = p[j * 3 + 1] - y, ez = p[j * 3 + 2] - z;
         const d2 = ex * ex + ey * ey + ez * ez;
         if (d2 > r2) continue;
         const nd = nr[i * 3] * nr[j * 3] + nr[i * 3 + 1] * nr[j * 3 + 1] + nr[i * 3 + 2] * nr[j * 3 + 2];
         if (nd < 0.75) continue;
-        if (isValid && Math.abs(mortar[i] - mortar[j]) > 0.35) continue;
         const w = (1 - d2 / r2) * nd + 1e-4;
-        for (let c = 0; c < 12; c++) acc[c] += sh[j * 12 + c] * w;
+        for (let c = 0; c < 12; c++) acc[c] += sh[q * 12 + c] * w;
         wsum += w;
       }
     }
-    if (wsum > 0) for (let c = 0; c < 12; c++) out[i * 12 + c] = acc[c] / wsum;
-    else for (let c = 0; c < 12; c++) out[i * 12 + c] = sh[i * 12 + c];
+    if (wsum > 0) for (let c = 0; c < 12; c++) out[k * 12 + c] = acc[c] / wsum;
+    else for (let c = 0; c < 12; c++) out[k * 12 + c] = sh[k * 12 + c];
   }
   return out;
 }
