@@ -4,7 +4,7 @@ A browser tool for generating places for adventure and exploring them: a 3D worl
 
 "Dungeon" here means any bounded place worth exploring: crypts and caverns, castles, towns, and locations in open country.
 
-The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms in a loop, sometimes round a cloister court — built stone by stone, with procedural materials and baked light, and a plan map of it. Structure is simple so far: loops and side chambers, no locks or keys.
+The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms in a loop, sometimes round a cloister court — built stone by stone, with procedural materials and baked light. Each has a locked sanctum to reach: keys to find, sometimes a second lock, sometimes a door barred from its far side, and a map that fills in as you explore. Every generated place is proven completable before it is shown.
 
 A generated place (seed `check-0`): its cloister court, its sanctum, and its plan.
 
@@ -29,8 +29,10 @@ npm run dev
 
 Open the address Vite prints.
 
-- **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `L` raises or lowers the light you carry, `M` enlarges the map, `F` toggles fog, `B` toggles baked light.
+- **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `L` raises or lowers the light you carry, `M` enlarges the map, `G` reveals the whole map, `F` toggles fog, `B` toggles baked light.
 - **Touch:** drag on the left side of the screen to move (a thumb stick appears under your finger; push well past its rim to run), drag on the right side to look, and use the buttons to jump and to raise or lower your light.
+
+Doors and keys need no button: walk up to a door to try it, walk up to a key to take it, and reach the chest in the sanctum to finish.
 
 Each place has its seed in the address, so a link reproduces it; **New place** rolls another. Some rooms are dark on purpose; they are shaded on the map.
 

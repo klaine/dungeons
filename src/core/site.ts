@@ -48,11 +48,32 @@ export interface Place {
   name: string;
 }
 
+/** Keys are told apart by their metal. */
+export type KeyId = 'iron' | 'gold';
+
+/** A door leaf hung in a doorway, and what stops it opening. */
+export interface DoorSpec {
+  /** Shut doors open when approached, unless something holds them. Open ones are just standing open. */
+  leaf: 'shut' | 'open';
+  /** Needs this key. */
+  lock?: KeyId;
+  /** Barred on the side of this place: it opens only from there, and stays open afterwards. */
+  barredFrom?: number;
+}
+
+/** Something to pick up. */
+export interface Item {
+  kind: 'key';
+  key: KeyId;
+  place: number;
+}
+
 export interface Way {
   /** Place ids. `side` is the wall of place `a` that the way passes through. */
   a: number;
   b: number;
   side: Side;
+  door?: DoorSpec;
   /** A door is a person-sized arch; an arch is a wide open bay; a window cannot be walked through. */
   kind: 'door' | 'arch' | 'window';
   /** Position of the centre along the wall: an x coordinate for north and south walls, z for east and west. */
@@ -64,6 +85,9 @@ export interface Site {
   seed: string;
   places: Place[];
   ways: Way[];
+  items: Item[];
+  /** Where the player starts. */
+  start: number;
   /** Thickness of the walls between places. */
   wallThickness: number;
   /** Height of the roofline; courts are open wells down from it. */

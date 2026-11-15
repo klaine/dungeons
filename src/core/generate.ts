@@ -1,3 +1,4 @@
+import { planMission, solve } from './mission';
 import { Rng } from './rng';
 import { allReachable, neighbours, Place, Role, Roof, Side, Site, Way } from './site';
 
@@ -217,7 +218,7 @@ export function generateSite(seed: string): Site {
 
   // ---- depth from the entrance, roofline, title
   const site: Site = {
-    seed, places, ways, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
+    seed, places, ways, items: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     sun: normalise([-0.3, 0.6, 0.9]), title: '',
   };
   const adj = neighbours(site);
@@ -238,6 +239,10 @@ export function generateSite(seed: string): Site {
     return p.floor + p.wall + (p.roof === 'barrel' ? span / 2 : 0.4);
   })) + 1.3);
   if (!allReachable(site)) throw new Error(`generated site is not connected (seed ${seed})`);
+
+  // ---- the mission: doors, locks, bars and keys, then proof that it can be completed
+  planMission(site, rng.fork('mission'));
+  if (!solve(site).ok) throw new Error(`generated site cannot be completed (seed ${seed})`);
 
   const rooms = places.filter((p) => p.roof !== 'sky').length;
   const number = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];

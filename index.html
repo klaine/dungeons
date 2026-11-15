@@ -20,7 +20,23 @@
     #seed { opacity: .62; margin-right: 6px; }
     #new { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
       border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 2px 9px; }
-    #new:hover { background: rgba(224, 176, 112, .35); }
+    #new:hover, #again:hover { background: rgba(224, 176, 112, .35); }
+    #keys { min-height: 1.45em; }
+    #keys span { display: inline-block; margin-right: 10px; padding-left: 14px; position: relative; }
+    #keys span::before { content: ''; position: absolute; left: 0; top: .42em; width: 8px; height: 8px; transform: rotate(45deg); background: currentColor; }
+    #keys .iron { color: #a9b3be; }
+    #keys .gold { color: #e6b540; }
+    #toast { position: fixed; left: 50%; bottom: 22%; transform: translateX(-50%); max-width: min(80vw, 34em); text-align: center;
+      padding: 8px 16px; border-radius: 4px; background: rgba(11, 10, 9, .62); font: 15px/1.4 ui-serif, Georgia, serif;
+      pointer-events: none; opacity: 0; transition: opacity .35s; }
+    #toast.show { opacity: 1; }
+    #won { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; padding: 22px 34px 24px;
+      border: 1px solid rgba(232, 226, 214, .35); border-radius: 6px; background: rgba(11, 10, 9, .78); max-width: min(84vw, 30em); }
+    #won[hidden] { display: none; }
+    #won h2 { margin: 0 0 6px; font: 600 22px/1.2 ui-serif, Georgia, serif; letter-spacing: .12em; text-transform: uppercase; }
+    #won p { margin: 0 0 16px; font: 15px/1.5 ui-serif, Georgia, serif; }
+    #again { font: inherit; color: inherit; background: rgba(224, 176, 112, .25); cursor: pointer;
+      border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 6px 16px; }
     #hint { text-align: right; opacity: .8; transition: opacity .4s; }
     body.walking #hint .idle { display: none; }
     body:not(.walking) #hint .active { display: none; }
@@ -70,12 +86,19 @@
 <body>
   <canvas id="view"></canvas>
   <canvas id="map" title="Plan of this place. Click to enlarge."></canvas>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="won" hidden>
+    <h2>The sanctum</h2>
+    <p id="wonText"></p>
+    <button id="again" type="button">Another place</button>
+  </div>
   <div id="progress"><div id="bar"></div><div id="status">Starting</div></div>
   <div id="hud">
     <div>
       <h1>Dungeons</h1>
       <div id="title"></div>
       <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button></div>
+      <div id="keys"></div>
       <div id="stats"></div>
       <div id="fps"></div>
     </div>

@@ -1,7 +1,8 @@
 import {
-  AdditiveBlending, Color, CylinderGeometry, DoubleSide, Group, Mesh, MeshStandardMaterial, PlaneGeometry, PointLight,
+  AdditiveBlending, Color, CylinderGeometry, DoubleSide, Group, Mesh, PlaneGeometry, PointLight,
   ShaderMaterial, TorusGeometry, Vector3,
 } from 'three';
+import { makePropMaterial } from './siteMaterial';
 
 /**
  * A wall torch: an iron-bound brand on a bracket and an animated flame. It carries no light of its
@@ -20,8 +21,8 @@ export class Torch {
   constructor(position: Vector3, out: Vector3, phase: number) {
     this.phase = phase;
 
-    const iron = new MeshStandardMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9, envMapIntensity: 0.05 });
-    const wood = new MeshStandardMaterial({ color: new Color(0.12, 0.07, 0.04), roughness: 0.9, envMapIntensity: 0.05 });
+    const iron = makePropMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9 });
+    const wood = makePropMaterial({ color: new Color(0.12, 0.07, 0.04), roughness: 0.9, metalness: 0 });
 
     // The brand leans out from the wall; its head is at `position`.
     const lean = 0.42;

@@ -101,6 +101,12 @@ Two smaller measures keep the skin closed: every stone has a plain backing sheet
 - Water with reflection, refraction, depth colour and caustics on nearby surfaces.
 - Bloom on what glows, contact shadows in corners, film-like tone mapping, and a colour grade per biome so each has its own palette on screen.
 
+### Things that move
+
+Doors swing, so they cannot be baked with the walls. Each door leaf is built like the masonry (boards with joints, closed on every side) and takes its share of baked light from the building just in front of each face. Doors do not cast shadows, because all shadow maps are drawn once.
+
+Small loose things — iron fittings, torch brands, keys — get a faint fixed ambient light and the real lights, and nothing else. Without that they are lit by the open sky wherever they are, indoors included, and glow white.
+
 ### Darkness and the carried light
 
 Not every place is lit, and that is decided, not left to chance. The site document records how each place is lit: by day (open to the sky, or reached by a court's light through windows and arches), by torches, or not at all. The generator leaves some rooms dark on purpose — side chambers more often than passages, and never two in a row, so there is always light ahead to walk towards.

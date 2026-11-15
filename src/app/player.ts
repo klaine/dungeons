@@ -19,6 +19,8 @@ export class Player {
   /** Movement from an analogue stick: x right, y back, length up to 1. */
   readonly analog = new Vector2();
   analogRun = false;
+  /** Boxes that stop the player while active, such as shut doors. */
+  readonly blockers: { min: Vector3; max: Vector3; active: boolean }[] = [];
   private jumpQueued = false;
   private velocity = new Vector3();
   private onGround = false;
@@ -124,6 +126,28 @@ export class Player {
         return false;
       },
     });
+
+    // Shut doors and the like: push the body out sideways.
+    for (const b of this.blockers) {
+      if (!b.active || seg.start.y - RADIUS > b.max.y || seg.end.y + RADIUS < b.min.y) continue;
+      const nx = Math.min(b.max.x, Math.max(b.min.x, seg.start.x));
+      const nz = Math.min(b.max.z, Math.max(b.min.z, seg.start.z));
+      let dx = seg.start.x - nx, dz = seg.start.z - nz;
+      const d = Math.hypot(dx, dz);
+      if (d >= RADIUS) continue;
+      if (d < 1e-5) {
+        // Inside the box: leave by the nearer face across its thin dimension.
+        const thinX = b.max.x - b.min.x < b.max.z - b.min.z;
+        const mid = thinX ? (b.min.x + b.max.x) / 2 : (b.min.z + b.max.z) / 2;
+        const out = (thinX ? before.x : before.z) >= mid ? 1 : -1;
+        const half = (thinX ? b.max.x - b.min.x : b.max.z - b.min.z) / 2 + RADIUS;
+        if (thinX) { dx = mid + out * half - seg.start.x; dz = 0; } else { dz = mid + out * half - seg.start.z; dx = 0; }
+        seg.start.x += dx; seg.end.x += dx; seg.start.z += dz; seg.end.z += dz;
+      } else {
+        const push = (RADIUS - d) / d;
+        seg.start.x += dx * push; seg.end.x += dx * push; seg.start.z += dz * push; seg.end.z += dz * push;
+      }
+    }
 
     const delta = seg.start.clone().sub(before);
     this.onGround = delta.y > Math.abs(dt * this.velocity.y * 0.25);

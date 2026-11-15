@@ -14,11 +14,13 @@ import { AtmospherePass } from '../render/post';
 import { makeSiteMaterial, siteUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
 import { generateSite } from '../core/generate';
+import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
+import { Game } from './game';
 import { Player } from './player';
 import { TouchControls } from './touch';
 
@@ -47,11 +49,22 @@ const hud = {
   title: document.getElementById('title')!,
   seed: document.getElementById('seed')!,
 };
-document.getElementById('new')!.addEventListener('click', () => {
+const newPlace = () => {
   const next = new URLSearchParams(location.search);
   next.set('seed', randomSeed());
   location.search = next.toString();
-});
+};
+document.getElementById('new')!.addEventListener('click', newPlace);
+document.getElementById('again')!.addEventListener('click', newPlace);
+
+let toastTimer = 0;
+function toast(message: string): void {
+  const el = document.getElementById('toast')!;
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => el.classList.remove('show'), 4200);
+}
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
 const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25 };
@@ -244,6 +257,24 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
   new TouchControls(canvas, player, toggleLantern);
+
+  // ------------------------------------------------------------------ doors, keys and the goal
+  const game = site ? new Game(site, desc, scene, materials.wood, player, {
+    toast,
+    keysChanged: (keys) => {
+      document.getElementById('keys')!.innerHTML = keys.map((k) => `<span class="${k}">${k} key</span>`).join('');
+    },
+    won: (seconds) => {
+      const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
+      document.getElementById('wonText')!.textContent = `You reached the heart of the house in ${m ? `${m} min ` : ''}${s} s, having seen ${game!.visited.size - 1} of its ${site.places.length - 1} places.`;
+      document.getElementById('won')!.hidden = false;
+      document.exitPointerLock?.();
+    },
+  }) : null;
+  let revealAll = params.has('reveal');
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyG') revealAll = !revealAll;
+  });
   if (params.has('cam')) {
     const c = params.get('cam')!.split(',').map(Number);
     player.place(new Vector3(c[0], c[1], c[2]), c[3] ?? 0, c[4] ?? 0);
@@ -284,6 +315,20 @@ async function start(): Promise<void> {
       }
       shR.needsUpdate = shG.needsUpdate = shB.needsUpdate = bk.needsUpdate = true;
     }
+    // Moving things take their baked light from the nearest part of the building.
+    game?.applyBake((at) => {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < vertexTotal; i++) {
+        const dx = positions[i * 3] - at.x, dy = positions[i * 3 + 1] - at.y, dz = positions[i * 3 + 2] - at.z;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      const e = [0, 1, 2].map((c) => {
+        const o = best * 12 + c * 4;
+        return r.sh[o] + 0.5 * Math.hypot(r.sh[o + 1], r.sh[o + 2], r.sh[o + 3]);
+      }) as [number, number, number];
+      return { e, sky: r.skyVis[best], sun: r.sunVis[best] };
+    });
     bakeTarget = 1;
   };
 
@@ -352,6 +397,7 @@ async function start(): Promise<void> {
     last = now;
     const time = fixedTime ?? now / 1000;
     player.update(dt);
+    game?.update(dt, time);
     for (const t of torches) t.update(time);
     // Held low and to the right, so it models what it lights instead of flattening it.
     lantern.position.set(0.28, -0.42, -0.15).applyQuaternion(camera.quaternion).add(camera.position);
@@ -380,7 +426,13 @@ async function start(): Promise<void> {
 
     // The plan follows the player, and the readout names the place they are standing in.
     if (site && tick % 6 === 1) {
-      drawPlan(map, site, { player: { x: player.position.x, z: player.position.z, yaw: player.yaw }, labels: map.classList.contains('big') });
+      drawPlan(map, site, {
+        player: { x: player.position.x, z: player.position.z, yaw: player.yaw },
+        labels: map.classList.contains('big'),
+        visited: revealAll || !game ? undefined : game.visited,
+        shut: new Set(game?.doors.filter((d) => !d.open).map((d) => d.desc.way)),
+        items: game?.things.filter((k) => !k.taken).map((k) => k.item),
+      });
       const here = placeAt(site, player.position.x, player.position.z);
       if (here && here.id !== lastPlace) {
         lastPlace = here.id;
@@ -404,12 +456,15 @@ async function start(): Promise<void> {
   };
   requestAnimationFrame(loop);
 
-  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, get exposure() { return exposure; } };
+  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {
     if (!site) return [];
     const failures: string[] = [];
+    // This checks the masonry, so doors are taken out of the way for the duration.
+    const wasActive = player.blockers.map((b) => b.active);
+    for (const b of player.blockers) b.active = false;
     for (const w of site.ways) {
       if (w.kind === 'window') continue;
       const a = site.places[w.a], b = site.places[w.b];
@@ -433,8 +488,57 @@ async function start(): Promise<void> {
       }
     }
     player.analog.set(0, 0);
+    player.blockers.forEach((b, i) => (b.active = wasActive[i]));
     player.place(desc.spawn.position, desc.spawn.yaw);
     return failures;
+  };
+
+  // For checking that the mission can be completed in the built world, not just on paper: follows
+  // the solver's route with the player's body, letting doors and keys respond as they would in play.
+  (window as any).__dbg.playthrough = () => {
+    if (!site || !game) return { won: false, log: ['no site'] };
+    const log: string[] = [];
+    let clock = 0;
+    const walkTo = (tx: number, tz: number, reach: number): boolean => {
+      let lastX = player.position.x, lastZ = player.position.z, sidestep = 0, turn = 1;
+      for (let i = 0; i < 1500; i++) {
+        if (Math.hypot(tx - player.position.x, tz - player.position.z) < reach) { player.analog.set(0, 0); return true; }
+        player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+        player.analog.set(sidestep > 0 ? turn : 0, sidestep > 0 ? -0.3 : -1);
+        sidestep--;
+        player.update(1 / 60);
+        game.update(1 / 60, (clock += 1 / 60));
+        if (i % 45 === 44) {
+          // Not getting anywhere: something is in the way, so step round it.
+          if (Math.hypot(player.position.x - lastX, player.position.z - lastZ) < 0.25) { sidestep = 40; turn = -turn; }
+          lastX = player.position.x; lastZ = player.position.z;
+        }
+      }
+      player.analog.set(0, 0);
+      return false;
+    };
+    player.place(desc.spawn.position, desc.spawn.yaw);
+    let at = site.start;
+    for (const m of solve(site).moves) {
+      const w = site.ways[m.way];
+      const a = site.places[w.a];
+      const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
+      const alongX = w.side === 'n' || w.side === 's';
+      const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
+      const inA = wallA - (alongX ? n[1] : n[0]) * 1.1;
+      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 1.1);
+      const [near, far] = at === w.a ? [inA, inB] : [inB, inA];
+      const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
+      const ok = walkTo(point(near)[0], point(near)[1], 0.3) && walkTo(point(far)[0], point(far)[1], 0.3);
+      if (!ok) { log.push(`stuck going from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
+      at = m.to;
+      const anchor = desc.anchors?.get(at);
+      if (anchor && (at === site.goal || game.things.some((k) => !k.taken && k.item.place === at))) {
+        if (!walkTo(anchor.x, anchor.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
+      }
+      log.push(`${site.places[at].name}${m.events.length ? ` (${m.events.join(', ')})` : ''}`);
+    }
+    return { won: game.won, keys: [...game.keys], log };
   };
   // For diagnosis: what a pixel looks at, and whether that point has a clear line to the sun.
   (window as any).__dbg.sunProbe = (nx: number, ny: number) => {

@@ -1,11 +1,12 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
 import { Place, Side, Site, Way } from '../core/site';
+import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { ashlar, beam, coping, dressed, flag, hallFlag, plank, vaultStone } from './geom/styles';
-import { SceneDescription, TorchSpec } from './scene';
+import { DoorDesc, SceneDescription, TorchSpec } from './scene';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -137,6 +138,9 @@ export function meshSite(site: Site): SceneDescription {
     torchesByPlace.set(p.id, list);
   }
 
+  const doors: DoorDesc[] = [];
+  const anchors = new Map<number, Vector3>();
+
   // ------------------------------------------------------------------ places
   const house = places.filter((p) => p.role !== 'approach');
   const houseX0 = Math.min(...house.map((p) => p.x0)) - T / 2;
@@ -252,6 +256,13 @@ export function meshSite(site: Site): SceneDescription {
       kit.box('stone', body.min, body.max, { ...dressed, length: [0.7, 1.1], course: [0.4, 0.45] });
       const lid = wallBox(f, u - half - 0.1, u + half + 0.1, body.max.y, body.max.y + 0.17, -(near - 0.1), -(near + deep + 0.1));
       kit.box('stone', lid.min, lid.max, { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.2, 1.2] }, 'lid');
+      anchors.set(p.id, V((lid.min.x + lid.max.x) / 2, lid.max.y, (lid.min.z + lid.max.z) / 2));
+    } else if (site.items.some((it) => it.place === p.id)) {
+      // Something is kept here and there is no chest: a pedestal in the middle of the floor.
+      kit.box('stone', V(cx - 0.3, p.floor - 0.02, cz - 0.3), V(cx + 0.3, p.floor + 0.14, cz + 0.3), coping, coping, 'base');
+      kit.box('stone', V(cx - 0.22, p.floor + 0.14, cz - 0.22), V(cx + 0.22, p.floor + 0.92, cz + 0.22), { ...dressed, length: [0.44, 0.44] }, coping, 'shaft');
+      kit.box('stone', V(cx - 0.3, p.floor + 0.92, cz - 0.3), V(cx + 0.3, p.floor + 1.04, cz + 0.3), coping, coping, 'cap');
+      anchors.set(p.id, V(cx, p.floor + 1.04, cz));
     }
 
     // Ways are built once, from the side of their first place.
@@ -281,6 +292,27 @@ export function meshSite(site: Site): SceneDescription {
         const b = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, lo + STEP * (k - 1), lo + STEP * k, t0, t1);
         kit.box('floor', b.min, b.max, stepStyle, hallFlag, 'step');
       }
+      // A door leaf, hung at the higher side so it stands on the top stair and swings away from the steps.
+      if (w.door) {
+        const highIsHere = p.floor > q.floor;
+        const t = highIsHere ? 0.2 : T - 0.2;
+        const towardsHigh = highIsHere ? f.normal.clone() : f.normal.clone().negate();
+        const lw = w.halfWidth - 0.02;
+        const hingeLow = rng.chance(0.5);
+        const d = hingeLow ? f.dir.clone() : f.dir.clone().negate();
+        const hinge = f.a.clone().addScaledVector(f.dir, hingeLow ? c - lw : c + lw).addScaledVector(f.normal, -t).setY(hi + 0.006);
+        const yaw = Math.atan2(-d.z, d.x);
+        const faces = Math.sign(Math.sin(yaw) * towardsHigh.x + Math.cos(yaw) * towardsHigh.z) || 1;
+        const barred = w.door.barredFrom;
+        const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + 3.2, t - 0.14, t + 0.14);
+        doors.push({
+          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: 0.07,
+          leaf: buildDoorLeaf(`${site.seed}/door${site.ways.indexOf(w)}`, lw, 2.0, 0.07),
+          blocker: block,
+          centre: f.a.clone().addScaledVector(f.dir, c).addScaledVector(f.normal, -t).setY(hi + 1.2),
+          barSide: barred === undefined ? 0 : (barred === (highIsHere ? p.id : q.id) ? faces : -faces),
+        });
+      }
     }
   }
 
@@ -300,5 +332,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
+    doors,
+    anchors,
   };
 }

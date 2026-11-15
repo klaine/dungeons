@@ -1,4 +1,4 @@
-import { Place, Site } from '../core/site';
+import { Item, Place, Site, Way } from '../core/site';
 
 /**
  * The plan map: a clean drawing of a site from above, north up. Drawn from the site document, so
@@ -11,6 +11,12 @@ export interface PlanOptions {
   player?: { x: number; z: number; yaw: number };
   /** Draw room numbers. */
   labels?: boolean;
+  /** Places the player has been in. When given, the rest of the site stays hidden until found. */
+  visited?: Set<number>;
+  /** Ways whose door is shut at the moment, by index. */
+  shut?: Set<number>;
+  /** Keys still lying where they were left. */
+  items?: Item[];
 }
 
 const INK = '#2b241c';
@@ -19,6 +25,8 @@ const FLOOR = '#f6efdd';
 const COURT = '#cfd9b4';
 const DARK = '#b7ab96';
 const ACCENT = '#a5432a';
+const GLIMPSED = '#ddd2ba';
+const KEY_COLOUR: Record<string, string> = { iron: '#6f7781', gold: '#c9961f' };
 
 export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOptions = {}): void {
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -51,21 +59,41 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.globalAlpha = 1;
 
+  // Fog of war: places that have been entered are drawn in full; places seen through an open
+  // doorway, arch or window are sketched; everything else is left off the page.
+  const shut = opts.shut ?? new Set<number>();
+  const known = (p: Place) => !opts.visited || opts.visited.has(p.id);
+  const glimpsed = new Set<number>();
+  if (opts.visited) {
+    site.ways.forEach((w, i) => {
+      if (shut.has(i)) return;
+      if (opts.visited!.has(w.a) && !opts.visited!.has(w.b)) glimpsed.add(w.b);
+      if (opts.visited!.has(w.b) && !opts.visited!.has(w.a)) glimpsed.add(w.a);
+    });
+  }
+  const drawn = (p: Place) => known(p) || glimpsed.has(p.id);
+  const wayDrawn = (w: Way) => known(site.places[w.a]) || known(site.places[w.b]);
+
   // Masonry: every place grown by half a wall, in ink. Low outer walls are drawn thinner.
-  ctx.fillStyle = INK;
   for (const p of site.places) {
+    if (!drawn(p)) continue;
+    ctx.fillStyle = INK;
+    ctx.globalAlpha = known(p) ? 1 : 0.35;
     const g = p.role === 'approach' ? half * 0.6 : half;
     rect(p.x0 - g, p.z0 - g, p.x1 + g, p.z1 + g);
   }
+  ctx.globalAlpha = 1;
   // Floors: open ground tinted green, unlit rooms shaded.
-  const floorOf = (p: Place) => (p.roof === 'sky' ? COURT : p.light === 'dark' ? DARK : FLOOR);
+  const floorOf = (p: Place) => (!known(p) ? GLIMPSED : p.roof === 'sky' ? COURT : p.light === 'dark' ? DARK : FLOOR);
   for (const p of site.places) {
+    if (!drawn(p)) continue;
     ctx.fillStyle = floorOf(p);
     rect(p.x0, p.z0, p.x1, p.z1);
   }
 
   // Ways: cut through the wall; windows are a thin slot; stairs are ruled across the opening.
-  for (const w of site.ways) {
+  site.ways.forEach((w, index) => {
+    if (!wayDrawn(w)) return;
     const a = site.places[w.a], b = site.places[w.b];
     const alongX = w.side === 'n' || w.side === 's';
     const wall = w.side === 'n' ? a.z0 - T : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0 - T;
@@ -74,11 +102,18 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.fillStyle = FLOOR;
       if (alongX) rect(lo, wall + T * 0.35, hi, wall + T * 0.65);
       else rect(wall + T * 0.35, lo, wall + T * 0.65, hi);
-      continue;
+      return;
     }
-    ctx.fillStyle = a.roof === 'sky' && b.roof === 'sky' ? COURT : a.light === 'dark' && b.light === 'dark' ? DARK : FLOOR;
+    ctx.fillStyle = FLOOR;
     if (alongX) rect(lo, wall - 0.05, hi, wall + T + 0.05);
     else rect(wall - 0.05, lo, wall + T + 0.05, hi);
+    // A shut door is a stroke across the opening, in the colour of its lock if it has one.
+    if (shut.has(index)) {
+      ctx.fillStyle = w.door?.lock ? KEY_COLOUR[w.door.lock] : INK;
+      if (alongX) rect(lo, wall + T * 0.36, hi, wall + T * 0.64);
+      else rect(wall + T * 0.36, lo, wall + T * 0.64, hi);
+      return;
+    }
     const steps = Math.round(Math.abs(a.floor - b.floor) / 0.17);
     if (steps > 0) {
       ctx.strokeStyle = INK;
@@ -91,10 +126,16 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       }
       ctx.stroke();
     }
-  }
+  });
 
   // Furnishings and marks.
+  for (const it of opts.items ?? []) {
+    const p = site.places[it.place];
+    if (!known(p)) continue;
+    diamond(ctx, X((p.x0 + p.x1) / 2), Z((p.z0 + p.z1) / 2), Math.max(3.5 * ratio, 0.6 * scale), KEY_COLOUR[it.key]);
+  }
   for (const p of site.places) {
+    if (!known(p)) continue;
     const cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
     if (p.role === 'court') {
       ctx.strokeStyle = INK;
@@ -130,6 +171,17 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     ctx.fill();
     ctx.restore();
   }
+}
+
+function diamond(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string): void {
+  ctx.fillStyle = colour;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1, r * 0.18);
+  ctx.beginPath();
+  ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.7, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.7, y);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
 }
 
 function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, colour: string): void {

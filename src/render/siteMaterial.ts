@@ -89,3 +89,24 @@ roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
   m.customProgramCacheKey = () => 'site-v1';
   return m;
 }
+
+/**
+ * A material for small loose things: iron fittings, torch brands, keys. They are not part of the
+ * light bake, and left to themselves they would be lit by the open sky wherever they are, indoors
+ * included. Here they get a faint fixed ambient instead, and otherwise only the real lights.
+ */
+export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardMaterial {
+  const m = new MeshStandardMaterial({
+    color: o.color, roughness: o.roughness, metalness: o.metalness,
+    emissive: o.emissive ?? new Color(0, 0, 0), emissiveIntensity: o.emissiveIntensity ?? 1,
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', /* glsl */ `
+irradiance = vec3( 0.05, 0.045, 0.04 );
+iblIrradiance = vec3( 0.0 );
+radiance = vec3( 0.0 );
+#include <lights_fragment_end>`);
+  };
+  m.customProgramCacheKey = () => 'prop-v1';
+  return m;
+}

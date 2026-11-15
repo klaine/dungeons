@@ -10,6 +10,29 @@ export interface TorchSpec {
   out: Vector3;
 }
 
+/** A door leaf to hang: where its hinge is, how it swings, and what it blocks while shut. */
+export interface DoorDesc {
+  /** Index into the site's ways. */
+  way: number;
+  /** Foot of the hinge. */
+  hinge: Vector3;
+  /** Rotation about the vertical that lays the leaf across the opening. */
+  yaw: number;
+  /** Signed angle added when the door stands open. */
+  swing: number;
+  halfWidth: number;
+  spring: number;
+  thickness: number;
+  /** Geometry in the leaf's own coordinates; see `buildDoorLeaf`. */
+  leaf: MeshBuilder;
+  /** The space the shut door fills, for stopping the player. */
+  blocker: { min: Vector3; max: Vector3 };
+  /** Middle of the doorway, for deciding when the player has come up to it. */
+  centre: Vector3;
+  /** Which face of the leaf carries the bar, as a sign along the leaf's z; 0 for none. */
+  barSide: number;
+}
+
 export interface SceneDescription {
   /**
    * Geometry, keyed by "group|material". Each key becomes one mesh, so grouping by place lets
@@ -25,4 +48,8 @@ export interface SceneDescription {
   blocks: number;
   /** A one-line description to show the player. */
   title?: string;
+  /** Doors to hang in the doorways. */
+  doors?: DoorDesc[];
+  /** Per place, the spot where a thing can be set down: the top of its chest or pedestal. */
+  anchors?: Map<number, Vector3>;
 }
