@@ -4,7 +4,24 @@ A browser tool for generating places for adventure and exploring them: a 3D worl
 
 "Dungeon" here means any bounded place worth exploring: crypts and caverns, castles, towns, and locations in open country.
 
-The project is at the planning stage. No code yet.
+The project is at an early stage. The design is written down in `docs/`, and the first 3D test scene runs in the browser: a sunlit courtyard and a torchlit vaulted hall, built stone by stone, with procedural materials and baked light. Nothing is generated from a site document yet.
+
+![A vaulted hall with shafts of sunlight from the door and window](docs/images/hall-light-shafts.jpg)
+
+![A walled courtyard with an arcade and a well](docs/images/courtyard.jpg)
+
+More in `docs/images/`. These were captured from the running scene.
+
+## Running it
+
+```
+npm install
+npm run dev
+```
+
+Open the address Vite prints. Click to walk; `W` `A` `S` `D` to move, `Shift` to run, `F` toggles fog, `B` toggles baked light.
+
+Useful URL parameters: `seed` (any text), `rays` and `bounces` (bake quality; defaults 48 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
 ## The idea in brief
 

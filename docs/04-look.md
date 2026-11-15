@@ -11,7 +11,7 @@ The standard to hold: **a generated place should not look generated.** No visibl
 ## Principles
 
 1. **Light first.** Lighting is the largest single contributor to how good a scene looks, and the one most often left as an afterthought in generated worlds. It gets its own pipeline layer and its own budget.
-2. **Form before surface.** Normal maps add grain, not shape. Edges need bevels, walls need plinths and cornices, blocks need to sit slightly proud or shy of each other, rubble gathers at the foot of a ruin. Silhouette is geometry's job.
+2. **Form before surface.** Normal maps add grain, not shape. This is not a low-poly look: every stone is its own piece of geometry with a bevelled edge and a recessed mortar joint, sitting slightly proud or shy of its neighbours. Walls get plinths and cornices; rubble gathers at the foot of a ruin. Anything that should cast a shadow or catch a highlight on its edge is modelled. A modest courtyard and hall comes to several thousand stones and several hundred thousand triangles, which current hardware draws easily.
 3. **Fields drive surfaces.** The history layer already knows where it is damp, old, hot, overgrown and well-trodden. Those fields choose and blend materials, which is what ties the look to the place's story.
 4. **Hide the machine.** Break up tiling, vary instances, jitter what would be regular, and never let the underlying grid show.
 5. **One document, many views.** The 3D world and every map style are rendered from the same data and always agree.
@@ -68,7 +68,28 @@ Once generated, the world is static, and that is the opportunity. Soft indirect 
 - **A probe volume** carrying the baked light to anything that moves.
 - **Many small lights** handled by baking the distant ones and keeping only the nearby ones live.
 
-How the bake is stored (per vertex, in lightmaps or in a probe grid) is the main technical question for the look and is settled by experiment early; see "What must be proven early".
+**How the bake is stored.** Per vertex. Because every stone is modelled, vertices are never more than a few tens of centimetres apart, which is fine enough for soft indirect light and avoids unwrapping generated geometry for lightmaps. Crevices such as mortar joints get their own vertices, so they darken naturally.
+
+Each vertex stores, per colour channel, a constant term and a direction term, so that the light a surface receives still depends on which way the normal map tilts it. For a vertex whose hemisphere is sampled uniformly with N rays of incoming radiance L along directions d:
+
+- constant term E0 = (π / 2) · mean(L)
+- direction term E1 = π · mean(L · d)
+- light received by a surface with normal n: E0 + E1 · n
+
+The bake also records how much sky each vertex sees and what share of the day it is in direct sun. Moss grows where there is sky but little sun, and sky reflections are suppressed where the sky cannot be seen.
+
+A final pass averages nearby vertices that face the same way to remove sampling noise, keeping joints separate so they stay dark.
+
+### Skin and solid
+
+Visible geometry is only a skin: the faces a player can see, with nothing behind them. Light needs to know where the solid is, for two reasons found in practice.
+
+- **Buried vertices.** Patches overlap at inside corners, so some vertices sit inside a wall or under a floor. Left alone they collect light from wherever their rays escape to, often the open sky, and it smears onto the visible surface next to them as a bright rim. The bake is given the solid volumes behind the skin; a vertex whose rays mostly hit solid mass or the backs of surfaces is treated as buried and takes its light from visible neighbours.
+- **Thin shadows.** A skin shadows itself unreliably, so sunlight would catch stone edges inside a closed room. The same solid volumes are drawn into the sun's shadow map from their sunward side, which gives walls and roofs real thickness.
+
+In the hand-assembled scene the solids are listed alongside the skin. In generated sites they come for free: the span grid already says which space is open and which is not.
+
+Two smaller measures keep the skin closed: every stone has a plain backing sheet just behind its mortar, slightly larger than the stone, so no pixel-wide gaps show between neighbours; and where a wall is cut for an opening, triangles touching the hole are left out and the dressed stones round the opening cover the edge.
 
 ### Atmosphere and finish
 
@@ -111,6 +132,30 @@ Common to all styles:
 - A numbered key generated from the site document: each place's name, fiction and contents.
 - Output as vector and raster images, with an optional grid at a chosen scale.
 - Optional export of walls, doors and lights in a form virtual tabletops can import.
+
+## Where the look stands
+
+A first scene exists: a walled courtyard with an arcade and a well, and a doorway into a barrel-vaulted hall lit by four torches. It is assembled by hand from the kit of parts, which is the code the site mesher will call later.
+
+| Proof | State |
+|---|---|
+| Procedural material with normal, roughness and height, blended by a field | Stone, wood and moss recipes; moss, damp and soot driven by fields and by the bake |
+| Baked indirect light computed in the browser | Working, in web workers, shown progressively |
+| Sun shadows, and shadowed local lights | Working; all shadow maps are drawn once because the world is static |
+| Fog with visible shafts of light | Working, by marching view rays against a sun depth map |
+| Target frame rate | Not measured: development so far has been on a software renderer without a graphics card |
+| Span grid to mesh, built and natural | Not started: the scene is assembled by hand, and there is no natural rock yet |
+| Plan and rendered maps | Not started |
+
+Also in place: eye adaptation measured from the image, and first-person walking with collision.
+
+Known weaknesses, in rough order of importance:
+
+- The stone reads as clean and new. It needs stronger weathering, more variation between stones, and broken or missing pieces.
+- Moss is a flat overlay. It should have its own relief and gather more convincingly in joints.
+- Nothing is in the rooms: no doors, furniture, debris or plants.
+- Torch flames are simple animated cards and there are no particles in the air.
+- Bake quality and time need tuning on real hardware.
 
 ## What must be proven early
 

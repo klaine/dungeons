@@ -43,12 +43,12 @@ Out of scope for now: combat systems, character progression, multiplayer, a cont
 | Generator core | Pure TypeScript, no DOM | Runs in a web worker, and in Node for tests and batch analysis |
 | Randomness | Seeded generator, one stream per layer | Determinism, independent re-rolls |
 | 3D | three.js on WebGL 2, with custom shaders for materials | Mature, large ecosystem, glTF export, full control of the shading |
-| Light baking | Ray tracing against the generated geometry, in workers or on the GPU | The world is static after generation |
+| Light baking | Ray tracing against the generated geometry in web workers, stored per vertex | The world is static after generation; dense geometry makes vertices a fine enough carrier |
 | Textures | Procedural material recipes rendered on the GPU; scanned sets accepted | Seedable, variable, nothing to license |
 | 2D maps | Canvas and SVG | Raster and vector output from the same code |
 | Tests | Vitest, with property tests across many seeds | Invariants such as "always completable" need thousands of cases |
 
-The renderer and baking choices are confirmed or changed by the look spike (M2) before anything depends on them.
+The renderer and baking choices are being proven by the look milestone (M1) before anything depends on them.
 
 Proposed layout, one package with enforced boundaries:
 
@@ -68,13 +68,13 @@ docs/
 
 ## Milestones
 
-Two things carry the most risk and the most value: the structure of the adventure, and the look. They are independent, so they are tackled first and side by side. Kinds of site are then added one at a time, each a full vertical slice.
+3D comes first. The look is proven on hand-assembled scenes before any generator exists, so that the visual target is real and every later milestone is judged in the world it will ship in. Structure follows, and then kinds of site are added one at a time, each a full vertical slice.
 
 | # | Milestone | Delivers | Done when |
 |---|---|---|---|
-| **M0** | Foundations | Project scaffold, seeded randomness, site document types, empty workbench shell, test harness | A seed in the URL produces a stable placeholder document |
-| **M1** | Structure | Premise record, cyclic mission generator with four or five cycle patterns, lock and key solver, mission graph view, structural metrics | 1,000 seeds are all completable; graphs show nested loops, gating and shortcuts; metrics vary meaningfully across seeds |
-| **M2** | Look spike | Two hand-assembled test scenes (torchlit hall; sunlit courtyard), span grid to mesh, first procedural materials, baked and real-time lighting, fog, plan and rendered maps of both | The six proofs in document 4 are met at the target frame rate, or the approach is changed |
+| **M0** | Foundations | Project scaffold, seeded randomness, first-person explorer shell | A seed in the URL produces the same world every time. **Done.** |
+| **M1** | Look | Hand-assembled test scenes (sunlit courtyard and arcade; torchlit vaulted hall) built from the kit of parts, procedural materials, baked and real-time lighting, fog with light shafts, eye adaptation | The proofs in document 4 are met at the target frame rate, or the approach is changed. **In progress.** |
+| **M2** | Structure | Site document types, premise record, cyclic mission generator with four or five cycle patterns, lock and key solver, mission graph view, structural metrics | 1,000 seeds are all completable; graphs show nested loops, gating and shortcuts; metrics vary meaningfully across seeds |
 | **M3** | First delve | Topology, layout and geometry for an underground site; walkable in 3D with doors and keys; plan map and automap | A generated delve can be played from entrance to goal, and the Fork, Return and Question tests can be judged by walking it |
 | **M4** | Biomes and history | Biome definitions as data, built and natural generators, fields, field-driven materials, two or three enclosed biomes with transitions, dressing, the lighting layer | Zones are distinguishable at a glance; damp, age and wear are visible and make sense; the Touch test passes |
 | **M5** | Open air | Setting layer, terrain, sky and weather, vegetation, the wild-place grammar, hard and soft edges, viewshed planning, entrances between outside and underground | A ruin in a forest with a delve beneath can be walked end to end; the Approach test passes |
@@ -103,7 +103,8 @@ Two things carry the most risk and the most value: the structure of the adventur
 ### Settled
 
 - **Presentation.** A 3D world in WebGL, plus 2D maps as assets in their own right.
-- **Visual direction.** Physically based materials with normal maps, and lighting treated as a first-class part of generation.
+- **Order.** 3D first. The look is built and proven before the generator.
+- **Visual direction.** Physically based materials with normal maps, and lighting treated as a first-class part of generation. Not a low-poly style: geometry is dense, and anything that should catch light on an edge is modelled rather than faked.
 - **Range.** Any place of adventure: underground, castles, towns and open country.
 
 ### Still open

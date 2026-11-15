@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dungeons</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a09; color: #e8e2d6;
+      font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #view { display: block; width: 100%; height: 100%; cursor: pointer; }
+    #hud { position: fixed; left: 18px; bottom: 16px; right: 18px; pointer-events: none;
+      display: flex; justify-content: space-between; align-items: flex-end; gap: 24px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+    #hud h1 { margin: 0 0 2px; font: 600 15px/1.2 ui-serif, Georgia, serif; letter-spacing: .14em; text-transform: uppercase; }
+    #stats, #fps { opacity: .62; font-variant-numeric: tabular-nums; }
+    #hint { text-align: right; opacity: .8; transition: opacity .4s; }
+    body.walking #hint .idle { display: none; }
+    body:not(.walking) #hint .active { display: none; }
+    kbd { font: inherit; padding: 0 5px; border: 1px solid rgba(232, 226, 214, .4); border-radius: 3px; }
+    #progress { position: fixed; top: 0; left: 0; right: 0; pointer-events: none; }
+    #bar { height: 2px; background: #e0b070; transform-origin: 0 50%; transform: scaleX(0); transition: transform .2s linear; }
+    #status { padding: 8px 18px; opacity: .85; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="progress"><div id="bar"></div><div id="status">Starting</div></div>
+  <div id="hud">
+    <div>
+      <h1>Dungeons</h1>
+      <div id="stats"></div>
+      <div id="fps"></div>
+    </div>
+    <div id="hint">
+      <div class="idle">Click to walk</div>
+      <div class="active"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>F</kbd> fog · <kbd>B</kbd> baked light · <kbd>Esc</kbd> release</div>
+    </div>
+  </div>
+  <script type="module" src="/src/app/main.ts"></script>
+</body>
+</html>
