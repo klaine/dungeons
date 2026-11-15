@@ -1,7 +1,10 @@
-import { Box3, Line3, PerspectiveCamera, Vector3 } from 'three';
+import { Box3, Line3, PerspectiveCamera, Vector2, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 
-/** First-person walking: mouse look, WASD, gravity, and a capsule that slides along the site geometry. */
+/**
+ * First-person walking: gravity and a capsule that slides along the site geometry. Mouse and keyboard
+ * are handled here; other inputs (touch) drive it through `analog`, `look` and `jump`.
+ */
 
 const RADIUS = 0.28;
 const HEIGHT = 1.8;
@@ -13,6 +16,10 @@ export class Player {
   yaw = 0;
   pitch = 0;
   locked = false;
+  /** Movement from an analogue stick: x right, y back, length up to 1. */
+  readonly analog = new Vector2();
+  analogRun = false;
+  private jumpQueued = false;
   private velocity = new Vector3();
   private onGround = false;
   private keys = new Set<string>();
@@ -23,21 +30,28 @@ export class Player {
   private capPoint = new Vector3();
 
   constructor(private camera: PerspectiveCamera, private dom: HTMLElement, private bvh: MeshBVH) {
-    dom.addEventListener('click', () => {
-      if (!this.locked) dom.requestPointerLock?.();
+    dom.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && !this.locked) dom.requestPointerLock?.();
     });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === dom;
       document.body.classList.toggle('walking', this.locked);
     });
     document.addEventListener('mousemove', (e) => {
-      if (!this.locked) return;
-      this.yaw -= e.movementX * 0.0022;
-      this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch - e.movementY * 0.0022));
+      if (this.locked) this.look(-e.movementX * 0.0022, -e.movementY * 0.0022);
     });
     window.addEventListener('keydown', (e) => this.keys.add(e.code));
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
+  }
+
+  look(dYaw: number, dPitch: number): void {
+    this.yaw += dYaw;
+    this.pitch = Math.max(-1.5, Math.min(1.5, this.pitch + dPitch));
+  }
+
+  jump(): void {
+    this.jumpQueued = true;
   }
 
   /** Places the player with their eyes at `eye`. */
@@ -51,14 +65,17 @@ export class Player {
   }
 
   update(dt: number): void {
-    const run = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const run = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.analogRun;
     const speed = run ? 6.5 : 3.2;
     let fx = 0, fz = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz -= 1;
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz += 1;
     if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) fx -= 1;
     if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) fx += 1;
-    const len = Math.hypot(fx, fz) || 1;
+    const keyLen = Math.hypot(fx, fz) || 1;
+    fx = fx / keyLen + this.analog.x;
+    fz = fz / keyLen + this.analog.y;
+    const len = Math.max(1, Math.hypot(fx, fz));
     const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
     const wx = ((fx * cos + fz * sin) / len) * speed;
     const wz = ((-fx * sin + fz * cos) / len) * speed;
@@ -66,10 +83,11 @@ export class Player {
     const k = 1 - Math.exp(-dt * (this.onGround ? 14 : 3));
     this.velocity.x += (wx - this.velocity.x) * k;
     this.velocity.z += (wz - this.velocity.z) * k;
-    if (this.onGround && this.keys.has('Space')) {
+    if (this.onGround && (this.keys.has('Space') || this.jumpQueued)) {
       this.velocity.y = 5.2;
       this.onGround = false;
     }
+    this.jumpQueued = false;
 
     const steps = 4;
     for (let i = 0; i < steps; i++) this.step(dt / steps);

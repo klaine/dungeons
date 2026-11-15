@@ -16,6 +16,7 @@ import { generateTextureSet } from '../render/textures';
 import { Torch } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Player } from './player';
+import { TouchControls } from './touch';
 
 const params = new URLSearchParams(location.search);
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
@@ -193,6 +194,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
+  new TouchControls(canvas, player);
   if (params.has('cam')) {
     const c = params.get('cam')!.split(',').map(Number);
     player.place(new Vector3(c[0], c[1], c[2]), c[3] ?? 0, c[4] ?? 0);
@@ -252,7 +254,8 @@ async function start(): Promise<void> {
       {
         positions, normals, albedo, index, mortar, lights,
         masses: new Float32Array(desc.masses.flatMap((m) => [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z])),
-        rays: num('rays', 48),
+        // Phones and tablets have fewer and slower cores; halve the work unless asked otherwise.
+        rays: num('rays', window.matchMedia('(pointer: coarse)').matches ? 24 : 48),
         bounces: num('bounces', 2),
         workers: num('workers', Math.max(1, Math.min(12, (navigator.hardwareConcurrency || 4) - 1))),
       },

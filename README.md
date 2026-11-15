@@ -19,7 +19,10 @@ npm install
 npm run dev
 ```
 
-Open the address Vite prints. Click to walk; `W` `A` `S` `D` to move, `Shift` to run, `F` toggles fog, `B` toggles baked light.
+Open the address Vite prints.
+
+- **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `F` toggles fog, `B` toggles baked light.
+- **Touch:** drag on the left side of the screen to move (a thumb stick appears under your finger; push well past its rim to run), drag on the right side to look, and tap the button to jump.
 
 Useful URL parameters: `seed` (any text), `rays` and `bounces` (bake quality; defaults 48 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
