@@ -4,13 +4,21 @@ A browser tool for generating places for adventure and exploring them: a 3D worl
 
 "Dungeon" here means any bounded place worth exploring: crypts and caverns, castles, towns, and locations in open country.
 
-The project is at an early stage. The design is written down in `docs/`, and the first 3D test scene runs in the browser: a sunlit courtyard and a torchlit vaulted hall, built stone by stone, with procedural materials and baked light. Nothing is generated from a site document yet.
+The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms in a loop, sometimes round a cloister court — built stone by stone, with procedural materials and baked light, and a plan map of it. Structure is simple so far: loops and side chambers, no locks or keys.
+
+A generated place (seed `check-0`): its cloister court, its sanctum, and its plan.
+
+![A cloister court open to the sky, with a well and arched openings](docs/images/generated-court.jpg)
+
+![A vaulted sanctum with a stone chest lit by a torch](docs/images/generated-sanctum.jpg)
+
+<img src="docs/images/plan-map.png" alt="Plan of the same place: rooms in a ring round a court" width="420">
+
+The hand-built scene used to develop the look (`?scene=test`):
 
 ![A vaulted hall with shafts of sunlight from the door and window](docs/images/hall-light-shafts.jpg)
 
-![A walled courtyard with an arcade and a well](docs/images/courtyard.jpg)
-
-More in `docs/images/`. These were captured from the running scene.
+More in `docs/images/`. All were captured from the running program.
 
 ## Running it
 
@@ -24,7 +32,11 @@ Open the address Vite prints.
 - **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `F` toggles fog, `B` toggles baked light.
 - **Touch:** drag on the left side of the screen to move (a thumb stick appears under your finger; push well past its rim to run), drag on the right side to look, and tap the button to jump.
 
-Useful URL parameters: `seed` (any text), `rays` and `bounces` (bake quality; defaults 48 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
+Each place has its seed in the address, so a link reproduces it; **New place** rolls another. `M` or a click on the map enlarges it.
+
+Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
+
+To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them.
 
 ## Publishing
 

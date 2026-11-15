@@ -13,20 +13,45 @@ import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { AtmospherePass } from '../render/post';
 import { makeSiteMaterial, siteUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
-import { Torch } from '../render/torch';
+import { generateSite } from '../core/generate';
+import { SceneDescription } from '../render/scene';
+import { drawPlan, placeAt } from '../maps/plan';
+import { meshSite } from '../render/siteMesher';
+import { Torch, TorchLights } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Player } from './player';
 import { TouchControls } from './touch';
 
 const params = new URLSearchParams(location.search);
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
-const seed = params.get('seed') ?? 'first-light';
+
+/** A fresh, readable seed such as "amber-vault-41". */
+function randomSeed(): string {
+  const a = ['amber', 'ashen', 'bright', 'cold', 'deep', 'elder', 'fallow', 'gilded', 'hollow', 'iron', 'last', 'mossy', 'north', 'old', 'pale', 'quiet', 'red', 'salt', 'tall', 'west'];
+  const b = ['abbey', 'cloister', 'court', 'crypt', 'gate', 'hall', 'hold', 'keep', 'priory', 'vault', 'ward', 'well'];
+  const pick = <T>(list: T[]) => list[Math.floor(Math.random() * list.length)];
+  return `${pick(a)}-${pick(b)}-${Math.floor(Math.random() * 90 + 10)}`;
+}
+
+// Every place has a seed in its address, so a link reproduces it.
+if (!params.has('seed')) {
+  params.set('seed', randomSeed());
+  history.replaceState(null, '', `${location.pathname}?${params}`);
+}
+const seed = params.get('seed')!;
 
 const hud = {
   status: document.getElementById('status')!,
   bar: document.getElementById('bar')!,
   stats: document.getElementById('stats')!,
+  title: document.getElementById('title')!,
+  seed: document.getElementById('seed')!,
 };
+document.getElementById('new')!.addEventListener('click', () => {
+  const next = new URLSearchParams(location.search);
+  next.set('seed', randomSeed());
+  location.search = next.toString();
+});
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
 const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25 };
@@ -67,19 +92,30 @@ async function start(): Promise<void> {
   hud.status.textContent = 'Laying stone';
   await nextFrame();
   const t0 = performance.now();
-  const desc = buildCourtyardHall(seed);
+  // The hand-built look test scene is still available as ?scene=test.
+  const site = params.get('scene') === 'test' ? null : generateSite(seed);
+  const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
+  hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
+  const map = document.getElementById('map') as HTMLCanvasElement;
+  map.hidden = !site;
+  map.addEventListener('click', () => map.classList.toggle('big'));
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyM') map.classList.toggle('big');
+  });
+  hud.seed.textContent = seed;
   const statics: Mesh[] = [];
   const parts: { mesh: Mesh; offset: number; count: number; albedo: number }[] = [];
   let vertexTotal = 0, triTotal = 0;
   for (const [name, builder] of desc.meshes) {
     const geometry = builder.build();
-    const mesh = new Mesh(geometry, materials[name] ?? materials.stone);
+    const material = name.split('|')[1];
+    const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     statics.push(mesh);
-    parts.push({ mesh, offset: vertexTotal, count: builder.vertexCount, albedo: MEAN_ALBEDO[name] ?? 0.5 });
+    parts.push({ mesh, offset: vertexTotal, count: builder.vertexCount, albedo: MEAN_ALBEDO[material] ?? 0.5 });
     vertexTotal += builder.vertexCount;
     triTotal += builder.triangleCount;
   }
@@ -172,8 +208,11 @@ async function start(): Promise<void> {
   scene.environmentIntensity = 0.5;
 
   // ------------------------------------------------------------------ torches
-  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, TORCH_INTENSITY));
+  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1));
   for (const t of torches) scene.add(t.group);
+  // Four real lights serve however many torches there are; see TorchLights.
+  const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);
+  for (const l of torchLights.lights) scene.add(l);
 
   // ------------------------------------------------------------------ post
   const size = renderer.getDrawingBufferSize(new Vector2());
@@ -185,7 +224,6 @@ async function start(): Promise<void> {
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
   atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
-  atmosphere.setLights(torches.map((t) => ({ position: t.flamePosition, color: new Vector3(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16) })));
   const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.14, 0.5, 1.8);
   composer.addPass(atmosphere);
   if (num('bloom', 1)) composer.addPass(bloom);
@@ -243,7 +281,7 @@ async function start(): Promise<void> {
       sunE: [SUN_COLOR.r * SUN_INTENSITY, SUN_COLOR.g * SUN_INTENSITY, SUN_COLOR.b * SUN_INTENSITY],
       sky: SKY,
       points: torches.map((t) => ({
-        pos: [t.light.position.x, t.light.position.y, t.light.position.z],
+        pos: [t.lightPosition.x, t.lightPosition.y, t.lightPosition.z],
         intensity: [1.0 * TORCH_INTENSITY, 0.6 * TORCH_INTENSITY, 0.3 * TORCH_INTENSITY],
         range: 30,
         size: 0.12,
@@ -255,7 +293,7 @@ async function start(): Promise<void> {
         positions, normals, albedo, index, mortar, lights,
         masses: new Float32Array(desc.masses.flatMap((m) => [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z])),
         // Phones and tablets have fewer and slower cores; halve the work unless asked otherwise.
-        rays: num('rays', window.matchMedia('(pointer: coarse)').matches ? 24 : 48),
+        rays: num('rays', window.matchMedia('(pointer: coarse)').matches ? 16 : 32),
         bounces: num('bounces', 2),
         workers: num('workers', Math.max(1, Math.min(12, (navigator.hardwareConcurrency || 4) - 1))),
       },
@@ -289,6 +327,8 @@ async function start(): Promise<void> {
   let exposureTarget = 0.5;
   let tick = 0;
   let metering = false;
+  const glow = new Vector3();
+  let lastPlace = -1;
   // In a software-rendered test run, drawing starves the bake workers; this draws rarely until the bake is done.
   const bakeFirst = params.has('bakefirst');
   let last = performance.now();
@@ -301,6 +341,10 @@ async function start(): Promise<void> {
     const time = fixedTime ?? now / 1000;
     player.update(dt);
     for (const t of torches) t.update(time);
+    torchLights.update(dt, camera.position);
+    atmosphere.setLights(torchLights.state().map((s) => ({
+      position: s.position, color: glow.set(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16 * s.strength).clone(),
+    })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
@@ -318,6 +362,16 @@ async function start(): Promise<void> {
     exposure = exposure < 0 ? exposureTarget : exposure + (exposureTarget - exposure) * (1 - Math.exp(-dt * rate));
     renderer.toneMappingExposure = exposure;
 
+    // The plan follows the player, and the readout names the place they are standing in.
+    if (site && tick % 6 === 1) {
+      drawPlan(map, site, { player: { x: player.position.x, z: player.position.z, yaw: player.yaw }, labels: map.classList.contains('big') });
+      const here = placeAt(site, player.position.x, player.position.z);
+      if (here && here.id !== lastPlace) {
+        lastPlace = here.id;
+        hud.seed.textContent = `${seed} · ${here.name}`;
+      }
+    }
+
     frames++;
     if (now - fpsAt > 500) {
       document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
@@ -334,7 +388,38 @@ async function start(): Promise<void> {
   };
   requestAnimationFrame(loop);
 
-  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, get exposure() { return exposure; } };
+  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, get exposure() { return exposure; } };
+  // For checking that geometry matches the plan: walks the player's body through every door and
+  // arch, in both directions, and reports the ways that could not be crossed.
+  (window as any).__dbg.walkTest = () => {
+    if (!site) return [];
+    const failures: string[] = [];
+    for (const w of site.ways) {
+      if (w.kind === 'window') continue;
+      const a = site.places[w.a], b = site.places[w.b];
+      const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
+      const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
+      const alongX = w.side === 'n' || w.side === 's';
+      const inA = wallA - (alongX ? n[1] : n[0]) * 1.2;
+      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 1.2);
+      const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
+      for (const [from, to, floorFrom, floorTo] of [[inA, inB, a.floor, b.floor], [inB, inA, b.floor, a.floor]] as const) {
+        const [fx, fz] = point(from), [tx, tz] = point(to);
+        player.place(new Vector3(fx, floorFrom + 1.68 + 0.05, fz), 0);
+        player.analog.set(0, -1);
+        let ok = false;
+        for (let i = 0; i < 480 && !ok; i++) {
+          player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+          player.update(1 / 60);
+          ok = Math.hypot(tx - player.position.x, tz - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < 0.12;
+        }
+        if (!ok) failures.push(`${w.kind} ${w.a}->${w.b} side ${w.side}: stopped at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), wanted (${tx.toFixed(2)}, ${floorTo.toFixed(2)}, ${tz.toFixed(2)})`);
+      }
+    }
+    player.analog.set(0, 0);
+    player.place(desc.spawn.position, desc.spawn.yaw);
+    return failures;
+  };
   // For diagnosis: what a pixel looks at, and whether that point has a clear line to the sun.
   (window as any).__dbg.sunProbe = (nx: number, ny: number) => {
     camera.updateMatrixWorld(true);
@@ -350,6 +435,8 @@ async function start(): Promise<void> {
   (window as any).__capture = (pose?: number[]) => {
     if (pose) {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
+      // Let the torch lights finish moving to the new position before the picture is taken.
+      for (let i = 0; i < 12; i++) torchLights.update(1, new Vector3(pose[0], pose[1], pose[2]));
       frame(performance.now());
       exposure = exposureFor(atmosphere.measure(renderer));
       renderer.toneMappingExposure = exposure;

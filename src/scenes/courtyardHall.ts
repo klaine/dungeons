@@ -1,102 +1,24 @@
 import { Vector3 } from 'three';
-import { fbm2 } from '../core/rng';
-import { Kit, Mass, Opening } from '../render/geom/kit';
-import { MasonryStyle } from '../render/geom/masonry';
-import { MeshBuilder } from '../render/geom/meshBuilder';
+import { indoorField, outdoorField } from '../render/fields';
+import { Kit, Opening } from '../render/geom/kit';
+import { ashlar, beam, coping, dressed, flag, hallFlag, plank, slate, vaultStone } from '../render/geom/styles';
+import { SceneDescription, TorchSpec } from '../render/scene';
 
 /**
  * The look-spike scene: a walled courtyard with an arcade along its east side, and a doorway in the
- * north wall into a barrel-vaulted hall lit by torches. Hand-assembled from the kit of parts; the
- * site mesher will make the same calls from generated data.
+ * north wall into a barrel-vaulted hall lit by torches. Hand-assembled from the kit of parts. Kept
+ * as a fixed test bed for the look; open it with ?scene=test.
  *
  * Axes: +x east, +y up, +z south. The courtyard floor is y = 0.
  */
-
-export interface TorchSpec {
-  position: Vector3;
-  /** Unit vector from the wall towards the room. */
-  out: Vector3;
-}
-
-export interface SceneDescription {
-  /** Geometry by material name. */
-  meshes: Map<string, MeshBuilder>;
-  /** Solid volumes behind the visible skin, for the light bake. */
-  masses: Mass[];
-  torches: TorchSpec[];
-  sunDir: Vector3;
-  spawn: { position: Vector3; yaw: number };
-  bounds: { min: Vector3; max: Vector3 };
-  blocks: number;
-}
-
-const LIME: [number, number, number] = [0.86, 0.77, 0.63];
-const MORTAR: [number, number, number] = [0.5, 0.45, 0.36];
-
-const ashlar: MasonryStyle = {
-  course: [0.26, 0.38], length: [0.5, 1.05], joint: 0.007, bevel: 0.013, depth: 0.014, proud: 0.009, relief: 0.004,
-  maxSeg: 0.3, chip: 0.14, tint: LIME, tintVar: 0.13, hueVar: 0.035, mortar: MORTAR, uvScale: 0.8,
-};
-const dressed: MasonryStyle = { ...ashlar, length: [0.26, 0.38], course: [0.3, 0.4], proud: 0.005, tint: [0.92, 0.84, 0.7], tintVar: 0.08, chip: 0.08 };
-const vaultStone: MasonryStyle = { ...ashlar, course: [0.28, 0.36], length: [0.45, 0.8], tint: [0.8, 0.73, 0.62], maxSeg: 0.3 };
-const flag: MasonryStyle = {
-  course: [0.55, 0.95], length: [0.6, 1.35], joint: 0.009, bevel: 0.012, depth: 0.012, proud: 0.007, relief: 0.005,
-  maxSeg: 0.3, chip: 0.2, tint: [0.64, 0.59, 0.51], tintVar: 0.16, hueVar: 0.03, mortar: [0.4, 0.37, 0.3], uvScale: 0.7,
-};
-const hallFlag: MasonryStyle = { ...flag, tint: [0.52, 0.49, 0.44], proud: 0.004 };
-const coping: MasonryStyle = { ...dressed, length: [0.6, 0.9], course: [0.4, 0.6] };
-const slate: MasonryStyle = {
-  course: [0.24, 0.3], length: [0.3, 0.46], joint: 0.003, bevel: 0.008, depth: 0.012, proud: 0.014, relief: 0.003,
-  maxSeg: 0.5, chip: 0.25, tint: [0.36, 0.39, 0.45], tintVar: 0.22, hueVar: 0.03, mortar: [0.12, 0.12, 0.13], uvScale: 1.4,
-};
-const plank: MasonryStyle = {
-  course: [0.19, 0.27], length: [2.2, 3.8], joint: 0.002, bevel: 0.005, depth: 0.012, proud: 0.005, relief: 0.003,
-  maxSeg: 0.5, chip: 0, tint: [1, 1, 1], tintVar: 0.2, hueVar: 0.04, mortar: [0.1, 0.07, 0.05], uvScale: 0.55,
-};
-const beam: MasonryStyle = { ...plank, course: [0.3, 0.4], length: [5, 6], bevel: 0.012, tint: [0.8, 0.78, 0.75], tintVar: 0.1 };
 
 export function buildCourtyardHall(seed: string): SceneDescription {
   const kit = new Kit(seed);
   const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
   const sunDir = V(-0.3, 0.6, 0.9).normalize();
   const torches: TorchSpec[] = [];
-
-  // Fields. Outdoors: moss where the ground and wall bases stay damp, strongest in joints and in
-  // patches; walls streak darker towards the ground. Indoors: damp low on the walls, soot above flames.
-  const noiseSeed = 7;
-  const outdoor = (p: Vector3, n: Vector3, out: Float32Array): number => {
-    const patch = fbm2(p.x * 0.35 + 3, p.z * 0.35 + 9, 4, noiseSeed);
-    const fine = fbm2(p.x * 2.1, p.z * 2.1 + p.y * 2.1, 3, noiseSeed + 5);
-    const up = Math.max(0, n.y);
-    const low = 1 - Math.min(1, Math.max(0, p.y / 1.4));
-    const ground = up * (0.12 + Math.max(0, patch - 0.4) * 2.6);
-    const base = (1 - up) * low * low * (0.3 + patch * 1.0);
-    const ledge = up * Math.min(1, Math.max(0, p.y - 0.3)) * 0.7;
-    out[0] = Math.min(1, (ground + base + ledge) * (0.55 + fine * 0.8));
-    out[1] = Math.min(1, low * low * (1 - up) * 0.5 * patch + up * Math.max(0, patch - 0.6) * 1.2);
-    out[2] = 0;
-    // Weathering: rain streaks down the walls, grime towards the ground, blotches on the paving.
-    const streak = fbm2((p.x + p.z) * 2.6, p.y * 0.22, 4, noiseSeed + 11);
-    const blot = fbm2(p.x * 0.8 + 5, p.z * 0.8 + p.y * 0.8, 3, noiseSeed + 13);
-    return 0.66 + 0.3 * streak * (1 - up) + 0.26 * blot - low * (1 - up) * 0.14 + up * 0.14;
-  };
-  const indoor = (p: Vector3, n: Vector3, out: Float32Array): number => {
-    const patch = fbm2(p.x * 0.5 + p.z * 0.5, p.y * 0.6 + 4, 4, noiseSeed + 21);
-    const up = Math.max(0, n.y);
-    const low = 1 - Math.min(1, Math.max(0, p.y / 1.1));
-    out[0] = 0;
-    out[1] = Math.min(1, (1 - up) * low * low * patch * 1.3 + up * Math.max(0, patch - 0.62) * 1.5);
-    let soot = 0;
-    for (const t of torches) {
-      const dx = p.x - t.position.x, dz = p.z - t.position.z, dy = p.y - t.position.y;
-      if (dy < 0.1) continue;
-      const spread = 0.22 + dy * 0.28;
-      const r = Math.hypot(dx, dz);
-      soot = Math.max(soot, Math.max(0, 1 - r / spread) * Math.max(0, 1 - dy / 3.2) * (0.6 + patch * 0.8));
-    }
-    out[2] = Math.min(1, soot);
-    return 0.9 + 0.14 * patch;
-  };
+  const outdoor = outdoorField;
+  const indoor = indoorField(torches);
 
   // ---------------------------------------------------------------- dimensions
   const CX0 = 0, CX1 = 14, CZ1 = 16;            // courtyard

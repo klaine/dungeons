@@ -100,11 +100,15 @@ export class Kit {
 
   constructor(readonly seed: string) {}
 
+  /** Geometry built from now on goes into this group; each group and material pair becomes one mesh. */
+  group = 'all';
+
   mesh(material: string): MeshBuilder {
-    let m = this.meshes.get(material);
+    const key = `${this.group}|${material}`;
+    let m = this.meshes.get(key);
     if (!m) {
       m = new MeshBuilder();
-      this.meshes.set(material, m);
+      this.meshes.set(key, m);
     }
     return m;
   }

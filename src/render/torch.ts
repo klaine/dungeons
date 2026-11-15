@@ -3,19 +3,23 @@ import {
   ShaderMaterial, TorusGeometry, Vector3,
 } from 'three';
 
-/** A wall torch: an iron-bound brand on a bracket, an animated flame, and a shadow-casting light. */
+/**
+ * A wall torch: an iron-bound brand on a bracket and an animated flame. It carries no light of its
+ * own; `TorchLights` lends real lights to whichever torches are nearest the player.
+ */
 
 export class Torch {
   readonly group = new Group();
-  readonly light: PointLight;
   readonly flamePosition = new Vector3();
+  readonly lightPosition = new Vector3();
+  readonly phase: number;
+  /** Brightness of the flame this frame, including flicker. */
+  flicker = 1;
   private flame: ShaderMaterial;
-  private phase: number;
-  private baseIntensity: number;
 
-  constructor(position: Vector3, out: Vector3, phase: number, intensity: number) {
+  constructor(position: Vector3, out: Vector3, phase: number) {
     this.phase = phase;
-    this.baseIntensity = intensity;
+
     const iron = new MeshStandardMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9, envMapIntensity: 0.05 });
     const wood = new MeshStandardMaterial({ color: new Color(0.12, 0.07, 0.04), roughness: 0.9, envMapIntensity: 0.05 });
 
@@ -85,24 +89,74 @@ void main() {
     quad.frustumCulled = false;
     this.group.add(quad);
 
-    this.light = new PointLight(new Color(1.0, 0.6, 0.3), intensity, 0, 2);
-    this.light.position.copy(position).addScaledVector(out, 0.36).add(new Vector3(0, 0.26, 0));
-    this.light.castShadow = true;
-    this.light.shadow.mapSize.set(1024, 1024);
-    this.light.shadow.camera.near = 0.08;
-    this.light.shadow.camera.far = 24;
-    this.light.shadow.bias = -0.003;
-    this.light.shadow.normalBias = 0.03;
-    this.light.shadow.autoUpdate = false;
-    this.light.shadow.needsUpdate = true;
-    this.group.add(this.light);
+    this.lightPosition.copy(position).addScaledVector(out, 0.36).add(new Vector3(0, 0.26, 0));
   }
 
   update(time: number): void {
     const t = time * 7 + this.phase * 31;
-    const flicker = 0.86 + 0.09 * Math.sin(t) + 0.05 * Math.sin(t * 2.7 + 1.3) + 0.04 * Math.sin(t * 5.1 + 0.4);
-    this.light.intensity = this.baseIntensity * flicker;
+    this.flicker = 0.86 + 0.09 * Math.sin(t) + 0.05 * Math.sin(t * 2.7 + 1.3) + 0.04 * Math.sin(t * 5.1 + 0.4);
     this.flame.uniforms.uTime.value = time;
-    this.flame.uniforms.uGain.value = flicker;
+    this.flame.uniforms.uGain.value = this.flicker;
+  }
+}
+
+/**
+ * A fixed pool of shadow-casting lights shared among many torches. The nearest torches hold the
+ * lights; when the player moves on, a light fades out, moves to its new torch, redraws its shadow
+ * map once, and fades back in. Torches without a light still glow, and still light their rooms
+ * through the bake's bounced light.
+ */
+export class TorchLights {
+  readonly lights: PointLight[] = [];
+  private slots: { torch: Torch | null; fade: number }[] = [];
+
+  constructor(private torches: Torch[], count: number, private intensity: number) {
+    for (let i = 0; i < count; i++) {
+      const light = new PointLight(new Color(1.0, 0.6, 0.3), 0, 0, 2);
+      light.castShadow = true;
+      light.shadow.mapSize.set(1024, 1024);
+      light.shadow.camera.near = 0.08;
+      light.shadow.camera.far = 24;
+      light.shadow.bias = -0.003;
+      light.shadow.normalBias = 0.03;
+      light.shadow.autoUpdate = false;
+      this.lights.push(light);
+      this.slots.push({ torch: null, fade: 0 });
+    }
+  }
+
+  update(dt: number, viewer: Vector3): void {
+    // The torches that should be lit: nearest first. A torch already lit keeps a small advantage,
+    // so lights do not swap back and forth at a boundary.
+    const held = new Set(this.slots.map((s) => s.torch));
+    const wanted = [...this.torches]
+      .sort((a, b) => score(a) - score(b))
+      .slice(0, this.lights.length);
+    function score(t: Torch): number {
+      return t.lightPosition.distanceTo(viewer) - (held.has(t) ? 1.5 : 0);
+    }
+    const wantedSet = new Set(wanted);
+    let moved = false;
+    this.slots.forEach((slot, i) => {
+      const light = this.lights[i];
+      const keep = slot.torch !== null && wantedSet.has(slot.torch);
+      slot.fade = Math.min(1, Math.max(0, slot.fade + (keep ? dt : -dt) * 3.5));
+      if (!keep && slot.fade === 0 && !moved) {
+        // One move per frame: each redraws a cube shadow map.
+        const next = wanted.find((t) => !this.slots.some((s) => s.torch === t));
+        slot.torch = next ?? null;
+        if (next) {
+          light.position.copy(next.lightPosition);
+          light.shadow.needsUpdate = true;
+          moved = true;
+        }
+      }
+      light.intensity = slot.torch ? this.intensity * slot.torch.flicker * slot.fade : 0;
+    });
+  }
+
+  /** Position and strength of each light now, for the glow in the air round it. */
+  state(): { position: Vector3; strength: number }[] {
+    return this.slots.map((s, i) => ({ position: s.torch ? s.torch.flamePosition : this.lights[i].position, strength: s.torch ? s.fade : 0 }));
   }
 }

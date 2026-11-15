@@ -73,15 +73,23 @@ docs/
 | # | Milestone | Delivers | Done when |
 |---|---|---|---|
 | **M0** | Foundations | Project scaffold, seeded randomness, first-person explorer shell | A seed in the URL produces the same world every time. **Done.** |
-| **M1** | Look | Hand-assembled test scenes (sunlit courtyard and arcade; torchlit vaulted hall) built from the kit of parts, procedural materials, baked and real-time lighting, fog with light shafts, eye adaptation | The proofs in document 4 are met at the target frame rate, or the approach is changed. **In progress.** |
-| **M2** | Structure | Site document types, premise record, cyclic mission generator with four or five cycle patterns, lock and key solver, mission graph view, structural metrics | 1,000 seeds are all completable; graphs show nested loops, gating and shortcuts; metrics vary meaningfully across seeds |
-| **M3** | First delve | Topology, layout and geometry for an underground site; walkable in 3D with doors and keys; plan map and automap | A generated delve can be played from entrance to goal, and the Fork, Return and Question tests can be judged by walking it |
+| **M1** | Look | Hand-assembled test scenes (sunlit courtyard and arcade; torchlit vaulted hall) built from the kit of parts, procedural materials, baked and real-time lighting, fog with light shafts, eye adaptation | The proofs in document 4 are met at the target frame rate, or the approach is changed. **Mostly done:** runs at 30 to 38 frames a second on an M1 iPad Pro; natural rock is still missing. |
+| **M2** | First generated site | Site document, a first generator (rooms in a loop round a court, entered from a forecourt), a mesher from site to stone, a walk test of every way, a plan map | Any seed gives a different place that can be walked end to end. **Done**, in its first small form. |
+| **M3** | Structure | Premise record, cyclic mission generator with four or five cycle patterns, locks and keys with working doors, a solver, mission graph view, structural metrics | 1,000 seeds are all completable; graphs show nested loops, gating and shortcuts; metrics vary meaningfully across seeds |
 | **M4** | Biomes and history | Biome definitions as data, built and natural generators, fields, field-driven materials, two or three enclosed biomes with transitions, dressing, the lighting layer | Zones are distinguishable at a glance; damp, age and wear are visible and make sense; the Touch test passes |
 | **M5** | Open air | Setting layer, terrain, sky and weather, vegetation, the wild-place grammar, hard and soft edges, viewshed planning, entrances between outside and underground | A ruin in a forest with a delve beneath can be walked end to end; the Approach test passes |
 | **M6** | Strongholds and settlements | Castle and town grammars, storeys, roofs, shells and interiors, wall-walks, rooftops and cellars as layers | A castle above its village can be generated and entered by more than one route |
 | **M7** | Wonder | State-change cycles, systemic puzzle elements, blueprints, secrets with tells, signature set pieces, the surprise budget, more biomes | The "Wait, what?" test passes; each site has a describable signature |
 | **M8** | Judgement | Batch runner, expressive range plots, generate-and-select, candidate gallery | The Second seed test passes routinely; weak seeds are filtered before the user sees them |
 | **M9** | Assets | Ink and illustrated map styles, layered map export, glTF export, versioned document schema, a minimal example of loading a site in a game engine | A generated site and its maps are usable outside the tool |
+
+## Where things stand
+
+- **Generated sites.** A seed produces a walled house: five to twelve rooms in a ring, sometimes round a cloister court open to the sky, with side chambers, a sanctum on the far side and a forecourt in front. Rooms vary from narrow passages to halls, floors step up and down through the doorways, and roofs are stone vaults or timber. Structure comes from a cycle from the start, so there are always two ways round; there are no locks or keys yet, and every place is a rectangle.
+- **Checks.** A batch tool (`npx tsx tools/sites.ts`) generates hundreds of sites and confirms each is connected and that no doorway is too steep for its stairs. In the browser, a walk test moves the player's body through every door and arch in both directions.
+- **Map.** A plan of the site is drawn from the same document and shown as a minimap with the player's position. It is the first of the map styles in document 4.
+- **Lighting many rooms.** Four shadow-casting lights are shared among all torches and follow the player; rooms further off are lit by baked bounce light only until the player comes near.
+- **The hand-built scene** is kept as a fixed test bed for the look, at `?scene=test`.
 
 ## Risks
 
