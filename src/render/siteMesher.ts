@@ -243,7 +243,9 @@ export function meshSite(site: Site): SceneDescription {
       const far = door ? flip[sideOf(door, p)] : 'n';
       const f = frameOf(p, far, 0);
       const u = f.length / 2;
-      const big = p.role === 'goal';
+      // The grand arrangement needs room in front of it; a small chamber gets the plain one.
+      const room = far === 'n' || far === 's' ? dz : dx;
+      const big = p.role === 'goal' && room >= 4.6;
       const half = Math.min(big ? 1.1 : 0.7, f.length / 2 - 0.6);
       let y = p.floor;
       if (big) {

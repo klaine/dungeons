@@ -15,6 +15,7 @@ for (let n = 0; n < count; n++) {
     bump(`rooms=${rooms}`);
     bump(`loops=${loopCount(site)}`);
     bump(`court=${site.places.some((p) => p.role === 'court')}`);
+    bump(`plan=${/rooms (.*?)(?: with| and|;)/.exec(site.title)?.[1] ?? '?'}`);
     bump(`goalDepth=${site.places[site.goal].depth}`);
     const solution = solve(site);
     if (!solution.ok) throw new Error('cannot be completed');

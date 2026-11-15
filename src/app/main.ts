@@ -472,8 +472,8 @@ async function start(): Promise<void> {
       const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
       const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
       const alongX = w.side === 'n' || w.side === 's';
-      const inA = wallA - (alongX ? n[1] : n[0]) * 1.2;
-      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 1.2);
+      const inA = wallA - (alongX ? n[1] : n[0]) * 0.8;
+      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 0.8);
       const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
       for (const [from, to, floorFrom, floorTo] of [[inA, inB, a.floor, b.floor], [inB, inA, b.floor, a.floor]] as const) {
         const [fx, fz] = point(from), [tx, tz] = point(to);
@@ -526,8 +526,8 @@ async function start(): Promise<void> {
       const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
       const alongX = w.side === 'n' || w.side === 's';
       const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
-      const inA = wallA - (alongX ? n[1] : n[0]) * 1.1;
-      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 1.1);
+      const inA = wallA - (alongX ? n[1] : n[0]) * 0.8;
+      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 0.8);
       const [near, far] = at === w.a ? [inA, inB] : [inB, inA];
       const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
       const ok = walkTo(point(near)[0], point(near)[1], 0.3) && walkTo(point(far)[0], point(far)[1], 0.3);

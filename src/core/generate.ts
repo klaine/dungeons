@@ -3,42 +3,168 @@ import { Rng } from './rng';
 import { allReachable, neighbours, Place, Role, Roof, Side, Site, Way } from './site';
 
 /**
- * First site generator: a walled house of rooms arranged in a loop, entered from a forecourt.
+ * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
  *
  * The plan is a grid whose columns and rows vary in width, so rooms range from narrow passages to
- * halls while sharing walls exactly. Structure is built from a cycle, not from a tree with loops
- * added afterwards: the main ring gives two ways round from the entrance to the far side, and the
- * goal lies beyond the point where they meet. A wide enough ring encloses a court open to the
- * sky. Side chambers hang off the ring, and now and then two of them connect to make a second loop.
+ * halls while sharing walls exactly. Which cells are rooms, and which are joined, comes from a
+ * draft: one of several ways of laying out loops. Structure is built from cycles, not from a tree
+ * with loops added afterwards, so there is always more than one way round. Side chambers and
+ * chains of chambers hang off the loops, a court may open one cell to the sky, and the mission
+ * layer then locks and bars the result.
  *
- * Not here yet: locks and keys, pacing, premise, and anything that is not a rectangle.
+ * Not here yet: pacing, premise, and anything that is not a rectangle.
  */
 
 const T = 1.0;          // wall thickness
 const STEP = 0.17;      // height of one stair
 const MAX_STEPS = 3;    // most stairs that fit in a doorway
+const NX = 6, NZ = 5;   // plan grid; the entrance is on the south row
+const MAX_ROOMS = 12;
 
 interface Cell { i: number; j: number }
 
+/** The bare plan: which cells are places, which are joined, where the way in is. */
+interface Draft {
+  cells: Cell[];
+  edges: [Cell, Cell][];
+  entrance: Cell;
+  /** A cell to leave open to the sky, if any. */
+  court: Cell | null;
+  /** How the title describes the arrangement. */
+  phrase: string;
+}
+
+const key = (c: Cell) => `${c.i},${c.j}`;
+const same = (a: Cell, b: Cell) => a.i === b.i && a.j === b.j;
+
+/** The cells round the edge of a rectangle of cells, clockwise from its north-west corner. */
+function loop(i0: number, j0: number, w: number, h: number): Cell[] {
+  const out: Cell[] = [];
+  for (let i = 0; i < w; i++) out.push({ i: i0 + i, j: j0 });
+  for (let j = 1; j < h; j++) out.push({ i: i0 + w - 1, j: j0 + j });
+  for (let i = w - 2; i >= 0; i--) out.push({ i: i0 + i, j: j0 + h - 1 });
+  for (let j = h - 2; j >= 1; j--) out.push({ i: i0, j: j0 + j });
+  return out;
+}
+
+/** Collects cells and edges without duplicates. */
+class DraftBuilder {
+  cells = new Map<string, Cell>();
+  edges = new Map<string, [Cell, Cell]>();
+  cell(c: Cell): void {
+    if (!this.cells.has(key(c))) this.cells.set(key(c), c);
+  }
+  edge(a: Cell, b: Cell): void {
+    this.cell(a);
+    this.cell(b);
+    const k = [key(a), key(b)].sort().join('|');
+    this.edges.set(k, [a, b]);
+  }
+  ring(cells: Cell[]): void {
+    cells.forEach((c, k) => this.edge(c, cells[(k + 1) % cells.length]));
+  }
+  degree(c: Cell): number {
+    return [...this.edges.values()].filter(([a, b]) => same(a, c) || same(b, c)).length;
+  }
+}
+
+/** One loop of rooms; a wide one encloses a court. */
+function draftRing(rng: Rng): Draft {
+  const r = rng.next();
+  const [w, h] = r < 0.55 ? [3, 3] : r < 0.75 ? [3, 2] : r < 0.9 ? [2, 3] : [2, 2];
+  const i0 = rng.int(0, NX - w), j0 = NZ - h;
+  const b = new DraftBuilder();
+  const cells = loop(i0, j0, w, h);
+  b.ring(cells);
+  const south = cells.filter((c) => c.j === NZ - 1);
+  const entrance = w === 3 && rng.chance(0.5) ? south.find((c) => c.i === i0 + 1)! : rng.pick(south);
+  let court: Cell | null = null;
+  if (w === 3 && h === 3) {
+    court = { i: i0 + 1, j: j0 + 1 };
+    const sides: Cell[] = [{ i: court.i, j: court.j - 1 }, { i: court.i + 1, j: court.j }, { i: court.i - 1, j: court.j }, { i: court.i, j: court.j + 1 }];
+    shuffle(sides, rng);
+    b.edge(court, sides[0]);
+    b.edge(court, sides[1]);
+  }
+  return { cells: [...b.cells.values()], edges: [...b.edges.values()], entrance, court, phrase: court ? 'in a ring round a cloister court' : 'in a ring' };
+}
+
+/** Two loops side by side, sharing the rooms between them. */
+function draftDouble(rng: Rng): Draft {
+  const wa = rng.int(2, 3), wb = rng.int(2, 3);
+  const i0 = rng.int(0, NX - (wa + wb - 1)), j0 = NZ - 2;
+  const b = new DraftBuilder();
+  b.ring(loop(i0, j0, wa, 2));
+  b.ring(loop(i0 + wa - 1, j0, wb, 2));
+  const south = [...b.cells.values()].filter((c) => c.j === NZ - 1);
+  return { cells: [...b.cells.values()], edges: [...b.edges.values()], entrance: rng.pick(south), court: pickCourt(b, rng, 0.35), phrase: 'in two rings side by side' };
+}
+
+/** Two loops, one behind the other, overlapping by one room or more. */
+function draftStack(rng: Rng): Draft {
+  const wa = rng.int(2, 3), wb = rng.int(2, 3);
+  const ia = rng.int(1, NX - wa - 1);
+  // The rear loop is shifted sideways, but must still touch the front one.
+  const ib = Math.max(0, Math.min(NX - wb, ia + rng.int(-(wb - 1), wa - 1)));
+  const b = new DraftBuilder();
+  b.ring(loop(ia, NZ - 2, wa, 2));
+  b.ring(loop(ib, NZ - 3, wb, 2));
+  const south = [...b.cells.values()].filter((c) => c.j === NZ - 1);
+  return { cells: [...b.cells.values()], edges: [...b.edges.values()], entrance: rng.pick(south), court: pickCourt(b, rng, 0.4), phrase: 'in two rings, one behind the other' };
+}
+
+/** A gallery running back from the entrance with rooms off both sides, joined along the flanks. */
+function draftSpine(rng: Rng): Draft {
+  const c = rng.int(1, NX - 2);
+  const b = new DraftBuilder();
+  const rows = [NZ - 1, NZ - 2, NZ - 3];
+  rows.slice(1).forEach((j, k) => b.edge({ i: c, j: rows[k] }, { i: c, j }));
+  let loops = 0;
+  for (const side of shuffle([-1, 1], rng)) {
+    let previous: Cell | null = null;
+    for (const j of rows) {
+      const want = rng.chance(0.8) || (loops === 0 && side === 1 && j !== NZ - 1);
+      if (!want) { previous = null; continue; }
+      const cell = { i: c + side, j };
+      b.edge({ i: c, j }, cell);
+      // Joining neighbours along the flank is what turns the comb into loops.
+      if (previous && (rng.chance(0.75) || loops === 0)) { b.edge(previous, cell); loops++; }
+      previous = cell;
+    }
+  }
+  return { cells: [...b.cells.values()], edges: [...b.edges.values()], entrance: { i: c, j: NZ - 1 }, court: pickCourt(b, rng, 0.35, c), phrase: 'off a central gallery' };
+}
+
+/** Chooses a room on a loop to leave open to the sky: a garth to be crossed. */
+function pickCourt(b: DraftBuilder, rng: Rng, chance: number, avoidColumn = -1): Cell | null {
+  if (!rng.chance(chance)) return null;
+  const options = [...b.cells.values()].filter((c) => c.j !== NZ - 1 && c.i !== avoidColumn && b.degree(c) >= 2);
+  return options.length ? rng.pick(options) : null;
+}
+
+function shuffle<V>(list: V[], rng: Rng): V[] {
+  for (let k = list.length - 1; k > 0; k--) {
+    const s = rng.int(0, k);
+    [list[k], list[s]] = [list[s], list[k]];
+  }
+  return list;
+}
+
 export function generateSite(seed: string): Site {
   const rng = new Rng(seed).fork('site');
-  const NX = 5, NZ = 4;
-
-  // ---- ring shape and position; its south side sits on the south edge of the plan
-  const shape = rng.next();
-  const [rw, rh] = shape < 0.55 ? [3, 3] : shape < 0.75 ? [3, 2] : shape < 0.9 ? [2, 3] : [2, 2];
-  const i0 = rng.int(0, NX - rw);
-  const j0 = NZ - rh;
-  const hasCourt = rw === 3 && rh === 3;
+  const pick = rng.next();
+  const draft = pick < 0.34 ? draftRing(rng) : pick < 0.58 ? draftDouble(rng) : pick < 0.8 ? draftStack(rng) : draftSpine(rng);
+  const court = draft.court;
+  const isCourt = (c: Cell) => !!court && same(c, court);
 
   // ---- column widths and row depths: mostly rooms, sometimes a passage
   const widths: number[] = [];
   const depths: number[] = [];
   for (let i = 0; i < NX; i++) widths.push(rng.chance(0.25) ? rng.range(3.0, 3.6) : rng.range(5.6, 7.6));
   for (let j = 0; j < NZ; j++) depths.push(rng.chance(0.2) ? rng.range(3.0, 3.6) : rng.range(5.6, 9.0));
-  if (hasCourt) {
-    widths[i0 + 1] = rng.range(6.6, 8.2);
-    depths[j0 + 1] = rng.range(6.6, 8.6);
+  if (court) {
+    widths[court.i] = rng.range(6.6, 8.2);
+    depths[court.j] = rng.range(6.6, 8.6);
   }
   const round = (v: number) => Math.round(v * 10) / 10;
   const xs = [0];
@@ -49,8 +175,8 @@ export function generateSite(seed: string): Site {
   const places: Place[] = [];
   const ways: Way[] = [];
   const byCell = new Map<string, number>();
-  const key = (c: Cell) => `${c.i},${c.j}`;
   const inGrid = (c: Cell) => c.i >= 0 && c.i < NX && c.j >= 0 && c.j < NZ;
+  const placeOf = (c: Cell) => places[byCell.get(key(c))!];
 
   const addCell = (c: Cell, role: Role, name: string): Place => {
     const p: Place = {
@@ -67,8 +193,7 @@ export function generateSite(seed: string): Site {
   const sideTowards = (a: Cell, b: Cell): Side => (b.j < a.j ? 'n' : b.j > a.j ? 's' : b.i > a.i ? 'e' : 'w');
 
   const connect = (a: Cell, b: Cell, kind: Way['kind'], halfWidth: number, offsets: number[] = [0]): void => {
-    const pa = places[byCell.get(key(a))!];
-    const pb = places[byCell.get(key(b))!];
+    const pa = placeOf(a), pb = placeOf(b);
     const side = sideTowards(a, b);
     const along = side === 'n' || side === 's';
     const lo = along ? Math.max(pa.x0, pb.x0) : Math.max(pa.z0, pb.z0);
@@ -76,32 +201,57 @@ export function generateSite(seed: string): Site {
     const mid = (lo + hi) / 2;
     for (const o of offsets) ways.push({ a: pa.id, b: pb.id, side, kind, at: round(mid + o), halfWidth });
   };
-
-  // ---- the ring, clockwise from its north-west corner
-  const ring: Cell[] = [];
-  for (let i = 0; i < rw; i++) ring.push({ i: i0 + i, j: j0 });
-  for (let j = 1; j < rh; j++) ring.push({ i: i0 + rw - 1, j: j0 + j });
-  for (let i = rw - 2; i >= 0; i--) ring.push({ i: i0 + i, j: j0 + rh - 1 });
-  for (let j = rh - 2; j >= 1; j--) ring.push({ i: i0, j: j0 + j });
-  for (const c of ring) addCell(c, 'passage', 'gallery');
   const DOOR = 0.85;
-  for (let k = 0; k < ring.length; k++) connect(ring[k], ring[(k + 1) % ring.length], 'door', DOOR);
+  const joined = (a: Cell, b: Cell) => ways.some((w) => (w.a === byCell.get(key(a)) && w.b === byCell.get(key(b))) || (w.b === byCell.get(key(a)) && w.a === byCell.get(key(b))));
 
-  // ---- entrance on the south side, goal as far round the ring as possible
-  const southRow = ring.filter((c) => c.j === NZ - 1);
-  const entranceCell = rw === 3 && rng.chance(0.5) ? southRow.find((c) => c.i === i0 + 1)! : rng.pick(southRow);
-  const entranceIndex = ring.findIndex((c) => c.i === entranceCell.i && c.j === entranceCell.j);
-  const entrance = places[byCell.get(key(entranceCell))!];
+  // ---- the drafted rooms and the ways between them; a court is entered through open arches
+  for (const c of draft.cells) {
+    const p = addCell(c, isCourt(c) ? 'court' : 'passage', isCourt(c) ? 'cloister court' : 'gallery');
+    if (isCourt(c)) p.roof = 'sky';
+  }
+  const archesFor = (a: Cell, b: Cell): number[] => {
+    const pa = placeOf(a), pb = placeOf(b);
+    const length = a.i === b.i ? Math.min(pa.x1, pb.x1) - Math.max(pa.x0, pb.x0) : Math.min(pa.z1, pb.z1) - Math.max(pa.z0, pb.z0);
+    const count = Math.max(1, Math.floor((length - 0.6) / 3.1));
+    return Array.from({ length: count }, (_, m) => (m - (count - 1) / 2) * 3.1);
+  };
+  for (const [a, b] of draft.edges) {
+    if (isCourt(a) || isCourt(b)) connect(a, b, 'arch', 1.15, archesFor(a, b));
+    else connect(a, b, 'door', DOOR);
+  }
+
+  const around = (c: Cell): Cell[] => [{ i: c.i, j: c.j - 1 }, { i: c.i + 1, j: c.j }, { i: c.i - 1, j: c.j }, { i: c.i, j: c.j + 1 }];
+  const free = (c: Cell) => inGrid(c) && !byCell.has(key(c));
+  const rooms = () => places.filter((p) => p.roof !== 'sky').length;
+
+  // ---- entrance, and the room farthest from it
+  const entrance = placeOf(draft.entrance);
   entrance.role = 'entrance';
   entrance.name = 'gatehall';
-  const farCell = ring[(entranceIndex + Math.floor(ring.length / 2)) % ring.length];
-  const far = places[byCell.get(key(farCell))!];
-
-  const free = (c: Cell) => inGrid(c) && !byCell.has(key(c)) && !(hasCourt && c.i === i0 + 1 && c.j === j0 + 1);
-  const around = (c: Cell): Cell[] => [{ i: c.i, j: c.j - 1 }, { i: c.i + 1, j: c.j }, { i: c.i - 1, j: c.j }, { i: c.i, j: c.j + 1 }];
+  const hops = (from: number): Map<number, number> => {
+    const dist = new Map<number, number>([[from, 0]]);
+    const queue = [from];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const w of ways) {
+        if (w.kind === 'window' || (w.a !== id && w.b !== id)) continue;
+        const n = w.a === id ? w.b : w.a;
+        if (!dist.has(n)) { dist.set(n, dist.get(id)! + 1); queue.push(n); }
+      }
+    }
+    return dist;
+  };
+  const fromEntrance = hops(entrance.id);
+  // Farthest first; among the farthest few, prefer one with spare ground beside it for the sanctum.
+  const ranked = draft.cells.filter((c) => !isCourt(c) && !same(c, draft.entrance))
+    .map((c) => ({ c, d: fromEntrance.get(placeOf(c).id)!, tie: rng.next() }))
+    .sort((a, b) => b.d - a.d || a.tie - b.tie).map((x) => x.c);
+  const farCell = ranked.find((c, k) => k < 3 && around(c).some(free)) ?? ranked[0];
+  const far = placeOf(farCell);
 
   let goal = far;
-  const sanctumCell = around(farCell).find(free);
+  // Of the free cells beside it, the sanctum takes the largest.
+  const sanctumCell = around(farCell).filter(free).sort((a, b) => widths[b.i] * depths[b.j] - widths[a.i] * depths[a.j])[0];
   if (sanctumCell) {
     goal = addCell(sanctumCell, 'goal', 'sanctum');
     connect(farCell, sanctumCell, 'door', DOOR);
@@ -110,47 +260,39 @@ export function generateSite(seed: string): Site {
     far.name = 'sanctum';
   }
 
-  // ---- side chambers, and sometimes a door between two of them for a second loop
+  // ---- side chambers, some of them two deep, and now and then a door between neighbours
   const chambers: Cell[] = [];
-  const candidates = ring.filter((c) => c !== entranceCell && c !== farCell);
-  for (let k = candidates.length - 1; k > 0; k--) {
-    const s = rng.int(0, k);
-    [candidates[k], candidates[s]] = [candidates[s], candidates[k]];
-  }
-  for (const c of candidates) {
-    if (chambers.length >= 3) break;
-    const spot = around(c).find(free);
+  const hosts = shuffle(draft.cells.filter((c) => !isCourt(c) && !same(c, draft.entrance) && !same(c, farCell)), rng);
+  for (const host of hosts) {
+    if (chambers.length >= 4 || rooms() >= MAX_ROOMS) break;
+    const spot = shuffle(around(host).filter(free), rng)[0];
     if (!spot || !rng.chance(0.55)) continue;
     addCell(spot, 'reward', rng.pick(['cell', 'store', 'vestry', 'scriptorium']));
-    connect(c, spot, 'door', DOOR);
+    connect(host, spot, 'door', DOOR);
     for (const other of chambers) {
       const adjacent = Math.abs(other.i - spot.i) + Math.abs(other.j - spot.j) === 1;
-      if (adjacent && rng.chance(0.5)) connect(other, spot, 'door', DOOR);
+      if (adjacent && !joined(other, spot) && rng.chance(0.4)) connect(other, spot, 'door', DOOR);
     }
     chambers.push(spot);
+    // A second chamber beyond the first: somewhere properly out of the way.
+    const beyond = shuffle(around(spot).filter(free), rng)[0];
+    if (beyond && rooms() < MAX_ROOMS && rng.chance(0.3)) {
+      placeOf(spot).name = 'antechamber';
+      placeOf(spot).role = 'passage';
+      addCell(beyond, 'reward', rng.pick(['strongroom', 'reliquary', 'oubliette']));
+      connect(spot, beyond, 'door', DOOR);
+      chambers.push(beyond);
+    }
   }
 
-  // ---- the court: arcades on two sides, windows on the others
-  let court: Place | null = null;
-  if (hasCourt) {
-    const cc: Cell = { i: i0 + 1, j: j0 + 1 };
-    court = addCell(cc, 'court', 'cloister court');
-    court.roof = 'sky';
-    const sides = around(cc);
-    for (let k = sides.length - 1; k > 0; k--) {
-      const s = rng.int(0, k);
-      [sides[k], sides[s]] = [sides[s], sides[k]];
+  // ---- windows from the court into the rooms that do not open onto it
+  if (court) {
+    const cp = placeOf(court);
+    for (const n of around(court)) {
+      if (!byCell.has(key(n)) || joined(court, n)) continue;
+      const length = n.i === court.i ? cp.x1 - cp.x0 : cp.z1 - cp.z0;
+      connect(court, n, 'window', 0.42, length > 6.4 && rng.chance(0.6) ? [-1.5, 1.5] : [0]);
     }
-    sides.forEach((n, k) => {
-      const length = n.i === cc.i ? court!.x1 - court!.x0 : court!.z1 - court!.z0;
-      if (k < 2) {
-        const count = Math.max(1, Math.floor((length - 0.6) / 3.1));
-        const offsets = Array.from({ length: count }, (_, m) => (m - (count - 1) / 2) * 3.1);
-        connect(cc, n, 'arch', 1.15, offsets);
-      } else {
-        connect(cc, n, 'window', 0.42, length > 6.4 && rng.chance(0.6) ? [-1.5, 1.5] : [0]);
-      }
-    });
   }
 
   // ---- the forecourt, outside the south wall
@@ -172,7 +314,7 @@ export function generateSite(seed: string): Site {
     const roof: Roof = roomy && p.role !== 'goal' && rng.chance(0.3) ? 'timber' : 'barrel';
     p.roof = roof;
     p.wall = roof === 'timber' ? 4.2 : 3.4;
-    if (Math.min(dx, dz) < 4 && p.role === 'passage') p.name = 'passage';
+    if (Math.min(dx, dz) < 4 && p.name === 'gallery') p.name = 'passage';
   }
 
   // ---- light. Daylight where a court reaches in; torches at the entrance and the sanctum; and some
@@ -188,20 +330,22 @@ export function generateSite(seed: string): Site {
     if (!besideDark && rng.chance(p.role === 'reward' ? 0.5 : 0.28)) p.light = 'dark';
   }
 
-  // ---- floor levels: a gentle walk in steps, then pulled together until every doorway can hold its stairs
-  const level = new Map<number, number>();
-  let walk = 0;
-  for (const c of ring) {
-    walk += rng.pick([-1, 0, 0, 0, 1]);
-    level.set(byCell.get(key(c))!, walk);
+  // ---- floor levels: a gentle walk in steps out from the entrance, then pulled together until
+  // every doorway can hold its stairs
+  const level = new Map<number, number>([[entrance.id, 0], [forecourt.id, -2]]);
+  const order = [entrance.id];
+  while (order.length) {
+    const id = order.shift()!;
+    for (const w of ways) {
+      if (w.kind === 'window' || (w.a !== id && w.b !== id)) continue;
+      const n = places[w.a === id ? w.b : w.a];
+      if (level.has(n.id)) continue;
+      const base = level.get(id)!;
+      level.set(n.id, n.role === 'goal' ? base + 3 : n.role === 'court' ? base - 1 : base + rng.pick([-1, 0, 0, 0, 1, 1]));
+      order.push(n.id);
+    }
   }
-  for (const p of places) {
-    if (level.has(p.id)) continue;
-    const parent = ways.find((w) => w.kind !== 'window' && (w.a === p.id || w.b === p.id) && level.has(w.a === p.id ? w.b : w.a));
-    const base = parent ? level.get(parent.a === p.id ? parent.b : parent.a)! : 0;
-    level.set(p.id, p.role === 'goal' ? base + 3 : p.role === 'court' ? base - 1 : p.role === 'approach' ? base - 2 : base + rng.pick([0, 1, 2]));
-  }
-  for (let pass = 0; pass < 40; pass++) {
+  for (let pass = 0; pass < 60; pass++) {
     let changed = false;
     for (const w of ways) {
       if (w.kind === 'window') continue;
@@ -214,9 +358,9 @@ export function generateSite(seed: string): Site {
     if (!changed) break;
   }
   const lowest = Math.min(...level.values());
-  for (const p of places) p.floor = round2((level.get(p.id)! - lowest) * STEP);
+  for (const p of places) p.floor = Math.round((level.get(p.id)! - lowest) * STEP * 100) / 100;
 
-  // ---- depth from the entrance, roofline, title
+  // ---- depth from the start, roofline
   const site: Site = {
     seed, places, ways, items: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     sun: normalise([-0.3, 0.6, 0.9]), title: '',
@@ -244,19 +388,16 @@ export function generateSite(seed: string): Site {
   planMission(site, rng.fork('mission'));
   if (!solve(site).ok) throw new Error(`generated site cannot be completed (seed ${seed})`);
 
-  const rooms = places.filter((p) => p.roof !== 'sky').length;
-  const number = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
-  const parts = [`${number[rooms] ?? rooms} rooms`];
-  parts.push(court ? 'in a ring round a cloister court' : 'in a ring');
-  if (chambers.length) parts.push(`with ${number[chambers.length]} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
+  // ---- title
+  const number = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];
+  const count = (n: number) => number[n] ?? String(n);
+  const parts = [`${count(rooms())} rooms ${draft.phrase}`];
+  if (court && draft.phrase.indexOf('court') < 0) parts.push('with a court to cross');
+  if (chambers.length) parts.push(`and ${count(chambers.length)} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
   const dark = places.filter((p) => p.light === 'dark').length;
-  const unlit = dark ? ` ${number[dark][0].toUpperCase()}${number[dark].slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
-  site.title = `A walled house of ${parts.join(' ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
+  site.title = `A walled house of ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
-}
-
-function round2(v: number): number {
-  return Math.round(v * 100) / 100;
 }
 
 function normalise(v: [number, number, number]): [number, number, number] {
