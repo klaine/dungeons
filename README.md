@@ -23,6 +23,10 @@ Open the address Vite prints. Click to walk; `W` `A` `S` `D` to move, `Shift` to
 
 Useful URL parameters: `seed` (any text), `rays` and `bounces` (bake quality; defaults 48 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
+## Publishing
+
+Every push to the default branch is built by GitHub Actions and written to the `gh-pages` branch (`.github/workflows/pages.yml`). To serve it, set Settings > Pages > Source to "Deploy from a branch", branch `gh-pages`, folder `/ (root)`. That is a one-time step.
+
 ## The idea in brief
 
 A fantastic site is a place with a past, a shape you can learn and a rhythm you can feel. Generators usually get local detail right and global intent wrong, so this one works top-down:
