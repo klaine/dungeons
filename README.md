@@ -4,7 +4,7 @@ A browser tool for generating places for adventure and exploring them: a 3D worl
 
 "Dungeon" here means any bounded place worth exploring: crypts and caverns, castles, towns, and locations in open country.
 
-The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms arranged in loops, sometimes with a court open to the sky — built stone by stone, with procedural materials and baked light. Each has a locked sanctum to reach: keys to find, sometimes a second lock, sometimes a door barred from its far side, and a map that fills in as you explore. Every generated place is proven completable before it is shown.
+The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms arranged in loops, sometimes with a court open to the sky — built stone by stone, with procedural materials and baked light. Each has a locked sanctum to reach: keys to find, sometimes a second lock, sometimes a door barred from its far side or a portcullis with a lever beyond it, and a map that fills in as you explore. Every generated place is proven completable before it is shown.
 
 A generated place (seed `check-0`): its cloister court, its sanctum, and its plan.
 
@@ -15,6 +15,10 @@ A generated place (seed `check-0`): its cloister court, its sanctum, and its pla
 Four seeds, four plans: a ring round a court, two rings side by side, two rings one behind the other with a court to cross, and rooms off a central gallery. Stars mark the sanctum, diamonds the keys, coloured strokes the locked doors; shaded rooms are unlit.
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
+
+Some ways are shut by a portcullis, raised by a lever on the far side. You can see through it to where you cannot yet go:
+
+![A portcullis down, and raised](docs/images/portcullis.jpg)
 
 Each place has its own stone and time of day:
 
