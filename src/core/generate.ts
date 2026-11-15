@@ -53,7 +53,7 @@ export function generateSite(seed: string): Site {
 
   const addCell = (c: Cell, role: Role, name: string): Place => {
     const p: Place = {
-      id: places.length, role, name, roof: 'barrel',
+      id: places.length, role, name, roof: 'barrel', light: 'torch',
       x0: xs[c.i] + T / 2, x1: xs[c.i + 1] - T / 2, z0: zs[c.j] + T / 2, z1: zs[c.j + 1] - T / 2,
       floor: 0, wall: 3.4, axis: 'x', depth: 0,
     };
@@ -155,7 +155,7 @@ export function generateSite(seed: string): Site {
   // ---- the forecourt, outside the south wall
   const ecx = round((entrance.x0 + entrance.x1) / 2);
   const forecourt: Place = {
-    id: places.length, role: 'approach', name: 'forecourt', roof: 'sky',
+    id: places.length, role: 'approach', name: 'forecourt', roof: 'sky', light: 'day',
     x0: ecx - 4.5, x1: ecx + 4.5, z0: zs[NZ] + T / 2, z1: zs[NZ] + T / 2 + 7.5,
     floor: 0, wall: 3.9, axis: 'x', depth: 0,
   };
@@ -172,6 +172,19 @@ export function generateSite(seed: string): Site {
     p.roof = roof;
     p.wall = roof === 'timber' ? 4.2 : 3.4;
     if (Math.min(dx, dz) < 4 && p.role === 'passage') p.name = 'passage';
+  }
+
+  // ---- light. Daylight where a court reaches in; torches at the entrance and the sanctum; and some
+  // rooms left dark on purpose, never two in a row, so there is always light ahead to walk towards.
+  for (const p of places) {
+    if (p.roof === 'sky') { p.light = 'day'; continue; }
+    const facesCourt = ways.some((w) => w.kind !== 'door' && (w.a === p.id || w.b === p.id) && places[w.a === p.id ? w.b : w.a].roof === 'sky');
+    if (facesCourt) p.light = 'day';
+  }
+  for (const p of places) {
+    if (p.light !== 'torch' || p.role === 'entrance' || p.role === 'goal') continue;
+    const besideDark = ways.some((w) => w.kind !== 'window' && (w.a === p.id || w.b === p.id) && places[w.a === p.id ? w.b : w.a].light === 'dark');
+    if (!besideDark && rng.chance(p.role === 'reward' ? 0.5 : 0.28)) p.light = 'dark';
   }
 
   // ---- floor levels: a gentle walk in steps, then pulled together until every doorway can hold its stairs
@@ -231,7 +244,9 @@ export function generateSite(seed: string): Site {
   const parts = [`${number[rooms] ?? rooms} rooms`];
   parts.push(court ? 'in a ring round a cloister court' : 'in a ring');
   if (chambers.length) parts.push(`with ${number[chambers.length]} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
-  site.title = `A walled house of ${parts.join(' ')}; the sanctum lies ${goal.depth - 1} doors in.`;
+  const dark = places.filter((p) => p.light === 'dark').length;
+  const unlit = dark ? ` ${number[dark][0].toUpperCase()}${number[dark].slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
+  site.title = `A walled house of ${parts.join(' ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

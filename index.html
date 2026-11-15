@@ -46,8 +46,14 @@
       border: 1.5px solid rgba(232, 226, 214, .38); background: rgba(11, 10, 9, .28); color: #e8e2d6;
       font: 600 12px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
       touch-action: none; -webkit-user-select: none; user-select: none; }
-    #jump:active { background: rgba(224, 176, 112, .45); }
-    body.touch #jump { display: block; }
+    #jump:active, #light:active { background: rgba(224, 176, 112, .45); }
+    #light { display: none; position: fixed; right: calc(28px + env(safe-area-inset-right));
+      bottom: calc(108px + env(safe-area-inset-bottom)); width: 56px; height: 56px; border-radius: 50%;
+      border: 1.5px solid rgba(224, 176, 112, .7); background: rgba(224, 176, 112, .3); color: #e8e2d6;
+      font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase;
+      touch-action: none; -webkit-user-select: none; user-select: none; }
+    body.unlit #light { border-color: rgba(232, 226, 214, .38); background: rgba(11, 10, 9, .28); }
+    body.touch #jump, body.touch #light { display: block; }
     #map { position: fixed; right: 16px; top: 16px; width: 190px; height: 190px; border-radius: 4px; cursor: pointer;
       box-shadow: 0 2px 10px rgba(0, 0, 0, .5); transition: width .2s, height .2s; touch-action: manipulation; }
     #map.big { width: min(72vmin, 620px); height: min(72vmin, 620px); }
@@ -75,8 +81,8 @@
     </div>
     <div id="hint">
       <div class="idle">Click to walk</div>
-      <div class="touch">Drag on the left to move, push further to run · drag on the right to look</div>
-      <div class="active"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>M</kbd> map · <kbd>F</kbd> fog · <kbd>B</kbd> baked light · <kbd>Esc</kbd> release</div>
+      <div class="touch">Drag on the left to move, push further to run · drag on the right to look · Light raises or lowers your lantern</div>
+      <div class="active"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>L</kbd> light · <kbd>M</kbd> map · <kbd>F</kbd> fog · <kbd>B</kbd> baked light · <kbd>Esc</kbd> release</div>
     </div>
   </div>
   <script type="module" src="/src/app/main.ts"></script>

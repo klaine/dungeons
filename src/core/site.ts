@@ -17,10 +17,23 @@ export type Roof =
 
 export type Role = 'approach' | 'entrance' | 'passage' | 'court' | 'reward' | 'goal';
 
+/**
+ * How a place is lit. Darkness is a choice the generator makes, not a failure to place lights:
+ * a dark room is somewhere the player's own light matters.
+ */
+export type Lighting =
+  /** Open to the sky, or lit through windows and arches from a court. */
+  | 'day'
+  /** Torches on the walls. */
+  | 'torch'
+  /** Nothing. Only what the player carries, and what spills in through the doors. */
+  | 'dark';
+
 export interface Place {
   id: number;
   role: Role;
   roof: Roof;
+  light: Lighting;
   /** Interior extent. Walls lie outside it. */
   x0: number; x1: number; z0: number; z1: number;
   /** Floor height. */

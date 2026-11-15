@@ -88,6 +88,7 @@ docs/
 - **Generated sites.** A seed produces a walled house: five to twelve rooms in a ring, sometimes round a cloister court open to the sky, with side chambers, a sanctum on the far side and a forecourt in front. Rooms vary from narrow passages to halls, floors step up and down through the doorways, and roofs are stone vaults or timber. Structure comes from a cycle from the start, so there are always two ways round; there are no locks or keys yet, and every place is a rectangle.
 - **Checks.** A batch tool (`npx tsx tools/sites.ts`) generates hundreds of sites and confirms each is connected and that no doorway is too steep for its stairs. In the browser, a walk test moves the player's body through every door and arch in both directions.
 - **Map.** A plan of the site is drawn from the same document and shown as a minimap with the player's position. It is the first of the map styles in document 4.
+- **Light and dark.** Each place is lit by day, by torches, or deliberately left dark; the player carries a small light for the dark ones. The plan map shades unlit rooms.
 - **Lighting many rooms.** Four shadow-casting lights are shared among all torches and follow the player; rooms further off are lit by baked bounce light only until the player comes near.
 - **The hand-built scene** is kept as a fixed test bed for the look, at `?scene=test`.
 

@@ -47,7 +47,7 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   kit.wallFace('stone', north, -0.1, 8.6, ashlar, { openings: [door, window] });
   kit.openingTrim('stone', north, door, NT, dressed, 'both');
   kit.openingTrim('stone', north, window, NT, dressed, 'both');
-  kit.box('stone', V(hallAxisX - 0.75, 4.36, -NT - 0.06), V(hallAxisX + 0.75, 4.5, 0.08), 'xXyYzZ', coping, coping);
+  kit.box('stone', V(hallAxisX - 0.75, 4.36, -NT - 0.06), V(hallAxisX + 0.75, 4.5, 0.08), coping, coping);
   kit.slab('floor', hallAxisX - 1.05, -NT + 0.1, hallAxisX + 1.05, -0.1, 0, { ...flag, course: [0.7, 0.7], length: [0.9, 1.2] });
 
   // West wall, tall; south wall, low, both with merlons against the sky.
@@ -59,13 +59,13 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   const south = kit.frame(AX, CZ1, CX0 - 0.1, CZ1);
   kit.wallFace('stone', south, -0.1, 3.9, ashlar);
   kit.wallMass(south, 1.2, -1, 3.9);
-  kit.box('stone', V(CX0 - 0.1, 3.9, CZ1 - 0.12), V(AX, 4.02, CZ1 + 0.6), 'zYy', coping, coping);
+  kit.box('stone', V(CX0 - 0.1, 3.9, CZ1 - 0.12), V(AX, 4.02, CZ1 + 0.6), coping, coping);
   for (let x = 0.5; x < AX - 1; x += 1.9) {
-    kit.box('stone', V(x, 4.02, CZ1 - 0.04), V(x + 1.0, 4.9, CZ1 + 0.5), 'xXzY', ashlar, coping);
+    kit.box('stone', V(x, 4.02, CZ1 - 0.04), V(x + 1.0, 4.9, CZ1 + 0.5), ashlar, coping);
   }
-  kit.box('stone', V(CX0 - 0.6, 6.0, -0.1), V(CX0 + 0.12, 6.12, CZ1 + 0.1), 'XYy', coping, coping);
+  kit.box('stone', V(CX0 - 0.6, 6.0, -0.1), V(CX0 + 0.12, 6.12, CZ1 + 0.1), coping, coping);
   for (let z = 0.6; z < CZ1 - 1; z += 1.9) {
-    kit.box('stone', V(CX0 - 0.5, 6.12, z), V(CX0 + 0.04, 7.0, z + 1.0), 'XzZY', ashlar, coping);
+    kit.box('stone', V(CX0 - 0.5, 6.12, z), V(CX0 + 0.04, 7.0, z + 1.0), ashlar, coping);
   }
 
   // Arcade: a wall of four arches on piers, a lean-to roof behind it.
@@ -76,7 +76,7 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   kit.wallMass(arcade, AT, -1, 4.7, arches);
   kit.mass(V(AXB + 0.035, -1, -0.1), V(AXB + 1.4, 5.7, CZ1 + 0.1));
   kit.mass(V(AX + AT, -1, CZ1 + 0.035), V(AXB + 1.4, 4.7, CZ1 + 1.2));
-  kit.box('stone', V(AX - 0.1, 4.7, -0.1), V(AX + AT, 4.82, CZ1 + 0.1), 'xYy', coping, coping);
+  kit.box('stone', V(AX - 0.1, 4.7, -0.1), V(AX + AT, 4.82, CZ1 + 0.1), coping, coping);
   const arcadeIn = kit.frame(AX + AT, CZ1 + 0.1, AX + AT, -0.1);
   kit.wallFace('stone', arcadeIn, -0.1, 4.2, ashlar, { openings: arches.map((a) => ({ ...a, c: arcade.length - a.c })) });
   kit.wallFace('stone', kit.frame(AXB, -0.1, AXB, CZ1 + 0.1), -0.1, 4.2, ashlar);
@@ -91,7 +91,7 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   // Timber ceiling: beams across, boards above.
   kit.plane('wood', V(AX + AT - 0.1, 4.05, -0.1), V(0, 0, 1), V(1, 0, 0), V(0, -1, 0), CZ1 + 0.2, AXB - AX - AT + 0.2, plank);
   for (let z = 0.4; z < CZ1; z += 1.02) {
-    kit.box('wood', V(AX + AT - 0.1, 3.78, z), V(AXB + 0.1, 4.05, z + 0.2), 'yzZ', beam, beam, 'beam');
+    kit.box('wood', V(AX + AT - 0.1, 3.78, z), V(AXB + 0.1, 4.05, z + 0.2), beam, beam, 'beam');
   }
 
   // A well, off centre.
@@ -120,7 +120,7 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   kit.mass(V(HX0 - 2, -1, HZ1 - NT - 0.1), V(HX0 - 0.035, 8.2, HZ0 - 0.035));
   kit.mass(V(HX1 + 0.035, -1, HZ1 - NT - 0.1), V(HX1 + 2, 8.2, HZ0 - 0.035));
   kit.mass(V(HX0 - 2, SPRING + R + 0.06, HZ1 - NT - 0.1), V(HX1 + 2, 8.2, HZ0 - 0.035));
-  kit.box('stone', V(hallAxisX - 0.8, 3.56, HZ1 - NT), V(hallAxisX + 0.8, 3.7, HZ1 + 0.1), 'xXYZ', coping, coping);
+  kit.box('stone', V(hallAxisX - 0.8, 3.56, HZ1 - NT), V(hallAxisX + 0.8, 3.7, HZ1 + 0.1), coping, coping);
 
   // Side walls to the springing, then the vault.
   kit.wallFace('stone', kit.frame(HX0, HZ0 + 0.1, HX0, HZ1 - 0.1), -0.1, SPRING + 0.12, ashlar);
@@ -130,10 +130,10 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   // Transverse ribs on pilasters with a plain impost.
   for (const z of ribZ) {
     kit.rib('stone', V(hallAxisX, SPRING, z), V(0, 0, -1), R, 0.56, 0.32, dressed);
-    for (const [x0, x1, faces] of [[HX0 - 0.05, HX0 + 0.32, 'XzZ'], [HX1 - 0.32, HX1 + 0.05, 'xzZ']] as const) {
-      kit.box('stone', V(x0, -0.1, z - 0.28), V(x1, SPRING - 0.2, z + 0.28), faces, ashlar);
+    for (const [x0, x1] of [[HX0 - 0.05, HX0 + 0.32], [HX1 - 0.32, HX1 + 0.05]] as const) {
+      kit.box('stone', V(x0, -0.1, z - 0.28), V(x1, SPRING - 0.2, z + 0.28), ashlar);
       const grow = x0 < hallAxisX ? [0, 0.07] : [-0.07, 0];
-      kit.box('stone', V(x0 + grow[0], SPRING - 0.2, z - 0.35), V(x1 + grow[1], SPRING + 0.02, z + 0.35), faces + 'y', coping, coping, 'impost');
+      kit.box('stone', V(x0 + grow[0], SPRING - 0.2, z - 0.35), V(x1 + grow[1], SPRING + 0.02, z + 0.35), coping, coping, 'impost');
     }
   }
 
@@ -142,11 +142,11 @@ export function buildCourtyardHall(seed: string): SceneDescription {
   for (let k = 0; k < 3; k++) {
     const y = 0.17 * (k + 1);
     const zf = stepZ - 0.42 * k;
-    kit.box('floor', V(HX0 - 0.05, y - 0.17, k === 2 ? HZ1 - 0.1 : zf - 0.5), V(HX1 + 0.05, y, zf), 'ZY', { ...hallFlag, course: [0.17, 0.17], length: [0.8, 1.3] }, hallFlag, 'step');
+    kit.box('floor', V(HX0 - 0.05, y - 0.17, k === 2 ? HZ1 - 0.1 : zf - 0.5), V(HX1 + 0.05, y, zf), { ...hallFlag, course: [0.17, 0.17], length: [0.8, 1.3] }, hallFlag, 'step');
   }
   const dy = 0.51;
-  kit.box('stone', V(hallAxisX - 1.1, dy, HZ1 + 1.0), V(hallAxisX + 1.1, dy + 0.85, HZ1 + 1.95), 'xXzZ', { ...dressed, length: [0.7, 1.1], course: [0.4, 0.45] });
-  kit.box('stone', V(hallAxisX - 1.2, dy + 0.85, HZ1 + 0.9), V(hallAxisX + 1.2, dy + 1.02, HZ1 + 2.05), 'xXzZYy', { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.15, 1.15] }, 'lid');
+  kit.box('stone', V(hallAxisX - 1.1, dy, HZ1 + 1.0), V(hallAxisX + 1.1, dy + 0.85, HZ1 + 1.95), { ...dressed, length: [0.7, 1.1], course: [0.4, 0.45] });
+  kit.box('stone', V(hallAxisX - 1.2, dy + 0.85, HZ1 + 0.9), V(hallAxisX + 1.2, dy + 1.02, HZ1 + 2.05), { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.15, 1.15] }, 'lid');
 
   return {
     meshes: kit.meshes,

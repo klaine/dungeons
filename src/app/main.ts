@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
@@ -214,6 +214,17 @@ async function start(): Promise<void> {
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);
   for (const l of torchLights.lights) scene.add(l);
 
+  // A light the player carries, for rooms the site leaves dark. It casts no shadows: redrawing a
+  // shadow map of the whole site every frame as the player moves is more than the frame can afford.
+  const lantern = new PointLight(new Color(1.0, 0.74, 0.48), 0, 11, 2);
+  scene.add(lantern);
+  const LANTERN_INTENSITY = num('lantern', 0.9);
+  let lanternOn = true;
+  const toggleLantern = () => {
+    lanternOn = !lanternOn;
+    document.body.classList.toggle('unlit', !lanternOn);
+  };
+
   // ------------------------------------------------------------------ post
   const size = renderer.getDrawingBufferSize(new Vector2());
   const composer = new EffectComposer(renderer);
@@ -232,7 +243,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
-  new TouchControls(canvas, player);
+  new TouchControls(canvas, player, toggleLantern);
   if (params.has('cam')) {
     const c = params.get('cam')!.split(',').map(Number);
     player.place(new Vector3(c[0], c[1], c[2]), c[3] ?? 0, c[4] ?? 0);
@@ -248,6 +259,7 @@ async function start(): Promise<void> {
   });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyF') atmosphere.uniforms.uEnabled.value = 1 - atmosphere.uniforms.uEnabled.value;
+    if (e.code === 'KeyL') toggleLantern();
     if (e.code === 'KeyB') bakeTarget = bakeTarget > 0.5 ? 0 : 1;
   });
 
@@ -341,6 +353,10 @@ async function start(): Promise<void> {
     const time = fixedTime ?? now / 1000;
     player.update(dt);
     for (const t of torches) t.update(time);
+    // Held low and to the right, so it models what it lights instead of flattening it.
+    lantern.position.set(0.28, -0.42, -0.15).applyQuaternion(camera.quaternion).add(camera.position);
+    const lanternTarget = lanternOn ? LANTERN_INTENSITY * (0.94 + 0.06 * Math.sin(time * 9.1) * Math.sin(time * 3.7)) : 0;
+    lantern.intensity += (lanternTarget - lantern.intensity) * (1 - Math.exp(-dt * 8));
     torchLights.update(dt, camera.position);
     atmosphere.setLights(torchLights.state().map((s) => ({
       position: s.position, color: glow.set(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16 * s.strength).clone(),
@@ -388,7 +404,7 @@ async function start(): Promise<void> {
   };
   requestAnimationFrame(loop);
 
-  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, get exposure() { return exposure; } };
+  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {
@@ -437,6 +453,7 @@ async function start(): Promise<void> {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
       // Let the torch lights finish moving to the new position before the picture is taken.
       for (let i = 0; i < 12; i++) torchLights.update(1, new Vector3(pose[0], pose[1], pose[2]));
+      lantern.intensity = lanternOn ? LANTERN_INTENSITY : 0;
       frame(performance.now());
       exposure = exposureFor(atmosphere.measure(renderer));
       renderer.toneMappingExposure = exposure;

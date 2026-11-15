@@ -17,6 +17,7 @@ const INK = '#2b241c';
 const PAPER = '#e9dfc8';
 const FLOOR = '#f6efdd';
 const COURT = '#cfd9b4';
+const DARK = '#b7ab96';
 const ACCENT = '#a5432a';
 
 export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOptions = {}): void {
@@ -56,9 +57,10 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     const g = p.role === 'approach' ? half * 0.6 : half;
     rect(p.x0 - g, p.z0 - g, p.x1 + g, p.z1 + g);
   }
-  // Floors.
+  // Floors: open ground tinted green, unlit rooms shaded.
+  const floorOf = (p: Place) => (p.roof === 'sky' ? COURT : p.light === 'dark' ? DARK : FLOOR);
   for (const p of site.places) {
-    ctx.fillStyle = p.roof === 'sky' ? COURT : FLOOR;
+    ctx.fillStyle = floorOf(p);
     rect(p.x0, p.z0, p.x1, p.z1);
   }
 
@@ -74,7 +76,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       else rect(wall + T * 0.35, lo, wall + T * 0.65, hi);
       continue;
     }
-    ctx.fillStyle = a.roof === 'sky' && b.roof === 'sky' ? COURT : FLOOR;
+    ctx.fillStyle = a.roof === 'sky' && b.roof === 'sky' ? COURT : a.light === 'dark' && b.light === 'dark' ? DARK : FLOOR;
     if (alongX) rect(lo, wall - 0.05, hi, wall + T + 0.05);
     else rect(wall - 0.05, lo, wall + T + 0.05, hi);
     const steps = Math.round(Math.abs(a.floor - b.floor) / 0.17);

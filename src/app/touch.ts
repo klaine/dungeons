@@ -2,7 +2,8 @@ import { Player } from './player';
 
 /**
  * Touch controls: a thumb stick that appears wherever the left side of the screen is touched,
- * look by dragging on the right side, and a jump button. Pushing the stick well past its rim runs.
+ * look by dragging on the right side, and buttons to jump and to raise or lower the carried light.
+ * Pushing the stick well past its rim runs.
  */
 
 const STICK_RADIUS = 56;
@@ -19,7 +20,7 @@ export class TouchControls {
   private base: HTMLElement;
   private knob: HTMLElement;
 
-  constructor(private dom: HTMLElement, private player: Player) {
+  constructor(private dom: HTMLElement, private player: Player, onLight: () => void) {
     this.base = document.createElement('div');
     this.base.id = 'stick';
     this.knob = document.createElement('div');
@@ -30,7 +31,16 @@ export class TouchControls {
     jump.type = 'button';
     jump.textContent = 'Jump';
     jump.setAttribute('aria-label', 'Jump');
-    document.body.append(this.base, jump);
+    const light = document.createElement('button');
+    light.id = 'light';
+    light.type = 'button';
+    light.textContent = 'Light';
+    light.setAttribute('aria-label', 'Raise or lower your light');
+    light.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      onLight();
+    });
+    document.body.append(this.base, jump, light);
 
     if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) document.body.classList.add('touch');
 

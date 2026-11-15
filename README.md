@@ -29,10 +29,10 @@ npm run dev
 
 Open the address Vite prints.
 
-- **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `F` toggles fog, `B` toggles baked light.
-- **Touch:** drag on the left side of the screen to move (a thumb stick appears under your finger; push well past its rim to run), drag on the right side to look, and tap the button to jump.
+- **Mouse and keyboard:** click to walk; `W` `A` `S` `D` to move, `Shift` to run, `Space` to jump, `L` raises or lowers the light you carry, `M` enlarges the map, `F` toggles fog, `B` toggles baked light.
+- **Touch:** drag on the left side of the screen to move (a thumb stick appears under your finger; push well past its rim to run), drag on the right side to look, and use the buttons to jump and to raise or lower your light.
 
-Each place has its seed in the address, so a link reproduces it; **New place** rolls another. `M` or a click on the map enlarges it.
+Each place has its seed in the address, so a link reproduces it; **New place** rolls another. Some rooms are dark on purpose; they are shaded on the map.
 
 Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 

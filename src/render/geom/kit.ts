@@ -254,12 +254,13 @@ export class Kit {
   }
 
   /**
-   * An axis-aligned block of masonry with eased arrises. `faces` lists the sides to build:
-   * x and X are the low and high x sides, and likewise y, Y, z, Z.
+   * An axis-aligned block of masonry with eased arrises. All six faces are always built, including
+   * any that seem hidden against a wall or floor: a solid thing must never be see-through from any
+   * angle, and guessing which faces a player can reach has been wrong before.
    */
-  box(material: string, min: Vector3, max: Vector3, faces: string, style: MasonryStyle, topStyle: MasonryStyle = style, courseKey = 'wall'): void {
+  box(material: string, min: Vector3, max: Vector3, style: MasonryStyle, topStyle: MasonryStyle = style, courseKey = 'wall'): void {
     const open = { u0: true, u1: true, v0: true, v1: true };
-    const sx = max.x - min.x, sy = max.y - min.y, sz = max.z - min.z;
+    const sx = max.x - min.x, sz = max.z - min.z;
     const inset = new Vector3(MASS_INSET, MASS_INSET, MASS_INSET);
     this.mass(min.clone().add(inset), max.clone().sub(inset));
     const X = new Vector3(1, 0, 0), Z = new Vector3(0, 0, 1);
@@ -270,13 +271,12 @@ export class Kit {
         n.copy(normal);
       }, { u0: 0, u1: ulen, v0: min.y, v1: max.y, style, open, courseKey });
     };
-    if (faces.includes('z')) side(new Vector3(min.x, 0, min.z), X, new Vector3(0, 0, -1), sx);
-    if (faces.includes('Z')) side(new Vector3(min.x, 0, max.z), X, new Vector3(0, 0, 1), sx);
-    if (faces.includes('x')) side(new Vector3(min.x, 0, min.z), Z, new Vector3(-1, 0, 0), sz);
-    if (faces.includes('X')) side(new Vector3(max.x, 0, min.z), Z, new Vector3(1, 0, 0), sz);
-    if (faces.includes('Y')) this.plane(material, new Vector3(min.x, max.y, min.z), X, Z, new Vector3(0, 1, 0), sx, sz, topStyle, { open });
-    if (faces.includes('y')) this.plane(material, new Vector3(min.x, min.y, min.z), X, Z, new Vector3(0, -1, 0), sx, sz, topStyle, { open });
-    void sy;
+    side(new Vector3(min.x, 0, min.z), X, new Vector3(0, 0, -1), sx);
+    side(new Vector3(min.x, 0, max.z), X, new Vector3(0, 0, 1), sx);
+    side(new Vector3(min.x, 0, min.z), Z, new Vector3(-1, 0, 0), sz);
+    side(new Vector3(max.x, 0, min.z), Z, new Vector3(1, 0, 0), sz);
+    this.plane(material, new Vector3(min.x, max.y, min.z), X, Z, new Vector3(0, 1, 0), sx, sz, topStyle, { open });
+    this.plane(material, new Vector3(min.x, min.y, min.z), X, Z, new Vector3(0, -1, 0), sx, sz, topStyle, { open });
   }
 
   /** The inside of a half-round vault. `start` is on the axis at springing height. */

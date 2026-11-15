@@ -15,6 +15,10 @@ for (let n = 0; n < count; n++) {
     bump(`loops=${loopCount(site)}`);
     bump(`court=${site.places.some((p) => p.role === 'court')}`);
     bump(`goalDepth=${site.places[site.goal].depth}`);
+    bump(`dark=${site.places.filter((p) => p.light === 'dark').length}`);
+    for (const w of site.ways) {
+      if (w.kind !== 'window' && site.places[w.a].light === 'dark' && site.places[w.b].light === 'dark') throw new Error('two dark rooms in a row');
+    }
     for (const w of site.ways) {
       if (w.kind === 'window') continue;
       const d = Math.abs(site.places[w.a].floor - site.places[w.b].floor);

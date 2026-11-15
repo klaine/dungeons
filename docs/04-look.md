@@ -89,6 +89,8 @@ Visible geometry is only a skin: the faces a player can see, with nothing behind
 
 In the hand-assembled scene the solids are listed alongside the skin. In generated sites they come for free: the span grid already says which space is open and which is not.
 
+**Solid things are closed things.** Any free-standing or projecting piece — a coping, a sill, a merlon, a step, a beam, a chest — is built with all six of its faces, including ones that seem hidden against a wall or floor. Leaving out faces "the player cannot see" was tried and was wrong twice: undersides of overhanging stones showed the sky through them. The few extra hidden faces cost little; a see-through stone costs the whole illusion.
+
 Two smaller measures keep the skin closed: every stone has a plain backing sheet just behind its mortar, slightly larger than the stone, so no pixel-wide gaps show between neighbours; and where a wall is cut for an opening, triangles touching the hole are left out and the dressed stones round the opening cover the edge.
 
 ### Atmosphere and finish
@@ -98,6 +100,12 @@ Two smaller measures keep the skin closed: every stone has a plain backing sheet
 - Particles as part of each biome: dust motes, spores, embers, rain, snow, insects, drifting leaves.
 - Water with reflection, refraction, depth colour and caustics on nearby surfaces.
 - Bloom on what glows, contact shadows in corners, film-like tone mapping, and a colour grade per biome so each has its own palette on screen.
+
+### Darkness and the carried light
+
+Not every place is lit, and that is decided, not left to chance. The site document records how each place is lit: by day (open to the sky, or reached by a court's light through windows and arches), by torches, or not at all. The generator leaves some rooms dark on purpose — side chambers more often than passages, and never two in a row, so there is always light ahead to walk towards.
+
+The player carries a light for those rooms: small, warm, held low and to one side so that it models surfaces instead of flattening them, and weak enough that torchlit rooms still read as torchlit. It can be lowered. It casts no shadows yet, because that would mean redrawing a shadow map of the whole site every frame.
 
 ### Light as a design tool
 

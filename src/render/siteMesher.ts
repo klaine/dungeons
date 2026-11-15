@@ -78,9 +78,6 @@ export function meshSite(site: Site): SceneDescription {
     const b = f.a.clone().addScaledVector(f.dir, u1).addScaledVector(f.normal, -t1);
     return { min: V(Math.min(a.x, b.x), y0, Math.min(a.z, b.z)), max: V(Math.max(a.x, b.x), y1, Math.max(a.z, b.z)) };
   };
-  /** The letter `Kit.box` uses for the face pointing along an axis-aligned direction. */
-  const faceLetter = (d: Vector3): string => (Math.abs(d.x) > 0.5 ? (d.x > 0 ? 'X' : 'x') : d.z > 0 ? 'Z' : 'z');
-
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
   const torchesByPlace = new Map<number, TorchSpec[]>();
   const pilasterSlots = new Map<number, { pos: number; side: Side; clear: boolean }[]>();
@@ -104,8 +101,8 @@ export function meshSite(site: Site): SceneDescription {
     const list: TorchSpec[] = [];
     if (p.roof !== 'sky') {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
-      const daylit = site.ways.some((w) => (w.a === p.id || w.b === p.id) && places[w.a === p.id ? w.b : w.a].roof === 'sky' && w.kind !== 'door');
-      const want = Math.max(0, (area < 22 ? 1 : area < 50 ? 2 : 3) - (daylit ? 1 : 0));
+      // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none.
+      const want = p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : 3) : p.light === 'day' && area >= 40 ? 1 : 0;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
       const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
@@ -195,13 +192,12 @@ export function meshSite(site: Site): SceneDescription {
         // In the wall's own terms: along it, and out of the wall into the room (negative depth).
         const f = frameOf(p, s.side, 0);
         const u = alongFrame(p, s.side, s.pos, 0);
-        const faces = faceLetter(f.normal) + (p.axis === 'x' ? 'xX' : 'zZ');
         if (s.clear) {
           const b = wallBox(f, u - 0.26, u + 0.26, p.floor - 0.1, roofY - 0.2, 0.05, -0.3);
-          kit.box('stone', b.min, b.max, faces, ashlar);
+          kit.box('stone', b.min, b.max, ashlar);
         }
         const c = wallBox(f, u - 0.33, u + 0.33, roofY - 0.2, roofY + 0.02, 0.05, -0.37);
-        kit.box('stone', c.min, c.max, faces + 'y', coping, coping, 'impost');
+        kit.box('stone', c.min, c.max, coping, coping, 'impost');
       }
     } else if (p.roof === 'timber') {
       const alongX = dx >= dz;
@@ -211,8 +207,8 @@ export function meshSite(site: Site): SceneDescription {
       const count = Math.max(2, Math.round(long / 1.05));
       for (let k = 0; k < count; k++) {
         const at = (alongX ? p.x0 : p.z0) + (long * (k + 0.5)) / count;
-        if (alongX) kit.box('wood', V(at - 0.1, roofY - 0.27, p.z0 - 0.1), V(at + 0.1, roofY, p.z1 + 0.1), 'yxX', beam, beam, 'beam');
-        else kit.box('wood', V(p.x0 - 0.1, roofY - 0.27, at - 0.1), V(p.x1 + 0.1, roofY, at + 0.1), 'yzZ', beam, beam, 'beam');
+        if (alongX) kit.box('wood', V(at - 0.1, roofY - 0.27, p.z0 - 0.1), V(at + 0.1, roofY, p.z1 + 0.1), beam, beam, 'beam');
+        else kit.box('wood', V(p.x0 - 0.1, roofY - 0.27, at - 0.1), V(p.x1 + 0.1, roofY, at + 0.1), beam, beam, 'beam');
       }
       kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
     } else if (p.role === 'approach') {
@@ -221,10 +217,10 @@ export function meshSite(site: Site): SceneDescription {
         const f = frameOf(p, side, 0.1);
         const y = p.floor + p.wall;
         const cap = wallBox(f, 0, f.length, y, y + 0.12, -0.12, 0.6);
-        kit.box('stone', cap.min, cap.max, faceLetter(f.normal) + 'Yy', coping, coping);
+        kit.box('stone', cap.min, cap.max, coping, coping);
         for (let u = 0.6; u < f.length - 1.2; u += 1.9) {
           const m = wallBox(f, u, u + 1.0, y + 0.12, y + 1.0, -0.04, 0.5);
-          kit.box('stone', m.min, m.max, faceLetter(f.normal) + (f.dir.x !== 0 ? 'xX' : 'zZ') + 'Y', ashlar, coping);
+          kit.box('stone', m.min, m.max, ashlar, coping);
         }
       }
     }
@@ -248,14 +244,14 @@ export function meshSite(site: Site): SceneDescription {
       let y = p.floor;
       if (big) {
         const plinth = wallBox(f, u - half - 0.5, u + half + 0.5, y - 0.02, y + STEP, -0.5, -2.3);
-        kit.box('floor', plinth.min, plinth.max, 'xXzZY', { ...hallFlag, course: [STEP + 0.02, STEP + 0.02], length: [0.8, 1.3] }, hallFlag, 'step');
+        kit.box('floor', plinth.min, plinth.max, { ...hallFlag, course: [STEP + 0.02, STEP + 0.02], length: [0.8, 1.3] }, hallFlag, 'step');
         y += STEP;
       }
       const near = big ? 0.95 : 0.35, deep = big ? 0.9 : 0.65;
       const body = wallBox(f, u - half, u + half, y, y + (big ? 0.85 : 0.6), -near, -(near + deep));
-      kit.box('stone', body.min, body.max, 'xXzZ', { ...dressed, length: [0.7, 1.1], course: [0.4, 0.45] });
+      kit.box('stone', body.min, body.max, { ...dressed, length: [0.7, 1.1], course: [0.4, 0.45] });
       const lid = wallBox(f, u - half - 0.1, u + half + 0.1, body.max.y, body.max.y + 0.17, -(near - 0.1), -(near + deep + 0.1));
-      kit.box('stone', lid.min, lid.max, 'xXzZYy', { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.2, 1.2] }, 'lid');
+      kit.box('stone', lid.min, lid.max, { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.2, 1.2] }, 'lid');
     }
 
     // Ways are built once, from the side of their first place.
@@ -268,7 +264,7 @@ export function meshSite(site: Site): SceneDescription {
       kit.openingTrim('stone', f, op, T, dressed, 'both');
       if (w.kind === 'window') {
         const sill = wallBox(f, c - w.halfWidth - 0.22, c + w.halfWidth + 0.22, op.y0 - 0.14, op.y0, -0.07, T + 0.07);
-        kit.box('stone', sill.min, sill.max, 'xXyYzZ', coping, coping);
+        kit.box('stone', sill.min, sill.max, coping, coping);
         continue;
       }
       const lo = Math.min(p.floor, q.floor), hi = Math.max(p.floor, q.floor);
@@ -283,8 +279,7 @@ export function meshSite(site: Site): SceneDescription {
         const t0 = lowIsHere ? 0.1 + (k - 1) * tread : 0.1;
         const t1 = lowIsHere ? T - 0.1 : T - 0.1 - (k - 1) * tread;
         const b = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, lo + STEP * (k - 1), lo + STEP * k, t0, t1);
-        const riser = lowIsHere ? f.normal : f.normal.clone().negate();
-        kit.box('floor', b.min, b.max, 'Y' + faceLetter(riser), stepStyle, hallFlag, 'step');
+        kit.box('floor', b.min, b.max, stepStyle, hallFlag, 'step');
       }
     }
   }
