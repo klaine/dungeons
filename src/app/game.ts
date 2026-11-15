@@ -52,7 +52,7 @@ export class Game {
   private goalAt: Vector3 | null;
 
   constructor(private site: Site, desc: SceneDescription, scene: Scene, wood: Material, private player: Player, private ui: GameUi) {
-    const iron = makePropMaterial({ color: new Color(0.09, 0.085, 0.08), roughness: 0.5, metalness: 0.85 });
+    const iron = makePropMaterial({ color: new Color(0.07, 0.065, 0.06), roughness: 0.74, metalness: 0.5 });
     const timber = makePropMaterial({ color: new Color(0.2, 0.13, 0.08), roughness: 0.85, metalness: 0 });
 
     for (const d of desc.doors ?? []) {
@@ -79,7 +79,7 @@ export class Game {
       // The lock plate takes the colour of its key, so a locked door says what it wants.
       if (spec.lock) {
         const plate = new Mesh(new BoxGeometry(0.13, 0.19, t + 0.04), makePropMaterial({
-          color: METAL[spec.lock], metalness: 0.9, roughness: 0.35, emissive: METAL[spec.lock], emissiveIntensity: 0.12,
+          color: METAL[spec.lock], metalness: 0.8, roughness: 0.5, emissive: METAL[spec.lock], emissiveIntensity: 0.1,
         }));
         plate.position.set(W - 0.16, 1.22, 0);
         group.add(plate);
