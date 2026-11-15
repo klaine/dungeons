@@ -1,10 +1,11 @@
 import { Vector3 } from 'three';
-import { Rng } from '../core/rng';
+import { fbm2, Rng } from '../core/rng';
 import { Place, Side, Site, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
+import { carveRock, smin } from './geom/rock';
 import { ashlar, beam, coping, dressed, flag, hallFlag, plank, vaultStone } from './geom/styles';
 import { DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -69,6 +70,7 @@ export function meshSite(site: Site): SceneDescription {
   const wallTop = (p: Place, side: Side): number => {
     if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? span(p) / 2 + 0.3 : 0.12);
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
+    if (p.roof === 'cave') return p.floor + p.wall + 1.3;
     if (p.role === 'approach') return side === 'n' ? site.top : p.floor + p.wall;
     return site.top;
   };
@@ -153,8 +155,13 @@ export function meshSite(site: Site): SceneDescription {
     const cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
     const roofY = p.floor + p.wall;
 
-    kit.slab('floor', p.x0 - 0.1, p.z0 - 0.1, p.x1 + 0.1, p.z1 + 0.1, p.floor, open ? flag : hallFlag);
-    kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
+    const cave = p.roof === 'cave';
+    if (cave) {
+      kit.mass(V(p.x0, p.floor - 1.6, p.z0), V(p.x1, p.floor - 0.7, p.z1));
+    } else {
+      kit.slab('floor', p.x0 - 0.1, p.z0 - 0.1, p.x1 + 0.1, p.z1 + 0.1, p.floor, open ? flag : hallFlag);
+      kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
+    }
 
     // Walls, and the solid behind them.
     for (const side of SIDES) {
@@ -170,17 +177,79 @@ export function meshSite(site: Site): SceneDescription {
       const mid = f.length / 2;
       const R = span(p) / 2;
       const end = p.roof === 'barrel' && isEndWall(p, side);
-      kit.wallFace('stone', f, p.floor - 0.1, top, ashlar, {
-        openings: holesOn(p, side, 0.1),
-        keep: end ? (u, y) => y < roofY + 0.3 || Math.hypot(u - mid, y - roofY) < R + 0.45 : undefined,
-      });
+      // A cave has masonry only where the builders walled it off to hang a door.
+      if (!cave || holesOn(p, side, 0).length) {
+        kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, top, ashlar, {
+          openings: holesOn(p, side, 0.1),
+          keep: end ? (u, y) => y < roofY + 0.3 || Math.hypot(u - mid, y - roofY) < R + 0.45 : undefined,
+        });
+      }
       // Solid behind the wall, one wall's thickness deep; beyond that is another place or the outside.
       const ext = T / 2 + 0.02;
       kit.wallMass(frameOf(p, side, ext), T, p.floor - 1.2, p.roof === 'sky' ? top : site.top, holesOn(p, side, ext));
     }
 
     // Roof.
-    if (p.roof === 'barrel') {
+    if (cave) {
+      // Open air is an uneven dome over a rough oval floor, with a bay reaching each doorway.
+      const doors = SIDES.flatMap((side) => holesOn(p, side, 0).map((h) => ({ side, at: h.at, w: h.w })));
+      const doorPoint = (d: { side: Side; at: number }) => (d.side === 'n' ? [d.at, p.z0] : d.side === 's' ? [d.at, p.z1] : d.side === 'w' ? [p.x0, d.at] : [p.x1, d.at]);
+      const walled = new Set(doors.map((d) => d.side));
+      const rx = dx / 2 - 0.35, rz = dz / 2 - 0.35, rMin = Math.min(rx, rz);
+      const s1 = rng.range(0, 50), s2 = rng.range(0, 50);
+      const shape = (x: number, z: number): { e: number; nearDoor: number } => {
+        let e = (1 - Math.hypot((x - cx) / rx, (z - cz) / rz)) * rMin;
+        e += (fbm2(x * 0.5 + s1, z * 0.5 + s2, 3) - 0.5) * 1.5;
+        // Keep clear of the sides that have no wall to hide the edge of the rock.
+        let limit = Infinity;
+        if (!walled.has('n')) limit = Math.min(limit, z - p.z0);
+        if (!walled.has('s')) limit = Math.min(limit, p.z1 - z);
+        if (!walled.has('w')) limit = Math.min(limit, x - p.x0);
+        if (!walled.has('e')) limit = Math.min(limit, p.x1 - x);
+        e = Math.min(e, limit - 0.25);
+        let nearDoor = Infinity;
+        for (const d of doors) {
+          const [qx, qz] = doorPoint(d);
+          const dd = Math.hypot(x - qx, z - qz);
+          nearDoor = Math.min(nearDoor, dd);
+          e = Math.max(e, d.w + 0.9 - dd);
+        }
+        return { e, nearDoor };
+      };
+      const density = (x: number, y: number, z: number): number => {
+        let { e, nearDoor } = shape(x, z);
+        // Ledges and hollows a hand's breadth to a pace across, so the walls are not smooth.
+        e += (fbm2(x * 1.9 + y * 1.1 + s1, z * 1.9 - y * 0.8 + s2, 3) - 0.5) * 0.5 * Math.min(1, nearDoor / 1.5);
+        const settle = Math.min(1, Math.max(0, (nearDoor - 1.3) / 1.6));
+        const floorY = p.floor - 0.006 + (fbm2(x * 0.8 + s2, z * 0.8 + s1, 3) - 0.5) * 0.34 * settle;
+        const dome = Math.pow(Math.min(1, Math.max(0, e / rMin)), 0.55);
+        let ceilY = p.floor + p.wall * (0.5 + 0.5 * dome) + (fbm2(x * 0.65 + s1 + 9, z * 0.65 + s2, 3) - 0.5) * 0.9;
+        ceilY = Math.max(ceilY, p.floor + 3.5 - nearDoor * 0.5);
+        const air = smin(smin(e, y - floorY, 0.35), ceilY - y, 0.5);
+        // Whatever the noise does, the rock must close before it reaches the edge of the space
+        // being carved, except towards a masonry wall, which hides the edge.
+        let edge = Math.min(p.floor + p.wall + 1.2 - y, y - (p.floor - 0.6));
+        if (!walled.has('n')) edge = Math.min(edge, z - p.z0);
+        if (!walled.has('s')) edge = Math.min(edge, p.z1 - z);
+        if (!walled.has('w')) edge = Math.min(edge, x - p.x0);
+        if (!walled.has('e')) edge = Math.min(edge, p.x1 - x);
+        return Math.min(air, edge - 0.2);
+      };
+      const wet = indoorField([], p.floor);
+      carveRock(kit.mesh('rock'), density, {
+        min: V(p.x0 - 0.14, p.floor - 0.6, p.z0 - 0.14), max: V(p.x1 + 0.14, p.floor + p.wall + 1.2, p.z1 + 0.14),
+        cell: 0.28, uvScale: 0.45,
+        shade: (q, n, field) => {
+          wet(q, n, field);
+          // Beds of slightly different stone, tilted; darker where water has stood.
+          const bed = fbm2((q.y + q.x * 0.18) * 2.6, q.z * 0.15 + s1, 3);
+          const blot = fbm2(q.x * 0.9 + s2, q.z * 0.9 + q.y * 0.7, 3);
+          const tone = 0.72 + 0.4 * bed + 0.24 * blot;
+          return [0.8 * tone, 0.74 * tone, 0.65 * tone];
+        },
+      });
+      kit.mass(V(p.x0 - T / 2, p.floor + p.wall + 1.25, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+    } else if (p.roof === 'barrel') {
       const R = span(p) / 2;
       const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1);
       const start = p.axis === 'x' ? V(p.x0 - 0.1, roofY, cz) : V(cx, roofY, p.z0 - 0.1);
@@ -237,7 +306,7 @@ export function meshSite(site: Site): SceneDescription {
       kit.roundWall('stone', wx, wz, 0.68, y - 2.5, y + 0.85, { ...ashlar, length: [0.35, 0.5] }, true, { open: { v1: true } });
       kit.ring('stone', wx, wz, 0.68, 0.95, y + 0.85, { ...dressed, length: [0.5, 0.65] });
     }
-    if (p.role === 'goal' || p.role === 'reward') {
+    if ((p.role === 'goal' || p.role === 'reward') && !cave) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
       const far = door ? flip[sideOf(door, p)] : 'n';
@@ -261,7 +330,7 @@ export function meshSite(site: Site): SceneDescription {
       anchors.set(p.id, V((lid.min.x + lid.max.x) / 2, lid.max.y, (lid.min.z + lid.max.z) / 2));
     } else if (site.items.some((it) => it.place === p.id)) {
       // Something is kept here and there is no chest: a pedestal in the middle of the floor.
-      kit.box('stone', V(cx - 0.3, p.floor - 0.02, cz - 0.3), V(cx + 0.3, p.floor + 0.14, cz + 0.3), coping, coping, 'base');
+      kit.box('stone', V(cx - 0.3, p.floor - 0.4, cz - 0.3), V(cx + 0.3, p.floor + 0.14, cz + 0.3), coping, coping, 'base');
       kit.box('stone', V(cx - 0.22, p.floor + 0.14, cz - 0.22), V(cx + 0.22, p.floor + 0.92, cz + 0.22), { ...dressed, length: [0.44, 0.44] }, coping, 'shaft');
       kit.box('stone', V(cx - 0.3, p.floor + 0.92, cz - 0.3), V(cx + 0.3, p.floor + 1.04, cz + 0.3), coping, coping, 'cap');
       anchors.set(p.id, V(cx, p.floor + 1.04, cz));
@@ -307,6 +376,11 @@ export function meshSite(site: Site): SceneDescription {
         const faces = Math.sign(Math.sin(yaw) * towardsHigh.x + Math.cos(yaw) * towardsHigh.z) || 1;
         const barred = w.door.barredFrom;
         const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + 3.2, t - 0.14, t + 0.14);
+        // A door that starts shut is baked shut, so a locked room does not fill with its neighbour's light.
+        if (w.door.leaf === 'shut') {
+          const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + 3.2, t - 0.03, t + 0.03);
+          kit.mass(slab.min, slab.max);
+        }
         doors.push({
           way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: 0.07,
           leaf: buildDoorLeaf(`${site.seed}/door${site.ways.indexOf(w)}`, lw, 2.0, 0.07),

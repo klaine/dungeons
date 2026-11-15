@@ -87,6 +87,26 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   const floorOf = (p: Place) => (!known(p) ? GLIMPSED : p.roof === 'sky' ? COURT : p.light === 'dark' ? DARK : FLOOR);
   for (const p of site.places) {
     if (!drawn(p)) continue;
+    if (p.roof === 'cave') {
+      // Solid rock, with a rough oval of open floor and a bay towards each way in.
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = known(p) ? 0.82 : 0.3;
+      rect(p.x0, p.z0, p.x1, p.z1);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = floorOf(p);
+      ctx.beginPath();
+      ctx.ellipse(X((p.x0 + p.x1) / 2), Z((p.z0 + p.z1) / 2), ((p.x1 - p.x0) / 2 - 0.4) * scale, ((p.z1 - p.z0) / 2 - 0.4) * scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (const w of site.ways) {
+        if (w.kind === 'window' || (w.a !== p.id && w.b !== p.id)) continue;
+        const side = w.a === p.id ? w.side : ({ n: 's', s: 'n', e: 'w', w: 'e' } as const)[w.side];
+        const qx = side === 'w' ? p.x0 : side === 'e' ? p.x1 : w.at, qz = side === 'n' ? p.z0 : side === 's' ? p.z1 : w.at;
+        ctx.beginPath();
+        ctx.arc(X(qx), Z(qz), (w.halfWidth + 0.7) * scale, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      continue;
+    }
     ctx.fillStyle = floorOf(p);
     rect(p.x0, p.z0, p.x1, p.z1);
   }

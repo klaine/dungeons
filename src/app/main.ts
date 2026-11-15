@@ -67,7 +67,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 const SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -99,6 +99,7 @@ async function start(): Promise<void> {
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
+    rock: makeSiteMaterial(stone, moss, { normalScale: 2.2 }),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -123,6 +124,7 @@ async function start(): Promise<void> {
     const geometry = builder.build();
     const material = name.split('|')[1];
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
+    mesh.name = name;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;

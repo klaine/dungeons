@@ -24,13 +24,24 @@ The span grid is logical. Separate builders turn it into visible geometry, selec
 |---|---|---|
 | **Terrain** | Open-air spans, material weights | Continuous ground surface with level of detail; cliffs given real rock faces rather than stretched slopes |
 | **Architecture** | Built spans, storeys, openings | Walls with thickness, floors, vaults and ceilings, stairs, roofs derived from footprints |
-| **Natural rock** | Hewn and natural enclosed spans | Smooth irregular surfaces extracted from a density field, so caves have curves and overhangs |
+| **Natural rock** | A function giving how far inside open air each point is | Smooth irregular surfaces extracted with marching cubes, so caves have curves and overhangs. Built: see below |
 | **Kit of parts** | Sockets from archetypes and openings | Arches, columns, door and window frames, battlements, beams, railings |
 | **Vegetation** | Growth field, flora rules | Trees grown procedurally, undergrowth and ground cover as instances, ivy and roots following surfaces |
 | **Ruin** | Decay field, events | Broken wall tops, missing roofs, fallen blocks, rubble |
 | **Water** | Water level and flow from history | Surfaces for pools, rivers and flooded spans |
 
 The kit of parts is itself procedural and parameterised by builder culture, so one arch recipe yields a pointed arch for one culture and a round one for another. Seams between builders (a cave breaking into a cellar, a wall founded on rock) are handled explicitly, since those borders are where sites are most interesting.
+
+### Natural rock
+
+Where masonry is laid stone by stone on a surface, rock is carved. A cave is described by a function that is positive in open air and negative in rock: an uneven dome over a rough oval floor, with a bay reaching towards each doorway, roughened by noise at two scales. The surface between air and rock is extracted with marching cubes at about a quarter of a metre.
+
+- **Texture without stretching.** Each triangle takes its texture from the direction it mostly faces: floor and ceiling from above, walls from the side. Triangles do not share vertices, so neighbouring triangles can differ. Shading stays smooth because normals come from the function itself.
+- **Winding from the tables, never from the slope.** Where two parts of the function meet in a crease, its slope can point the wrong way. A triangle wound by the slope then faces away and leaves a hole to the sky. Winding is fixed by the marching cubes tables.
+- **Closed by construction.** Whatever the noise does, the rock is forced solid before it reaches the edge of the volume being carved, except towards a masonry wall, which hides the edge.
+- **Where rock meets masonry.** A cave has masonry only on the side where the builders walled it off to hang a door. That wall is laid as usual; the rock runs a little way past its plane and the wall hides the join.
+
+Rock strata are tinted per vertex in tilted beds. Caves are unlit: they are places for the carried light.
 
 ## Materials
 
@@ -160,7 +171,7 @@ A first scene exists: a walled courtyard with an arcade and a well, and a doorwa
 | Sun shadows, and shadowed local lights | Working; all shadow maps are drawn once because the world is static |
 | Fog with visible shafts of light | Working, by marching view rays against a sun depth map |
 | Target frame rate | Not measured: development so far has been on a software renderer without a graphics card |
-| Span grid to mesh, built and natural | Not started: the scene is assembled by hand, and there is no natural rock yet |
+| Site to mesh, built and natural | Working for rectangular rooms, courts and caves; the span grid itself is not built yet |
 | Plan and rendered maps | Not started |
 
 Also in place: eye adaptation measured from the image, and first-person walking with collision.

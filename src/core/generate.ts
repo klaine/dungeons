@@ -305,9 +305,21 @@ export function generateSite(seed: string): Site {
   places.push(forecourt);
   ways.push({ a: entrance.id, b: forecourt.id, side: 's', kind: 'door', at: ecx, halfWidth: 0.95 });
 
+  // ---- some dead ends are not rooms at all: the builders broke into a cave and walled it off
+  for (const p of places) {
+    const doors = ways.filter((w) => w.kind !== 'window' && (w.a === p.id || w.b === p.id));
+    const roomy = Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 4.6;
+    if (p.role === 'reward' && doors.length === 1 && roomy && rng.chance(0.5)) {
+      p.roof = 'cave';
+      p.light = 'dark';
+      p.wall = rng.range(3.3, 4.4);
+      p.name = rng.pick(['cave', 'grotto', 'hollow']);
+    }
+  }
+
   // ---- roofs
   for (const p of places) {
-    if (p.roof === 'sky') continue;
+    if (p.roof === 'sky' || p.roof === 'cave') continue;
     const dx = p.x1 - p.x0, dz = p.z1 - p.z0;
     p.axis = Math.abs(dx - dz) < 0.8 ? rng.pick(['x', 'z'] as const) : dx > dz ? 'x' : 'z';
     const roomy = Math.min(dx, dz) >= 5.6;
@@ -321,6 +333,7 @@ export function generateSite(seed: string): Site {
   // rooms left dark on purpose, never two in a row, so there is always light ahead to walk towards.
   for (const p of places) {
     if (p.roof === 'sky') { p.light = 'day'; continue; }
+    if (p.roof === 'cave') continue;
     const facesCourt = ways.some((w) => w.kind !== 'door' && (w.a === p.id || w.b === p.id) && places[w.a === p.id ? w.b : w.a].roof === 'sky');
     if (facesCourt) p.light = 'day';
   }
@@ -380,7 +393,7 @@ export function generateSite(seed: string): Site {
   for (const p of places) p.depth = depth.get(p.id) ?? -1;
   site.top = round(Math.max(...places.filter((p) => p.roof !== 'sky').map((p) => {
     const span = p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0;
-    return p.floor + p.wall + (p.roof === 'barrel' ? span / 2 : 0.4);
+    return p.floor + p.wall + (p.roof === 'barrel' ? span / 2 : p.roof === 'cave' ? 1.3 : 0.4);
   })) + 1.3);
   if (!allReachable(site)) throw new Error(`generated site is not connected (seed ${seed})`);
 
@@ -394,6 +407,8 @@ export function generateSite(seed: string): Site {
   const parts = [`${count(rooms())} rooms ${draft.phrase}`];
   if (court && draft.phrase.indexOf('court') < 0) parts.push('with a court to cross');
   if (chambers.length) parts.push(`and ${count(chambers.length)} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
+  const caves = places.filter((p) => p.roof === 'cave').length;
+  if (caves) parts.push(caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
   const dark = places.filter((p) => p.light === 'dark').length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
   site.title = `A walled house of ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;

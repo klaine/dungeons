@@ -13,7 +13,9 @@ export type Roof =
   /** A flat ceiling of boards on beams. */
   | 'timber'
   /** Open to the sky. */
-  | 'sky';
+  | 'sky'
+  /** Not built at all: a natural cave, with rock for walls, floor and ceiling. */
+  | 'cave';
 
 export type Role = 'approach' | 'entrance' | 'passage' | 'court' | 'reward' | 'goal';
 

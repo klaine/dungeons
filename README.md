@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+Some dead ends are natural caves, unlit, walled off behind a door:
+
+![A cave seen from its doorway, and the door set in masonry in the rock](docs/images/cave.jpg)
+
 The hand-built scene used to develop the look (`?scene=test`):
 
 ![A vaulted hall with shafts of sunlight from the door and window](docs/images/hall-light-shafts.jpg)
