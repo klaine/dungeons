@@ -48,6 +48,8 @@ Each place has its seed in the address, so a link reproduces it; **New place** r
 
 Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
+**Export** saves the current place: its plan as an image with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 45 MB for a ten-room place; baked light is not included).
+
 To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them.
 
 ## Publishing

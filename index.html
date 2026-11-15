@@ -18,9 +18,11 @@
     #title { max-width: 46em; }
     #place { margin: 3px 0 4px; }
     #seed { opacity: .62; margin-right: 6px; }
-    #new { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
+    #new, #export, #exportMenu button { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
       border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 2px 9px; }
-    #new:hover, #again:hover { background: rgba(224, 176, 112, .35); }
+    #new:hover, #again:hover, #export:hover, #exportMenu button:hover { background: rgba(224, 176, 112, .35); }
+    #exportMenu[hidden] { display: none; }
+    #exportMenu button { margin-left: 4px; }
     #keys { min-height: 1.45em; }
     #keys span { display: inline-block; margin-right: 10px; padding-left: 14px; position: relative; }
     #keys span::before { content: ''; position: absolute; left: 0; top: .42em; width: 8px; height: 8px; transform: rotate(45deg); background: currentColor; }
@@ -46,7 +48,7 @@
     body.touch #hud { bottom: auto; top: calc(34px + env(safe-area-inset-top)); align-items: flex-start;
       left: calc(18px + env(safe-area-inset-left)); right: calc(18px + env(safe-area-inset-right)); }
     body.touch #stats, body.touch #title { max-width: 52vw; }
-    body.touch #new { padding: 6px 12px; }
+    body.touch #new, body.touch #export, body.touch #exportMenu button { padding: 6px 12px; }
     body.touch #hint .idle, body.touch #hint .active { display: none; }
     body.touch #hint .touch { display: block; }
     body.touched #hint { opacity: 0; }
@@ -97,7 +99,13 @@
     <div>
       <h1>Dungeons</h1>
       <div id="title"></div>
-      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button></div>
+      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <button id="export" type="button">Export</button>
+        <span id="exportMenu" hidden>
+          <button id="exportPlan" type="button">Plan (PNG)</button>
+          <button id="exportJson" type="button">Site data (JSON)</button>
+          <button id="exportModel" type="button">3D model (GLB)</button>
+        </span>
+      </div>
       <div id="keys"></div>
       <div id="stats"></div>
       <div id="fps"></div>

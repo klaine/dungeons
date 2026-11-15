@@ -15,6 +15,8 @@ export interface TextureSet {
   normalMap: Texture;
   /** Occlusion in red, roughness in green, metalness in blue. */
   ormMap: Texture;
+  /** The render targets behind the three maps, in the same order, for reading pixels back. */
+  targets: WebGLRenderTarget[];
 }
 
 const NOISE = /* glsl */ `
@@ -199,6 +201,7 @@ export function generateTextureSet(renderer: WebGLRenderer, recipe: keyof typeof
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
+  const targets: WebGLRenderTarget[] = [];
   const render = (mode: number, srgb: boolean): Texture => {
     const rt = new WebGLRenderTarget(size, size, {
       format: RGBAFormat, type: UnsignedByteType, depthBuffer: false,
@@ -211,12 +214,13 @@ export function generateTextureSet(renderer: WebGLRenderer, recipe: keyof typeof
     renderer.setRenderTarget(rt);
     renderer.render(scene, camera);
     renderer.setRenderTarget(null);
+    targets.push(rt);
     return rt.texture;
   };
 
   const prevTone = renderer.toneMapping;
   renderer.toneMapping = 0;
-  const set = { map: render(0, true), normalMap: render(1, false), ormMap: render(2, false) };
+  const set = { map: render(0, true), normalMap: render(1, false), ormMap: render(2, false), targets };
   renderer.toneMapping = prevTone;
   material.dispose();
   quad.geometry.dispose();

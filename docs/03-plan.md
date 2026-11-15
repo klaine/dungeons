@@ -81,7 +81,7 @@ docs/
 | **M6** | Strongholds and settlements | Castle and town grammars, storeys, roofs, shells and interiors, wall-walks, rooftops and cellars as layers | A castle above its village can be generated and entered by more than one route |
 | **M7** | Wonder | State-change cycles, systemic puzzle elements, blueprints, secrets with tells, signature set pieces, the surprise budget, more biomes | The "Wait, what?" test passes; each site has a describable signature |
 | **M8** | Judgement | Batch runner, expressive range plots, generate-and-select, candidate gallery | The Second seed test passes routinely; weak seeds are filtered before the user sees them |
-| **M9** | Assets | Ink and illustrated map styles, layered map export, glTF export, versioned document schema, a minimal example of loading a site in a game engine | A generated site and its maps are usable outside the tool |
+| **M9** | Assets | Ink and illustrated map styles, layered map export, glTF export, versioned document schema, a minimal example of loading a site in a game engine | A generated site and its maps are usable outside the tool. **Started:** the site document exports as JSON, the plan as a PNG with a key to its rooms, and the built world as a glTF model. Other map styles and an engine example are not done. |
 
 ## Where things stand
 
@@ -93,6 +93,7 @@ docs/
 - **Proof of completion.** A solver searches over where the player is, which keys they hold and which bars they have lifted, and every generated site must have a solution or it is rejected. Nothing the player does can be undone, so a site that can be completed from the start can be completed from anywhere.
 - **Play.** Everything is done by walking: coming up to a door tries it, walking up to a key takes it, reaching the chest in the sanctum ends the run. Lock plates are the colour of their key.
 - **Checks.** A batch tool (`npx tsx tools/sites.ts`) generates hundreds of sites and confirms each is connected, can be completed, and has no doorway too steep for its stairs. In the browser, a walk test moves the player's body through every door and arch in both directions, and a playthrough test follows the solver's route with the player's body, letting doors and keys respond as in play.
+- **Export.** From the Export menu: the site document as JSON (with the solver's route), the plan as a PNG with a numbered key, and the 3D model as a binary glTF with its textures and stone tints. The model reloads through the standard glTF loader with every mesh intact; a ten-room site is about 45 MB. Baked light is not in the model.
 - **Map.** A plan of the site is drawn from the same document and shown as a minimap. It fills in as the player explores: places entered are drawn in full, places seen through an open doorway are sketched, the rest is left off. Shut doors and keys seen but not taken are marked.
 - **Light and dark.** Each place is lit by day, by torches, or deliberately left dark; the player carries a small light for the dark ones. The plan map shades unlit rooms.
 - **Lighting many rooms.** Four shadow-casting lights are shared among all torches and follow the player; rooms further off are lit by baked bounce light only until the player comes near.

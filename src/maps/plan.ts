@@ -17,6 +17,8 @@ export interface PlanOptions {
   shut?: Set<number>;
   /** Keys still lying where they were left. */
   items?: Item[];
+  /** Draw at exactly this many pixels square, ignoring the canvas's size on the page. */
+  pixels?: number;
 }
 
 const INK = '#2b241c';
@@ -29,8 +31,8 @@ const GLIMPSED = '#ddd2ba';
 const KEY_COLOUR: Record<string, string> = { iron: '#6f7781', gold: '#c9961f' };
 
 export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOptions = {}): void {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
+  const ratio = opts.pixels ? opts.pixels / 420 : Math.min(window.devicePixelRatio || 1, 2);
+  const cssW = opts.pixels ? 420 : canvas.clientWidth, cssH = opts.pixels ? 420 : canvas.clientHeight;
   if (canvas.width !== Math.round(cssW * ratio) || canvas.height !== Math.round(cssH * ratio)) {
     canvas.width = Math.round(cssW * ratio);
     canvas.height = Math.round(cssH * ratio);
@@ -55,7 +57,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.fillStyle = PAPER;
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = opts.pixels ? 1 : 0.9;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.globalAlpha = 1;
 
@@ -170,7 +172,9 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.font = `${Math.max(9 * ratio, 1.1 * scale)}px ui-serif, Georgia, serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(p.id + 1), X(cx), Z(cz) + (p.role === 'goal' || p.role === 'court' ? 1.6 * scale : 0));
+      // Step the number aside where something else is drawn in the middle of the room.
+      const busy = p.role === 'goal' || p.role === 'court' || (opts.items ?? []).some((it) => it.place === p.id);
+      ctx.fillText(String(p.id + 1), X(cx), Z(cz) + (busy ? Math.min(1.6, (p.z1 - p.z0) / 2 - 0.7) * scale : 0));
     }
   }
 
