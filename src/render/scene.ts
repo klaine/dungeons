@@ -112,6 +112,8 @@ export interface SceneDescription {
   falls?: { x: number; y: number; z: number; height: number; width: number }[];
   /** Boxes of space that are underground though outside the house: no mist lies in them and no daylight reaches them. */
   unders?: { min: Vector3; max: Vector3 }[];
+  /** Shafts of daylight coming down into a hall under the hill: where each begins, which way it goes, how far, and how broad. The air in them is lit. */
+  sunShafts?: { top: Vector3; down: Vector3; length: number; radius: number }[];
   /** High places that can be climbed to: where the cairn stands on each, and how far above the valley floor. */
   lookouts?: { x: number; y: number; z: number; height: number }[];
   /** Where the track crosses running water, how it gets over, and how high the water stands there. */

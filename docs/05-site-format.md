@@ -171,6 +171,12 @@ If a grotto has a `hall`, it is not a cave but a hall cut by hand, and `r` is no
 "grottoes": [ { "side": "w", "z": 80.4, "r": 2.1, "hall": { "length": 26.1, "width": 12.6, "height": 9.1, "drop": 5.8 } } ]
 ```
 
+If a hall has `great`, it is a great hall, and is laid out differently. The stair still goes down `drop` metres, but comes out on a ledge 6 metres deep across the near end of the hall, `great.deep` metres above its floor; `height` is from the floor to the crown. Along the hall, distances are from its near end. The side named by `great.gallery` (`n` for lesser z, `s` for greater) is a screen 0.9 metres thick standing 3.4 metres in from that wall, pierced by arched openings 2.6 metres wide every 3.65 metres, in two tiers: behind the upper, at the ledge's level, a gallery; behind the lower, at the floor, an aisle. Along the opposite wall a stair 3 metres wide goes down from the ledge at one in two. A chasm crosses the floor from the stair's wall to the screen, beginning `great.chasm.at` metres along, `width` across and `depth` deep; the last metre and a half of its width is steps that climb out of it, from the screen's end to the other. A bridge 3 metres wide crosses it on the hall's middle line. A second bridge, 2.6 metres wide, crosses the hall at the ledge's level over the middle of the chasm, from an opening of the gallery to a door in the opposite wall, behind which is a room 6.4 metres square. Pillars 2.2 metres square stand 27 hundredths of the hall's width either side of its middle line, the first pair 9.1 metres either side of the middle of the chasm and the rest every 7.3 metres from those. The last 5.6 metres are a dais with a tomb, as in any hall. A round shaft 6 metres across comes down through the roof, leaning towards `sun`, so that its light falls on the middle line 2.4 metres short of the chasm.
+
+```json
+"hall": { "length": 57.4, "width": 25.1, "height": 22.4, "drop": 5.5, "great": { "deep": 11.9, "gallery": "n", "chasm": { "at": 34.2, "width": 7.5, "depth": 10 } } }
+```
+
 ```json
 "towers": [ { "x": 27.1, "z": 75.2, "half": 3.1, "storeys": 3, "door": "w" } ]
 ```

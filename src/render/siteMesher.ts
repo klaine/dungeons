@@ -403,7 +403,7 @@ export function meshSite(site: Site): SceneDescription {
       const seeds = rng.fork(`grotto${k}`);
       // (For a hall: where its stair begins, measured as everything in a grotto is, going out of the valley from seven metres inside its edge; how far the stair runs; and where the hall itself begins.)
       const stair0 = 3.9, run = q.hall ? q.hall.drop / 0.5 : 0, hall0 = stair0 + run + 1.6;
-      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0 };
+      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0, gs: q.hall?.great?.gallery === 's' ? 1 : -1 };
     });
     /**
      * The air of a hewn hall, at a point given as the grotto's own measures: `t` going out of
@@ -424,7 +424,109 @@ export function meshSite(site: Site): SceneDescription {
       if (u < 0) return q.y0 + 0.24 * Math.max(0, 2.6 - t) - h.drop * Math.min(1, Math.max(0, (t - q.stair0) / q.run));
       return q.y0 - h.drop + (u > h.length - 5.6 ? 0.51 : 0);
     };
+    /**
+     * A great hall. Everything in it is measured as in any hall, with two things more: `yy`,
+     * the height above its floor, and `o`, how far a point lies from the middle line towards the
+     * side the gallery is on. The stair from the valley comes out on a ledge across the near
+     * end, `deep` above the floor. On the gallery's side the wall of the hall is a screen with
+     * arched openings in two tiers, a gallery behind the upper and an aisle behind the lower;
+     * along the other wall a stair goes down from the ledge. Pillars stand in two rows the
+     * whole height of it. A chasm crosses the floor, with a strip along its far side that
+     * climbs out of it; a bridge crosses it at the floor and another at the gallery's level,
+     * which ends at a door into a room cut in the far wall. A shaft in the roof lets the day in.
+     */
+    // (`foot` is the level bottom left at the foot of the steps out of the chasm, so that they can be walked onto.)
+    const GREAT = { ledge: 6, gal: 3.4, screen: 0.9, bay: 3.65, stair: 3, pitch: 7.3, strip: 1.5, foot: 1.4 };
+    // One tier of what lies behind the screen: a passage along the wall, and the arched openings into it.
+    const tierAir = (a: number, o: number, yy: number, u: number, du: number, face: number, back: number, half: number, fy: number, from: number, to: number): number =>
+      Math.max(a, Math.min(o - back, half - o, yy - fy, fy + 3.5 - yy, u - from, to - u), Math.min(1.3 - du, o - (face - 0.5), back + 0.5 - o, yy - fy, fy + 3.2 - 0.8 * (du / 1.3) ** 2 - yy, u - from - 0.6, to - 0.6 - u));
+    const greatPillars = (q: (typeof grottoes)[number]): [number, number][] => {
+      // (They stand opposite every other pier of the screen, counted both ways from the upper bridge, and well back from the chasm.)
+      const h = q.hall!, c = h.great!.chasm, out: [number, number][] = [], clear = GREAT.bay * 2.5 - c.width / 2;
+      for (const v of [-h.width * 0.27, h.width * 0.27]) {
+        for (let u = c.at - clear; u > GREAT.ledge + 2.5; u -= GREAT.pitch) out.push([u, v]);
+        for (let u = c.at + c.width + clear; u < h.length - 7; u += GREAT.pitch) out.push([u, v]);
+      }
+      return out;
+    };
+    /**
+     * Where the day comes into a great hall: a round shaft through the roof, leaning towards the
+     * sun so that its light lands where the lower bridge begins. `u`, `off` and `yy` are where
+     * its middle line meets the roof; `du`, `dv` and `dy` are the way up it, towards the sun.
+     * The sun is taken no lower than about fifty degrees (a shaft cut flatter than that would
+     * light nothing but its own side), and steeper still if the shaft would otherwise come out
+     * beyond the hall.
+     */
+    const shaftOf = (q: (typeof grottoes)[number]) => {
+      const h = q.hall!, gr = h.great!, half = h.width / 2;
+      const land = { u: gr.chasm.at - 2.4, off: 0 };
+      let du = -q.inw * site.sun[0], dv = site.sun[2];
+      const flat = Math.hypot(du, dv) || 1, lean = Math.min(0.78, flat / Math.max(0.05, site.sun[1]));
+      du = (du / flat) * lean; dv = (dv / flat) * lean;
+      // (Per metre climbed, how far it goes along and across. Kept inside the roof, and off the screen.)
+      let top = { u: land.u + du * h.height * 0.95, off: land.off + dv * h.height * 0.95 };
+      top = { u: Math.min(h.length - 6, Math.max(7, top.u)), off: Math.min(half - 7, Math.max(-(half - 7), top.off)) };
+      const yy = h.height * (0.7 + 0.3 * Math.sqrt(Math.max(0, 1 - (top.off / half) ** 2)));
+      const len = Math.hypot(top.u - land.u, top.off - land.off, yy);
+      return { u: top.u, off: top.off, yy, du: (top.u - land.u) / len, dv: (top.off - land.off) / len, dy: yy / len, r: 3, land };
+    };
+    const shaftFor = new Map<(typeof grottoes)[number], ReturnType<typeof shaftOf>>();
+    for (const q of grottoes) if (q.hall?.great) shaftFor.set(q, shaftOf(q));
+    const greatAir = (q: (typeof grottoes)[number], t: number, off: number, y: number): number => {
+      const h = q.hall!, gr = h.great!, c = gr.chasm, u = t - q.hall0, half = h.width / 2, G = gr.deep, L = h.length, H = h.height;
+      const yl = q.y0 - h.drop, yy = y - (yl - G), o = off * q.gs, face = half - GREAT.gal;
+      // The way in, as to any hall; but it comes out on the ledge.
+      const pf = q.y0 + 0.24 * Math.max(0, 2.6 - t) - h.drop * Math.min(1, Math.max(0, (t - q.stair0) / q.run));
+      const air = Math.min(1.35 - Math.abs(off), y - pf, pf + 3.3 - y, t + 0.4, q.hall0 + 0.6 - t);
+      if (u < -0.8 || u > L + 0.8) return air;
+      const crown = H * (0.7 + 0.3 * Math.sqrt(Math.max(0, 1 - (off / half) ** 2)));
+      let a = Math.min(u, L - u, o + half, face - o, yy, crown - yy);
+      // The ledge across the near end; the stair down from it along one wall; the dais at the far end.
+      a = Math.min(a, Math.max(u - GREAT.ledge, yy - G));
+      a = Math.min(a, Math.max(o + half - GREAT.stair, (yy - Math.min(G, G - (u - GREAT.ledge) / 2)) * 0.894));
+      a = Math.min(a, Math.max(L - 5.6 - u, yy - 0.51));
+      if (a > -1.2) {
+        // The nearest pillar: they are counted outwards from the chasm, both ways.
+        const c1 = c.at + c.width, near = u < c.at + c.width / 2, clear = GREAT.bay * 2.5 - c.width / 2, first = near ? c.at - clear : c1 + clear;
+        const k = Math.max(0, Math.round((near ? first - u : u - first) / GREAT.pitch)), pu = near ? first - k * GREAT.pitch : first + k * GREAT.pitch;
+        const pv = (off < 0 ? -1 : 1) * h.width * 0.27, d = Math.max(Math.abs(u - pu), Math.abs(off - pv));
+        if ((near ? pu > GREAT.ledge + 2.5 : pu < L - 7) && d < 2.6) {
+          // Square in the shaft; a band where the gallery's floor is; spreading wide under the roof, and a little at the foot.
+          const top = H * 0.953;
+          a = Math.min(a, d - (1.1 + 0.85 * smooth((yy - (top - 5)) / 2.8) + 0.36 * (1 - smooth((yy - 0.05) / 0.8)) + 0.2 * Math.min(1, Math.max(0, (0.5 - Math.abs(yy - G)) / 0.14))));
+        }
+        // The tomb, on the dais.
+        a = Math.min(a, Math.max(Math.abs(u - (L - 2.7)) - 0.8, Math.abs(off) - 1.5, yy - (0.51 + 1.25)));
+      }
+      {
+        // The chasm; and along its far side a strip whose floor climbs from the bottom to the hall's floor.
+        const c1 = c.at + c.width, oA = face - GREAT.foot, ramp = Math.min(0, Math.max(-c.depth, -c.depth + (oA - o) / 2));
+        a = Math.max(a, Math.min(u - c.at, c1 - GREAT.strip - u, yy + c.depth, o + half, face - o, 1.5 - yy));
+        a = Math.max(a, Math.min(u - (c1 - GREAT.strip - 0.1), c1 - u, (yy - ramp) * 0.894, o + half, face - o, 1.5 - yy));
+        // The bridge at the floor: level on top, arched beneath, thinnest at the middle.
+        const uc = c.at + c.width / 2, x = (u - uc) / (c.width / 2);
+        a = Math.min(a, Math.max(Math.abs(off) - 1.5, yy, -0.8 - 1.7 * x * x - yy));
+        // The bridge above: from the gallery to the far wall, right over the chasm.
+        const xo = (o - (face - half) / 2) / ((face + half) / 2);
+        a = Math.min(a, Math.max(Math.abs(u - uc) - 1.3, yy - G, G - 1.0 - 3.2 * xo * xo - yy));
+        // Behind the screen: the gallery, and the aisle under it; and the openings through to both, a bay apart, arched.
+        const du = Math.abs(u - uc - GREAT.bay * Math.round((u - uc) / GREAT.bay)), back = face + GREAT.screen;
+        a = tierAir(a, o, yy, u, du, face, back, half, G, 0.6, L - 2);
+        a = tierAir(a, o, yy, u, du, face, back, half, 0, GREAT.ledge + 1.2, L - 6.4);
+        // The door at the far end of the upper bridge, and the room behind it.
+        a = Math.max(a, Math.min(1.2 - Math.abs(u - uc), -half + 0.3 - o, o + half + 1.7, yy - G, G + 3.0 - yy));
+        a = Math.max(a, Math.min(3.2 - Math.abs(u - uc), -half - 1.5 - o, o + half + 8, yy - G, G + 3.8 - yy));
+      }
+      // The shaft that lets the day in.
+      const sh = shaftFor.get(q)!;
+      if (yy > sh.yy - 3) {
+        const up = (yy - sh.yy) / sh.dy;
+        a = Math.max(a, Math.min((sh.r - Math.hypot(u - sh.u - sh.du * up, off - sh.off - sh.dv * up)) * sh.dy, yy - (sh.yy - 2.5)));
+      }
+      return Math.max(air, a);
+    };
     const hallAir = (q: (typeof grottoes)[number], t: number, off: number, y: number): number => {
+      if (q.hall!.great) return greatAir(q, t, off, y);
       const h = q.hall!, u = t - q.hall0, floor = hallFloor(q, t);
       // The way in: a doorway's breadth, and half as high again as a man.
       let air = Math.min(1.35 - Math.abs(off), y - floor, floor + 3.3 - y, t + 0.4, q.hall0 + 0.6 - t);
@@ -1776,13 +1878,15 @@ export function meshSite(site: Site): SceneDescription {
     // is told so, so that nothing lights it but what burns in it and what is carried into it.
     for (const q of grottoes) {
       if (!q.hall) continue;
-      const h = q.hall, yf = q.y0 - h.drop;
+      const h = q.hall, gr = h.great, yl = q.y0 - h.drop, yf = yl - (gr?.deep ?? 0), half = h.width / 2;
       wild.group = 'under';
       const rockUnder = wild.mesh('rock');
       wild.group = 'wild';
       const tone1 = rng.fork('hewn').range(0, 50);
       // From a point of the world to the hall's own measures, and back.
       const tOf = (x: number) => 7 - (x - q.edge) * q.inw, xOf = (t: number) => q.edge + q.inw * (7 - t);
+      // (And by a great hall's: along it, towards the gallery's side, and up from its floor.)
+      const at = (u: number, o: number, yy: number) => V(xOf(q.hall0 + u), yf + yy, q.z + q.gs * o);
       const air = (x: number, y: number, z: number) => hallAir(q, tOf(x), z - q.z, y);
       const shade = (c: Vector3, n: Vector3): Colour => {
         // Tool marks, and soot under the roof.
@@ -1791,24 +1895,74 @@ export function meshSite(site: Site): SceneDescription {
       };
       // The land's rock is carved only a little deeper than the valley floor, so it can hold no more than the
       // head of the stair; this takes over from there, and what the land's carving made of the rest is thrown away.
-      const pieces: [number, number, number, number][] = [[UNDER_FROM - 0.3, q.hall0 + 0.9, 2.4, q.y0 + 3.9], [q.hall0 - 0.3, q.hall0 + h.length + 0.9, h.width / 2 + 0.9, yf + h.height + 0.9]];
-      for (const [t0, t1, half, top] of pieces) {
-        carveRock(rockUnder, air, {
-          min: V(Math.min(xOf(t0), xOf(t1)), yf - 0.9, q.z - half), max: V(Math.max(xOf(t0), xOf(t1)), top, q.z + half),
-          cell: 0.36, uvScale: 0.4, fromSamples: true, sharp: true, shade: (c, n) => shade(c, n),
-        });
-      }
+      const span = (a: Vector3, b: Vector3): [Vector3, Vector3] => [V(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z)), V(Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z))];
+      const pieces: [Vector3, Vector3][] = [span(V(xOf(UNDER_FROM - 0.3), yl - 0.9, q.z - 2.4), V(xOf(q.hall0 + 0.9), q.y0 + 3.9, q.z + 2.4))];
+      const sh = shaftFor.get(q);
+      if (gr && sh) {
+        // A great hall is carved in three: the hall with its chasm, the room off the upper bridge, and the shaft above the roof.
+        const uc = gr.chasm.at + gr.chasm.width / 2, rise = 9, lean = rise / sh.dy;
+        pieces.push(span(at(-0.3, -half - 0.9, -gr.chasm.depth - 0.9), at(h.length + 0.9, half + 0.9, h.height + 0.9)));
+        pieces.push(span(at(uc - 4.1, -half - 8.9, gr.deep - 0.9), at(uc + 4.1, -half - 0.5, gr.deep + 4.7)));
+        pieces.push(span(
+          V(xOf(q.hall0 + Math.min(sh.u, sh.u + sh.du * lean) - sh.r - 1.2), yf + sh.yy - 0.6, q.z + Math.min(sh.off, sh.off + sh.dv * lean) - sh.r - 1.2),
+          V(xOf(q.hall0 + Math.max(sh.u, sh.u + sh.du * lean) + sh.r + 1.2), yf + sh.yy + rise, q.z + Math.max(sh.off, sh.off + sh.dv * lean) + sh.r + 1.2)));
+      } else pieces.push(span(V(xOf(q.hall0 - 0.3), yf - 0.9, q.z - half - 0.9), V(xOf(q.hall0 + h.length + 0.9), yf + h.height + 0.9, q.z + half + 0.9)));
+      for (const [min, max] of pieces) carveRock(rockUnder, air, { min, max, cell: gr ? 0.42 : 0.36, uvScale: 0.4, fromSamples: true, sharp: true, shade: (c, n) => shade(c, n) });
       // The stair: steps of stone on the slope the rock was cut to, a stride and a half broad, each a hand and a half high.
       const cut = rng.fork('hallsteps');
       // (Counted from the bottom, so that the first step up from the hall is no higher than the rest: a step and a bit is a wall.)
       for (let k = 0; 0.34 * (k + 1) <= q.run + 0.05; k++) {
-        const t = q.stair0 + q.run - 0.34 * (k + 1), top = yf + 0.17 * (k + 1), x0 = xOf(t), x1 = xOf(t + 0.34);
+        const t = q.stair0 + q.run - 0.34 * (k + 1), top = yl + 0.17 * (k + 1), x0 = xOf(t), x1 = xOf(t + 0.34);
         layBeam(rockUnder, V((x0 + x1) / 2, top - 0.16, q.z - 1.3), V((x0 + x1) / 2, top - 0.16, q.z + 1.3), 0.36, 0.32, rockColour(cut.range(0.85, 1.05)), cut.range(0, 9));
       }
-      // And the three steps of the dais.
-      for (let k = 0; k < 3; k++) {
-        const u = h.length - 5.6 - 0.34 * (2 - k), x = xOf(q.hall0 + u + 0.17);
-        layBeam(rockUnder, V(x, yf + 0.17 * (k + 1) - 0.16, q.z - h.width / 2 + 0.4), V(x, yf + 0.17 * (k + 1) - 0.16, q.z + h.width / 2 - 0.4), 0.36, 0.32, rockColour(0.95), k);
+      // Where torches burn: they are hung further down, and what they light is reckoned from this.
+      const lamps: Vector3[] = [];
+      const torch = (position: Vector3, out: Vector3) => { hallTorches.push({ position, out }); lamps.push(position); };
+      if (gr) {
+        const c = gr.chasm, G = gr.deep, L = h.length, c1 = c.at + c.width, uc = c.at + c.width / 2, face = half - GREAT.gal, back = face + GREAT.screen;
+        const step = (a: Vector3, b: Vector3) => layBeam(rockUnder, a, b, 0.36, 0.32, rockColour(cut.range(0.85, 1.05)), cut.range(0, 9));
+        // The stair from the ledge to the floor, along the wall.
+        for (let k = 0; 0.17 * (k + 1) <= G + 0.01; k++) {
+          const u = GREAT.ledge + 2 * G - 0.34 * (k + 1) + 0.17, y = 0.17 * (k + 1) - 0.16;
+          step(at(u, -half, y), at(u, -half + GREAT.stair, y));
+        }
+        // The steps out of the chasm, along its far side.
+        for (let k = 0; 0.17 * (k + 1) <= c.depth + 0.01; k++) {
+          const o = face - GREAT.foot - 0.34 * (k + 1) + 0.17, y = -c.depth + 0.17 * (k + 1) - 0.16;
+          step(at(c1 - GREAT.strip, o, y), at(c1, o, y));
+        }
+        // The three steps of the dais.
+        for (let k = 0; k < 3; k++) {
+          const u = L - 5.6 - 0.34 * (2 - k) + 0.17;
+          layBeam(rockUnder, at(u, -half + 0.4, 0.17 * (k + 1) - 0.16), at(u, face - 0.4, 0.17 * (k + 1) - 0.16), 0.36, 0.32, rockColour(0.95), k);
+        }
+        // Torches: on the pillars, facing the middle; either side of the way in; along the back wall of the gallery and of the aisle,
+        // every other bay and turn about; either side of the tomb; and one in the room over the bridge.
+        const way = (du: number, dout: number) => V(-q.inw * du, 0, q.gs * dout);
+        for (const [u, v] of greatPillars(q)) torch(V(xOf(q.hall0 + u), yf + 2.7, q.z + v - Math.sign(v) * 1.36), V(0, 0, -Math.sign(v)));
+        for (const side of [-1, 1]) torch(V(xOf(q.hall0 + 0.14), yf + G + 2.5, q.z + side * 2.5), way(1, 0));
+        for (let k = -12; k <= 12; k++) {
+          const u = uc + (k + 0.5) * GREAT.bay;
+          if (u > 2.5 && u < L - 3.5 && (k & 1) === 0) torch(at(u, half - 0.14, G + 2.4), way(0, -1));
+          if (u > GREAT.ledge + 2.5 && u < L - 7.5 && (k & 1) !== 0) torch(at(u, half - 0.14, 2.4), way(0, -1));
+        }
+        for (const side of [-1, 1]) torch(V(xOf(q.hall0 + L - 0.14), yf + 0.51 + 2.6, q.z + side * 3.6), way(-1, 0));
+        torch(at(uc + 3.06, -half - 4.6, G + 2.3), way(-1, 0));
+        finds.push({ at: V(xOf(q.hall0 + L - 2.7), yf + 0.51 + 1.43, q.z), what: 'a crown of dull gold, lying on the tomb in the great hall under the hill' });
+        finds.push({ at: at(uc - 1.6, -half - 6.4, G + 0.4), what: 'a roll of drawings for a hall never finished, in the room over the bridge' });
+        finds.push({ at: at(c.at + 2.2, -half + 2.2, -c.depth + 0.4), what: 'a helm with a dent in its crown, at the bottom of the chasm' });
+        unders.push({ min: span(at(-1, -half - 9.5, -c.depth - 1), at(L + 1, half + 1, h.height + 1))[0].min(V(xOf(q.stair0), Infinity, Infinity)), max: span(at(-1, -half - 9.5, -c.depth - 1), at(L + 1, half + 1, h.height + 1))[1].max(V(xOf(q.stair0), -Infinity, -Infinity)) });
+      } else {
+        // The three steps of the dais.
+        for (let k = 0; k < 3; k++) {
+          const u = h.length - 5.6 - 0.34 * (2 - k), x = xOf(q.hall0 + u + 0.17);
+          layBeam(rockUnder, V(x, yf + 0.17 * (k + 1) - 0.16, q.z - h.width / 2 + 0.4), V(x, yf + 0.17 * (k + 1) - 0.16, q.z + h.width / 2 - 0.4), 0.36, 0.32, rockColour(0.95), k);
+        }
+        // Torches on the pillars, facing the middle of the hall, and one either side of the tomb.
+        for (const [u, v] of pillarsOf(q)) torch(V(xOf(q.hall0 + u), yf + 2.5, q.z + v - Math.sign(v) * 0.76), V(0, 0, -Math.sign(v)));
+        for (const side of [-1, 1]) torch(V(xOf(q.hall0 + h.length - 0.14), yf + 0.51 + 2.5, q.z + side * 3.2), V(q.inw, 0, 0));
+        finds.push({ at: V(xOf(q.hall0 + h.length - 2.7), yf + 0.51 + 1.18, q.z), what: 'a crown of dull gold, lying on the tomb in the hall under the hill' });
+        unders.push({ min: V(Math.min(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf - 1, q.z - h.width / 2 - 1), max: V(Math.max(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf + h.height + 1, q.z + h.width / 2 + 1) });
       }
       // The doorway: where the passage meets the face of the cliff it is dressed, as a made thing
       // is: two jambs of squared stone, a lintel across them, and a sill. The face is found by
@@ -1822,15 +1976,64 @@ export function meshSite(site: Site): SceneDescription {
         layBeam(made, V(x, q.y0 + 4.26, q.z - 1.5), V(x, q.y0 + 4.26, q.z + 1.5), 0.8, 0.3, rockColour(1.08), 6);
         layBeam(made, V(xOf(face - 0.6), q.y0 - 0.11, q.z - 1.9), V(xOf(face - 0.6), q.y0 - 0.11, q.z + 1.9), 1.5, 0.2, rockColour(1.0), 7);
       }
-      // No sky down here: none in the hall, and less and less of it going down the stair.
-      rockUnder.setOpenBy((x) => 0.9 * (1 - smooth((tOf(x) - 2.6) / 5)));
-      // Torches on the pillars, facing the middle of the hall, and one either side of the tomb.
-      for (const [u, v] of pillarsOf(q)) {
-        hallTorches.push({ position: V(xOf(q.hall0 + u), yf + 2.5, q.z + v - Math.sign(v) * 0.76), out: V(0, 0, -Math.sign(v)) });
-      }
-      for (const side of [-1, 1]) hallTorches.push({ position: V(xOf(q.hall0 + h.length - 0.14), yf + 0.51 + 2.5, q.z + side * 3.2), out: V(q.inw, 0, 0) });
-      finds.push({ at: V(xOf(q.hall0 + h.length - 2.7), yf + 0.51 + 1.18, q.z), what: 'a crown of dull gold, lying on the tomb in the hall under the hill' });
-      unders.push({ min: V(Math.min(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf - 1, q.z - h.width / 2 - 1), max: V(Math.max(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf + h.height + 1, q.z + h.width / 2 + 1) });
+      /**
+       * The light down here. No sky stands over a hall, and the sun's shadows are not kept this
+       * far from the house, so nothing that lights the valley can be let light this. Its light
+       * is reckoned here instead, point by point, and carried by the rock as baked light is: the
+       * last of the day coming down the stair; every torch, as far as ten metres and not through
+       * rock; and in a great hall the sun down its shaft, the sky seen through the shaft's mouth,
+       * and what the sunlit floor throws back. Each is looked for along a straight line through
+       * the hall's own air, so pillars and bridges cast shadows.
+       */
+      const sunC = [0, 1, 2].map((c) => sky.colour[c] * sky.intensity), skyC = [0, 1, 2].map((c) => 0.6 * sky.zenith[c] + 0.4 * sky.horizon[c]);
+      const clear = (px: number, py: number, pz: number, lx: number, ly: number, lz: number, far: number, by: number): boolean => {
+        for (let d = by; d < far; d += by) if (air(px + lx * d, py + ly * d, pz + lz * d) < -0.1) return false;
+        return true;
+      };
+      // (The sun, as the shaft was cut to take it: where its mouth is, and the way up it.)
+      const mouth = sh ? at(sh.u, q.gs * sh.off, sh.yy) : null, up = sh ? V(-q.inw * sh.du, sh.dy, sh.dv) : null;
+      const pool = sh ? at(sh.land.u, 0, 1.2) : null, area = sh ? Math.PI * sh.r * sh.r : 0;
+      rockUnder.setLightBy((p, n, out) => {
+        const px = p[0] + n[0] * 0.3, py = p[1] + n[1] * 0.3, pz = p[2] + n[2] * 0.3;
+        // (Light from one way, written so that a face turned from it gets none and a face turned to it gets it all.)
+        const add = (r: number, g: number, b: number, lx: number, ly: number, lz: number, nl: number) => {
+          const k = nl / (0.25 + 0.5 * nl);
+          out[0] += 0.25 * k * r; out[1] += 0.5 * k * r * lx; out[2] += 0.5 * k * r * ly; out[3] += 0.5 * k * r * lz;
+          out[4] += 0.25 * k * g; out[5] += 0.5 * k * g * lx; out[6] += 0.5 * k * g * ly; out[7] += 0.5 * k * g * lz;
+          out[8] += 0.25 * k * b; out[9] += 0.5 * k * b * lx; out[10] += 0.5 * k * b * ly; out[11] += 0.5 * k * b * lz;
+        };
+        // Never quite nothing: the eye finds a little in any dark.
+        out[0] += 0.055; out[4] += 0.075; out[8] += 0.12;
+        const day = 0.9 * (1 - smooth((tOf(p[0]) - 2.6) / 5)) * (Math.PI / 2);
+        if (day > 0) for (let c = 0; c < 3; c++) { out[c * 4] += skyC[c] * day; out[c * 4 + 2] += skyC[c] * day * 0.8; }
+        for (const l of lamps) {
+          const dx = l.x - px, dy = l.y - py, dz = l.z - pz, d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 > 196) continue;
+          const d = Math.sqrt(d2), nl = (n[0] * dx + n[1] * dy + n[2] * dz) / d;
+          if (nl < 0.02 || !clear(px, py, pz, dx / d, dy / d, dz / d, d - 0.4, 0.55)) continue;
+          const e = (7 * (1 - d / 14)) / (d2 + 1);
+          add(e, e * 0.5, e * 0.17, dx / d, dy / d, dz / d, nl);
+        }
+        if (!sh || !mouth || !up || !pool) return;
+        // The sun: only within the shaft's own round of light, and only where nothing stands between.
+        const wx = px - mouth.x, wy = py - mouth.y, wz = pz - mouth.z, along = wx * up.x + wy * up.y + wz * up.z;
+        const beam = smooth((sh.r + 1.2 - Math.hypot(wx - up.x * along, wy - up.y * along, wz - up.z * along)) / 0.6), nu = n[0] * up.x + n[1] * up.y + n[2] * up.z;
+        // (Its light is not added here: the rock is told only that it stands in it, and draws the edge of the light itself.)
+        if (beam > 0 && nu > 0.02 && clear(px, py, pz, up.x, up.y, up.z, 8.5 - along, 0.55)) out[12] = 1;
+        // The sky, seen through the mouth of the shaft: little, cold, and from above.
+        {
+          const dx = mouth.x - px, dy = mouth.y + 1 - py, dz = mouth.z - pz, d = Math.hypot(dx, dy, dz), nl = (n[0] * dx + n[1] * dy + n[2] * dz) / d;
+          const e = (16 * area * Math.max(0, dy / d)) / (d * d + 30);
+          if (nl > 0.02 && e > 0.004 && clear(px, py, pz, dx / d, dy / d, dz / d, d - 1.5, 0.9)) add(skyC[0] * e, skyC[1] * e, skyC[2] * e, dx / d, dy / d, dz / d, nl);
+        }
+        // What the sunlit floor throws back: warm, and from below.
+        {
+          const dx = pool.x - px, dy = pool.y - py, dz = pool.z - pz, d = Math.hypot(dx, dy, dz), nl = (n[0] * dx + n[1] * dy + n[2] * dz) / d;
+          const e = (3.2 * area * Math.max(0.2, -dy / d)) / (Math.PI * (d * d + 16));
+          if (nl > 0.02 && e * sky.intensity > 0.004 && clear(px, py, pz, dx / d, dy / d, dz / d, d - 0.8, 0.9)) add(sunC[0] * e, sunC[1] * e * 0.9, sunC[2] * e * 0.78, dx / d, dy / d, dz / d, nl);
+        }
+      });
+      if (sh && mouth && up) sunShafts.push({ top: mouth.clone().addScaledVector(up, 8), down: up.clone().negate(), length: 8 + sh.yy / sh.dy + gr!.chasm.depth, radius: sh.r });
     }
     grottoes.forEach((q, k) => {
       if (q.hall) return;
@@ -2065,6 +2268,7 @@ export function meshSite(site: Site): SceneDescription {
   const lookouts: { x: number; y: number; z: number; height: number }[] = [];
   const hallTorches: TorchSpec[] = [];
   const unders: { min: Vector3; max: Vector3 }[] = [];
+  const sunShafts: { top: Vector3; down: Vector3; length: number; radius: number }[] = [];
   const crossings: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
@@ -2546,6 +2750,7 @@ export function meshSite(site: Site): SceneDescription {
     masses: kit.masses,
     torches: [...[...torchesByPlace.values()].flat(), ...hallTorches],
     unders,
+    sunShafts,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
     spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
     track: arrival.track,

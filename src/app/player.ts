@@ -24,6 +24,8 @@ export class Player {
    * for taking pictures of it from where no one could stand. `V` turns it on and off.
    */
   flying = false;
+  /** Below this the player has fallen out of the world, and is put back where they came in. Lower where there is ground far down: a hall under the hill, a chasm. */
+  fallTo = -8;
   /** Boxes that stop the player while active, such as shut doors. */
   readonly blockers: { min: Vector3; max: Vector3; active: boolean }[] = [];
   private jumpQueued = false;
@@ -117,7 +119,7 @@ export class Player {
 
     const steps = 4;
     for (let i = 0; i < steps; i++) this.step(dt / steps);
-    if (this.position.y < -8) {
+    if (this.position.y < this.fallTo) {
       this.position.copy(this.spawn);
       this.velocity.set(0, 0, 0);
     }

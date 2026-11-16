@@ -242,7 +242,14 @@ async function start(): Promise<void> {
     const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
     const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];
     const bk = geometry.getAttribute('aBake') as BufferAttribute;
+    const own = builder.own;
     for (let i = 0; i < builder.vertexCount; i++) {
+      // What lies under the hill has light of its own, reckoned when it was built; it is marked as seeing no sky, which keeps the sun off it.
+      if (own) {
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, own[i * 13 + c * 4], own[i * 13 + c * 4 + 1], own[i * 13 + c * 4 + 2], own[i * 13 + c * 4 + 3]);
+        bk.setXY(i, 0, 0.6 + 0.4 * own[i * 13 + 12]);
+        continue;
+      }
       // Rock knows how much of the sky each of its points can see; everything else sees all of it.
       // Even the deepest crack gets a little light back from the rock about it.
       const open = 0.3 + 0.7 * builder.openAt(i);
@@ -521,6 +528,19 @@ async function start(): Promise<void> {
     const lowest = atmosphere.uniforms.uUnderMin.value.set(Infinity, Infinity, Infinity), highest = atmosphere.uniforms.uUnderMax.value.set(-Infinity, -Infinity, -Infinity);
     for (const u of desc.unders) { lowest.min(u.min); highest.max(u.max); }
   }
+  {
+    // A shaft of daylight in a hall under the hill: its air is lit as the sun is that day, or the moon.
+    const shaft = desc.sunShafts?.[0], u = atmosphere.uniforms;
+    if (shaft) {
+      u.uShaftTop.value.set(shaft.top.x, shaft.top.y, shaft.top.z, shaft.radius);
+      u.uShaftDown.value.set(shaft.down.x, shaft.down.y, shaft.down.z, shaft.length);
+      u.uShaftCol.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.012);
+      u.uUnderAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(0.05);
+      rockUniforms.uShaftTop.value.set(shaft.top.x, shaft.top.y, shaft.top.z, shaft.radius);
+      rockUniforms.uShaftUp.value.copy(shaft.down).negate();
+      rockUniforms.uShaftSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY);
+    } else { u.uShaftTop.value.set(0, 0, 0, 0); u.uUnderAir.value.set(0, 0, 0); rockUniforms.uShaftTop.value.set(0, 0, 0, 0); }
+  }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
   atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
@@ -533,6 +553,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
+  player.fallTo = Math.min(-8, under.position.y - 1);
   for (const f of desc.fences ?? []) player.blockers.push({ min: f.min, max: f.max, active: true });
   new TouchControls(canvas, player, toggleLantern);
 
@@ -991,6 +1012,24 @@ async function start(): Promise<void> {
     return { won: game.won, keys: [...game.keys], log };
   };
   // For diagnosis: what a pixel looks at, and whether that point has a clear line to the sun.
+  // For walking the player's body along a line of points, wherever they are: up a tower, through a hall under the hill.
+  // It goes straight at each and steps round nothing, so that whatever stops it shows. Says how far it got.
+  (window as any).__dbg.walk = (points: [number, number][], reach = 0.35) => {
+    const out: { ok: boolean; x: number; y: number; z: number }[] = [];
+    for (const [tx, tz] of points) {
+      let ok = false;
+      for (let i = 0; i < 1800 && !ok; i++) {
+        if (Math.hypot(tx - player.position.x, tz - player.position.z) < reach) { ok = true; break; }
+        player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+        player.analog.set(0, -1);
+        player.update(1 / 60);
+      }
+      player.analog.set(0, 0);
+      out.push({ ok, x: +player.position.x.toFixed(2), y: +player.position.y.toFixed(2), z: +player.position.z.toFixed(2) });
+      if (!ok) break;
+    }
+    return out;
+  };
   (window as any).__dbg.sunProbe = (nx: number, ny: number) => {
     camera.updateMatrixWorld(true);
     const dir = new Vector3(nx, ny, 0.5).unproject(camera).sub(camera.position).normalize();

@@ -104,6 +104,25 @@ export class MeshBuilder {
     for (let i = 0; i < this.vertexCount; i++) this.setOpen(i, value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]));
   }
 
+  /**
+   * Light of its own, for what is neither baked nor under the sky: for every point already laid,
+   * given where it is and which way it faces, the light that falls on it, as the bake would
+   * have written it (for each of red, green and blue: a level, and three numbers for the way it
+   * comes from; and last, a thirteenth number, whether it stands clear in a shaft of sunlight).
+   * What is given this is lit by nothing else but lamps.
+   */
+  own: Float32Array | null = null;
+  setLightBy(light: (p: number[], n: number[], out: Float32Array) => void): void {
+    this.own = new Float32Array(this.vertexCount * 13);
+    const p = [0, 0, 0], n = [0, 0, 0], out = new Float32Array(13);
+    for (let i = 0; i < this.vertexCount; i++) {
+      for (let k = 0; k < 3; k++) { p[k] = this.pos.data[i * 3 + k]; n[k] = this.nrm.data[i * 3 + k]; }
+      out.fill(0);
+      light(p, n, out);
+      this.own.set(out, i * 13);
+    }
+  }
+
   /** Sets one of the four fields of every point already laid, from where the point is. Where the function gives nothing, the field is left. */
   setField(channel: number, value: (x: number, y: number, z: number) => number | undefined): void {
     for (let i = 0; i < this.vertexCount; i++) {

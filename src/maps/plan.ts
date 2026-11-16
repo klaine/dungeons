@@ -62,6 +62,12 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   const g = opts.valley ? site.grounds : undefined;
   if (g) {
     x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
+    // A hall under the hill runs out beyond the valley's edge, and the map is made wide enough to show all of it.
+    for (const q of site.grottoes ?? []) {
+      if (!q.hall) continue;
+      const far = 3.9 + q.hall.drop / 0.5 + 1.6 + q.hall.length - 7 + 3;
+      if (q.side === 'w') x0 = Math.min(x0, g.x0 - far); else x1 = Math.max(x1, g.x1 + far);
+    }
   }
   const pad = 10 * ratio;
   const scale = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (z1 - z0));
@@ -106,6 +112,61 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     // Grottoes: a dark hollow in the rock at the valley's edge.
     for (const q of site.grottoes ?? []) {
       const edge = q.side === 'w' ? g.x0 : g.x1, inw = q.side === 'w' ? 1 : -1;
+      if (q.hall?.great) {
+        // A great hall, drawn at its floor: the ledge it is come upon from, the stair down, the screen with the aisle behind it,
+        // the chasm with its bridge and its steps, the upper bridge as a broken line, the pillars, and the room off the upper bridge.
+        const h = q.hall, gr = q.hall.great, c = gr.chasm, hall0 = 3.9 + h.drop / 0.5 + 1.6, gs = gr.gallery === 's' ? 1 : -1, half = h.width / 2;
+        const face = half - 3.4, back = face + 0.9, c1 = c.at + c.width, uc = c.at + c.width / 2;
+        const box = (u0: number, u1: number, o0: number, o1: number) => {
+          const xa = edge + inw * (7 - hall0 - u0), xb = edge + inw * (7 - hall0 - u1), za = q.z + gs * o0, zb = q.z + gs * o1;
+          rect(Math.min(xa, xb), Math.min(za, zb), Math.max(xa, xb), Math.max(za, zb));
+        };
+        const line = (u0: number, o0: number, u1: number, o1: number) => { ctx.beginPath(); ctx.moveTo(X(edge + inw * (7 - hall0 - u0)), Z(q.z + gs * o0)); ctx.lineTo(X(edge + inw * (7 - hall0 - u1)), Z(q.z + gs * o1)); ctx.stroke(); };
+        ctx.fillStyle = INK;
+        box(-0.6, h.length + 0.6, -half - 0.6, half + 0.6);
+        box(uc - 3.8, uc + 3.8, -half - 8.6, -half);
+        box(2.6 - hall0, 0, -1.95, 1.95);
+        ctx.fillStyle = DARK;
+        box(2.6 - hall0, 0, -1.35, 1.35);
+        box(0, h.length, -half, face);
+        box(0.6, h.length - 2, back, half);
+        box(uc - 3.2, uc + 3.2, -half - 8, -half - 1.5);
+        box(uc - 1.2, uc + 1.2, -half - 1.6, -half);
+        for (let u = uc - 12 * 3.65; u < h.length - 3; u += 3.65) if (u > 2) box(u - 1.3, u + 1.3, face - 0.05, back + 0.05);
+        // The ledge, which is the level of the door: paler than the floor far below it.
+        ctx.fillStyle = FLOOR;
+        ctx.globalAlpha = 0.55;
+        box(0, 6, -half, face);
+        ctx.globalAlpha = 1;
+        // The chasm, and the bridge over it.
+        ctx.fillStyle = INK;
+        ctx.globalAlpha = 0.8;
+        box(c.at, c1, -half, face);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = DARK;
+        box(c.at - 0.2, c1 + 0.2, -1.5, 1.5);
+        ctx.fillStyle = INK;
+        const clear = 3.65 * 2.5 - c.width / 2;
+        for (const v of [-h.width * 0.27, h.width * 0.27]) {
+          for (let u = c.at - clear; u > 8.5; u -= 7.3) box(u - 1.1, u + 1.1, gs * v - 1.1, gs * v + 1.1);
+          for (let u = c1 + clear; u < h.length - 7; u += 7.3) box(u - 1.1, u + 1.1, gs * v - 1.1, gs * v + 1.1);
+        }
+        box(h.length - 3.5, h.length - 1.9, -1.5, 1.5);
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(1, 0.6 * ratio);
+        // Steps: down from the valley, down from the ledge, and up out of the chasm.
+        for (let t = 3.9; t < hall0 - 1.6; t += 0.68) { ctx.beginPath(); ctx.moveTo(X(edge + inw * (7 - t)), Z(q.z - 1.35)); ctx.lineTo(X(edge + inw * (7 - t)), Z(q.z + 1.35)); ctx.stroke(); }
+        for (let u = 6; u < 6 + gr.deep * 2; u += 0.68) line(u, -half, u, -half + 3);
+        ctx.strokeStyle = PAPER;
+        for (let o = face - 1.4; o > face - 1.4 - c.depth * 2; o -= 0.68) line(c1 - 1.5, o, c1, o);
+        // The upper bridge, overhead.
+        ctx.strokeStyle = INK;
+        ctx.setLineDash([Math.max(1.5 * ratio, 0.5 * scale), Math.max(1.5 * ratio, 0.5 * scale)]);
+        line(uc - 1.3, -half, uc - 1.3, face);
+        line(uc + 1.3, -half, uc + 1.3, face);
+        ctx.setLineDash([]);
+        continue;
+      }
       if (q.hall) {
         // A hall under the hill: its stair and its length drawn as built things are, with its pillars; it runs off beyond the valley's edge.
         const h = q.hall, at = (t: number) => edge + inw * (7 - t), hall0 = 3.9 + h.drop / 0.5 + 1.6;

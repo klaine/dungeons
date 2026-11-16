@@ -297,6 +297,17 @@ function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
     if (rng.chance(0.4)) {
       const round = (v: number) => Math.round(v * 10) / 10;
       site.grottoes[0].hall = { length: round(rng.range(22, 30)), width: round(rng.range(12, 15)), height: round(rng.range(9, 11)), drop: round(rng.range(5.1, 5.95)) };
+      // And of those, about half are great: come upon from a ledge high in one end, with a chasm across the floor.
+      const great = rng.fork('great');
+      if (great.chance(0.5)) {
+        const deep = round(great.range(11, 13)), width = round(great.range(24, 28)), across = 7.5;
+        // (The stair from the ledge goes down at one in two and wants level floor at its foot before the chasm; beyond the chasm there is the dais.)
+        const at = round(6 + deep * 2 + great.range(3.5, 5));
+        site.grottoes[0].hall = {
+          length: round(at + across + great.range(13, 16)), width, height: round(deep + great.range(10, 12)), drop: site.grottoes[0].hall.drop,
+          great: { deep, gallery: great.chance(0.5) ? 'n' : 's', chasm: { at, width: across, depth: round(Math.min(10, width / 2 - 3.2)) } },
+        };
+      }
     }
     return;
   }

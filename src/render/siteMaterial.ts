@@ -1,4 +1,4 @@
-import { Color, MeshStandardMaterial, ShaderChunk, Vector2, Vector3 } from 'three';
+import { Color, MeshStandardMaterial, ShaderChunk, Vector2, Vector3, Vector4 } from 'three';
 import { TextureSet } from './textures';
 
 /**
@@ -87,7 +87,7 @@ roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
   vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
   vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
   vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  irradiance = mix( fallback, baked, uBake );
+  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) );
   iblIrradiance = vec3( 0.0 );
   // vBake: x = share of sky seen, y = share of the day in direct sun.
   // Reflections of the sky only where the sky can be seen.
@@ -97,7 +97,7 @@ roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
 ${o.matt ? 'reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecular *= 0.12;' : ''}`);
   };
   // Every site material shares one program per texture layout.
-  m.customProgramCacheKey = () => (o.matt ? 'site-v2-matt' : 'site-v2');
+  m.customProgramCacheKey = () => (o.matt ? 'site-v3-matt' : 'site-v3');
   return m;
 }
 
@@ -231,7 +231,7 @@ roughnessFactor *= mix( 1.0, 0.4, siteWet * gBare );`)
   vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
   vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
   vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  irradiance = mix( fallback, baked, uBake );
+  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) );
   iblIrradiance = vec3( 0.0 );
   radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake );
 }
@@ -240,7 +240,7 @@ roughnessFactor *= mix( 1.0, 0.4, siteWet * gBare );`)
 float gShine = mix( 0.12, 0.7, siteWet * gBare );
 reflectedLight.directSpecular *= gShine; reflectedLight.indirectSpecular *= gShine;`);
   };
-  m.customProgramCacheKey = () => 'ground-v5';
+  m.customProgramCacheKey = () => 'ground-v6';
   return m;
 }
 
@@ -275,7 +275,13 @@ radiance = vec3( 0.0 );
  * Light comes from the bake where there is one, and from the open sky where there is not.
  */
 /** How strongly rock shows broad flat faces: set for the kind of stone the place is made of. */
-export const rockUniforms = { uRockBroad: { value: 0.8 } };
+/**
+ * Shared by all rock. `uShaftTop`, `uShaftUp` and `uShaftSun` are a shaft of sunlight let down into a
+ * hall under the hill: a point on its middle line and how broad it is, the way up it, and the
+ * sun's light. Rock that was told it stands in that light draws its edge itself, point by point
+ * of the picture, so the round of light on the floor is round.
+ */
+export const rockUniforms = { uRockBroad: { value: 0.8 }, uShaftTop: { value: new Vector4() }, uShaftUp: { value: new Vector3(0, 1, 0) }, uShaftSun: { value: new Vector3() } };
 
 export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number] } = {}): MeshStandardMaterial {
   const m = new MeshStandardMaterial({ roughness: 1, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
@@ -288,6 +294,9 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
     shader.uniforms.uRockScale = { value: o.scale ?? 0.3 };
     shader.uniforms.uRockBump = { value: o.normalScale ?? 1.4 };
     shader.uniforms.uRockBroad = rockUniforms.uRockBroad;
+    shader.uniforms.uShaftTop = rockUniforms.uShaftTop;
+    shader.uniforms.uShaftUp = rockUniforms.uShaftUp;
+    shader.uniforms.uShaftSun = rockUniforms.uShaftSun;
     shader.uniforms.uRockDip = { value: new Vector2(o.dip?.[0] ?? 0.05, o.dip?.[1] ?? 0.03) };
 
     shader.vertexShader = shader.vertexShader
@@ -306,6 +315,7 @@ vRockNrm = normalize( mat3( modelMatrix ) * normal );`);
       .replace('#include <common>', /* glsl */ `#include <common>
 uniform float uBake; uniform vec3 uFallback; uniform sampler2D uMossMap;
 uniform sampler2D uRockMap; uniform sampler2D uRockNormal; uniform float uRockScale; uniform float uRockBump; uniform float uRockBroad; uniform vec2 uRockDip;
+uniform vec4 uShaftTop; uniform vec3 uShaftUp; uniform vec3 uShaftSun;
 varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
 varying vec4 vField; varying vec2 vBake;
 varying vec3 vRockPos; varying vec3 vRockNrm;`)
@@ -389,7 +399,16 @@ roughnessFactor = mix( roughnessFactor, 0.97, siteMoss );`)
   vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
   vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
   // The pits and cracks of the texture hold less of the sky's light.
-  irradiance = mix( fallback, baked, uBake ) * rockAo;
+  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) ) * rockAo;
+  // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
+  // carries in the second of its two numbers, above the six tenths all such rock has).
+  float shaft = smoothstep( 0.62, 0.95, vBake.y ) * step( vBake.x, 0.004 ) * step( 0.001, uShaftTop.w );
+  if ( shaft > 0.0 ) {
+    vec3 sw = vRockPos - uShaftTop.xyz;
+    float off = length( sw - uShaftUp * dot( sw, uShaftUp ) );
+    vec3 bn = inverseTransformDirection( normal, viewMatrix );
+    irradiance += uShaftSun * max( dot( bn, uShaftUp ), 0.0 ) * shaft * ( 1.0 - smoothstep( uShaftTop.w - 0.3, uShaftTop.w + 0.05, off ) ) * rockAo;
+  }
   iblIrradiance = vec3( 0.0 );
   radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake ) * rockAo;
 }
@@ -398,7 +417,7 @@ roughnessFactor = mix( roughnessFactor, 0.97, siteMoss );`)
 reflectedLight.directSpecular *= mix( 0.3, 1.0, siteWet );
 reflectedLight.indirectSpecular *= mix( 0.3, 1.0, siteWet );`);
   };
-  m.customProgramCacheKey = () => 'rock-v5';
+  m.customProgramCacheKey = () => 'rock-v7';
   return m;
 }
 
@@ -541,6 +560,6 @@ normal = normalize( ( viewMatrix * vec4( farN, 0.0 ) ).xyz );`)
 #include <lights_fragment_end>
 reflectedLight.directSpecular *= farShine; reflectedLight.indirectSpecular *= farShine;`);
   };
-  m.customProgramCacheKey = () => 'far-v4';
+  m.customProgramCacheKey = () => 'far-v5';
   return m;
 }

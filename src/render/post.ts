@@ -100,6 +100,12 @@ export class AtmospherePass extends Pass {
       // A box of space that is underground though it is outside the house: no daylight, no mist.
       uUnderMin: { value: new Vector3(1, 1, 1) },
       uUnderMax: { value: new Vector3(0, 0, 0) },
+      // A shaft of daylight under the hill: where it begins and how broad it is; which way it goes and how far; its light.
+      uShaftTop: { value: new Vector4(0, 0, 0, 0) },
+      uShaftDown: { value: new Vector4(0, -1, 0, 0) },
+      uShaftCol: { value: new Vector3() },
+      // What little light the air of such a hall holds everywhere, from the day let into it.
+      uUnderAir: { value: new Vector3() },
     };
 
     this.quad = new FullScreenQuad(new ShaderMaterial({
@@ -419,6 +425,8 @@ uniform vec4 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
 uniform float uCloudOn, uShade, uNight;
 uniform vec3 uUnderMin, uUnderMax;
+uniform vec4 uShaftTop, uShaftDown;
+uniform vec3 uShaftCol, uUnderAir;
 
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
@@ -484,10 +492,11 @@ void main() {
     float sky = seen(tSkyDepth, uSkyVP, p, 0.0006);
     float sun = seen(tSunDepth, uSunVP, p, 0.0006);
     // (Under the hill, though outside the house and off both maps: no sky and no sun there either.)
-    if (all(greaterThan(p, uUnderMin)) && all(lessThan(p, uUnderMax))) { sky = 0.0; sun = 0.0; }
+    vec3 held = vec3(0.0);
+    if (all(greaterThan(p, uUnderMin)) && all(lessThan(p, uUnderMax))) { sky = 0.0; sun = 0.0; held = uUnderAir; }
     // Still air indoors holds more dust than the open courtyard.
     float dens = uDensity * mix(uIndoorDensity, 1.0, sky) * exp(-max(p.y, 0.0) * 0.06);
-    vec3 light = uSunColor * sun * phase + uSkyColor * sky * 0.0796;
+    vec3 light = uSunColor * sun * phase + uSkyColor * sky * 0.0796 + held;
     // Mist is out of doors only, and is a little darker where the house's shadow lies through it.
     float mist = uAirOn > 0.5 ? mistAt(p) * sky : 0.0;
     scatter += trans * (light * dens + air * mist * mix(0.55, 1.0, sun)) * dt;
@@ -513,6 +522,31 @@ void main() {
     float h = sqrt(max(dot(q, q) - b * b, 0.03));
     float integral = (atan((tMax - b) / h) - atan(-b / h)) / h;
     scatter += uLightCol[i] * integral * uDensity * uIndoorDensity * 0.0796;
+  }
+  // A shaft of daylight under the hill: the dust in it is lit. How much of the line of sight
+  // lies inside the shaft is reckoned outright, a round column cut off at both ends and at
+  // whatever is looked at; so it is brightest seen through its middle and fades to its edges.
+  if (uShaftTop.w > 0.0) {
+    vec3 ax = uShaftDown.xyz, oc = uCamPos - uShaftTop.xyz;
+    float h0 = dot(oc, ax), hd = dot(rd, ax);
+    vec3 across = rd - ax * hd, from = oc - ax * h0;
+    float qa = dot(across, across), qb = dot(across, from);
+    // (Twice: the shaft itself, and a wider, fainter round of air about it that its light spills into.)
+    for (int i = 0; i < 2; i++) {
+      float wide = i == 0 ? 1.0 : 2.1, qc = dot(from, from) - uShaftTop.w * uShaftTop.w * wide * wide;
+      float disc = qb * qb - qa * qc;
+      if (qa < 1e-5 || disc <= 0.0) continue;
+      float root = sqrt(disc), t0 = (-qb - root) / qa, t1 = (-qb + root) / qa;
+      if (abs(hd) > 1e-4) { float ta = -h0 / hd, tb = (uShaftDown.w - h0) / hd; t0 = max(t0, min(ta, tb)); t1 = min(t1, max(ta, tb)); }
+      t0 = max(t0, 0.0); t1 = min(t1, dist);
+      if (t1 <= t0) continue;
+      // Dust is not even: it hangs in slow drifts, which is what makes a shaft look like air.
+      // And a line of sight that only clips the rim counts for less than its length, so the rim is soft.
+      vec3 mid = uCamPos + rd * (0.5 * (t0 + t1));
+      float drift = 0.45 + 1.1 * texture(tCloud, mid * vec3(0.06, 0.018, 0.06) + uCloudDrift * 14.0).r;
+      float soft = min(1.0, (t1 - t0) / (2.0 * uShaftTop.w * wide));
+      scatter += uShaftCol * (i == 0 ? 1.0 : 0.16) * (t1 - t0) * soft * drift * mix(phaseHG(hd, 0.5), 0.0796, 0.6);
+    }
   }
   gl_FragColor = vec4(col * trans + scatter, 1.0);
 }`;

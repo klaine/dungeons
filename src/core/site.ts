@@ -192,7 +192,21 @@ export interface Grotto {
    * crown of its roof, with two rows of pillars down it and a tomb on a dais at the far end.
    * It is lit by torches on the pillars and by nothing else.
    */
-  hall?: { length: number; width: number; height: number; drop: number };
+  hall?: {
+    length: number; width: number; height: number; drop: number;
+    /**
+     * If present, the hall is one of the great ones, and the stair does not come down to its
+     * floor but out onto a ledge across its near end, `deep` metres above the floor: the hall
+     * is first seen from above, whole. (`height` is still from the floor to the crown.) From the
+     * ledge a stair goes down along one side wall; along the other, the side named by `gallery`
+     * (`n` is the side of lesser z), runs a gallery behind an arcade at the ledge's level, with
+     * an aisle under it. A chasm crosses the floor from `chasm.at` metres into the hall, `width`
+     * across and `depth` deep, with a bridge over it at the floor and another at the level of
+     * the gallery; steps cut in its far side climb out of it. Daylight comes down a shaft in
+     * the roof and falls where the lower bridge begins.
+     */
+    great?: { deep: number; gallery: 'n' | 's'; chasm: { at: number; width: number; depth: number } };
+  };
 }
 
 /**
