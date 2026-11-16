@@ -19,6 +19,11 @@ export class Player {
   /** Movement from an analogue stick: x right, y back, length up to 1. */
   readonly analog = new Vector2();
   analogRun = false;
+  /**
+   * Flying: no weight and nothing solid, moving the way one looks. For seeing a place whole, and
+   * for taking pictures of it from where no one could stand. `V` turns it on and off.
+   */
+  flying = false;
   /** Boxes that stop the player while active, such as shut doors. */
   readonly blockers: { min: Vector3; max: Vector3; active: boolean }[] = [];
   private jumpQueued = false;
@@ -45,7 +50,10 @@ export class Player {
     document.addEventListener('mousemove', (e) => {
       if (this.locked) this.look(-e.movementX * 0.0022, -e.movementY * 0.0022);
     });
-    window.addEventListener('keydown', (e) => this.keys.add(e.code));
+    window.addEventListener('keydown', (e) => {
+      this.keys.add(e.code);
+      if (e.code === 'KeyV' && !e.repeat) this.fly(!this.flying);
+    });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
   }
@@ -57,6 +65,14 @@ export class Player {
 
   jump(): void {
     this.jumpQueued = true;
+  }
+
+  /** Takes to the air, or comes down: on landing the player drops from wherever they are. */
+  fly(on: boolean): void {
+    this.flying = on;
+    this.velocity.set(0, 0, 0);
+    this.onGround = false;
+    document.body.classList.toggle('flying', on);
   }
 
   /** Places the player with their eyes at `eye`. */
@@ -71,6 +87,10 @@ export class Player {
 
   update(dt: number): void {
     const run = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.analogRun;
+    if (this.flying) {
+      this.flyBy(dt, run);
+      return;
+    }
     const speed = run ? 6.5 : 3.2;
     this.running = run;
     let fx = 0, fz = 0;
@@ -101,6 +121,31 @@ export class Player {
       this.position.copy(this.spawn);
       this.velocity.set(0, 0, 0);
     }
+    this.syncCamera();
+  }
+
+  /** Moving while flying: forward is where the eye points, up and down included; Space rises, C sinks. */
+  private flyBy(dt: number, fast: boolean): void {
+    let fx = 0, fz = 0, up = 0;
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz -= 1;
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz += 1;
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) fx -= 1;
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) fx += 1;
+    if (this.keys.has('Space') || this.jumpQueued) up += 1;
+    if (this.keys.has('KeyC')) up -= 1;
+    this.jumpQueued = false;
+    fx += this.analog.x; fz += this.analog.y;
+    const speed = fast ? 28 : 9;
+    const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
+    // Forward is along the line of sight; sideways stays level.
+    const wx = (fx * cy + fz * sy * cp) * speed, wy = (-fz * sp + up) * speed, wz = (-fx * sy + fz * cy * cp) * speed;
+    const k = 1 - Math.exp(-dt * 10);
+    this.velocity.x += (wx - this.velocity.x) * k;
+    this.velocity.y += (wy - this.velocity.y) * k;
+    this.velocity.z += (wz - this.velocity.z) * k;
+    this.position.addScaledVector(this.velocity, dt);
+    this.onGround = false;
+    this.running = false;
     this.syncCamera();
   }
 

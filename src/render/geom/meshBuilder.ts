@@ -40,6 +40,8 @@ export class MeshBuilder {
    */
   private bakeSource: number[] = [];
   private bakeScale: number[] = [];
+  /** For geometry that is not baked: the share of the sky each vertex can see, where the builder knows it. */
+  private sky: number[] = [];
   vertexCount = 0;
 
   addVertex(
@@ -70,6 +72,16 @@ export class MeshBuilder {
     this.bakeScale[i] = scale;
   }
 
+  /** Records how much of the sky vertex `i` can see, from 0 to 1. Used only where light is not baked. */
+  setOpen(i: number, open: number): void {
+    this.sky[i] = open;
+  }
+
+  /** The share of sky recorded for vertex `i`; all of it if nothing was recorded. */
+  openAt(i: number): number {
+    return this.sky[i] ?? 1;
+  }
+
   /** For each vertex, the vertex its baked light comes from (itself if it is traced) and the multiplier. */
   bakePlan(): { source: Int32Array; scale: Float32Array } {
     const source = new Int32Array(this.vertexCount);
@@ -80,6 +92,29 @@ export class MeshBuilder {
       scale[i] = s === undefined ? 1 : this.bakeScale[i];
     }
     return { source, scale };
+  }
+
+  /**
+   * Copies another mesh into this one. Each vertex is handed to `place` as a position, a normal,
+   * a colour, a field and its share of sky, any of which it may change: this is how one carved
+   * stone becomes many, each turned and tinted differently.
+   */
+  append(src: MeshBuilder, place: (v: { p: number[]; n: number[]; colour: number[]; field: number[]; open: number }) => void): void {
+    const base = this.vertexCount;
+    const v = { p: [0, 0, 0], n: [0, 0, 0], colour: [0, 0, 0], field: [0, 0, 0, 0], open: 1 };
+    for (let i = 0; i < src.vertexCount; i++) {
+      for (let k = 0; k < 3; k++) {
+        v.p[k] = src.pos.data[i * 3 + k];
+        v.n[k] = src.nrm.data[i * 3 + k];
+        v.colour[k] = src.col.data[i * 3 + k];
+      }
+      for (let k = 0; k < 4; k++) v.field[k] = src.fld.data[i * 4 + k];
+      v.open = src.openAt(i);
+      place(v);
+      const id = this.addVertex(v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], src.uv.data[i * 2], src.uv.data[i * 2 + 1], v.colour[0], v.colour[1], v.colour[2], v.field[0], v.field[1], v.field[2], v.field[3]);
+      this.setOpen(id, v.open);
+    }
+    for (let t = 0; t < src.idx.length; t += 3) this.addTriangle(src.idx[t] + base, src.idx[t + 1] + base, src.idx[t + 2] + base);
   }
 
   addTriangle(a: number, b: number, c: number): void {

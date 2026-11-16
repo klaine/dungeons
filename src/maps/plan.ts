@@ -45,6 +45,9 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     canvas.width = Math.round(cssW * ratio);
     canvas.height = Math.round(cssH * ratio);
   }
+  // A map with no room to be drawn in (hidden, or not yet laid out) is not drawn: sizes worked
+  // out from nothing come out negative, and an error here would stop the whole program's loop.
+  if (canvas.width < 24 || canvas.height < 24) return;
   const ctx = canvas.getContext('2d')!;
   const T = site.wallThickness;
   const half = T / 2;

@@ -159,7 +159,7 @@ export interface Site {
 }
 
 export type Stone = 'limestone' | 'sandstone' | 'greystone' | 'basalt';
-export type Hour = 'morning' | 'midday' | 'evening';
+export type Hour = 'morning' | 'midday' | 'evening' | 'sunset' | 'dusk' | 'night';
 
 /** Where and when: what the place is built of, what it is called, and the time of day. */
 export interface Setting {
@@ -171,14 +171,47 @@ export interface Setting {
   condition: 'kept' | 'damp' | 'forsaken';
   /** The time of year, which colours everything that grows. */
   season?: 'spring' | 'summer' | 'autumn';
+  /** How much of the sky is cloud, from 0 for clear to 1 for overcast. Clouds drift, and shade what is under them. */
+  cloud?: number;
 }
 
-/** The sun and sky at each time of day, in the renderer's light units. */
-export const SKIES: Record<Hour, { sun: [number, number, number]; colour: [number, number, number]; intensity: number; zenith: number[]; horizon: number[]; ground: number[] }> = {
+/**
+ * The light at each time of day, in the renderer's light units.
+ *  - `sun` is where the strongest light comes from, and `colour` and `intensity` what it is: the
+ *    sun by day, the glow where it went down at dusk, the moon at night.
+ *  - `disc` is where the sun itself stands, for drawing the sky; below the horizon after sunset.
+ *    Left out, it is where the light comes from.
+ *  - `zenith`, `horizon` and `ground` are how bright the sky is overhead and at its edge, and the
+ *    light thrown up by the land.
+ *  - `night` is how far the stars are out, 0 to 1, and `eyes` how far eyes open in the dark: the
+ *    most that exposure may rise to.
+ */
+export interface Sky {
+  sun: [number, number, number];
+  colour: [number, number, number];
+  intensity: number;
+  zenith: number[];
+  horizon: number[];
+  ground: number[];
+  disc?: [number, number, number];
+  night?: number;
+  eyes?: number;
+}
+
+export const SKIES: Record<Hour, Sky> = {
   morning: { sun: [0.5, 0.62, 0.6], colour: [1.0, 0.88, 0.72], intensity: 11, zenith: [0.16, 0.3, 0.62], horizon: [0.66, 0.72, 0.8], ground: [0.09, 0.08, 0.07] },
   midday: { sun: [-0.12, 0.9, 0.42], colour: [1.0, 0.96, 0.9], intensity: 12.5, zenith: [0.14, 0.28, 0.66], horizon: [0.6, 0.72, 0.88], ground: [0.1, 0.09, 0.08] },
   evening: { sun: [-0.62, 0.5, 0.6], colour: [1.0, 0.7, 0.46], intensity: 9.5, zenith: [0.14, 0.22, 0.5], horizon: [0.8, 0.62, 0.48], ground: [0.08, 0.07, 0.06] },
+  // The sun a hand's breadth above the hills: long shadows, red light, a sky going from gold to deep blue.
+  sunset: { sun: [-0.8, 0.17, 0.57], colour: [1.0, 0.46, 0.2], intensity: 7.5, zenith: [0.07, 0.1, 0.26], horizon: [0.9, 0.46, 0.24], ground: [0.06, 0.045, 0.035], eyes: 2 },
+  // The sun gone: no shadows to speak of, a band of rose where it went down, and the first stars.
+  dusk: { sun: [-0.78, 0.26, 0.57], colour: [0.9, 0.55, 0.5], intensity: 0.9, zenith: [0.022, 0.032, 0.085], horizon: [0.2, 0.13, 0.15], ground: [0.02, 0.018, 0.02], disc: [-0.8, -0.07, 0.59], night: 0.35, eyes: 3.2 },
+  // Moonlight: cold, faint, with shadows; every lit window and torch counts for much more.
+  night: { sun: [0.42, 0.72, 0.55], colour: [0.62, 0.74, 1.0], intensity: 0.5, zenith: [0.006, 0.009, 0.024], horizon: [0.014, 0.018, 0.034], ground: [0.006, 0.006, 0.008], disc: [-0.5, -0.6, 0.62], night: 1, eyes: 4.5 },
 };
+
+/** How each time of day is put in a sentence. */
+export const WHEN: Record<Hour, string> = { morning: 'in the morning', midday: 'at midday', evening: 'at evening', sunset: 'at sunset', dusk: 'at dusk', night: 'by night' };
 
 export const OPPOSITE: Record<Side, Side> = { n: 's', s: 'n', e: 'w', w: 'e' };
 

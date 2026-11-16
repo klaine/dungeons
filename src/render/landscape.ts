@@ -1,4 +1,4 @@
-import { fbm2 } from '../core/rng';
+import { fbm2, valueNoise2 } from '../core/rng';
 import { MeshBuilder } from './geom/meshBuilder';
 
 /**
@@ -24,6 +24,8 @@ export interface TerrainOptions {
   /** The colour of turf at a point, and of rock given a tone; defaults are plain grass and the tinted stone. */
   colour?: (x: number, z: number) => [number, number, number];
   rock?: (tone: number) => [number, number, number];
+  /** How level a triangle must be to hold turf, as the upward part of its normal; steeper is rock. */
+  bare?: number;
   /** Texture repeats per metre, for turf and for rock. */
   turfScale: number;
   rockScale: number;
@@ -61,7 +63,8 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
       const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
       const fl = Math.hypot(fx, fy, fz);
       if (fl < 1e-6) continue;
-      const steep = fy / fl < 0.74;
+      // Only what is really steep is bare: a hillside of forty degrees holds turf.
+      const steep = fy / fl < (o.bare ?? 0.74);
       const mesh = steep ? rock : turf;
       const ids: number[] = [];
       for (const q of [A, B, C]) {
@@ -70,7 +73,7 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
           const tone = 0.6 + 0.45 * bed;
           const alongX = Math.abs(fx) > Math.abs(fz);
           const c = o.rock ? o.rock(tone) : [0.8 * tone * o.stone[0], 0.74 * tone * o.stone[1], 0.65 * tone * o.stone[2]];
-          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, (alongX ? q.z : q.x) * o.rockScale, q.y * o.rockScale, c[0], c[1], c[2], Math.max(0, q.ny) * 0.9, 0, 0, 0));
+          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, (alongX ? q.z : q.x) * o.rockScale, q.y * o.rockScale, c[0], c[1], c[2], Math.max(0, q.ny) * 0.9, 0, 0, 1));
         } else {
           const [r, g, b] = o.colour ? o.colour(q.x, q.z) : turfColour(q.x, q.z, o.seed);
           ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, q.x * o.turfScale, q.z * o.turfScale, r, g, b));
@@ -94,45 +97,119 @@ export function turfColour(x: number, z: number, seed: number): [number, number,
 
 /**
  * A ring of mountains round the whole scene, far enough off to be seen through haze. Drawn as a
- * sheet in polar coordinates over a height function: a broad swell some four hundred metres out,
- * broken into ridges, wooded at its foot and snowed on its tops.
+ * sheet in polar coordinates over a height function.
+ *
+ * The heights are ridged noise, summed the way water would have it: each finer layer counts for
+ * less where the layers before it are already steep. That leaves sharp crests with long smooth
+ * flanks below them and gullies between, which is what running water makes of a mountain, where
+ * plain noise gives lumps. What covers the ground is then decided by its height and slope:
+ * forest low down and in the gullies, pasture above it, bare rock in bands where it is steep,
+ * scree below the faces, and snow on what is high and not too steep to hold it.
  */
-export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: number, seed: number): void {
-  const around = 280;
+export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: number, seed: number, stone: [number, number, number] = [1, 1, 1]): void {
+  const around = 560;
   const radii: number[] = [];
-  for (let r = 215; r <= 760; r += 18 + (r - 215) * 0.04) radii.push(r);
-  const ridged = (x: number, z: number, octaves: number) => 1 - Math.abs(fbm2(x, z, octaves, 3) - 0.5) * 2;
+  for (let r = 215; r <= 800; r += 5.5 + (r - 215) * 0.022) radii.push(r);
+  const rings = radii.length;
+  const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(valueNoise2(x, z, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
-    const r = Math.hypot(x - cx, z - cz);
-    const swell = Math.exp(-(((r - 470) / (r < 470 ? 150 : 210)) ** 2));
-    const massif = 0.35 + 1.1 * fbm2(x * 0.0022 + seed, z * 0.0022 - seed, 2);
-    const ridge = ridged(x * 0.0045 + seed, z * 0.0045, 4);
-    const crag = ridged(x * 0.017 - seed, z * 0.017 + seed, 3);
-    return base - 6 + swell * massif * (45 + 105 * ridge * ridge + 26 * crag * ridge);
+    const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);
+    // The range is not a circle: it stands nearer in some quarters than others, and is higher in some.
+    const crest = 470 + 70 * Math.sin(a * 2 + seed) + 45 * Math.sin(a * 5 + seed * 1.7);
+    const swell = Math.exp(-(((r - crest) / (r < crest ? 150 : 230)) ** 2));
+    const massif = 0.4 + 1.1 * fbm2(x * 0.0022 + seed, z * 0.0022 - seed, 2);
+    let sum = 0, amp = 0.55, fx = x * 0.0034 + seed, fz = z * 0.0034 - seed * 0.7, sx = 0, sz = 0;
+    // No layer is finer than the sheet can draw here: one that was would come out as needles.
+    // The sheet is coarser the further off it is, so the far side of the range is plainer.
+    const spacing = Math.max(5.5 + (r - 215) * 0.022, (Math.PI * 2 * r) / around);
+    let wave = 1 / 0.0034;
+    for (let o = 0; o < 6; o++) {
+      const drawn = Math.min(1, Math.max(0, (wave / spacing - 4.5) / 4.5));
+      wave /= 2.03;
+      if (drawn <= 0) break;
+      amp *= drawn;
+      const e = 0.02, v = ridge(fx, fz, seed + o * 13);
+      // How steep this layer is here, added to the steepness of those before it.
+      sx += (ridge(fx + e, fz, seed + o * 13) - v) / e * amp;
+      sz += (ridge(fx, fz + e, seed + o * 13) - v) / e * amp;
+      sum += (amp * v) / (1 + 0.9 * (sx * sx + sz * sz));
+      amp *= 0.5;
+      // Each layer is turned as well as shrunk, so that none lines up with the last.
+      const nx = (fx * 0.8 - fz * 0.6) * 2.03, nz = (fx * 0.6 + fz * 0.8) * 2.03;
+      fx = nx; fz = nz;
+    }
+    return base - 6 + swell * massif * (26 + 215 * sum);
   };
-  const corner = (k: number, r: number) => {
-    const a = (k / around) * Math.PI * 2;
-    const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
-    const y = height(x, z), e = 6;
-    const dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e);
-    const l = Math.hypot(dx, 2 * e, dz);
-    return { x, y, z, nx: -dx / l, ny: (2 * e) / l, nz: -dz / l };
-  };
-  for (let k = 0; k < around; k++) for (let ri = 0; ri < radii.length - 1; ri++) {
-    const q = [corner(k, radii[ri]), corner(k + 1, radii[ri]), corner(k + 1, radii[ri + 1]), corner(k, radii[ri + 1])];
-    const ids = q.map((p) => {
-      // Wooded low down, bare rock above, and snow on what is highest and least steep.
-      const h = (p.y - base) / 170;
-      const wood = Math.min(1, Math.max(0, (0.34 - h) * 5 + (fbm2(p.x * 0.01, p.z * 0.01 + seed, 2) - 0.5)));
-      const snow = Math.min(1, Math.max(0, (h - 0.62 + 0.5 * (p.ny - 0.7)) * 5));
-      const tone = 0.6 + 0.5 * fbm2(p.x * 0.012 + seed, p.z * 0.012 + p.y * 0.02, 3);
-      let r = 0.36 * tone, g = 0.38 * tone, b = 0.42 * tone;
-      r += (0.1 - r) * wood; g += (0.19 - g) * wood; b += (0.11 - b) * wood;
-      r += (1.25 - r) * snow; g += (1.3 - g) * snow; b += (1.4 - b) * snow;
-      return rock.addVertex(p.x, p.y, p.z, p.nx, p.ny, p.nz, p.x * 0.012, p.z * 0.012, r, g, b);
-    });
-    // Seen from inside the ring, the sheet faces inwards and up.
-    rock.addTriangle(ids[0], ids[2], ids[1]);
-    rock.addTriangle(ids[0], ids[3], ids[2]);
+  const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
+  for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
+    const a = (k / around) * Math.PI * 2, o = ri * around + k;
+    X[o] = cx + Math.cos(a) * radii[ri]; Z[o] = cz + Math.sin(a) * radii[ri];
+    H[o] = height(X[o], Z[o]);
   }
+  const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
+  // Any point still standing far above all four of its neighbours is a spike, not a summit, and is brought down.
+  for (let pass = 0; pass < 3; pass++) {
+    const was = H.slice();
+    for (let ri = 1; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
+      const o = ri * around + k;
+      const top = Math.max(was[at(ri, k + 1)], was[at(ri, k - 1)], was[at(ri + 1, k)], was[at(ri - 1, k)]);
+      const span = Math.hypot(X[at(ri, k + 1)] - X[o], Z[at(ri, k + 1)] - Z[o]) + (radii[ri + 1] - radii[ri]);
+      if (was[o] > top + span * 0.2) H[o] = top + span * 0.2;
+    }
+  }
+  const ids = new Int32Array(rings * around);
+  for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
+    const o = ri * around + k, x = X[o], y = H[o], z = Z[o];
+    // The slope, from the heights either side along the ring and across it.
+    const e = at(ri, k + 1), w = at(ri, k - 1), n = at(ri + 1, k), s = at(ri - 1, k);
+    const ax = X[e] - X[w], ay = H[e] - H[w], az = Z[e] - Z[w], bx = X[n] - X[s], by = H[n] - H[s], bz = Z[n] - Z[s];
+    let nx = by * az - bz * ay, ny = bz * ax - bx * az, nz = bx * ay - by * ax;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    // Whether the ground here is a hollow or a crest, from how it stands against its neighbours.
+    const span = Math.hypot(ax, az) * 0.5 + Math.hypot(bx, bz) * 0.5;
+    const hollow = Math.min(1, Math.max(-1, (((H[e] + H[w] + H[n] + H[s]) / 4 - y) / span) * 9));
+    const h = (y - base) / 190, steep = Math.min(1, Math.max(0, (0.8 - ny) / 0.3));
+    const patch = fbm2(x * 0.011 + seed, z * 0.011, 3), fine = fbm2(x * 0.05, z * 0.05 + seed, 2);
+    // Rock: in beds some metres thick, each its own shade, darker where it is steep and in hollows.
+    const bed = hash01(Math.floor((y + x * 0.06 + patch * 30) / 9), seed);
+    const tone = (0.5 + 0.28 * bed + 0.22 * patch) * (1 - 0.3 * steep) * (1 - 0.28 * Math.max(0, hollow));
+    let r = 0.37 * tone * (0.6 + 0.4 * stone[0]), g = 0.37 * tone * (0.6 + 0.4 * stone[1]), b = 0.4 * tone * (0.6 + 0.4 * stone[2]);
+    const lay = (cr: number, cg: number, cb: number, w: number) => { r += (cr - r) * w; g += (cg - g) * w; b += (cb - b) * w; };
+    const sm = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
+    // Scree: pale and even, on slopes below the faces that are neither steep nor level.
+    lay(0.33, 0.32, 0.31, 0.6 * sm((h - 0.3) / 0.2) * (1 - steep) * sm((0.93 - ny) / 0.1));
+    // Pasture above the trees, on what is not too steep.
+    lay(0.16, 0.2, 0.08, sm((0.62 - h + 0.15 * (patch - 0.5)) / 0.12) * (1 - steep) * 0.85);
+    // Forest low down, reaching higher up the gullies than on the spurs between them.
+    lay(0.06 + 0.03 * fine, 0.13 + 0.05 * fine, 0.06, sm((0.36 - h + 0.12 * hollow + 0.2 * (patch - 0.5)) / 0.08) * (1 - 0.8 * steep));
+    // Snow on what is high, lying deeper in hollows and blown off what is steep.
+    const snow = sm((h - 0.6 + 0.12 * hollow + 0.1 * (patch - 0.5)) / 0.1) * sm((ny - 0.5) / 0.22);
+    lay(1.3, 1.34, 1.42, snow);
+    ids[o] = rock.addVertex(x, y, z, nx, ny, nz, x * 0.012, z * 0.012, r, g, b);
+  }
+  // The near edge of the sheet is turned down into the ground, so that from the air nobody sees
+  // under the foot of the mountains to the sky beyond.
+  const hem: number[] = [];
+  for (let k = 0; k < around; k++) hem.push(rock.addVertex(X[k] + (cx - X[k]) * 0.06, H[k] - 55, Z[k] + (cz - Z[k]) * 0.06, (cx - X[k]) / radii[0], 0.2, (cz - Z[k]) / radii[0], 0, 0, 0.05, 0.1, 0.05));
+  for (let k = 0; k < around; k++) {
+    const k1 = (k + 1) % around;
+    // The hem faces the middle of the ring.
+    rock.addTriangle(hem[k], hem[k1], ids[k1]);
+    rock.addTriangle(hem[k], ids[k1], ids[k]);
+  }
+  for (let ri = 0; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
+    const a = ids[at(ri, k)], b = ids[at(ri, k + 1)], c = ids[at(ri + 1, k + 1)], d = ids[at(ri + 1, k)];
+    // The sheet faces up. (It was long wound the other way, and so drawn inside out: every slope
+    // turned towards the eye was thrown away, and only the far sides of ridges were seen.)
+    rock.addTriangle(a, b, c);
+    rock.addTriangle(a, c, d);
+  }
+}
+
+function hash01(i: number, seed: number): number {
+  let h = Math.imul(i, 374761393) ^ Math.imul(Math.floor(seed * 977), 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }

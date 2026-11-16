@@ -11,6 +11,14 @@ import { FullScreenQuad, Pass } from 'three/addons/postprocessing/Pass.js';
  *
  * Two depth maps of the static site are rendered once: one from the sun, to know where its light
  * reaches, and one from straight above, to know where the air is under open sky.
+ *
+ * The same pass makes the sky's weather. Clouds are a layer of air some hundreds of metres up
+ * whose thickness at any point is read from a block of noise that drifts with the wind. Looking
+ * up, each view ray is marched through the layer, and at every step a second, shorter march
+ * towards the sun finds how much cloud the light came through: so clouds have lit sides, dark
+ * bases and bright edges against the sun. Looking at the land, the same question is asked of the
+ * line from each point to the sun, and the answer is the shadow of the cloud passing over it.
+ * After dark the stars and the moon are drawn here too, behind the clouds.
  */
 
 const MAX_LIGHTS = 4;
@@ -31,7 +39,7 @@ export class AtmospherePass extends Pass {
   private meterPixels = new Uint8Array(16 * 9 * 4);
   private meterQuad: FullScreenQuad;
 
-  constructor(private scene: Scene, private camera: PerspectiveCamera, width: number, height: number) {
+  constructor(private scene: Scene, private camera: PerspectiveCamera, width: number, height: number, cloudSteps = 28) {
     super();
     this.sceneTarget = new WebGLRenderTarget(width, height, { type: HalfFloatType, samples: 4 });
     this.sceneTarget.depthTexture = new DepthTexture(width, height, UnsignedIntType);
@@ -57,11 +65,27 @@ export class AtmospherePass extends Pass {
       uEnabled: { value: 1 },
       uLightPos: { value: Array.from({ length: MAX_LIGHTS }, () => new Vector4()) },
       uLightCol: { value: Array.from({ length: MAX_LIGHTS }, () => new Vector3()) },
+      // The weather. With no block of noise given, there are no clouds.
+      tCloud: { value: null },
+      uCloudOn: { value: 0 },
+      uCloudCover: { value: 0.45 },
+      uCloudBase: { value: 260 },
+      uCloudTop: { value: 620 },
+      uCloudDrift: { value: new Vector3() },
+      uCloudSun: { value: new Vector3(3, 3, 3) },
+      uCloudAir: { value: new Vector3(0.5, 0.6, 0.8) },
+      uShade: { value: 0.5 },
+      // The sky after dark: its own faint light, the glow where the sun went down, stars and moon.
+      uSkyZenith: { value: new Vector3() },
+      uSkyHorizon: { value: new Vector3() },
+      uGlowDir: { value: new Vector3(0, 0, 1) },
+      uGlow: { value: new Vector3() },
+      uNight: { value: 0 },
     };
 
     this.quad = new FullScreenQuad(new ShaderMaterial({
       uniforms: this.uniforms,
-      defines: { MAX_LIGHTS, STEPS: 40 },
+      defines: { MAX_LIGHTS, STEPS: 40, CLOUD_STEPS: cloudSteps },
       vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }',
       fragmentShader: FRAGMENT,
       depthTest: false,
@@ -222,16 +246,20 @@ function depthTarget(size: number): WebGLRenderTarget {
 
 const FRAGMENT = /* glsl */ `
 precision highp float;
+precision highp sampler3D;
 varying vec2 vUv;
 uniform sampler2D tColor;
 uniform sampler2D tDepth;
 uniform sampler2D tSunDepth;
 uniform sampler2D tSkyDepth;
+uniform sampler3D tCloud;
 uniform mat4 uInvProj, uInvView, uSunVP, uSkyVP;
 uniform vec3 uCamPos, uSunDir, uSunColor, uSkyColor;
 uniform float uDensity, uIndoorDensity, uFrame, uEnabled;
 uniform vec4 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
+uniform float uCloudOn, uCloudCover, uCloudBase, uCloudTop, uShade, uNight;
+uniform vec3 uCloudDrift, uCloudSun, uCloudAir, uSkyZenith, uSkyHorizon, uGlowDir, uGlow;
 
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
@@ -248,6 +276,74 @@ float phaseHG(float c, float g) {
   return (1.0 - g2) / (12.566 * pow(1.0 + g2 - 2.0 * g * c, 1.5));
 }
 
+// How thick the cloud is at a point, as the light lost per metre. Clouds have flat bases and
+// rounded tops, cover as much of the sky as the day calls for, and are frayed at their edges.
+float cloudAt(vec3 p, bool fine) {
+  float h = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
+  if (h <= 0.0 || h >= 1.0) return 0.0;
+  vec3 q = p / 1150.0 + uCloudDrift;
+  float shape = texture(tCloud, q).r;
+  // The more of the sky the day gives to cloud, the lower the bar a piece of air must clear to
+  // be cloud. The bar rises with height, so a cloud is broad at its flat base and only its
+  // strongest parts tower; and nothing hangs below the base.
+  // (The numbers are measured from the noise: at its base, cloud covers the share of sky asked for.)
+  float bar = 0.535 - 0.33 * uCloudCover + 0.26 * pow(h, 1.4) + 0.6 * (1.0 - smoothstep(0.0, 0.07, h));
+  if (shape < bar - 0.1) return 0.0;
+  // Smaller billows on the large ones give it the knobbly outline of a heap of cloud.
+  shape -= (1.0 - texture(tCloud, q * 3.9 + 0.37).g) * 0.2 - 0.07;
+  float d = (shape - bar) / 0.1;
+  if (d <= 0.0) return 0.0;
+  // And its edges are eaten away by finer noise still; the body of the cloud is left whole.
+  if (fine) d -= (1.0 - texture(tCloud, q * 12.3 + 0.11).g) * (1.0 - min(d, 1.0)) * 0.8;
+  return clamp(d, 0.0, 1.0) * 0.036;
+}
+
+// The share of sunlight a cloud takes from a point on the land: 0 under clear sky.
+float cloudShade(vec3 p) {
+  if (uSunDir.y < 0.04) return 0.0;
+  float through = 0.0;
+  for (int j = 0; j < 3; j++) {
+    float h = mix(uCloudBase, uCloudTop, 0.22 + 0.22 * float(j));
+    through += cloudAt(p + uSunDir * ((h - p.y) / uSunDir.y), false);
+  }
+  through *= (uCloudTop - uCloudBase) / 3.0 / max(uSunDir.y, 0.2);
+  return 1.0 - exp(-through * 1.1);
+}
+
+// Clouds along a line of sight, laid over what was behind them.
+vec3 clouds(vec3 ro, vec3 rd, vec3 behind) {
+  if (rd.y < 0.015) return behind;
+  float t0 = max((uCloudBase - ro.y) / rd.y, 0.0), t1 = min((uCloudTop - ro.y) / rd.y, 14000.0);
+  if (t1 <= t0) return behind;
+  float dt = (t1 - t0) / float(CLOUD_STEPS);
+  float t = t0 + dt * ign(gl_FragCoord.xy);
+  float toSun = dot(rd, uSunDir);
+  // Light goes mostly forward through cloud, so edges towards the sun are bright.
+  float phase = min(0.55 + 3.2 * mix(phaseHG(toSun, 0.7), phaseHG(toSun, -0.15), 0.25), 2.4);
+  float left = 1.0;
+  vec3 lit = vec3(0.0);
+  for (int i = 0; i < CLOUD_STEPS; i++) {
+    vec3 p = ro + rd * t;
+    float d = cloudAt(p, true);
+    if (d > 0.0) {
+      float through = 0.0;
+      for (int j = 1; j <= 4; j++) through += cloudAt(p + uSunDir * (28.0 * float(j) * float(j) * 0.5), false);
+      // Cloud passes on far more light than its thickness alone would let through: it scatters, and scatters again.
+      through *= 9.0;
+      float h = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
+      vec3 light = uCloudSun * phase * (exp(-through) * 0.8 + exp(-through * 0.2) * 0.2) + uCloudAir * (0.5 + 0.6 * h);
+      float a = 1.0 - exp(-d * dt);
+      lit += left * a * light;
+      left *= 1.0 - a;
+      if (left < 0.02) break;
+    }
+    t += dt;
+  }
+  // Far cloud sinks into the haze at the horizon.
+  float near = exp(-t0 / 9000.0) * smoothstep(0.015, 0.1, rd.y);
+  return mix(behind, behind * left + lit, near);
+}
+
 void main() {
   // The sun's disc is thousands of times brighter than anything else; left alone, bloom spreads it over the whole view.
   vec3 col = min(texture2D(tColor, vUv).rgb, vec3(6.0));
@@ -258,6 +354,27 @@ void main() {
   vec3 rd = wp - uCamPos;
   float dist = length(rd);
   rd /= dist;
+  if (depth > 0.999999) {
+    // Open sky. After sunset it has a faint light of its own, a glow where the sun went down,
+    // and stars; then the moon; then the clouds in front of all of them.
+    float up = clamp(rd.y, 0.0, 1.0);
+    col += mix(uSkyHorizon, uSkyZenith, pow(up, 0.45));
+    col += uGlow * pow(max(dot(normalize(rd.xz), normalize(uGlowDir.xz)), 0.0), 4.0) * exp(-up * 5.5);
+    if (uNight > 0.0) {
+      vec3 g = rd * 190.0, c = floor(g), f = fract(g) - 0.5;
+      float star = fract(sin(dot(c, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+      col += vec3(0.9, 0.95, 1.1) * step(0.9972, star) * smoothstep(0.32, 0.0, length(f)) * (0.25 + 1.6 * fract(star * 91.7)) * uNight * smoothstep(0.02, 0.25, rd.y);
+      float moon = smoothstep(0.99982, 0.99988, dot(rd, uSunDir)) * step(0.5, uNight);
+      col = mix(col, vec3(1.5, 1.62, 1.85) * (0.82 + 0.18 * fract(sin(dot(floor(rd * 900.0), vec3(12.9, 78.2, 37.7))) * 4375.5)), moon);
+    }
+    if (uCloudOn > 0.5) col = clouds(uCamPos, rd, col);
+  } else if (uCloudOn > 0.5 && uShade > 0.0) {
+    // Land: the shadow of whatever cloud stands between it and the sun, where the sun would
+    // otherwise reach it and it lies under the sky.
+    vec3 at = wp - rd * 0.08;
+    float sun = seen(tSunDepth, uSunVP, at, 0.0025), sky = seen(tSkyDepth, uSkyVP, at, 0.0025);
+    col *= 1.0 - uShade * cloudShade(wp) * mix(0.35, 1.0, sun) * sky;
+  }
   float tMax = min(dist, 45.0);
   float dt = tMax / float(STEPS);
   float t = dt * ign(gl_FragCoord.xy + uFrame * 5.588);

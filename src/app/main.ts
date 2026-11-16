@@ -12,10 +12,13 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { AtmospherePass } from '../render/post';
-import { makeSiteMaterial, siteUniforms } from '../render/siteMaterial';
+import { makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { ROCK } from '../render/geom/rockForms';
 import { generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite } from '../core/generate';
+import { Hour, SKIES, WHEN } from '../core/site';
+import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
@@ -40,9 +43,9 @@ const num = (key: string, fallback: number) => (params.has(key) ? Number(params.
  * their graphics modest.
  */
 const QUALITY = {
-  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0 },
-  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1 },
-  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1 },
+  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0 },
+  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16 },
+  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28 },
 };
 const coarse = window.matchMedia('(pointer: coarse)').matches;
 const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
@@ -90,7 +93,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, scree: 0.45, bark: 0.3, turf: 0.12, leaf: 0.1 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -119,14 +122,18 @@ async function start(): Promise<void> {
   const moss = generateTextureSet(renderer, 'moss', texSize / 2, 9);
   const rock = generateTextureSet(renderer, 'rock', texSize, 13);
   const ground = generateTextureSet(renderer, 'ground', texSize, 17);
+  const scree = generateTextureSet(renderer, 'scree', texSize, 23);
+  const bark = generateTextureSet(renderer, 'bark', texSize, 29);
   const materials: Record<string, MeshStandardMaterial> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
-    rock: makeSiteMaterial(rock, moss, { normalScale: 1.5 }),
+    rock: makeRockMaterial(rock, moss),
+    scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
+    bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeSiteMaterial(ground, moss, { normalScale: 1.0 }),
+    turf: makeSiteMaterial(ground, moss, { normalScale: 1.0, matt: true }),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
   };
 
@@ -136,8 +143,21 @@ async function start(): Promise<void> {
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
   const site = params.get('scene') === 'test' ? null : generateSite(seed);
+  // The hour and the cloud can be asked for in the address, whatever the seed gave.
+  if (site) {
+    const hour = params.get('hour') as Hour | null;
+    if (hour && hour in SKIES && hour !== site.setting.hour) {
+      site.title = site.title.replace(WHEN[site.setting.hour], WHEN[hour]);
+      site.setting.hour = hour;
+      const d = SKIES[hour].sun, l = Math.hypot(d[0], d[1], d[2]);
+      site.sun = [d[0] / l, d[1] / l, d[2] / l];
+    }
+    if (params.has('cloud')) site.setting.cloud = Math.min(1, Math.max(0, Number(params.get('cloud'))));
+  }
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
+  // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
+  if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
   // Sound starts with the first click or key, which is the earliest a browser allows.
   const sound = new Sound();
   const muteButton = document.getElementById('mute') as HTMLButtonElement;
@@ -160,7 +180,7 @@ async function start(): Promise<void> {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
       const next = new URLSearchParams(location.search);
       next.delete('quality');
-      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom');
+      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds');
       location.search = next.toString();
     });
     document.getElementById('begin')!.addEventListener('click', () => {
@@ -213,8 +233,11 @@ async function start(): Promise<void> {
     const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];
     const bk = geometry.getAttribute('aBake') as BufferAttribute;
     for (let i = 0; i < builder.vertexCount; i++) {
-      for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c], 0, (Math.PI / 2) * L[c] * 0.8, 0);
-      bk.setXY(i, 1, 0.6);
+      // Rock knows how much of the sky each of its points can see; everything else sees all of it.
+      // Even the deepest crack gets a little light back from the rock about it.
+      const open = 0.3 + 0.7 * builder.openAt(i);
+      for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * open, 0, (Math.PI / 2) * L[c] * 0.8 * open, 0);
+      bk.setXY(i, open, 0.6);
     }
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.name = `scenery:${material}`;
@@ -223,14 +246,27 @@ async function start(): Promise<void> {
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     scenic.push(mesh);
-    solidScenery.push(mesh);
+    // Twigs, roots and low boughs are drawn but stop nobody.
+    if (!key.startsWith('soft|')) solidScenery.push(mesh);
   }
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
   const cardMeshes: InstancedMesh[] = [];
   // Grass is drawn out to this distance, by the level of detail chosen.
   vegetationRange.value = num('grass', quality.grass);
-  for (const set of desc.scenery?.cards ?? []) {
+  // Trees carry more leaves than a modest machine wants to draw; at the lower levels of detail
+  // a share of them is left off, evenly, so every crown thins and none goes bare.
+  const leafShare = num('leaves', quality.leaves);
+  for (const whole of desc.scenery?.cards ?? []) {
+    let set = whole;
+    if (leafShare < 1 && whole.kind === 'leaf') {
+      set = { ...whole, matrices: [], colours: [], centres: [] };
+      for (let i = 0, n = whole.matrices.length / 16; i < n; i++) {
+        if (Math.floor((i + 1) * leafShare) === Math.floor(i * leafShare)) continue;
+        for (let c = 0; c < 16; c++) set.matrices.push(whole.matrices[i * 16 + c]);
+        for (let c = 0; c < 3; c++) { set.colours.push(whole.colours[i * 3 + c]); set.centres.push(whole.centres[i * 3 + c]); }
+      }
+    }
     for (const cards of makeCards(set, paintCards(set.kind))) {
       scene.add(cards);
       scenic.push(cards);
@@ -348,6 +384,7 @@ async function start(): Promise<void> {
   sun.shadow.needsUpdate = true;
   scene.add(sun, sun.target);
 
+  const cloudSteps = Math.round(num('clouds', quality.clouds));
   const makeSky = (disc: boolean) => {
     const sky = new Sky();
     sky.scale.setScalar(10000);
@@ -356,8 +393,11 @@ async function start(): Promise<void> {
     u.rayleigh.value = 1.4;
     u.mieCoefficient.value = 0.004;
     u.mieDirectionalG.value = 0.82;
-    u.sunPosition.value.copy(sunDir);
-    if (u.cloudCoverage) u.cloudCoverage.value = 0.32;
+    // The sky is drawn for where the sun itself is, which after sunset is not where the light comes from.
+    if (desc.sun?.disc) u.sunPosition.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]).normalize();
+    else u.sunPosition.value.copy(sunDir);
+    // Its own painted clouds are used only when the real ones are turned off.
+    if (u.cloudCoverage) u.cloudCoverage.value = cloudSteps > 0 ? 0 : 0.32;
     if (u.cloudDensity) u.cloudDensity.value = 0.5;
     if (u.showSunDisc) u.showSunDisc.value = disc ? 1 : 0;
     return sky;
@@ -391,9 +431,33 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ post
   const size = renderer.getDrawingBufferSize(new Vector2());
   const composer = new EffectComposer(renderer);
-  const atmosphere = new AtmospherePass(scene, camera, size.x, size.y);
+  const atmosphere = new AtmospherePass(scene, camera, size.x, size.y, Math.max(1, cloudSteps));
+  const skyMean = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
   atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
-  atmosphere.uniforms.uSkyColor.value.set(0.42, 0.52, 0.7).multiplyScalar(1.6);
+  atmosphere.uniforms.uSkyColor.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.75);
+  // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
+  siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
+  const night = desc.sun?.night ?? 0;
+  {
+    const u = atmosphere.uniforms;
+    if (cloudSteps > 0) {
+      u.tCloud.value = cloudNoise(64);
+      u.uCloudOn.value = 1;
+      u.uCloudCover.value = desc.sun?.cloud ?? 0.4;
+      // Lit cloud is as bright as a white wall in the same light; its shaded parts take the sky's colour.
+      u.uCloudSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.19);
+      u.uCloudAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(0.95);
+      u.uShade.value = night > 0.2 ? 0.35 : 0.55;
+    }
+    if (desc.sun?.disc) {
+      // After sunset the daytime sky gives next to nothing, and the night's own is added.
+      u.uSkyZenith.value.set(SKY.zenith[0], SKY.zenith[1], SKY.zenith[2]);
+      u.uSkyHorizon.value.set(SKY.horizon[0], SKY.horizon[1], SKY.horizon[2]);
+      u.uGlowDir.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]);
+      u.uGlow.value.set(0.55, 0.22, 0.14).multiplyScalar(night > 0.9 ? 0.05 : 1);
+      u.uNight.value = night;
+    }
+  }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
   atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
@@ -427,7 +491,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, wood, turf: ground, leaf: moss },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, wood, turf: ground, leaf: moss },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
@@ -467,6 +531,8 @@ async function start(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyG') revealAll = !revealAll;
   });
+  // A camera placed by the address, or anyone asking to fly, stays where it is put and does not drop.
+  if (params.has('fly') || params.has('cam')) player.fly(true);
   if (params.has('cam')) {
     const c = params.get('cam')!.split(',').map(Number);
     player.place(new Vector3(c[0], c[1], c[2]), c[3] ?? 0, c[4] ?? 0);
@@ -574,7 +640,8 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ loop
   // Exposure follows measured scene brightness, but only part of the way, so dim places stay dim.
   const EXPOSURE_KEY = num('key', 0.36);
-  const EXPOSURE_MIN = 0.3, EXPOSURE_MAX = num('expMax', 1.7);
+  // In the dark the eye opens further: how far depends on the hour.
+  const EXPOSURE_MIN = 0.3, EXPOSURE_MAX = num('expMax', desc.sun?.eyes ?? 1.7);
   const exposureFor = (lum: number) => Math.min(EXPOSURE_MAX, Math.max(EXPOSURE_MIN, EXPOSURE_KEY * Math.pow(lum, -0.43)));
   let exposure = -1;
   let exposureTarget = 0.5;
@@ -590,6 +657,8 @@ async function start(): Promise<void> {
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
 
   const frame = (now: number) => {
+    // A window that had no size when the program started has one by now.
+    if (canvas.width === 0 && window.innerWidth > 0) window.dispatchEvent(new Event('resize'));
     const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
     const time = fixedTime ?? now / 1000;
@@ -606,6 +675,8 @@ async function start(): Promise<void> {
     })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
     vegetationUniforms.uTime.value = time;
+    // The wind carries the clouds across, slowly, and turns them over as they go.
+    atmosphere.uniforms.uCloudDrift.value.set(time * 0.0042, time * 0.0006, time * 0.0017);
     {
       // What is underfoot and overhead, for sound: a roof or the sky, and grass, earth, stone or planks.
       const at = site ? placeAt(site, player.position.x, player.position.z) : undefined;
@@ -690,7 +761,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, renderer, composer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

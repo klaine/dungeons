@@ -24,7 +24,8 @@ const grey = (v: number, a = 1) => `rgba(${Math.round(v * 255)},${Math.round(v *
 
 /** Paints the texture for one kind of card. Light and dark only: colour comes from the card. */
 export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
-  const size = 256;
+  // Leaves are looked at closely and are worth four times the paint.
+  const size = kind === 'leaf' ? 512 : 256;
   const [canvas, ctx] = canvasOf(size);
   const rng = new Rng(`cards/${kind}/${seed}`);
   ctx.clearRect(0, 0, size, size);
@@ -115,31 +116,69 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
         ctx.fill();
       }
     }
-  } else if (kind === 'leaf') {
-    // A spray of leaves filling a rough disc, with twigs behind them.
-    ctx.strokeStyle = grey(0.3);
-    ctx.lineWidth = 3;
-    for (let k = 0; k < 7; k++) {
-      const a = rng.range(0, Math.PI * 2);
-      ctx.beginPath();
-      ctx.moveTo(size / 2, size / 2);
-      ctx.lineTo(size / 2 + Math.cos(a) * size * 0.4, size / 2 + Math.sin(a) * size * 0.4);
-      ctx.stroke();
+  } else if (kind === 'reed') {
+    // Reeds: tall narrow blades from the foot of the card to its top, arching a little at the
+    // tip, and among them stems that carry a dark head of seed.
+    for (let k = 0; k < 46; k++) {
+      const x0 = rng.range(0.1, 0.9) * size, h = rng.range(0.55, 0.98) * size, lean = rng.range(-0.16, 0.16) * size, tone = rng.range(0.5, 1.0);
+      const steps = 10, wide = rng.range(2.6, 4.6);
+      for (let s = 0; s < steps; s++) {
+        const f0 = s / steps, f1 = (s + 1) / steps;
+        ctx.strokeStyle = grey(tone * (0.5 + 0.5 * f1));
+        ctx.lineWidth = Math.max(1, (1 - f0 * 0.85) * wide);
+        ctx.beginPath();
+        ctx.moveTo(x0 + lean * f0 * f0 * f0, size - h * f0);
+        ctx.lineTo(x0 + lean * f1 * f1 * f1, size - h * f1);
+        ctx.stroke();
+      }
     }
-    for (let k = 0; k < 420; k++) {
-      const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()) * 0.47 * size * (0.78 + 0.22 * Math.sin(a * 5 + seed));
-      const x = size / 2 + Math.cos(a) * d, y = size / 2 + Math.sin(a) * d;
-      const len = rng.range(6, 11), turn = rng.range(0, Math.PI * 2);
-      ctx.fillStyle = grey(rng.range(0.42, 1.0));
+    for (let k = 0; k < 7; k++) {
+      const x0 = rng.range(0.15, 0.85) * size, h = rng.range(0.7, 0.95) * size, lean = rng.range(-0.05, 0.05) * size;
+      ctx.strokeStyle = grey(0.5);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x0, size); ctx.lineTo(x0 + lean, size - h); ctx.stroke();
+      ctx.fillStyle = grey(0.2);
       ctx.beginPath();
-      ctx.ellipse(x, y, len, len * 0.5, turn, 0, Math.PI * 2);
+      ctx.ellipse(x0 + lean, size - h + size * 0.02, size * 0.014, size * 0.055, lean * 0.01, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = grey(0.4, 0.5);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x - Math.cos(turn) * len, y - Math.sin(turn) * len);
-      ctx.lineTo(x + Math.cos(turn) * len, y + Math.sin(turn) * len);
-      ctx.stroke();
+    }
+  } else if (kind === 'leaf') {
+    // A spray: a twig across the card with lesser twigs off it, and on them leaves that can be
+    // told apart, each with a pointed tip, a midrib, and one half a little darker than the other.
+    const leaf = (x: number, y: number, turn: number, len: number, tone: number) => {
+      const wide = len * rng.range(0.34, 0.46), c = Math.cos(turn), s = Math.sin(turn);
+      const at = (u: number, v: number): [number, number] => [x + c * u * len - s * v * wide, y + s * u * len + c * v * wide];
+      for (const half of [-1, 1]) {
+        ctx.fillStyle = grey(tone * (half < 0 ? 0.8 : 1));
+        ctx.beginPath();
+        ctx.moveTo(...at(0, 0));
+        ctx.bezierCurveTo(...at(0.25, half * 1.1), ...at(0.7, half * 0.8), ...at(1, 0));
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.strokeStyle = grey(tone * 0.62, 0.8);
+      ctx.lineWidth = Math.max(1, size / 256);
+      ctx.beginPath(); ctx.moveTo(...at(0, 0)); ctx.lineTo(...at(0.95, 0)); ctx.stroke();
+    };
+    const twig = (x0: number, y0: number, dir: number, reach: number, width: number, depth: number) => {
+      const steps = Math.max(3, Math.round(reach / (size * 0.05)));
+      let x = x0, y = y0, d = dir;
+      for (let k = 0; k < steps; k++) {
+        const f = k / steps, nx = x + Math.cos(d) * (reach / steps), ny = y + Math.sin(d) * (reach / steps);
+        ctx.strokeStyle = grey(0.26);
+        ctx.lineWidth = width * (1 - 0.7 * f);
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+        x = nx; y = ny;
+        d += rng.range(-0.22, 0.22);
+        if (depth > 0 && k > 0 && k % 2 === 0) twig(x, y, d + (k % 4 ? 1 : -1) * rng.range(0.6, 1.0), reach * rng.range(0.35, 0.5) * (1 - f * 0.4), width * 0.6, depth - 1);
+        // Leaves stand off the twig to either side, turned a little forward, and one at the end.
+        for (const side of [-1, 1]) if (rng.chance(0.85)) leaf(x, y, d + side * rng.range(0.5, 1.1), size * rng.range(0.085, 0.125), rng.range(0.5, 1.0));
+      }
+      leaf(x, y, d, size * rng.range(0.09, 0.13), rng.range(0.6, 1.0));
+    };
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2 + rng.range(-0.3, 0.3);
+      twig(size / 2, size / 2, a, size * rng.range(0.3, 0.42), size * 0.018, 1);
     }
   } else {
     // A conifer bough seen from above: a stem up the card with side shoots, all bristling with

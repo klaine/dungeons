@@ -59,6 +59,33 @@ vec2 worley(vec2 x, vec2 per) {
   }
   return vec2(d1, d2);
 }
+// The same, with a number belonging to the nearest cell: for giving each piece its own height or shade.
+vec3 worleyId(vec2 x, vec2 per) {
+  vec2 i = floor(x), f = fract(x);
+  float d1 = 9., d2 = 9., id = 0.;
+  for (int yy = -1; yy <= 1; yy++) for (int xx = -1; xx <= 1; xx++) {
+    vec2 g = vec2(float(xx), float(yy));
+    vec2 c = mod(i + g, per);
+    vec2 o = hash22(c);
+    float d = length(g + o - f);
+    if (d < d1) { d2 = d1; d1 = d; id = hash21(c + 17.3); } else if (d < d2) { d2 = d; }
+  }
+  return vec3(d1, d2, id);
+}
+// Flat faces meeting in creases, as rock breaks: each cell holds a tilted plane, and the height
+// is the highest of the planes nearby. About -0.3 to 0.8.
+float facets(vec2 x, vec2 per) {
+  vec2 i = floor(x), f = fract(x);
+  float best = -9.;
+  for (int yy = -1; yy <= 1; yy++) for (int xx = -1; xx <= 1; xx++) {
+    vec2 g = vec2(float(xx), float(yy));
+    vec2 c = mod(i + g, per);
+    vec2 d = f - g - hash22(c);
+    vec2 n = hash22(c + 31.7) * 2. - 1.;
+    best = max(best, hash21(c + 5.1) * .5 - dot(d, n) * .9 - dot(d, d) * .35);
+  }
+  return best;
+}
 `;
 
 interface Recipe {
@@ -127,6 +154,33 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = clamp(.78 + cavity * .15 - h * .1, .45, 1.);
 }`,
   },
+  // Bark: long upright ridges with furrows between them that wander, join and part, cracked
+  // across here and there, and fibrous within. Mid-grey, so that the vertex tint makes it oak or ash.
+  bark: {
+    normalStrength: 7.,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  float warp = fbm(uv, vec2(3., 2.), 3, .5);
+  // A furrow is where a slow noise, stretched upright, passes through nothing.
+  float f1 = abs(gnoise(vec2(uv.x * 11. + warp * 2.2, uv.y * 1.5), vec2(11., 3.)));
+  float f2 = abs(gnoise(vec2(uv.x * 23. + warp * 3. + 7., uv.y * 3.), vec2(23., 3.)));
+  float ridge = smoothstep(.0, .2, f1) * (.72 + .28 * smoothstep(.0, .16, f2));
+  // Now and then a ridge is broken across.
+  vec3 w = worleyId(vec2(uv.x * 6., uv.y * 5. + warp), vec2(6., 5.));
+  float across = smoothstep(.0, .05, w.y - w.x);
+  float fibre = gnoise(vec2(uv.x * 64., uv.y * 6.), vec2(64., 6.)) * .5 + gnoise(vec2(uv.x * 150., uv.y * 14.), vec2(150., 14.)) * .3;
+  return clamp(.1 + ridge * (.55 + .2 * w.z) * (.75 + .25 * across) + fibre * .11 + fbm(uv + 3., vec2(5.), 3, .5) * .12, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float t = fbm(uv + 5.5, vec2(4., 3.), 4, .5);
+  vec3 base = mix(vec3(.13, .105, .09), vec3(.47, .43, .38), smoothstep(.2, .8, h + t * .3));
+  // Grey-green crust on the ridges, as there is on any old trunk.
+  base = mix(base, vec3(.4, .45, .34), smoothstep(.1, .4, fbm(uv + 8., vec2(5., 4.), 3, .5)) * smoothstep(.5, .8, h) * .5);
+  albedo = base * (1. - cavity * .65);
+  rough = clamp(.9 + cavity * .08, .6, 1.);
+}`,
+  },
   // Moss: soft clumps. Alpha (height) is used as the growth mask when blending over stone.
   moss: {
     normalStrength: 3.,
@@ -148,37 +202,79 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   albedo = base * (1. - cavity * .3);
   rough = .96;
 }`,
-  },  // Living rock in the open: plates split by cracks, smaller fractures within them, bedding, and
-  // ridged relief. Pale, like the dressed stone, so that the vertex tint sets its colour.
+  },
+  // Living rock: a broken, weathered surface. A few long fractures, more short ones that are not
+  // all open, flakes with slightly tilted faces, pits, and grain. There is no bedding in it: the
+  // rock is textured from three sides, so beds are drawn by the shader, which knows which way is
+  // up. Pale, like the dressed stone, so that the vertex tint sets its colour.
   rock: {
-    normalStrength: 9.,
+    normalStrength: 6.,
     height: /* glsl */ `
 float heightFn(vec2 uv) {
-  vec2 warp = vec2(fbm(uv + 1.3, vec2(3.), 3, .5), fbm(uv + 8.9, vec2(3.), 3, .5)) * .9;
-  vec2 w1 = worley(uv * 5. + warp, vec2(5.));
-  vec2 w2 = worley(uv * 13. + warp * 1.7 + 4., vec2(13.));
-  float plates = smoothstep(.0, .14, w1.y - w1.x);
-  float chips = smoothstep(.0, .10, w2.y - w2.x);
-  float tilt = hash21(floor(uv * 5. + warp) + 2.) * .22;
-  float ridge = 1. - abs(fbm(uv + 3.1, vec2(6.), 5, .55)) * 2.4;
-  float bed = gnoise(vec2(uv.x * 3., uv.y * 26.), vec2(3., 26.)) * .5 + gnoise(vec2(uv.x * 7., uv.y * 70.), vec2(7., 70.)) * .25;
-  float grain = fbm(uv + 1.7, vec2(64.), 3, .6);
-  float h = .2 + plates * (.34 + .12 * chips) + tilt * plates + ridge * .2 + bed * .1 + grain * .08;
-  return clamp(h, 0., 1.);
+  vec2 warp = vec2(fbm(uv + 1.3, vec2(3.), 4, .55), fbm(uv + 8.9, vec2(3.), 4, .55));
+  // A broken face: flat planes at three sizes, the lesser on the greater, meeting in sharp
+  // edges. The hollows between them are where the cracks are; none is drawn.
+  float broken = (facets(uv * 3. + warp * .6, vec2(3.)) - .3) * .5
+               + (facets(uv * 7. + warp * 1.2 + 4.3, vec2(7.)) - .3) * .24
+               + (facets(uv * 17. + 9.1, vec2(17.)) - .3) * .1;
+  // A few hairline cracks that wander and stop.
+  float c1 = abs(fbm(uv + 2.7, vec2(3.), 5, .5));
+  float crack = (1. - smoothstep(.0, .009, c1)) * smoothstep(.0, .2, fbm(uv + 11.3, vec2(3.), 3, .5)) * .2;
+  float roll = fbm(uv + 3.1, vec2(4.), 4, .55);
+  vec2 wp = worley(uv * 30. + 2., vec2(30.));
+  float pits = smoothstep(.22, .0, wp.x) * step(.6, hash21(floor(uv * 30. + 2.) + 7.)) * smoothstep(.0, .2, fbm(uv + 2.2, vec2(5.), 3, .5) + .05);
+  float grain = fbm(uv + 1.7, vec2(56.), 4, .6);
+  return clamp(.5 + broken + roll * .22 + grain * .13 - crack - pits * .2, 0., 1.);
 }`,
     surface: /* glsl */ `
 void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
   float blot = fbm(uv + 9.1, vec2(4.), 4, .5);
   float speck = hash21(floor(uv * 512.));
-  vec3 base = mix(vec3(.50, .50, .51), vec3(.72, .70, .67), smoothstep(-.3, .35, blot));
+  vec3 base = mix(vec3(.52, .52, .53), vec3(.72, .70, .67), smoothstep(-.3, .35, blot));
+  // Iron in the stone, weathering out warm.
+  base = mix(base, vec3(.66, .52, .38), smoothstep(.1, .4, fbm(uv + 13.7, vec2(5.), 4, .55)) * .3);
   // Lichen: pale grey-green and ochre crusts on the high, dry parts.
-  float crust = smoothstep(.16, .34, fbm(uv + 21.4, vec2(9.), 4, .6)) * smoothstep(.35, .7, h);
-  base = mix(base, mix(vec3(.62, .66, .50), vec3(.70, .58, .32), step(.5, hash21(floor(uv * 9.) + 5.))), crust * .55);
-  base *= mix(.72, 1.08, smoothstep(.15, .8, h));
-  base *= 1. - cavity * .6;
+  vec3 w = worleyId(uv * 11. + 5., vec2(11.));
+  float crust = smoothstep(.2, .36, fbm(uv + 21.4, vec2(9.), 4, .6)) * smoothstep(.4, .7, h) * smoothstep(.5, .3, w.x);
+  base = mix(base, mix(vec3(.66, .69, .55), vec3(.72, .6, .34), step(.6, w.z)), crust * .6);
+  base *= mix(.74, 1.08, smoothstep(.15, .8, h));
+  base *= 1. - cavity * .65;
   base *= .95 + speck * .1;
   albedo = base;
   rough = clamp(.9 + cavity * .08 - smoothstep(.6, .9, h) * .1, .55, 1.);
+}`,
+  },
+  // Scree: broken stone lying loose. Stones of three sizes, each a lump highest in its middle,
+  // the larger lying on the smaller, with earth and shadow in the gaps.
+  scree: {
+    normalStrength: 7.,
+    height: /* glsl */ `
+float lumps(vec2 uv, float n, float share, out float id) {
+  vec3 w = worleyId(uv * n + vec2(fbm(uv + n, vec2(4.), 3, .5), fbm(uv + n + 5.3, vec2(4.), 3, .5)) * 1.2, vec2(n));
+  id = w.z;
+  // Not every cell holds a stone, and those that do hold stones of different sizes.
+  float size = mix(.35, .62, fract(w.z * 7.3));
+  return step(1. - share, w.z) * smoothstep(size, size * .25, w.x) * smoothstep(.0, .12, w.y - w.x);
+}
+float heightFn(vec2 uv) {
+  float ia, ib, ic;
+  float big = lumps(uv, 5., .4, ia) * (.55 + .4 * ia);
+  float mid = lumps(uv + 3.7, 11., .7, ib) * (.36 + .25 * ib);
+  float small = lumps(uv + 8.1, 26., .9, ic) * (.2 + .12 * ic);
+  float grain = fbm(uv + 1.7, vec2(64.), 3, .6);
+  return clamp(max(big, max(mid, small)) + .1 + grain * .09 + fbm(uv, vec2(3.), 3, .5) * .1, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float ia, ib, ic;
+  float big = lumps(uv, 5., .4, ia), mid = lumps(uv + 3.7, 11., .7, ib), small = lumps(uv + 8.1, 26., .9, ic);
+  float tone = big > .05 ? ia : mid > .05 ? ib : ic;
+  vec3 stone = mix(vec3(.44, .43, .43), vec3(.74, .72, .68), fract(tone * 3.7));
+  stone = mix(stone, vec3(.6, .5, .38), step(.8, fract(tone * 11.3)) * .5);
+  vec3 earth = vec3(.17, .14, .1);
+  albedo = mix(earth, stone, smoothstep(.14, .26, h)) * (1. - cavity * .6);
+  albedo *= .95 + hash21(floor(uv * 512.)) * .1;
+  rough = clamp(.93 + cavity * .05, .6, 1.);
 }`,
   },
   // The ground under grass: a fine, fibrous mat with earth showing in the low places. No pattern

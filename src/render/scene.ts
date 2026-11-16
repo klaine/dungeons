@@ -42,7 +42,7 @@ export interface DoorDesc {
  */
 export interface CardSet {
   /** What is painted on the cards. */
-  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'leaf' | 'needle';
+  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle';
   /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
   shape: 'tuft' | 'card';
   /** Whether the cards cast shadows. */
@@ -74,7 +74,11 @@ export interface SceneDescription {
   bounds: { min: Vector3; max: Vector3 };
   blocks: number;
   /** The sun's colour and strength and the sky's radiance, if they differ from the defaults. */
-  sun?: { colour: [number, number, number]; intensity: number; sky: { zenith: number[]; horizon: number[]; ground: number[] } };
+  sun?: {
+    colour: [number, number, number]; intensity: number; sky: { zenith: number[]; horizon: number[]; ground: number[] };
+    /** Where the sun itself stands, if not where the light comes from; how far the stars are out; how far eyes open; how much cloud. */
+    disc?: [number, number, number]; night?: number; eyes?: number; cloud?: number;
+  };
   /** A one-line description to show the player. */
   title?: string;
   /** Per room, how many pieces of furniture were placed and why others were refused; for tuning. */

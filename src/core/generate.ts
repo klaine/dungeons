@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way } from './site';
+import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way, WHEN } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -165,7 +165,15 @@ export function generateSite(seed: string): Site {
     condition: pickFrom.pick<Setting['condition']>(['kept', 'kept', 'damp', 'forsaken', 'forsaken']),
     // Drawn from a stream of its own, so that adding it did not change any site already seen.
     season: base.fork('season').pick<NonNullable<Setting['season']>>(['spring', 'spring', 'summer', 'autumn']),
+    // Mostly a sky of broken cloud; now and then nearly clear, or heavy.
+    cloud: Math.round(base.fork('cloud').pick([0.12, 0.3, 0.38, 0.45, 0.5, 0.58, 0.72]) * 100) / 100,
   };
+  // The later hours were added after the first three, and are reached from the evening by a
+  // stream of their own, so that most sites already seen keep the hour they had.
+  if (setting.hour === 'evening') {
+    const later = base.fork('later').next();
+    setting.hour = later < 0.3 ? 'sunset' : later < 0.4 ? 'dusk' : later < 0.47 ? 'night' : 'evening';
+  }
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
   const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);
@@ -613,7 +621,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
     : caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
   const dark = places.filter((p) => p.light === 'dark' && p.id !== secretId).length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
-  const when = { morning: 'in the morning', midday: 'at midday', evening: 'at evening' }[setting.hour];
+  const when = WHEN[setting.hour];
   if (places.some((p) => p.fallen)) parts.push('one with its roof fallen in');
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
   site.title = `A ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;

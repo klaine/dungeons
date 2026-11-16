@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { fbm2, Rng } from '../core/rng';
+import { fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { Place, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
@@ -7,11 +7,12 @@ import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { carveRock, smin } from './geom/rock';
+import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
 import { layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
-import { Colour, layTrunk, Planting } from './planting';
+import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
 /**
@@ -201,7 +202,7 @@ export function meshSite(site: Site): SceneDescription {
     const escarpment = (x: number, z: number, wobble: number): number => {
       if (z < frontZ) return 1;
       const beside = Math.max(smooth((p.x0 + 2 + wobble * 0.5 - x) / 1.3), smooth((x - (p.x1 - 2 - wobble * 0.5)) / 1.3));
-      return beside * (1 - smooth((z - p.z0 - 0.3 - Math.max(0, wobble)) / 3.4));
+      return beside * (1 - smooth((z - p.z0 - 0.7 - Math.max(0, wobble)) / 2.4));
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
     const swells = (x: number, z: number): number => {
@@ -210,10 +211,12 @@ export function meshSite(site: Site): SceneDescription {
     };
     // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
+    // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
+    const openings = [...house.filter((q) => q.roof === 'sky').map((q) => ({ x0: q.x0, x1: q.x1, z0: q.z0, z1: q.z1 })), ...skylights];
     const ponds = lies.filter((f) => f.kind === 'pond').map((f) => ({ ...f, level: f.base - 0.42 }));
     const rings = lies.filter((f) => f.kind === 'stones');
     const ruins = lies.filter((f) => f.kind === 'ruin');
-    const ground = (x: number, z: number): number => {
+    const groundBase = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
       let y = swells(x, z);
@@ -244,47 +247,278 @@ export function meshSite(site: Site): SceneDescription {
       // house it starts to rise at once.
       const clearOfHouse = smooth(Math.max(0, houseX0 - x, x - houseX1) / 8);
       const riseFrom = houseZ0 + (frontZ - houseZ0) * clearOfHouse;
-      const crest = site.top - 0.15 + Math.min(18, Math.max(0, riseFrom - z) * 0.55);
+      // It lies a little above the top of the walls. (It used to lie a little below, inside the
+      // solid that casts the house's shadow, and so was never once in the sun.)
+      let crest = site.top + 0.12 + Math.min(18, Math.max(0, riseFrom - z) * 0.55);
+      // Over the house it is not a lid but the top of a hill: it swells and dips, keeping level
+      // only where it meets the front wall and the edge of anything open to the sky.
+      if (z < frontZ) {
+        let free = smooth((frontZ - z - 1.2) / 4);
+        for (const o of openings) free = Math.min(free, smooth((Math.max(o.x0 - x, x - o.x1, o.z0 - z, z - o.z1) - 0.6) / 3.5));
+        if (free > 0) crest += (0.25 + 1.9 * fbm2(x * 0.09 + s2 * 2, z * 0.09 - s1, 3) * fbm2(x * 0.31 + s1, z * 0.31 + s2, 2) * 2) * free;
+      }
       if (crest > y) y += (crest - y) * escarpment(x, z, wobble);
       const inside = Math.min(x - g.x0, g.x1 - x, g.z1 - z);
-      y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2 + wobble) / 3.6));
+      // The wall goes up in a stride or two. It is made steeper than rock would long stand, and then worn back.
+      // Behind the head of the valley it dies away into the hill, where it would otherwise run on as a bank to the horizon.
+      y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2.9 + wobble) / 1.8)) * smooth((z - (p.z0 - 9)) / 7);
       const beyond = Math.max(0, -inside);
       return y + smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
     };
     const slopeOf = (f: (x: number, z: number) => number, x: number, z: number, e: number) => Math.hypot(f(x + e, z) - f(x - e, z), f(x, z + e) - f(x, z - e)) / (2 * e);
+
+    /**
+     * The rock of the valley. The plain shape above gives a smooth wall round the valley and a
+     * smooth scarp at its head. Here it is turned into cliffs, in three steps:
+     *  1. the stone is given beds, some hard and some soft, which dip a little;
+     *  2. the wall is worn the way frost wears it, on a lattice of heights: soft beds fall back
+     *     into ledges, hard ones are left as faces, and what fell lies at the foot as scree;
+     *  3. the worn wall is carved as a solid, with the beds cut back or standing proud, split into
+     *     blocks by joints, and broken into buttresses and gullies.
+     * The same lattice serves every piece that is carved and the sheets laid beyond, so they meet.
+     */
+    const rockKind = ROCK[site.setting.stone];
+    const strata = new Strata(rockKind, rng.fork('strata'), p.floor);
+    const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
+    const CELL = 0.3, SHEET = 1.2;
+    const snapTo = (v: number, up: boolean) => (up ? Math.ceil(v / SHEET - 1e-6) : Math.floor(v / SHEET + 1e-6)) * SHEET;
+    // The band of ground carved as cliff: this far into the valley from its edge, and this far out.
+    const IN = 9.6, OUT = 6;
+    const X0o = snapTo(g.x0 - OUT, false), X0i = snapTo(g.x0 + IN, true), X1i = snapTo(g.x1 - IN, false), X1o = snapTo(g.x1 + OUT, true);
+    const Z1i = snapTo(g.z1 - IN, false), Z1o = snapTo(g.z1 + OUT, true), ZNo = snapTo(p.z0 - 7.2, false), ZNi = snapTo(p.z0 + IN, true);
+    // The meadow is carved too, and baked with the house. Behind the house front there is nothing to carve.
+    const MX0 = snapTo(p.x0 - 0.9, false), MX1 = snapTo(p.x1 + 0.9, true), MZ0 = snapTo(p.z0 - 0.14, false), MZ1 = snapTo(p.z1 + 0.3, true);
+    const behind = p.z0 - 0.14;
+    type Patch = { x0: number; x1: number; z0: number; z1: number };
+    const meadowPatch: Patch = { x0: MX0, x1: MX1, z0: MZ0, z1: MZ1 };
+    // The cliffs proper are only made where there is a valley with room for them.
+    const walled = !!site.grounds && X0i + 2.4 < MX0 && MX1 + 2.4 < X1i && ZNi + 2.4 < Z1i && MZ1 < Z1i;
+    const headPatches: Patch[] = walled ? [{ x0: X0i, x1: MX0, z0: ZNo, z1: ZNi }, { x0: MX1, x1: X1i, z0: ZNo, z1: ZNi }] : [];
+    const rimPatches: Patch[] = walled ? [{ x0: X0o, x1: X0i, z0: ZNo, z1: Z1o }, { x0: X1i, x1: X1o, z0: ZNo, z1: Z1o }, { x0: X0i, x1: X1i, z0: Z1i, z1: Z1o }] : [];
+    const patches = [meadowPatch, ...headPatches, ...rimPatches];
+    const inPatch = (c: Patch, x: number, z: number, m: number) => x >= c.x0 - m && x <= c.x1 + m && z >= c.z0 - m && z <= c.z1 + m;
+    // With a hair's breadth to spare: a point on the edge of a patch, as lattice points are, belongs to it.
+    const carved = (x: number, z: number) => patches.some((c) => inPatch(c, x, z, 1e-6));
+    // How deep a point lies inside the band of cliff, measured from the nearest ground that is
+    // not cliff: the valley floor, the hill outside, or the meadow and the house.
+    const depthInBand = (x: number, z: number): number => {
+      let d = Math.min(x - X0o, X1o - x, z - ZNo, Z1o - z, Math.max(X0i - x, x - X1i, ZNi - z, z - Z1i));
+      if (z < ZNi + 2) d = Math.min(d, Math.max(MX0 - x, x - MX1, z - ZNi));
+      return d;
+    };
+    const MARGIN = 3.2;
+    const lx0 = (walled ? X0o : MX0) - MARGIN, lz0 = (walled ? ZNo : MZ0) - MARGIN, lx1 = (walled ? X1o : MX1) + MARGIN, lz1 = (walled ? Z1o : MZ1) + MARGIN;
+    const land = new Grid2(lx0, lz0, CELL, Math.round((lx1 - lx0) / CELL) + 1, Math.round((lz1 - lz0) / CELL) + 1);
+    const known = new Uint8Array(land.data.length);
+    // In front of the house the meadow runs level up to the wall; the scarp behind the wall is not this piece's business.
+    const wallEnds = (x: number) => smooth((Math.min(x - (p.x0 - 0.2), p.x1 + 0.2 - x) + 0.7) / 0.7);
+    for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
+      const x = land.x0 + i * CELL, z = land.z0 + j * CELL;
+      // A little beyond what is carved is wanted too, because the face is looked up a few paces to one side of where it stands.
+      if (!patches.some((c) => inPatch(c, x, z, MARGIN))) continue;
+      known[j * land.nx + i] = 1;
+      // (This holds for the lattice's margin behind the wall as much as for the meadow itself:
+      // were the hill behind let in there, the meadow would find a cliff at its back and turn it to rock.)
+      land.data[j * land.nx + i] = groundBase(x, z < behind ? z + (behind - z) * wallEnds(x) : z);
+    }
+    const loose = land.like();
+    const wornBy = land.like();
+    if (walled) {
+      const before = land.data.slice();
+      const active = new Uint8Array(land.data.length);
+      const foot = land.like();
+      for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
+        const x = land.x0 + i * CELL, z = land.z0 + j * CELL, o = j * land.nx + i;
+        // Nothing moves at the edge of the band, where it must still meet the ground beside it;
+        // nor above the house, whose rooms lie close behind the scarp.
+        const overHouse = z < ZNi + 2 && x > houseX0 - 4 && x < houseX1 + 4;
+        if (!known[o] || !carved(x, z) || depthInBand(x, z) < 0.8 || overHouse) continue;
+        active[o] = 1;
+        foot.data[o] = swells(x, z);
+      }
+      erode({
+        rock: land, loose, active, repose: 0.67, kept: 0.16, passes: 46,
+        holds: (o, y) => {
+          const x = land.x0 + (o % land.nx) * CELL, z = land.z0 + Math.floor(o / land.nx) * CELL;
+          // The lowest beds are taken to be sound, so that the wall always starts with a face
+          // too high to scramble up, whatever lies above it.
+          const hard = y < foot.data[o] + 4.5 ? 0.92 : strata.hardness(Math.floor(strata.at(x, y, z)));
+          return 0.7 + hard * hard * hard * 7;
+        },
+      });
+      for (let o = 0; o < land.data.length; o++) {
+        land.data[o] += loose.data[o];
+        wornBy.data[o] = land.data[o] - before[o];
+      }
+    }
+    const ground = (x: number, z: number): number => (walled && wornBy.holds(x, z) ? groundBase(x, z) + wornBy.at(x, z) : groundBase(x, z));
+    // Three things read off the worn heights: how steep the ground is, which turns a height
+    // above it into a distance from it; which way is uphill; and how far the ground is rock,
+    // which is where it is steep and bare.
+    const steepness = land.like(), rocky = land.like(), upX = land.like(), upZ = land.like();
+    {
+      const H = land.data, nxL = land.nx;
+      const raw = new Float32Array(H.length);
+      for (let j = 0; j < land.nz; j++) for (let i = 0; i < nxL; i++) {
+        const o = j * nxL + i;
+        steepness.data[o] = 1;
+        if (!known[o]) continue;
+        const w = i > 0 && known[o - 1] ? o - 1 : o, e = i < nxL - 1 && known[o + 1] ? o + 1 : o;
+        const n = j > 0 && known[o - nxL] ? o - nxL : o, s = j < land.nz - 1 && known[o + nxL] ? o + nxL : o;
+        const gx = e > w ? (H[e] - H[w]) / ((e - w) * CELL) : 0, gz = s > n ? (H[s] - H[n]) / (((s - n) / nxL) * CELL) : 0;
+        const slope = Math.hypot(gx, gz);
+        steepness.data[o] = Math.sqrt(1 + slope * slope);
+        upX.data[o] = gx; upZ.data[o] = gz;
+        raw[o] = smooth((slope - 0.85) / 0.6) * (1 - smooth(loose.data[o] / 0.3));
+      }
+      // Each is eased over a pace or two: rock does not start at a line, and a face does not
+      // change the way it looks at every step in it.
+      const ease = (data: Float32Array, times: number) => {
+        const from = new Float32Array(data.length);
+        for (let t = 0; t < times; t++) {
+          from.set(data);
+          for (let j = 0; j < land.nz; j++) for (let i = 0; i < nxL; i++) {
+            let sum = 0, count = 0;
+            for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+              const ii = i + di, jj = j + dj;
+              if (ii < 0 || jj < 0 || ii >= nxL || jj >= land.nz || !known[jj * nxL + ii]) continue;
+              sum += from[jj * nxL + ii]; count++;
+            }
+            data[j * nxL + i] = count ? sum / count : 0;
+          }
+        }
+      };
+      ease(raw, 1); ease(upX.data, 3); ease(upZ.data, 3);
+      for (let o = 0; o < H.length; o++) {
+        rocky.data[o] = raw[o];
+        // The way uphill, as a direction; on ground that is nearly level it fades to nothing.
+        const l = Math.hypot(upX.data[o], upZ.data[o]), k = l > 1e-6 ? smooth(l / 0.8) / l : 0;
+        upX.data[o] *= k; upZ.data[o] *= k;
+      }
+    }
+    // Close in front of the house the face must not be cut back, or it would break into the rooms.
+    // How many beds make a step, and how strongly the stone steps at all: columns do not.
+    const stepBeds = Math.max(1, Math.round(1.3 / rockKind.bed)), stepped = Math.min(1, rockKind.bedded * 1.4);
+    const guarded = (x: number) => 1 - smooth((Math.max(houseX0 - 1.5 - x, x - houseX1 - 1.5)) / 2);
+    /**
+     * The land as a solid: positive in air, negative in the ground, and roughly the distance to
+     * the surface. Where the ground is rock, the surface is not where the heights put it but as
+     * far out from there, or back, as the rock's relief says: the heights are read that far
+     * uphill or down. Moving the face sideways, not up and down, is what lets a hard bed
+     * overhang a soft one, and keeps the top of a cliff from breaking into teeth.
+     */
+    // What is known about the spot of ground last asked about. The land is sampled a column at
+    // a time, so this is nearly always the spot asked about next.
+    const spot = { x: NaN, z: NaN, rocky: 0, h: 0, steep: 1, slope: 0, ux: 0, uz: 0 };
+    // The fine relief and the steps together never move the face further than this.
+    const TREAD_MOST = 0.9, FINE_MOST = 1.5;
+    const landAir = (x: number, y: number, z: number): number => {
+      if (x !== spot.x || z !== spot.z) {
+        spot.x = x; spot.z = z;
+        spot.rocky = rocky.at(x, z); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
+        if (spot.rocky >= 0.002) {
+          spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1));
+          spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z);
+        }
+      }
+      const d = (y - spot.h) / spot.steep;
+      if (spot.rocky < 0.002 || d > 5.4 || d < -5.4) return d;
+      // The broad forms first. If the fine ones could not bring the face as far as here, they
+      // are not worked out: only the sign of the answer matters away from the face.
+      let out = Math.min(2.4, Math.max(-2.4, relief.broad(x, y, z)));
+      const most = FINE_MOST * spot.rocky + 0.45;
+      if (Math.abs(d - out * spot.rocky) > most) return d - out * spot.rocky;
+      let fine = relief.fine(x, y, z);
+      // Bedded stone goes up in steps: within each step the face is brought upright, its top
+      // pushed out and its foot drawn back, by as much as the slope there calls for. On a steep
+      // face the treads are a hand wide; where the rock lies back they are ledges.
+      const tread = strata.at(x, y, z) / stepBeds + 0.31, within = tread - Math.floor(tread);
+      fine += Math.max(-TREAD_MOST, Math.min(TREAD_MOST, ((within - 0.5) * stepBeds * rockKind.bed) / spot.slope)) * stepped;
+      out += Math.max(-FINE_MOST, Math.min(FINE_MOST, fine));
+      // Close in front of the house the rock stands forward, and is cut back hardly at all.
+      if (z < ZNi + 2) out += (Math.max(-0.2, 1.3 + out * 0.85) - out) * guarded(x);
+      out *= spot.rocky;
+      const sx = x + out * spot.ux, sz = z + out * spot.uz;
+      return (y - land.at(sx, sz)) / steepness.at(sx, sz);
+    };
+
     // Weathered rock in the open is greyer than the same stone freshly cut for the house.
     const outcrop: Colour = [0.5 + 0.5 * stoneTint[0], 0.52 + 0.5 * stoneTint[1], 0.56 + 0.5 * stoneTint[2]];
     const rockColour = (tone: number): Colour => [0.4 * tone * outcrop[0], 0.4 * tone * outcrop[1], 0.4 * tone * outcrop[2]];
+    const blotSeed = rng.fork('blot').int(1, 9999);
+    /**
+     * The colour of a point of cliff, and what grows and seeps on it. Each bed has its own shade
+     * between the stone's pale and dark; over that lie broad stains, and everything is darker in
+     * cracks and under overhangs, where dirt gathers and little light comes.
+     */
+    const shadeRock = (q: Vector3, n: Vector3, field: Float32Array, open: number, bedding: number): Colour => {
+      const u = strata.at(q.x, q.y, q.z), i = Math.floor(u);
+      const t = strata.shade(i), soft = 1 - strata.hardness(i);
+      const blot = fbm3(q.x * 0.3, q.y * 0.3, q.z * 0.3, 3, blotSeed);
+      const rust = smooth((fbm3(q.x * 0.17 + 9, q.y * 0.4, q.z * 0.17, 3, blotSeed + 3) - 0.6) / 0.14);
+      const tone = (0.72 + 0.56 * blot) * (0.7 + 0.3 * open);
+      const c = rockColour(tone);
+      const pale = rockKind.pale, dark = rockKind.dark;
+      c[0] *= (dark[0] + (pale[0] - dark[0]) * t) * (1 + 0.22 * rust);
+      c[1] *= (dark[1] + (pale[1] - dark[1]) * t) * (1 - 0.02 * rust);
+      c[2] *= (dark[2] + (pale[2] - dark[2]) * t) * (1 - 0.22 * rust);
+      const up = Math.max(0, n.y);
+      // Moss on what faces the sky and in the soft beds, which hold water; damp below overhangs.
+      field[0] = Math.min(1, up * 0.9 + soft * 0.35 * (1 - open) + (1 - open) * 0.2);
+      field[1] = Math.min(1, (1 - open) * 0.25 + soft * 0.3 * smooth((blot - 0.45) / 0.2));
+      field[3] = bedding;
+      return c;
+    };
+    const earth = (x: number, z: number): Colour => {
+      const t = 0.62 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);
+      return [0.5 * t * outcrop[0], 0.47 * t * outcrop[1], 0.43 * t * outcrop[2]];
+    };
     // Earth shows through along the track, where feet have worn the grass away.
     const worn = (x: number, z: number) => (z < p.z1 - 6 ? 0 : 1 - smooth((Math.abs(x - pathAt(z)) - 0.5) / 1.1)) * smooth((z - p.z1 + 6) / 3);
     const turfAt = (x: number, z: number): Colour => {
-      const c = turfColour(x, z, s1), w = worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2));
+      const c = turfColour(x, z, s1);
+      // Bare earth shows where feet have worn the grass away, and where stones have come down on it.
+      const fallen = walled && loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0;
+      const w = Math.max(fallen, worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2)));
       return [c[0] + (3.1 - c[0]) * w, c[1] + (0.92 - c[1]) * w, c[2] + (2.6 - c[2]) * w];
     };
     const cliff = site.top - p.floor + 0.5;
-    const turf = kit.mesh('turf');
-    carveRock(kit.mesh('rock'), (x, y, z) => {
-      // The cliff is broken: beds that step back as they rise, and clefts down them. The breaking
-      // dies away at the edge of what is carved, where this surface must meet the sheet beyond.
-      const rocky = escarpment(x, z, wobbleAt(x, z)) * Math.min(1, Math.max(0, (y - p.floor - 0.4) / 1.2)) * smooth(Math.min(x - p.x0, p.x1 - x) / 1.4 + 0.15);
-      if (rocky <= 0) return y - ground(x, z);
-      const bed = Math.abs(((y * 0.95 + fbm2(x * 0.12 + s1, z * 0.12 + s2, 2) * 2.2) % 1) - 0.5) - 0.25;
-      const cleft = Math.abs(fbm2(x * 0.75 + s2, z * 0.75 + y * 0.25 + s1, 3) - 0.5) - 0.12;
-      const lump = (fbm2(x * 0.45 + y * 0.5 + s2, z * 0.45 - y * 0.4 + s1, 3) - 0.5) * 1.5;
-      return y - ground(x, z) + ((fbm2(x * 1.4 + y * 0.9 + s1, z * 1.4 - y * 0.7 + s2, 2) - 0.5) * 0.5 + lump + bed * 1.5 + Math.min(0.2, cleft) * 2.6) * rocky;
-    }, {
-      min: V(p.x0 - 0.3, p.floor - 3.4, p.z0 - 0.14), max: V(p.x1 + 0.3, p.floor + cliff + 1.4, p.z1 + 0.3),
-      cell: 0.42, uvScale: 0.4, otherUvScale: 2.3,
-      meshFor: (n) => (n.y > 0.74 ? turf : null),
-      shade: (q, n, field, face) => {
-        // Asked of the triangle, not the corner: a rock face with one level corner is still rock.
-        if (face.y > 0.74) return turfAt(q.x, q.z);
-        const bed = fbm2((q.y + q.x * 0.2) * 1.8, q.z * 0.2 + s1, 3);
-        const tone = 0.62 + 0.4 * bed + 0.2 * fbm2(q.x * 0.8 + s2, q.z * 0.8 + q.y, 3);
-        field[0] = Math.max(0, n.y) * 0.9;
-        return rockColour(tone);
-      },
-    });
+    /** Carves one patch of the land: rock where it is steep, turf where it is level, scree where debris lies. */
+    const carveLand = (whole: Patch, into: (material: string) => MeshBuilder, keep?: (at: Vector3) => boolean) => {
+      // A long patch is carved in lengths, each only as tall as its own ground needs.
+      const TILE = 12;
+      if (whole.x1 - whole.x0 > TILE * 1.5 || whole.z1 - whole.z0 > TILE * 1.5) {
+        const alongX = whole.x1 - whole.x0 > whole.z1 - whole.z0;
+        const from = alongX ? whole.x0 : whole.z0, to = alongX ? whole.x1 : whole.z1;
+        for (let a = from; a < to - 1e-6; a += TILE) {
+          const b = to - (a + TILE) < TILE * 0.5 ? to : a + TILE;
+          carveLand(alongX ? { ...whole, x0: a, x1: b } : { ...whole, z0: a, z1: b }, into, keep);
+          if (b === to) break;
+        }
+        return;
+      }
+      const c = whole;
+      let lo = Infinity, hi = -Infinity;
+      for (let z = c.z0; z < c.z1 + CELL / 2; z += CELL) for (let x = c.x0; x < c.x1 + CELL / 2; x += CELL) {
+        const h = land.at(x, z);
+        lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      const turf = into('turf'), scree = into('scree');
+      carveRock(into('rock'), landAir, {
+        min: V(c.x0, Math.floor((lo - 2) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
+        cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
+        // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
+        meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
+        shade: (q, n, field, other, open) => {
+          if (other === turf) return turfAt(q.x, q.z);
+          if (other === scree) return earth(q.x, q.z);
+          return shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
+        },
+      });
+    };
+    kit.group = `p${p.id}`;
+    // Behind the house front, between the ends of the wall, there is nothing to see and nothing is made.
+    carveLand(meadowPatch, (m) => kit.mesh(m), (at) => at.z > behind - CELL || at.x < p.x0 - 0.2 || at.x > p.x1 + 0.2);
     // The rim of the valley is too steep to climb, but nobody is to leave by it whatever they find.
     fences.push(
       { min: V(g.x0 - 3, p.floor - 6, g.z0 - 3), max: V(g.x0 - 1.2, p.floor + 80, g.z1 + 3) },
@@ -294,8 +528,9 @@ export function meshSite(site: Site): SceneDescription {
       { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
     );
     // Solid rock beside the house, and under the meadow.
-    kit.mass(V(p.x0 - 30, p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 + 0.8));
-    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(p.x1 + 30, p.floor + cliff - 1.2, p.z0 + 0.8));
+    // It stops well behind the face of the scarp, which is cut back in places by a stride or two.
+    kit.mass(V(p.x0 - 30, p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 - 2.2));
+    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(p.x1 + 30, p.floor + cliff - 1.2, p.z0 - 2.2));
     kit.mass(V(p.x0 - 3, p.floor - 5, p.z0), V(p.x1 + 3, p.floor - 3.2, p.z1 + 3));
 
     // The path: flags laid in a strip from the door, following the same gentle wander.
@@ -309,18 +544,46 @@ export function meshSite(site: Site): SceneDescription {
     // Everything out in the valley is built with a kit of its own, whose meshes are scenery.
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const sceneryMesh = (material: string) => wild.mesh(material);
+    // Roots, twigs, bushes and the low boughs of firs: wood that is drawn but stops nobody.
+    wild.group = 'soft';
+    const softBark = wild.mesh('bark');
+    wild.group = 'wild';
+    // The scarp at the head of the valley, either side of the meadow, is near enough the door to
+    // be baked with the house; the rest of the rim takes its light from the open sky.
+    const overCourt = (at: Vector3) => house.some((q) => q.roof === 'sky' && at.x > q.x0 - T / 2 - 0.2 && at.x < q.x1 + T / 2 + 0.2 && at.z > q.z0 - T / 2 - 0.2 && at.z < q.z1 + T / 2 + 0.2)
+      || skylights.some((q) => at.x > q.x0 && at.x < q.x1 && at.z > q.z0 && at.z < q.z1);
+    kit.group = 'scarp';
+    for (const c of headPatches) carveLand(c, (m) => kit.mesh(m), (at) => !overCourt(at));
+    kit.group = `p${p.id}`;
+    for (const c of rimPatches) carveLand(c, sceneryMesh);
+
     const stones: [number, number, number][] = [];
+    let boulders = 0;
     const boulder = (mesh: MeshBuilder, x: number, z: number, size: number, q: Rng) => {
-      const base = ground(x, z), ts = q.range(0, 60), sx = q.range(0.8, 1.3), sz = q.range(0.8, 1.3), sy = q.range(0.55, 0.8);
-      carveRock(mesh, (qx, qy, qz) => {
-        const d = Math.hypot((qx - x) / sx, (qy - base - size * 0.2) / sy, (qz - z) / sz);
-        return d - size + (fbm2(qx * 1.6 + qy * 1.1 + ts, qz * 1.6 - qy * 0.9 + ts, 3) - 0.5) * size * 0.75;
-      }, {
-        min: V(x - size * 1.9, base - 0.6, z - size * 1.9), max: V(x + size * 1.9, base + size * 1.6, z + size * 1.9),
-        cell: Math.max(0.16, size * 0.2), uvScale: 0.5,
-        shade: (c, n, field) => {
-          field[0] = Math.max(0, n.y) * 1.0;
-          return rockColour(0.6 + 0.5 * fbm2(c.x * 1.3 + ts, c.z * 1.3 + c.y, 3));
+      // These four are no longer used, but are still drawn so that what follows them in the stream is as it was.
+      const ts = q.range(0, 60);
+      q.range(0.8, 1.3); q.range(0.8, 1.3); q.range(0.55, 0.8);
+      const fq = rng.fork(`boulder${boulders++}`);
+      const form = boulderForm(fq, size, rockKind);
+      const base = ground(x, z);
+      // It lies a little way into the ground, deeper on the downhill side than it looks.
+      const cy = base + form.half * fq.range(0.3, 0.75);
+      const low = Math.min(base, ground(x - form.reach, z), ground(x + form.reach, z), ground(x, z - form.reach), ground(x, z + form.reach));
+      const cell = Math.min(0.26, Math.max(0.08, size * 0.14));
+      carveRock(mesh, (qx, qy, qz) => form.density(qx - x, qy - cy, qz - z), {
+        min: V(x - form.reach, Math.max(low - 0.4, cy - form.sink), z - form.reach), max: V(x + form.reach, cy + form.rise, z + form.reach),
+        cell, uvScale: 0.5, fromSamples: true, occlusion: [cell * 2, Math.max(cell * 3, size * 0.45)], sharp: true,
+        shade: (c, n, field, _other, open) => {
+          const h = c.y - base;
+          // Moss on top and in the cracks; damp and dark where it meets the ground.
+          field[0] = Math.min(1, Math.max(0, n.y) * 0.95 + (1 - open) * 0.3);
+          field[1] = 0.45 * (1 - smooth(h / 0.3));
+          field[3] = 0.35;
+          const tone = (0.7 + 0.5 * fbm3(c.x * 1.1 + ts, c.y * 1.1, c.z * 1.1, 3)) * (0.66 + 0.34 * open) * (0.75 + 0.25 * smooth(h / 0.25));
+          // It is the stone of the cliffs, beds and all, a little greyer for lying out in the weather.
+          const t = form.bedShade!(c.x - x, c.y - cy, c.z - z), col = rockColour(tone);
+          for (let k = 0; k < 3; k++) col[k] *= 0.3 + 0.7 * (rockKind.dark[k] + (rockKind.pale[k] - rockKind.dark[k]) * t);
+          return col;
         },
       });
       stones.push([x, z, size]);
@@ -347,6 +610,13 @@ export function meshSite(site: Site): SceneDescription {
     const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
     const blossom: Colour = [0.85, 0.2, 0.38];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+    // Trees used to be a pole with balls of leaves on it, drawn from the same streams of chance
+    // as everything planted after them. Those crowns are still drawn, into nothing, so that all
+    // that follows stands where it stood; the trees themselves are now grown, each from a
+    // stream of its own.
+    const spent = new Planting();
+    let grown = 0;
+    const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8];
     let planted = 0;
     for (let tries = 0; tries < 60 && planted < 5; tries++) {
       const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 3);
@@ -354,9 +624,11 @@ export function meshSite(site: Site): SceneDescription {
       if (trees.some((t) => Math.hypot(t[0] - x, t[1] - z) < 5.5) || !clearOfStones(x, z, 1.2)) continue;
       const base = ground(x, z);
       const height = r.range(5.2, 7.6), girth = r.range(0.19, 0.28);
-      kit.roundWall('wood', x, z, girth, base - 0.3, base + height, { ...plank, course: [6, 6], length: [0.07, 0.13], tint: [0.34, 0.3, 0.27], tintVar: 0.3, proud: 0.012, bevel: 0.012 }, false, { open: { v0: true, v1: true } });
-      kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + height, z + girth * 0.6));
-      planting.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, leafOf(plant.pick(greens)), plant, 0.72);
+      const tall = height * 1.25, oak = grown % 3 !== 1;
+      kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
+      const green = leafOf(plant.pick(greens));
+      spent.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, green, plant, 0.72);
+      growTree(planting, kit.mesh('bark'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: green, bark: oak ? oakBark : ashBark, soft: softBark }, rng.fork(`tree${grown++}`));
       trees.push([x, z]);
       planted++;
     }
@@ -375,28 +647,50 @@ export function meshSite(site: Site): SceneDescription {
       return coarse + (y - coarse) * smooth(inside / 6);
     };
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
-    const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: turfAt, rock: rockColour };
+    const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: turfAt, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
       ...terrain, area: fine, cell: 1.2,
-      // Not over the meadow, which is carved, and not over the house. Corners that fall just
-      // inside the meadow are drawn back to its edge, so the sheet meets it without lapping in.
-      // Over the house it is the turf of the hill above the vaults, left open over every court.
-      skip: (c) => overlaps(c, p.x0 + 1.3, p.x1 - 1.3, frontZ, p.z1 - 1.3) || (c.z0 < frontZ && c.z1 > frontZ && c.x1 > p.x0 - 0.3 && c.x0 < p.x1 + 0.3)
-        || house.some((q) => q.roof === 'sky' && overlaps(c, q.x0 - T / 2 - 0.2, q.x1 + T / 2 + 0.2, q.z0 - T / 2 - 0.2, q.z1 + T / 2 + 0.2))
-        || skylights.some((q) => overlaps(c, q.x0, q.x1, q.z0, q.z1)),
+      // Not where the land is carved, and not over the house: there it is the turf of the hill
+      // above the vaults, left open over every court. Carved patches end on this sheet's own
+      // lines, so a cell is either wholly carved or not at all.
+      // Nor across the line of the house front, where the ground drops from the hill to the
+      // meadow behind the wall: a cell lying across that would be a ramp through the doorway.
+      skip: (c) => {
+        const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2;
+        // Behind the front wall the sheet is the hilltop, right up to the wall; everywhere else
+        // it gives way to what is carved.
+        const behindWall = mx > p.x0 - 0.2 && mx < p.x1 + 0.2 && mz < frontZ - 0.05;
+        if (!behindWall && (carved(mx, mz) || (c.z0 < p.z0 + 0.1 && c.z1 > frontZ - 0.05 && c.x1 > p.x0 - 0.3 && c.x0 < p.x1 + 0.3))) return true;
+        return openings.some((o) => mx > o.x0 && mx < o.x1 && mz > o.z0 && mz < o.z1);
+      },
+      // Its corners are drawn back to the line of the wall top and out of every opening, so that
+      // the turf ends exactly where masonry begins and no gap is left to look down.
       warp: (x, z) => {
-        const w = x - (p.x0 - 0.25), e = p.x1 + 0.25 - x, s = p.z1 + 0.25 - z;
-        if (w <= 0 || e <= 0 || s <= 0 || z < frontZ) return [x, z];
-        const least = Math.min(w, e, s);
-        return least === w ? [p.x0 - 0.25, z] : least === e ? [p.x1 + 0.25, z] : [x, p.z1 + 0.25];
+        if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = frontZ - 0.05;
+        for (const o of openings) {
+          if (x <= o.x0 || x >= o.x1 || z <= o.z0 || z >= o.z1) continue;
+          const w = x - o.x0, e = o.x1 - x, n = z - o.z0, so = o.z1 - z, least = Math.min(w, e, n, so);
+          if (least === w) x = o.x0; else if (least === e) x = o.x1; else if (least === n) z = o.z0; else z = o.z1;
+        }
+        return [x, z];
       },
     });
+    // The top of the front wall is finished with a coping, which also covers the last hand's
+    // breadth between wall and turf; and every opening in the hill has a kerb of stone round it.
+    kit.box('stone', V(p.x0 - 0.2, site.top - 0.06, p.z0 - 0.5), V(p.x1 + 0.2, site.top + 0.2, p.z0 + 0.09), coping, coping, 'frontcoping');
+    for (const o of house.filter((q) => q.roof === 'sky')) {
+      const k = 0.4, y0 = site.top - 0.06, y1 = site.top + 0.3;
+      kit.box('stone', V(o.x0 - k, y0, o.z0 - k), V(o.x1 + k, y1, o.z0), coping, coping, `kerbn${o.id}`);
+      kit.box('stone', V(o.x0 - k, y0, o.z1), V(o.x1 + k, y1, o.z1 + k), coping, coping, `kerbs${o.id}`);
+      kit.box('stone', V(o.x0 - k, y0, o.z0), V(o.x0, y1, o.z1), coping, coping, `kerbw${o.id}`);
+      kit.box('stone', V(o.x1, y0, o.z0), V(o.x1 + k, y1, o.z1), coping, coping, `kerbe${o.id}`);
+    }
     const reach = 246;
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), ground, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 6,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
-    layMountains(sceneryMesh('rock'), cxA, czA, p.floor + 30, s2);
+    layMountains(sceneryMesh('rock'), cxA, czA, p.floor + 30, s2, stoneTint);
 
     // ---- what lies and grows in the valley
     const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
@@ -413,11 +707,51 @@ export function meshSite(site: Site): SceneDescription {
       if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
+    // What has come down off the cliffs: blocks lying on the scree and out from its foot, and
+    // the scree itself, which is small stones by the hundred. The small ones are a dozen shapes
+    // carved once and set down again and again, each turned, sized and tinted differently.
+    let screeLaid = 0;
+    if (walled) {
+      const fall = rng.fork('rockfall');
+      const lying: [number, number, number][] = [];
+      for (let j = 2; j < land.nz - 2; j += 2) for (let i = 2; i < land.nx - 2; i += 2) {
+        const depth = loose.data[j * land.nx + i];
+        if (depth < 0.06) continue;
+        const x = land.x0 + (i + fall.range(-1, 1)) * CELL, z = land.z0 + (j + fall.range(-1, 1)) * CELL;
+        if (offTrack(x, z) < 2 || clearOfFeatures(x, z) < 1) continue;
+        if (fall.chance(0.012 * Math.min(1, depth / 0.4)) && clearOfStones(x, z, 1.2)) boulder(sceneryMesh('rock'), x, z, fall.chance(0.25) ? fall.range(1.1, 1.9) : fall.range(0.45, 1), fall);
+        else if (fall.chance(0.5 * Math.min(1, depth / 0.5))) lying.push([x, z, fall.range(0.1, 0.24) + 0.25 * fall.next() * fall.next()]);
+      }
+      const shapes = Array.from({ length: 12 }, (_, k) => {
+        const form = boulderForm(rng.fork(`scree${k}`), 0.3, rockKind), m = new MeshBuilder();
+        carveRock(m, form.density, {
+          min: V(-form.reach, -form.sink, -form.reach), max: V(form.reach, form.rise, form.reach), cell: 0.1, uvScale: 0.5, fromSamples: true, occlusion: [0.1, 0.2], sharp: true,
+          shade: (_c, _n, _f, _o, open) => [open, open, open],
+        });
+        return m;
+      });
+      const into = sceneryMesh('rock');
+      for (const [x, z, size] of lying) {
+        const shape = fall.pick(shapes), k = size / 0.3, turn = fall.range(0, Math.PI * 2), cos = Math.cos(turn), sin = Math.sin(turn);
+        const y = ground(x, z) + size * fall.range(0.05, 0.3), tone = fall.range(0.6, 1.1);
+        into.append(shape, (v) => {
+          const px = v.p[0] * k, pz = v.p[2] * k, nx = v.n[0], nz = v.n[2];
+          v.p[0] = x + px * cos - pz * sin; v.p[1] = y + v.p[1] * k; v.p[2] = z + px * sin + pz * cos;
+          v.n[0] = nx * cos - nz * sin; v.n[2] = nx * sin + nz * cos;
+          const open = v.colour[0] * Math.min(1, 0.55 + (v.p[1] - y) / size + 0.5);
+          const c = rockColour(tone * (0.55 + 0.45 * open));
+          v.colour[0] = c[0]; v.colour[1] = c[1]; v.colour[2] = c[2];
+          v.field[0] = Math.max(0, v.n[1]) * 0.6; v.field[3] = 0.2;
+          v.open = open;
+        });
+      }
+      screeLaid = lying.length;
+    }
     // Woods first, because what grows under and between trees depends on where they stand.
     // Trees thin out into glades, firs take the higher ground, and here and there a stand is in
     // blossom. In the valley the trunks are solid; the track and the meadow are kept clear.
-    const wood = sceneryMesh('wood');
-    const bark: Colour = [0.3, 0.26, 0.22];
+    const barkMesh = sceneryMesh('bark');
+    const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.85, 0.58, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number) => {
       const lift = y - p.floor;
@@ -425,14 +759,38 @@ export function meshSite(site: Site): SceneDescription {
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
       if (kind > 0.56) {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
-        layTrunk(wood, x, y, z, height * 0.9, plant.range(0.16, 0.26), bark);
-        planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), leafOf(plant.pick(firs)), plant);
+        const girth = plant.range(0.16, 0.26), needle = leafOf(plant.pick(firs));
+        // (The old boughs are still drawn from the stream, into nothing, as the old crowns are.)
+        spent.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), needle, plant);
+        spent.needles.matrices.length = spent.needles.colours.length = spent.needles.centres.length = 0;
+        const own = rng.fork(`fir${grown++}`);
+        if (detail > 0.3) {
+          // Pines stand in patches among the spruce, on the drier knolls.
+          const pine = fbm2(x * 0.05 - s1, z * 0.05 + s2 * 2, 2) > 0.57;
+          growConifer(planting, barkMesh, x, y, z, height * (pine ? 1.25 : 1.2), radius * (pine ? 1.15 : 1), girth * (pine ? 1.15 : 1.05), {
+            kind: pine ? 'pine' : 'spruce', detail, needle: pine ? leafOf(pineGreen) : needle, bark: pine ? pineBark : firBark, shaded: true, soft: softBark,
+          }, own);
+        } else {
+          // Far off, a trunk and tiers of boughs are enough.
+          layTrunk(barkMesh, x, y, z, height * 0.9, girth, firBark);
+          planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), needle, own);
+        }
         canopies.push([x, z, radius * 1.15, 1]);
       } else {
         const height = plant.range(5.5, 9.5), spread = plant.range(2.2, 3.4);
-        layTrunk(wood, x, y, z, height * 0.8, plant.range(0.17, 0.3), bark, [plant.range(-0.4, 0.4), plant.range(-0.4, 0.4)]);
-        planting.broadleaf(x, y, z, height, spread, Math.round(26 + 260 * detail), leafOf(inBlossom ? blossom : plant.pick(greens)), plant, 1.7 - 0.85 * detail);
-        canopies.push([x, z, spread * 1.3, 0.75]);
+        const girth = plant.range(0.17, 0.3);
+        plant.range(-0.4, 0.4); plant.range(-0.4, 0.4);
+        const green = leafOf(inBlossom ? blossom : plant.pick(greens));
+        spent.broadleaf(x, y, z, height, spread, Math.round(26 + 260 * detail), green, plant, 1.7 - 0.85 * detail);
+        spent.leaves.matrices.length = spent.leaves.colours.length = spent.leaves.centres.length = 0;
+        // Which kind grows where goes by patches, as woods do; a tree in blossom is of the spreading kind.
+        const oak = inBlossom || fbm2(x * 0.045 + s2 * 3, z * 0.045 - s1, 2) > 0.44;
+        // One tree in six is old: half as tall again, twice as thick, and carrying far more leaf.
+        const old = detail > 0.7 && grown % 6 === 2 ? 1 : 0;
+        const reach = growTree(planting, barkMesh, x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old), girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old), {
+          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old)), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old), leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: softBark,
+        }, rng.fork(`tree${grown++}`));
+        canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
     };
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
@@ -494,6 +852,8 @@ export function meshSite(site: Site): SceneDescription {
     };
     const thinAt = (x: number, z: number): number => {
       let t = Math.min(1, slopeOf(ground, x, z, 0.5) * 1.7);
+      // Nothing much grows on scree.
+      if (walled && loose.holds(x, z)) t = Math.max(t, smooth(loose.at(x, z) / 0.3));
       for (const q of stones) t = Math.max(t, 0.7 * (1 - smooth((Math.hypot(q[0] - x, q[1] - z) - q[2] - 0.2) / 1.4)));
       const rim = Math.min(x - g.x0, g.x1 - x, g.z1 - z, z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
       return Math.max(t, 0.75 * (1 - smooth((rim - 2.5) / 3)));
@@ -542,11 +902,112 @@ export function meshSite(site: Site): SceneDescription {
     grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
     grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
 
+    const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : [0.42, 0.14, 0.34];
+    // ---- a second, taller growth, from a stream of its own so that nothing above is disturbed
+    const lush = rng.fork('lush');
+    // Meadow grass: knee-high and close where the ground is moist and nobody walks, thinning to
+    // nothing where it is dry, trodden or dark. With the turf grass under it, the ground is
+    // covered, not dotted.
+    for (let gz = g.z0 + 0.5; gz < g.z1; gz += 0.5) for (let gx = g.x0 + 1; gx < g.x1 - 1; gx += 0.5) {
+      const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
+      // The cheap questions first: most places are settled by them.
+      const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z);
+      const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
+      if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
+      // Not inside the ring of stones or the walls of the hut.
+      if (lies.some((f) => f.kind !== 'pond' && Math.hypot(x - f.x, z - f.z) < f.r * (f.kind === 'stones' ? 1.4 : 1.1))) continue;
+      const y = ground(x, z);
+      if (waterOver(x, z, y) > -0.2 || t > want * (1 - 0.7 * thinAt(x, z))) continue;
+      const tall = (0.42 + 0.75 * wet) * (0.7 + 0.6 * fbm2(x * 0.21 + s1, z * 0.21 - s2, 2));
+      const c = turfColour(x, z, s1), dry = Math.min(1, parched + Math.max(0, (0.4 - wet) * 2));
+      planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, [(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
+    }
+    // Reeds: a bed of them wherever the water is shallow and the bank is low, taller than a man,
+    // thickest at the water's edge. The side the landing stage is on is left open.
+    for (const f of ponds) {
+      let near = 0, nearD = Infinity;
+      for (let z = f.z - 30; z <= f.z + 30; z += 1) {
+        const d = Math.hypot(pathAt(z) - f.x, z - f.z);
+        if (d < nearD) { nearD = d; near = z; }
+      }
+      const jx = (pathAt(near) - f.x) / nearD, jz = (near - f.z) / nearD;
+      for (let k = 0; k < f.r * f.r * 16; k++) {
+        const a = lush.range(0, Math.PI * 2), d = f.r * lush.range(0.5, 1.3), x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d;
+        const h = lush.range(1.25, 2.2), w = lush.range(0.5, 0.9), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.15), patch = fbm2(x * 0.35 + s2, z * 0.35 + s1, 2);
+        if (Math.cos(a) * jx + Math.sin(a) * jz > 0.86 || patch < 0.4) continue;
+        const y = ground(x, z), depth = f.level - y;
+        if (depth < -0.3 || depth > 0.6) continue;
+        const straw = season === 'autumn' ? 0.5 : parched;
+        planting.tuft(planting.reeds, x, y - 0.05, z, w, h + Math.max(0, depth), turn, [(0.2 + 0.25 * straw) * tone, (0.31 + 0.02 * straw) * tone, 0.07 * tone]);
+      }
+    }
+    // Ivy on the front of the house: it starts at the foot of the wall and climbs, spreading as
+    // it goes and narrowing to its growing tip. A kept house has a little; a forsaken one is
+    // half covered. In autumn some of it has turned red.
+    {
+      const amount = { kept: 0.35, damp: 0.7, forsaken: 1 }[site.setting.condition];
+      const wall = lush.fork('ivy'), openings = holesOn(p, 'n', 0), highest = site.top - p.floor - 0.6;
+      for (let k = 0, n = Math.round(((p.x1 - p.x0 - 8) / 4.5) * amount); k < n; k++) {
+        let x = wall.range(p.x0 + 4, p.x1 - 4);
+        const climb = Math.min(highest, wall.range(2.2, 6.5) * (0.6 + 0.6 * amount)), girth = wall.range(0.7, 1.6);
+        const red = season === 'autumn' && wall.chance(0.35);
+        if (openings.some((h) => Math.abs(h.at - x) < h.w + 0.5 + girth)) continue;
+        for (let y = 0.1; y < climb; y += 0.2) {
+          const f = y / climb, wide = girth * Math.sin(Math.PI * Math.pow(f, 0.6)) + 0.12;
+          x += wall.range(-0.09, 0.09);
+          for (let c = 0; c < 2 + Math.round(wide * 2.2); c++) {
+            const lx = x + wall.range(-wide, wide), ly = p.floor + y + wall.range(-0.15, 0.15), t = wall.range(0.6, 1.15);
+            planting.card(planting.leaves, lx, ly, p.z0 + 0.06 + wall.range(0, 0.07), wall.range(0.42, 0.7), wall.range(-0.3, 0.3), wall.range(-0.3, 0.3), wall.range(0, Math.PI * 2),
+              red ? [0.42 * t, 0.07 * t, 0.03 * t] : [0.035 * t, 0.1 * t, 0.028 * t], lx, ly, p.z0 - 3);
+          }
+        }
+      }
+    }
+    // The hill above the house: thin soil over the vaults, so no trees, but rough grass, heather
+    // in mounds, and a bush here and there, all standing clear of the openings.
+    {
+      const top = rng.fork('hilltop');
+      const clearOf = (x: number, z: number, m: number) => !openings.some((o) => x > o.x0 - m && x < o.x1 + m && z > o.z0 - m && z < o.z1 + m);
+      let bushes = 0;
+      for (let gz = houseZ0 - 3; gz < frontZ - 0.6; gz += 0.62) for (let gx = Math.max(houseX0 - 3, p.x0 + 0.5); gx < Math.min(houseX1 + 3, p.x1 - 0.5); gx += 0.62) {
+        const x = gx + top.range(0, 0.62), z = gz + top.range(0, 0.62), t = top.next(), turn = top.range(0, Math.PI), tone = top.range(0.7, 1.2);
+        if (z > frontZ - 0.7 || !clearOf(x, z, 0.5)) continue;
+        const y = ground(x, z), patch = fbm2(x * 0.16 + s1 * 2, z * 0.16 + s2, 2);
+        if (t < 0.5) {
+          const c = turfColour(x, z, s1), dry = Math.min(1, 0.35 + parched);
+          planting.tuft(planting.grass, x, y - 0.05, z, 0.5 + 0.3 * patch, 0.22 + 0.5 * patch, turn, [(0.17 + 0.2 * dry) * c[0] * tone, (0.29 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
+        } else if (t > 0.93 && patch > 0.5 && clearOf(x, z, 1)) {
+          const size = 0.3 + 0.3 * top.next();
+          planting.crown(x, y + size * 0.35, z, size, size * 0.5, 14, size * 0.9, leafOf(heather), top);
+        } else if (t > 0.5 && t < 0.508 && bushes < 9 && clearOf(x, z, 1.6)) {
+          growTree(planting, softBark, x, y - 0.05, z, 1.5 + 1.2 * top.next(), 0.04, { kind: 'oak', detail: 0.5, cards: 56, cardSize: 0.5, leaf: leafOf(greens[0]), bark: oakBark, shaded: true }, rng.fork(`topbush${bushes++}`));
+        }
+      }
+    }
+    // Dead wood: trunks lying where they fell, and stumps, in the shade of the wood.
+    {
+      const dead = rng.fork('deadwood'), grey: Colour = [0.6, 0.56, 0.5];
+      let lying = 0;
+      for (let tries = 0; tries < 260 && lying < 16; tries++) {
+        const x = dead.range(g.x0 + 8, g.x1 - 8), z = dead.range(g.z0 + 8, g.z1 - 8), a = dead.range(0, Math.PI), len = dead.range(2.2, 5.5), r = dead.range(0.11, 0.26), stump = dead.chance(0.35);
+        if (shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
+        if (stump) {
+          const y = ground(x, z);
+          layLimb(barkMesh, [V(x, y - 0.3, z), V(x, y + 0.1, z), V(x + 0.02, y + dead.range(0.35, 0.8), z)], [r * 1.9, r * 1.5, r * 1.3], 8, grey, 0, () => 0.75);
+        } else {
+          const dx = Math.cos(a) * len * 0.5, dz = Math.sin(a) * len * 0.5;
+          const at = (t: number) => V(x + dx * t, ground(x + dx * t, z + dz * t) + r * (0.75 - 0.25 * Math.abs(t)), z + dz * t);
+          layLimb(barkMesh, [at(-1), at(-0.35), at(0.35), at(1)], [r * 1.15, r * 1.05, r * 0.95, r * 0.8], 8, grey, 0, () => 0.75);
+          stones.push([x, z, len * 0.4]);
+        }
+        lying++;
+      }
+    }
+
     // The other plants, each where it would grow.
     const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
-    const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : [0.42, 0.14, 0.34];
     const open = (x: number, z: number) => inGrounds(x, z, 0.5) && offTrack(x, z) > 1.6 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
-    const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0 };
+    const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0, scree: screeLaid };
     for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
       const x = gx + plant.range(0, 0.95), z = gz + plant.range(0, 0.95);
       if (!open(x, z) || inMeadow(x, z, -1.5) && offTrack(x, z) < 4) continue;
@@ -578,15 +1039,20 @@ export function meshSite(site: Site): SceneDescription {
       // Thicket: bushes where wood meets open ground, which is where the light and the shelter both are.
       if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.035)) {
         const size = plant.range(0.7, 1.35);
-        planting.crown(x, y + size * 0.55, z, size, size * 0.75, 52, size * 0.72, leafOf(plant.pick(greens)), plant);
+        // A bush: several stems from the ground, branching, with its leaves on its twigs.
+        const green = leafOf(plant.pick(greens));
+        spent.crown(x, y + size * 0.55, z, size, size * 0.75, 52, size * 0.72, green, plant);
+        spent.leaves.matrices.length = spent.leaves.colours.length = spent.leaves.centres.length = 0;
+        growTree(planting, softBark, x, y - 0.05, z, size * 2.4, 0.03 + 0.02 * size, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, leaf: green, bark: oakBark, shaded: true }, rng.fork(`bush${census.thicket}`));
         census.thicket++;
         // And now and then a young tree coming up among them.
         if (plant.chance(0.22)) {
           const sx = x + plant.range(-1.2, 1.2), sz = z + plant.range(-1.2, 1.2);
           if (open(sx, sz)) {
             const height = plant.range(2.2, 3.6);
-            layTrunk(wood, sx, ground(sx, sz), sz, height * 0.8, 0.06, bark);
-            planting.broadleaf(sx, ground(sx, sz), sz, height, plant.range(0.8, 1.2), 70, leafOf(plant.pick(greens)), plant, 0.7);
+            const green = leafOf(plant.pick(greens));
+            spent.broadleaf(sx, ground(sx, sz), sz, height, plant.range(0.8, 1.2), 70, green, plant, 0.7);
+            growTree(planting, softBark, sx, ground(sx, sz), sz, height * 1.15, 0.055, { kind: 'ash', detail: 0.45, cards: 70, cardSize: 0.55, leaf: green, bark: ashBark, shaded: true }, rng.fork(`tree${grown++}`));
             census.saplings++;
           }
         }
@@ -651,22 +1117,21 @@ export function meshSite(site: Site): SceneDescription {
         const x = f.x + Math.cos(a) * f.r, z = f.z + Math.sin(a) * f.r, base = ground(x, z);
         const down = k === fallen;
         const tall = plant.range(1.9, 2.9), wide = plant.range(0.5, 0.75), thick = plant.range(0.24, 0.36), ts = plant.range(0, 80);
-        // Along the ring, across it, and up: a standing stone is tall; a fallen one lies along the ring.
-        const [la, lb, lc] = down ? [tall * 0.5, wide * 0.5, thick * 0.9] : [wide * 0.5, thick * 0.5, tall * 0.5];
-        const cy = base + (down ? thick * 0.3 : tall * 0.42);
-        const ca = Math.cos(a), sa = Math.sin(a), reach = Math.max(la, lb) * 1.5 + 0.4;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const form = monolithForm(rng.fork(`stone${k}`), tall * 0.5, wide * 0.5, thick * (down ? 0.45 : 0.5), rockKind, down);
+        const cy = base + (down ? thick * 0.2 : tall * 0.42);
         carveRock(sceneryMesh('rock'), (qx, qy, qz) => {
+          // Turned so that the stone's broad face looks at the middle of the ring; a fallen one lies along the ring.
           const dx = qx - x, dz = qz - z;
-          const along = -dx * sa + dz * ca, across = dx * ca + dz * sa;
-          // A slab: the largest of the three scaled distances, rounded off, with a rough skin.
-          const d = Math.hypot(Math.max(0, Math.abs(along) / la - 0.55), Math.max(0, Math.abs(across) / lb - 0.55), Math.max(0, Math.abs(qy - cy) / lc - 0.55));
-          return d - 0.45 + (fbm2(qx * 2.1 + qy * 1.3 + ts, qz * 2.1 - qy + ts, 3) - 0.5) * 0.28;
+          return form.density(-dx * sa + dz * ca, qy - cy, dx * ca + dz * sa);
         }, {
-          min: V(x - reach, base - 0.5, z - reach), max: V(x + reach, cy + lc * 1.25 + 0.3, z + reach),
-          cell: 0.13, uvScale: 0.5,
-          shade: (c, n, field) => {
-            field[0] = Math.max(0, n.y) * 1.0 + 0.25;
-            return rockColour(0.7 + 0.45 * fbm2(c.x * 1.5 + ts, c.z * 1.5 + c.y, 3));
+          min: V(x - form.reach, base - 0.5, z - form.reach), max: V(x + form.reach, cy + form.rise, z + form.reach),
+          cell: 0.1, uvScale: 0.5, fromSamples: true, occlusion: [0.2, 0.5], sharp: true,
+          shade: (c, n, field, _other, open) => {
+            const h = c.y - base;
+            field[0] = Math.min(1, Math.max(0, n.y) * 1.0 + 0.25 + (1 - open) * 0.3);
+            field[1] = 0.4 * (1 - smooth(h / 0.3));
+            return rockColour((0.72 + 0.45 * fbm3(c.x * 1.2 + ts, c.y * 0.5, c.z * 1.2, 3)) * (0.55 + 0.45 * open));
           },
         });
         stones.push([x, z, down ? tall * 0.5 : 0.5]);
@@ -1152,7 +1617,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
-    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground } },
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud },
     doors,
     anchors,
     furnishing,

@@ -53,9 +53,10 @@ The document is the source. The model and the maps are made from it, so they alw
 | `seed` | The seed the site was generated from. The same seed in the same version of the tool gives the same site. |
 | `title` | One sentence describing the place. |
 | `setting.stone` | `limestone`, `sandstone`, `greystone` or `basalt`. |
-| `setting.hour` | `morning`, `midday` or `evening`. |
+| `setting.hour` | `morning`, `midday`, `evening`, `sunset`, `dusk` or `night`. The last three were added later; a reader that knows only the first three can treat them as `evening`. |
 | `setting.kind` | What the house is called: priory, abbey and so on. Only a name. |
 | `setting.condition` | `kept`, `damp` or `forsaken`. A forsaken house may have lost a roof. |
+| `setting.cloud` | How much of the sky is cloud, from 0 (clear) to 1 (overcast). May be absent in older documents. |
 | `setting.season` | `spring`, `summer` or `autumn`. It colours what grows: blossom and fresh green, deeper green and drier grass, or gold, rust and straw. |
 | `sun` | Unit vector pointing towards the sun. |
 | `wallThickness` | Thickness of the wall between two neighbouring places. |
