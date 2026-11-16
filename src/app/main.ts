@@ -17,6 +17,7 @@ import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, pl
 import { generateSite } from '../core/generate';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
+import { renderMap } from '../maps/rendered';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
@@ -301,7 +302,27 @@ async function start(): Promise<void> {
     toast('Preparing the model. This can take a little while for a large place.');
     exportModel(renderer, exportSource(), seed).then(() => toast('Model saved.'), (err) => toast(`The model could not be made: ${err.message}`));
   });
-  (window as any).__exports = { siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), ink: () => site && inkCanvas(site).toDataURL('image/png'), model: () => modelGlb(renderer, exportSource()) };
+  // The battle map is a picture of the scene itself, so it is taken here, where the scene is.
+  const battleMap = (maxPixels = 4096) => {
+    const map = renderMap(renderer, scene, site!, { indoorExposure: 1.6, outdoorExposure: 0.42, mute: [lantern, ...torchLights.lights], maxPixels });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', 1.5)));
+    window.dispatchEvent(new Event('resize'));
+    return map.canvas;
+  };
+  (document.getElementById('exportBattle') as HTMLButtonElement).hidden = !site;
+  document.getElementById('exportBattle')!.addEventListener('click', () => {
+    if (!site) return;
+    if (!(window as any).__bakeDone) toast('The light is still being worked out; the map will be better once it has finished.');
+    battleMap().toBlob((blob) => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${seed}-battlemap.jpg`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }, 'image/jpeg', 0.92);
+  });
+  (window as any).__exports = { battle: (max?: number) => battleMap(max).toDataURL('image/jpeg', 0.9), siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), ink: () => site && inkCanvas(site).toDataURL('image/png'), model: () => modelGlb(renderer, exportSource()) };
 
   let revealAll = params.has('reveal');
   window.addEventListener('keydown', (e) => {

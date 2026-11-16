@@ -133,7 +133,9 @@ export class Furnisher {
     if (!this.claim({ x0: x - radius, z0: z - radius, x1: x + radius, z1: z + radius }, 0.04)) return false;
     const y = this.p.floor;
     this.kit.roundWall('wood', x, z, radius, y - 0.02, y + 0.86, stave, false, { open: { v0: true, v1: true } });
-    this.kit.ring('wood', x, z, 0.004, radius, y + 0.86, { ...stave, length: [0.25, 0.35] });
+    // The head: narrow wedges, so that it comes out round. Each wedge is flat, and three wide
+    // ones made a triangle that left the barrel open at the rim. It laps the staves a little.
+    this.kit.ring('wood', x, z, 0.004, radius * 1.02, y + 0.86, { ...stave, length: [0.062, 0.072] });
     this.kit.mass(V(x - radius * 0.6, y, z - radius * 0.6), V(x + radius * 0.6, y + 0.8, z + radius * 0.6));
     return true;
   }

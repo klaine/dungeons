@@ -20,6 +20,10 @@ The same place can be exported as a map drawn in ink, with everything a referee 
 
 <img src="docs/images/ink-map.jpg" alt="An ink map of a generated place: hatched walls, numbered rooms, a cave, a secret door and a key" width="640">
 
+Or as a battle map: the built world itself from straight above, roofs cut away, ruled in 1.5 metre squares:
+
+<img src="docs/images/battle-map.jpg" alt="A battle map of the same place rendered from the 3D world: stone floors, furniture, trees and their shadows" width="640">
+
 You arrive outdoors, across open ground in a hollow of the rock:
 
 ![The approach: turf, a flagged path, trees and the house front](docs/images/approach.jpg)
@@ -68,7 +72,7 @@ Each place has its seed in the address, so a link reproduces it; **New place** r
 
 Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
-**Export** saves the current place: its plan and an ink map as images with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
+**Export** saves the current place: its plan and an ink map as images with a key to the rooms, a battle map rendered from above, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
 
 To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished. `npm run range` measures 2,000 sites and writes [a report of what the generator makes](public/range.html), which is published beside the tool as `range.html`.
 
