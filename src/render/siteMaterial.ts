@@ -170,12 +170,16 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // of the track run straight: they wander, and widen and narrow.
   const wander = turfAt(at0.div(5.3).add(0.61)).a.sub(0.5);
   const off = abs(f.x.sub(100).add(wander.mul(0.34))).add(mid.sub(0.5).mul(0.3));
-  const onTrack: N = step(50, f.x);
+  // (The field says how far from the track's middle, plus a hundred; or from a footpath's, plus two hundred.)
+  const onFoot: N = step(150, f.x), onTrack: N = step(50, f.x).mul(one(onFoot));
+  // A footpath: one worn line, a forearm's breadth or two, wandering a little either side of where it is laid.
+  const footOff: N = abs(f.x.sub(200)).add(wander.mul(0.22)).toVar();
+  const footBare: N = one(smoothstep(0.22, 0.5, footOff.add(mid.sub(0.5).mul(0.25)))).mul(onFoot).toVar();
   const rut: N = one(smoothstep(0, 0.34, abs(off.sub(0.58)).sub(0.2).sub(wander.mul(0.14)))).toVar();
   // The bottom of a rut, where wheels have pressed the earth down hard: narrower than the rut.
   const rutFloor: N = one(smoothstep(0, 0.16, abs(off.sub(0.58)).sub(0.08).sub(wander.mul(0.08)))).mul(onTrack).toVar();
   const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
-  const bareV: N = select(f.x.greaterThan(50), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z).toVar();
+  const bareV: N = max(select(f.x.greaterThan(50).and(f.x.lessThan(150)), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z), footBare.mul(0.85)).toVar();
   const wetV = f.y, litV = f.w;
   const stony: N = smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))).toVar();
   // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
@@ -222,7 +226,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // Dead grass lying in the turf, in drifts some metres across: thickest where it is dry and trodden,
   // along the edges of the track and between its ruts, and least where the ground is wet.
   const gThatch: N = (texture(thatch.map, at.mul(1.15)) as N).bias(blur).toVar();
-  const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35);
+  const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35).add(onFoot.mul(one(smoothstep(0.4, 1.6, footOff))).mul(0.3));
   const dry: N = smoothstep(0.5, 0.72, wide.mul(0.7).add(mid.mul(0.45)).add(patch.sub(0.5).mul(0.35)).add(trodden).sub(wetV.mul(0.7)).sub(0.08).add(gThatch.a.sub(0.4).mul(0.3))).mul(one(leafy)).toVar();
   turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.2).add(0.24)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
   // And moss, low and dark, where it is damp or shaded.

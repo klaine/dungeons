@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
+import { armsOf, edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
@@ -214,11 +214,12 @@ export function generateSite(seed: string): Site {
 function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void {
   const round = (v: number) => Math.round(v * 10) / 10;
   // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
-  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'));
+  const others = site.places.filter((q) => q !== meadow), house = { x0: Math.min(...others.map((q) => q.x0)) - site.wallThickness, x1: Math.max(...others.map((q) => q.x1)) + site.wallThickness };
+  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), house);
   site.valley = v;
   const within = v.west.slice(0, Math.round((v.mouth - v.z0) / v.step) + 1), withinE = v.east.slice(0, within.length);
   // (The box that holds it, for whatever only needs to know how far it reaches.)
-  const g = { x0: round(Math.min(...within)), x1: round(Math.max(...withinE)), z0: meadow.z0, z1: round(v.mouth + 3) };
+  const g = { x0: round(Math.min(...within)), x1: round(Math.max(...withinE)), z0: v.z0, z1: round(v.mouth + 3) };
   site.grounds = g;
   // The track goes down it from the door to the gap, wandering, but never close under either side.
   const track: [number, number][] = [[doorX, meadow.z0]];
@@ -268,6 +269,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   site.features = features;
   layOutWater(site, meadow, fromTrack, rng.fork('water'));
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
+  layOutArms(site, meadow, doorX, rng.fork('armways'));
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
   layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'));
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
@@ -282,6 +284,45 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
       (site.landmarks ??= []).push({ kind, angle, range: kind === 'castle' && far.chance(0.5) ? 'far' : 'near' });
     }
   }
+}
+
+/**
+ * The arms of the valley past the house. Each has a footpath up it from the track before the
+ * door, and something at the end of the path: the cave, if there is one in that arm, and if not
+ * the ruin of a hut near its head. The path keeps to the middle of the arm, wandering a little.
+ */
+function layOutArms(site: Site, meadow: Place, doorX: number, rng: Rng): void {
+  const v = site.valley!, round = (x: number) => Math.round(x * 10) / 10, features = site.features ?? [];
+  for (const arm of armsOf(v)) {
+    const inw = arm.side === 'w' ? 1 : -1, cave = (site.grottoes ?? []).find((q) => q.side === arm.side && q.z < v.ridge!.z);
+    let goal: [number, number];
+    let to: 'cave' | 'ruin';
+    if (cave) {
+      // (To the floor before the cave's mouth.)
+      goal = [edgeAt(v, arm.side, cave.z) + inw * 9.5, cave.z];
+      to = 'cave';
+    } else {
+      // (Where the arm has opened out enough to hold it: towards the head, but not in it.)
+      const r = round(rng.range(4.2, 4.8));
+      let z = arm.head + 10;
+      while (z < v.ridge!.z - 14 && !walkable(v, arm.middle(z), z, r + 1.8)) z += 2;
+      const x = arm.middle(z);
+      if (!walkable(v, x, z, r + 1.8) || features.some((f) => Math.hypot(f.x - x, f.z - z) < f.r + r + 8)) continue;
+      features.push({ kind: 'ruin', x: round(x), z: round(z), r });
+      goal = [x, z + r + 1.5];
+      to = 'ruin';
+    }
+    // From the track a few strides out from the door, across to the mouth of the arm, and up it.
+    const front = v.ridge!.z, points: [number, number][] = [[round(doorX), round(meadow.z0 + 7)], [round(arm.middle(front - 3)), round(front + 6)]];
+    let wander = 0;
+    for (let z = front - 3; z > goal[1] + 4; z -= 5) {
+      wander = Math.max(-2.2, Math.min(2.2, wander + rng.range(-1, 1)));
+      points.push([round(arm.middle(z) + wander), round(z)]);
+    }
+    points.push([round(goal[0]), round(goal[1])]);
+    (site.paths ??= []).push({ points, to });
+  }
+  site.features = features;
 }
 
 /**
@@ -427,11 +468,13 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
 
 /** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */
 function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
-  const g = site.grounds!;
-  if (!rng.chance(0.5)) return;
-  const v = site.valley!;
+  const g = site.grounds!, v = site.valley!;
+  // Where the valley runs on past the house, a cave is likeliest up one of its arms, in the arm's outer wall: the way to it is the path past the house.
+  const arms = armsOf(v), byArm = rng.fork('armcave'), arm = arms.length && byArm.chance(0.7) ? arms[byArm.int(0, arms.length - 1)] : null;
+  if (!arm && !rng.chance(0.5)) return;
   for (let tries = 0; tries < 30; tries++) {
-    const side = rng.chance(0.5) ? 'w' : 'e', z = Math.round(rng.range(meadow.z1 + 9, v.mouth - 24) * 10) / 10, r = Math.round(rng.range(2.0, 2.5) * 10) / 10;
+    const side = arm ? arm.side : rng.chance(0.5) ? 'w' : 'e', r = Math.round(rng.range(2.0, 2.5) * 10) / 10;
+    const z = Math.round((arm ? byArm.range(arm.head + 9, arm.head + (v.ridge!.z - arm.head) * 0.6) : rng.range(meadow.z1 + 9, v.mouth - 24)) * 10) / 10;
     const edge = edgeAt(v, side, z);
     // (It goes straight in under the hill, so it is made where the side runs fairly straight down the valley.)
     if (Math.max(Math.abs(slantAt(v, side, z)), Math.abs(slantAt(v, side, z - 4)), Math.abs(slantAt(v, side, z + 4))) > 0.3) continue;

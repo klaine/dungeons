@@ -407,6 +407,20 @@ export function meshSite(site: Site): SceneDescription {
     const vale = site.grounds ? site.valley ?? boxValley(site.grounds) : null;
     const reachOf = vale ? new Grid2(g.x0 - 60, g.z0 - 30, 0.75, Math.ceil((g.x1 - g.x0 + 120) / 0.75) + 1, Math.ceil((g.z1 - g.z0 + 110) / 0.75) + 1).fill((x, z) => insideOf(vale, x, z)) : null;
     const insideAt = (x: number, z: number): number => (!vale ? Math.min(x - g.x0, g.x1 - x, g.z1 - z) : reachOf!.holds(x, z) ? reachOf!.at(x, z) : insideOf(vale, x, z));
+    // How far a point is from the nearest footpath (and no more than eight metres), worked out once on a lattice over the valley.
+    const footways = site.grounds ? site.paths ?? [] : [];
+    const footGrid = footways.length ? new Grid2(g.x0 - 10, g.z0 - 10, 0.5, Math.ceil((g.x1 - g.x0 + 20) / 0.5) + 1, Math.ceil((g.z1 - g.z0 + 20) / 0.5) + 1).fill((x, z) => {
+      let best = 8;
+      for (const f of footways) for (let k = 0; k < f.points.length - 1; k++) {
+        const [ax, az] = f.points[k], [bx, bz] = f.points[k + 1];
+        if (Math.min(ax, bx) - best > x || Math.max(ax, bx) + best < x || Math.min(az, bz) - best > z || Math.max(az, bz) + best < z) continue;
+        const dx = bx - ax, dz = bz - az, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+        best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+      }
+      return best;
+    }) : null;
+    /** How far a point is from the nearest footpath's middle. */
+    const offFoot = (x: number, z: number) => (footGrid && footGrid.holds(x, z) ? footGrid.at(x, z) : 8);
     /** Where a side of the valley lies at `z`, and how far in from it a point is, measured square to it. */
     const sideAt = (side: 'w' | 'e', z: number) => (vale ? edgeAt(vale, side, z) : side === 'w' ? g.x0 : g.x1);
     const fromSide = (side: 'w' | 'e', x: number, z: number) => (side === 'w' ? x - sideAt('w', z) : sideAt('e', z) - x) / (vale ? Math.hypot(1, slantAt(vale, side, z)) : 1);
@@ -810,8 +824,15 @@ export function meshSite(site: Site): SceneDescription {
       // house it starts to rise at once.
       // (In a valley with a shape of its own, the land to either side of the house is the valley's side run on north, and only the hill behind the house is the house's.)
       // (Nor does the scarp either side of the house front run on beyond the valley's sides, which are scarp enough.)
-      const inside = insideAt(x, z);
-      const aside = Math.max(0, houseX0 - x, x - houseX1), ownHill = !vale ? 1 : z < frontZ ? 1 - smooth((aside - 1.5) / 6) : 1 - smooth((-inside - 2) / 4);
+      const inside = insideAt(x, z), ridge = vale?.ridge;
+      // (On a ridge, all of its top is the house's hill, but for its edges, which are crag.)
+      const onRidge = ridge && z < frontZ ? smooth((Math.min(x - ridge.x0, ridge.x1 - x) - 3) / 5) : 0;
+      const aside = Math.max(0, houseX0 - x, x - houseX1);
+      let ownHill = !vale ? 1 : z < frontZ ? Math.max(1 - smooth((aside - 1.5) / 6), onRidge) : 1 - smooth((-inside - 2) / 4);
+      // (And the scarp either side of the house front goes no further than the ridge, where an arm of the valley may run on past it.)
+      if (ridge && z >= frontZ) ownHill *= smooth((x - ridge.x0 + 1.5) / 2) * smooth((ridge.x1 + 1.5 - x) / 2);
+      // An arm rises a little as it goes north, as the upper end of a valley does.
+      if (ridge && z < frontZ) y += 4.5 * smooth((frontZ - 3 - z) / 45);
       const clearOfHouse = vale ? 0 : smooth(aside / 8);
       const riseFrom = houseZ0 + (frontZ - houseZ0) * clearOfHouse;
       // It lies a little above the top of the walls. (It used to lie a little below, inside the
@@ -839,11 +860,11 @@ export function meshSite(site: Site): SceneDescription {
         const spread = 1.8 + 44 * smooth((z - vale.mouth - 4) / 20);
         // (Nor does it stand over the house, nor close beside it north of its front, where the house's own hill is; further off to either side it runs on north as the top of the land does.)
         // North of the house front everything is side, but for the house and its hill.
-        const ins = z < frontZ ? Math.min(inside, 2.9 + z - frontZ) : inside;
+        const ins = z < frontZ && !ridge ? Math.min(inside, 2.9 + z - frontZ) : inside;
         y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
         // Behind the crags the land does not lie flat, as round a quarry: it goes on up, as a hillside, more on some sides
         // than on others. (North of the house front the hills keep the distance they always kept from it.)
-        const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = north + (out - north) * t;
+        const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : north + (out - north) * t;
         const stands = 0.55 + 0.9 * fbm2(x * 0.008 + s2 + 9, z * 0.008 - s1, 2);
         y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
@@ -956,17 +977,18 @@ export function meshSite(site: Site): SceneDescription {
     if (vale) {
       const zEnd = snapTo(vale.mouth + 19, true), ROW = 9.6, COL = 2.4;
       let bx0 = Infinity, bx1 = -Infinity;
-      for (let z = ZNo; z <= zEnd; z += 2) { bx0 = Math.min(bx0, sideAt('w', z)); bx1 = Math.max(bx1, sideAt('e', z)); }
+      const zStart = Math.min(ZNo, snapTo(vale.z0 - 9.6, false));
+      for (let z = zStart; z <= zEnd; z += 2) { bx0 = Math.min(bx0, sideAt('w', z)); bx1 = Math.max(bx1, sideAt('e', z)); }
       bx0 = snapTo(bx0 - OUT - 3, false); bx1 = snapTo(bx1 + OUT + 3, true);
       const shelves = terraces.map((t) => ({ t, za: (t.rise === 'n' ? t.z0 - t.run : t.z0) - 4.5, zb: (t.rise === 's' ? t.z1 + t.run : t.z1) + 4.5 }));
       const inBand = (x: number, z: number): boolean => {
         const d = insideAt(x, z);
         if (d < -OUT) return false;
-        if (d <= IN || z <= ZNi) return true;
+        if (d <= IN || (z <= ZNi && z >= ZNo)) return true;
         return shelves.some((q) => z > q.za && z < q.zb && fromSide(q.t.side, x, z) < 4.7 + q.t.depth + 5);
       };
-      for (let za = ZNo; za < zEnd - 1e-6;) {
-        const zb = za === ZNo ? ZNi : Math.min(zEnd, za + ROW), row = { z0: za, z1: zb, of: [] as Patch[] };
+      for (let za = zStart; za < zEnd - 1e-6;) {
+        const zb = za === ZNo ? ZNi : Math.min(zEnd, za + ROW, za < ZNo ? ZNo : Infinity), row = { z0: za, z1: zb, of: [] as Patch[] };
         let run: Patch | null = null;
         for (let x = bx0; x < bx1 - 1e-6; x += COL) {
           let any = false;
@@ -1215,7 +1237,9 @@ export function meshSite(site: Site): SceneDescription {
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
       const off = trackOff(x, z);
-      lay.track = Math.abs(off) < 6 ? 100 + off : 0;
+      // (On a footpath, how far from its middle plus two hundred: the material for ground tells the one from the other.)
+      const foot = offFoot(x, z);
+      lay.track = Math.abs(off) < 6 ? 100 + off : foot < 3 ? 200 + foot : 0;
       return turfColour(x, z, s1);
     };
     const cliff = site.top - p.floor + 0.5;
@@ -1267,9 +1291,11 @@ export function meshSite(site: Site): SceneDescription {
     // (The fence follows each side a little behind it, in short lengths, as far as a few strides beyond the gap; and one crosses the track there,
     // where the valley ends for whoever is walking it, though the track and the land go on.)
     const fenceEnd = vale ? vale.mouth + 8 : g.z1 + 3;
+    // (Whether the valley runs on past the house on either side of the ridge.)
+    const armW = !!vale?.ridge && sideAt('w', p.z0 - 6) < vale.ridge.x0 - 3, armE = !!vale?.ridge && sideAt('e', p.z0 - 6) > vale.ridge.x1 + 3;
     for (const sideOf of ['w', 'e'] as const) {
       const caves = grottoes.filter((h) => h.side === sideOf), out = sideOf === 'w' ? -1 : 1;
-      for (let z = g.z0 - 3; z < fenceEnd; z += 1.5) {
+      for (let z = g.z0 - 4; z < fenceEnd; z += 1.5) {
         const xa = sideAt(sideOf, z), xb = sideAt(sideOf, z + 1.5), near = out < 0 ? Math.max(xa, xb) - 1.2 : Math.min(xa, xb) + 1.2, far = out < 0 ? Math.min(xa, xb) - 3 : Math.max(xa, xb) + 3;
         const cave = caves.find((q) => z + 1.5 > q.z - q.r * 1.25 - 2.4 && z < q.z + q.r * 1.25 + 2.4);
         fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : p.floor - 6, z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
@@ -1277,13 +1303,18 @@ export function meshSite(site: Site): SceneDescription {
     }
     fences.push(
       { min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) },
-      { min: V(g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
-      { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
+      { min: V(armW ? vale!.ridge!.x0 + 1.2 : g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
+      { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(armE ? vale!.ridge!.x1 - 1.2 : g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
     );
+    // Up each side of the ridge that has an arm beside it, a fence a little way into the ridge, as along the valley's sides.
+    if (vale?.ridge) for (const [arm, x0, x1] of [[armW, vale.ridge.x0 + 1.2, vale.ridge.x0 + 3], [armE, vale.ridge.x1 - 3, vale.ridge.x1 - 1.2]] as const) {
+      if (arm) fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, p.z0 - 1.2) });
+    }
     // Solid rock beside the house, and under the meadow.
     // It stops well behind the face of the scarp, which is cut back in places by a stride or two.
-    kit.mass(V(p.x0 - 30, p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 - 2.2));
-    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(p.x1 + 30, p.floor + cliff - 1.2, p.z0 - 2.2));
+    // (No further than the ridge's edge, where an arm of the valley may run past.)
+    kit.mass(V(Math.max(p.x0 - 30, (vale?.ridge?.x0 ?? -Infinity) + 3.5), p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 - 2.2));
+    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(Math.min(p.x1 + 30, (vale?.ridge?.x1 ?? Infinity) - 3.5), p.floor + cliff - 1.2, p.z0 - 2.2));
     kit.mass(V(p.x0 - 3, p.floor - 5, p.z0), V(p.x1 + 3, p.floor - 3.2, p.z1 + 3));
 
     // The path: flags laid in a strip from the door, following the same gentle wander.
@@ -1393,7 +1424,7 @@ export function meshSite(site: Site): SceneDescription {
     // ---- the ground beyond the meadow: a fine sheet over the valley and its rim, a coarse one
     // out to the hills, and mountains behind them
     const snap = (v: number, up: boolean) => (up ? Math.ceil(v / 6) : Math.floor(v / 6)) * 6;
-    const fine = { x0: snap(g.x0 - 34, false), x1: snap(g.x1 + 34, true), z0: snap(houseZ0 - 40, false), z1: snap(g.z1 + 34, true) };
+    const fine = { x0: snap(g.x0 - 34, false), x1: snap(g.x1 + 34, true), z0: snap(Math.min(houseZ0 - 40, g.z0 - 34), false), z1: snap(g.z1 + 34, true) };
     // Near its edge the fine sheet is eased onto the coarse one's corners, so the two meet exactly.
     const eased = (x: number, z: number): number => {
       const inside = Math.min(x - fine.x0, fine.x1 - x, z - fine.z0, fine.z1 - z);
@@ -1526,7 +1557,7 @@ export function meshSite(site: Site): SceneDescription {
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
       const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
-      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
+      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || offFoot(x, z) < 1.4 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
     // Small stones are a dozen shapes carved once and set down again and again, each turned,
@@ -1692,7 +1723,7 @@ export function meshSite(site: Site): SceneDescription {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x = gx + plant.range(0.1, 0.9) * step, z = gz + plant.range(0.1, 0.9) * step;
         if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
-        if (offTrack(x, z) < 3.2 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
+        if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
         if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
         // Full detail anywhere the player can stand; less with distance beyond the rim.
         const out = vale ? Math.max(0, -insideAt(x, z), g.z0 - z, z - vale.mouth - 8) : Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
@@ -1747,6 +1778,8 @@ export function meshSite(site: Site): SceneDescription {
     // (`close` is for how tall grass stands: it is short only in the track itself, and long right up to the ruts.)
     const wearAt = (x: number, z: number, close = false): number => {
       let w = close ? 1 - smooth((offTrack(x, z) - 0.95) / 0.7) : 1 - smooth((offTrack(x, z) - 0.2) / 2.4);
+      // A footpath is worn bare along its middle, and the grass is short for a pace either side.
+      w = Math.max(w, close ? 1 - smooth((offFoot(x, z) - 0.35) / 0.5) : 0.85 * (1 - smooth((offFoot(x, z) - 0.1) / 1.6)));
       w = Math.max(w, 0.8 * (1 - smooth((Math.hypot(x - doorX, z - p.z0) - 2) / 5)));
       for (const f of lies) {
         const d = Math.hypot(x - f.x, z - f.z);
@@ -1760,7 +1793,7 @@ export function meshSite(site: Site): SceneDescription {
       // Nothing much grows on scree.
       if (walled && loose.holds(x, z)) t = Math.max(t, smooth(loose.at(x, z) / 0.3));
       for (const q of stones) t = Math.max(t, 0.7 * (1 - smooth((Math.hypot(q[0] - x, q[1] - z) - q[2] - 0.2) / 1.4)));
-      const rim = Math.min(vale ? insideAt(x, z) : Math.min(x - g.x0, g.x1 - x, g.z1 - z), z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
+      const rim = Math.min(vale ? insideAt(x, z) : Math.min(x - g.x0, g.x1 - x, g.z1 - z), z < p.z0 - 1.5 && vale?.ridge ? 99 : z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
       return Math.max(t, 0.75 * (1 - smooth((rim - 2.5) / 3)));
     };
 
@@ -1926,7 +1959,7 @@ export function meshSite(site: Site): SceneDescription {
       let lying = 0;
       for (let tries = 0; tries < 260 && lying < 16; tries++) {
         const x = dead.range(g.x0 + 8, g.x1 - 8), z = dead.range(g.z0 + 8, g.z1 - 8), a = dead.range(0, Math.PI), len = dead.range(2.2, 5.5), r = dead.range(0.11, 0.26), stump = dead.chance(0.35);
-        if (!inGrounds(x, z, 8) || shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
+        if (!inGrounds(x, z, 8) || shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || offFoot(x, z) < 1.5 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
         if (stump) {
           const y = ground(x, z);
           layLimb(barkMesh, [V(x, y - 0.3, z), V(x, y + 0.1, z), V(x + 0.02, y + dead.range(0.35, 0.8), z)], [r * 1.9, r * 1.5, r * 1.3], 8, grey, 0, () => 0.75);
@@ -1942,7 +1975,7 @@ export function meshSite(site: Site): SceneDescription {
 
     // The other plants, each where it would grow.
     const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
-    const open = (x: number, z: number) => inGrounds(x, z, 0.5) && offTrack(x, z) > 1.6 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
+    const open = (x: number, z: number) => inGrounds(x, z, 0.5) && offTrack(x, z) > 1.6 && offFoot(x, z) > 0.75 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
     const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0, scree: screeLaid };
     for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
       const x = gx + plant.range(0, 0.95), z = gz + plant.range(0, 0.95);

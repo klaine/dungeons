@@ -334,6 +334,13 @@ export interface Valley {
   west: number[];
   east: number[];
   mouth: number;
+  /**
+   * The ridge the house is built into: high ground from `x0` to `x1` across, from the house front
+   * at `z` northward without end. The valley does not stop at the house: where a side lies
+   * further out than the ridge north of the house front, the valley runs on past the house on
+   * that side as an arm, which closes at its head where the side comes back to the ridge.
+   */
+  ridge?: { x0: number; x1: number; z: number };
 }
 
 export interface Site {
@@ -359,6 +366,11 @@ export interface Site {
   track?: [number, number][];
   /** Things in the valley worth walking to. */
   features?: Feature[];
+  /**
+   * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
+   * Each is its points in order from where it leaves the track, and what it leads to.
+   */
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */

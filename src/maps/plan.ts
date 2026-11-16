@@ -105,6 +105,23 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     ctx.globalAlpha = 1;
     ctx.fillStyle = COURT;
     outline(0);
+    // The ridge the house is built into, which the arms of the valley run past, is rock like the rest.
+    if (vale!.ridge) {
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 0.55;
+      rect(vale!.ridge.x0, g.z0 - 6, vale!.ridge.x1, vale!.ridge.z);
+      ctx.globalAlpha = 1;
+    }
+    // Footpaths, as a dotted line.
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = Math.max(0.8 * ratio, 0.22 * scale);
+    ctx.setLineDash([Math.max(1.2 * ratio, 0.35 * scale), Math.max(2 * ratio, 0.6 * scale)]);
+    for (const f of site.paths ?? []) {
+      ctx.beginPath();
+      f.points.forEach(([x, z], i) => (i ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z))));
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
     // Terraces: the shelf, with ticks down its front as on any map that shows a drop, and the way up as a dotted line.
     for (const t of site.terraces ?? []) {
       const edge = sideAt(t.side, (t.z0 + t.z1) / 2), inw = t.side === 'w' ? 1 : -1, back = edge + inw * 4.2, front = edge + inw * (4.7 + t.depth);

@@ -1127,8 +1127,12 @@ async function start(): Promise<void> {
   };
 }
 
+/** Waits for the next frame to be drawn; or, where none is being drawn (a page in the background), a moment. */
 function nextFrame(): Promise<void> {
-  return new Promise((r) => requestAnimationFrame(() => r()));
+  return new Promise((r) => {
+    requestAnimationFrame(() => r());
+    setTimeout(r, 120);
+  });
 }
 
 start().catch((err) => {
