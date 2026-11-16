@@ -3408,7 +3408,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
-    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: approach.floor },
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: site.island ? site.island.sea + 1.5 : approach.floor },
     doors,
     anchors,
     furnishing,

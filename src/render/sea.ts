@@ -37,6 +37,8 @@ export class Sea {
   private readonly material = new NodeMaterial();
   private readonly ripples = rippleMap(256);
   private readonly uTime: N = uniform(0);
+  /** How far from the island's middle the rings are close together. */
+  private readonly reach: number;
 
   constructor(private readonly desc: SeaDesc, private readonly look: { deep: number[]; shallow: number[]; foam: number[] }) {
     const { bed } = desc;
@@ -48,7 +50,7 @@ export class Sea {
       return Math.min(60, desc.level - y);
     };
     // Rings: a metre and a half apart over the lattice of the sea bed, then further and further apart out to the edge.
-    const reach = Math.hypot(bed.nx * bed.cell, bed.nz * bed.cell) / 2 + 20, radii: number[] = [0];
+    const reach = (this.reach = Math.hypot(bed.nx * bed.cell, bed.nz * bed.cell) / 2 + 20), radii: number[] = [0];
     for (let r = 1.5; r < 3400; r += r < reach ? 1.5 : (r - reach) * 0.06 + 1.5) radii.push(r);
     radii.push(3400);
     const around = 540, position: number[] = [], depth: number[] = [], index: number[] = [];
@@ -89,7 +91,9 @@ export class Sea {
     this.material.positionNode = Fn(() => {
       const p: N = positionLocal, d: N = max(attribute('aDepth', 'float'), 0);
       const h: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(p.x.mul(kx).add(p.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0));
-      return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4))), p.z);
+      // (Far out the rings are too far apart to carry it, and it is too far off to be seen rising: there the surface lies flat.)
+      const out: N = length(p.xz.sub(vec2(this.desc.x, this.desc.z)));
+      return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4)).mul(one(smoothstep(this.reach, this.reach + 250, out)))), p.z);
     })();
     this.material.fragmentNode = Fn(() => {
       const P: N = positionWorld, d: N = max(attribute('aDepth', 'float'), 0).toVar();
@@ -101,15 +105,18 @@ export class Sea {
       const w1: N = rip(P.xz.mul(0.045).add(vec2(0.011, 0.007).mul(t)));
       const w2: N = rip(P.zx.mul(0.13).sub(vec2(0.017, 0.009).mul(t)));
       const w3: N = rip(P.xz.mul(0.41).add(vec2(-0.03, 0.04).mul(t)));
-      const slope: N = swell.add(w1.mul(0.12)).add(w2.mul(0.09).mul(fade.mul(0.6).add(0.4))).add(w3.mul(0.07).mul(fade)).mul(calm).toVar();
+      const slope: N = swell.add(w1.mul(0.075)).add(w2.mul(0.055).mul(fade.mul(0.6).add(0.4))).add(w3.mul(0.04).mul(fade)).mul(calm).toVar();
       const normal: N = normalize(vec3(slope.x.negate(), 1, slope.y.negate())).toVar();
       const view: N = normalize(cameraPosition.sub(P)).toVar();
       const facing: N = max(dot(normal, view), 0).toVar();
-      const fresnel: N = pow(one(facing), 5).mul(0.96).add(0.03).toVar();
+      // (A sea is never a mirror: its waves hide part of what it would reflect at a glancing angle, and show the water's own dark instead.)
+      const fresnel: N = pow(one(facing), 5).mul(0.7).add(0.025).toVar();
       const dir: N = reflect(view.negate(), normal).toVar();
       // What it reflects: the sky that way (never the ground under the horizon), and the sun itself as a scatter of glints.
       const up: N = normalize(vec3(dir.x, max(dir.y, 0.02), dir.z));
-      const skyColour: N = u.tSky.sample(up).level(1).rgb.add(sky.skyAfterDark(up)).toVar();
+      // (The sky towards the sun is far brighter than anything shown; it is brought down whole, keeping its colour, as for the haze.)
+      const raw: N = u.tSky.sample(up).level(2).rgb.toVar();
+      const skyColour: N = raw.mul(min(1, float(1.1).div(max(max(raw.r, raw.g), max(raw.b, 0.001))))).add(sky.skyAfterDark(up)).toVar();
       const glint: N = pow(max(dot(dir, u.uSunDir), 0), 900).mul(60).add(pow(max(dot(dir, u.uSunDir), 0), 90).mul(0.6)).mul(smoothstep(-0.02, 0.06, u.uSunDir.y));
       // The water itself: blue-green and clear over sand, dark where it is deep, lit by the sky over it.
       const body: N = mix(shallow, deep, smoothstep(0.5, 14, d)).toVar();
