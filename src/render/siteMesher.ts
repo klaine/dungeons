@@ -76,7 +76,6 @@ export function meshSite(site: Site): SceneDescription {
     if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? span(p) / 2 + 0.3 : 0.12);
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
     if (p.roof === 'cave') return p.floor + p.wall + 1.3;
-    if (p.role === 'approach') return side === 'n' ? site.top : p.floor + p.wall;
     return site.top;
   };
 
@@ -153,7 +152,101 @@ export function meshSite(site: Site): SceneDescription {
   const house = places.filter((p) => p.role !== 'approach');
   const houseX0 = Math.min(...house.map((p) => p.x0)) - T / 2;
   const houseX1 = Math.max(...house.map((p) => p.x1)) + T / 2;
+  /**
+   * The approach: open ground in a hollow of the rock, with the house front across its north side.
+   * Rock and turf are one carved surface; level ground is sent to the turf mesh and the rest stays
+   * rock. A flagged path runs from the door, and a few trees stand clear of it.
+   */
+  const buildApproach = (p: Place) => {
+    kit.group = `p${p.id}`;
+    kit.field = outdoorFieldAt(p.floor, 1.2);
+    const doorway = holesOn(p, 'n', 0)[0];
+    const doorX = doorway ? doorway.at : (p.x0 + p.x1) / 2;
+    const front = kit.frame(p.x0 - 0.2, p.z0, p.x1 + 0.2, p.z0);
+    kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - (p.x0 - 0.2) })) });
+
+    const r = rng.fork('approach');
+    const s1 = r.range(0, 60), s2 = r.range(0, 60);
+    const HEIGHT = { w: 6.5, e: 6.5, s: 3.4 };
+    const pathHalf = 1.15;
+    const ground = (x: number, z: number): number => {
+      // Level and smooth by the path and the door; rougher away from them.
+      const fromPath = Math.max(0, Math.abs(x - doorX - Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, (z - p.z0) / 5)) - pathHalf);
+      const rough = Math.min(1, fromPath / 2.5) * Math.min(1, (z - p.z0) / 2.5);
+      let y = p.floor - 0.03 + (fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough;
+      // The sides of the hollow: rock rising to shut the place in, with a broken edge.
+      const wobble = (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
+      const rise = (edge: number, height: number) => {
+        const t = Math.min(1, Math.max(0, (2.4 + wobble - edge) / 1.3));
+        return t * t * (3 - 2 * t) * height;
+      };
+      y += Math.max(rise(x - p.x0, HEIGHT.w), rise(p.x1 - x, HEIGHT.e), rise(p.z1 - z, HEIGHT.s));
+      return y;
+    };
+    const turf = kit.mesh('turf');
+    carveRock(kit.mesh('rock'), (x, y, z) => {
+      const air = y - ground(x, z) + (fbm2(x * 1.4 + y * 0.9 + s1, z * 1.4 - y * 0.7 + s2, 2) - 0.5) * 0.5 * Math.min(1, Math.max(0, (y - p.floor - 0.5) / 1.5));
+      return air;
+    }, {
+      min: V(p.x0 - 0.3, p.floor - 0.9, p.z0 - 0.14), max: V(p.x1 + 0.3, p.floor + 9.2, p.z1 + 0.3),
+      cell: 0.42, uvScale: 0.4, otherUvScale: 1.1,
+      meshFor: (n) => (n.y > 0.82 ? turf : null),
+      shade: (q, n, field) => {
+        if (n.y > 0.82) {
+          // Turf: worn thin along the path, patchy elsewhere.
+          const patch = fbm2(q.x * 0.5 + s1, q.z * 0.5 + s2, 3);
+          const t = 0.75 + 0.6 * patch;
+          return [0.95 * t, 1.05 * t, 0.7 * t];
+        }
+        const bed = fbm2((q.y + q.x * 0.2) * 1.8, q.z * 0.2 + s1, 3);
+        const tone = 0.62 + 0.4 * bed + 0.2 * fbm2(q.x * 0.8 + s2, q.z * 0.8 + q.y, 3);
+        field[0] = Math.max(0, n.y) * 0.9;
+        return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
+      },
+    });
+    // Solid behind the rock on the three open sides, and under the ground.
+    kit.mass(V(p.x0 - 3, p.floor - 2, p.z0), V(p.x0 - 0.3, p.floor + HEIGHT.w, p.z1 + 3));
+    kit.mass(V(p.x1 + 0.3, p.floor - 2, p.z0), V(p.x1 + 3, p.floor + HEIGHT.e, p.z1 + 3));
+    kit.mass(V(p.x0 - 3, p.floor - 2, p.z1 + 0.3), V(p.x1 + 3, p.floor + HEIGHT.s, p.z1 + 3));
+    kit.mass(V(p.x0 - 3, p.floor - 2.4, p.z0), V(p.x1 + 3, p.floor - 1.0, p.z1 + 3));
+
+    // The path: flags laid in a strip from the door, following the same gentle wander.
+    for (let z = p.z0 + 0.05; z < p.z1 - 5.5; z += 1.5) {
+      const mid = doorX + Math.sin((z + 0.75) * 0.23 + s1) * 0.6 * Math.min(1, (z + 0.75 - p.z0) / 5);
+      kit.slab('floor', mid - pathHalf, z, mid + pathHalf, z + 1.5, p.floor + 0.012, { ...flag, course: [0.6, 0.8], length: [0.7, 1.2] });
+    }
+
+    // Trees: a trunk, and a crown carved the same way as rock.
+    const leaf = kit.mesh('leaf');
+    let planted = 0;
+    for (let tries = 0; tries < 40 && planted < 5; tries++) {
+      const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 4.5);
+      if (Math.abs(x - doorX) < 3.4) continue;
+      if (trees.some((t) => Math.hypot(t[0] - x, t[1] - z) < 4.2)) continue;
+      const base = ground(x, z);
+      const height = r.range(3.4, 4.8), girth = r.range(0.16, 0.24);
+      kit.roundWall('wood', x, z, girth, base - 0.3, base + height, { ...plank, course: [6, 6], length: [0.07, 0.13], tint: [0.34, 0.3, 0.27], tintVar: 0.3, proud: 0.012, bevel: 0.012 }, false, { open: { v0: true, v1: true } });
+      kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + height, z + girth * 0.6));
+      const cy = base + height + 0.6, rad = r.range(1.9, 2.6), sq = r.range(0.7, 0.9), ts = r.range(0, 40);
+      carveRock(leaf, (qx, qy, qz) => {
+        const d = Math.hypot(qx - x, (qy - cy) / sq, qz - z);
+        return d - rad + (fbm2(qx * 1.3 + qy + ts, qz * 1.3 - qy * 0.8 + ts, 3) - 0.5) * 1.05;
+      }, {
+        min: V(x - rad - 1, cy - rad * sq - 1, z - rad - 1), max: V(x + rad + 1, cy + rad * sq + 1, z + rad + 1),
+        cell: 0.4, uvScale: 0.5,
+        shade: (q) => {
+          const t = 0.55 + 0.5 * fbm2(q.x * 1.1 + ts, q.z * 1.1 + q.y, 2) + 0.12 * (q.y - cy);
+          return [0.8 * t, 1.0 * t, 0.55 * t];
+        },
+      });
+      trees.push([x, z]);
+      planted++;
+    }
+  };
+  const trees: [number, number][] = [];
+
   for (const p of places) {
+    if (p.role === 'approach') { buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -173,13 +266,6 @@ export function meshSite(site: Site): SceneDescription {
     // Walls, and the solid behind them.
     for (const side of SIDES) {
       const top = wallTop(p, side);
-      if (p.role === 'approach' && side === 'n') {
-        // The house front: one face across the whole width of the house, not just the forecourt.
-        const f = kit.frame(houseX0 - 2, p.z0, houseX1 + 2, p.z0);
-        const openings = holesOn(p, side, 0).map((h) => ({ ...h, c: h.at - (houseX0 - 2) }));
-        kit.wallFace('stone', f, p.floor - 0.1, top, ashlar, { openings });
-        continue;
-      }
       const f = frameOf(p, side, 0.1);
       const mid = f.length / 2;
       const R = span(p) / 2;
@@ -291,18 +377,6 @@ export function meshSite(site: Site): SceneDescription {
         else kit.box('wood', V(p.x0 - 0.1, roofY - 0.27, at - 0.1), V(p.x1 + 0.1, roofY, at + 0.1), beam, beam, 'beam');
       }
       kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
-    } else if (p.role === 'approach') {
-      // Low outer walls with a coping and merlons; the house front rises behind.
-      for (const side of ['s', 'e', 'w'] as Side[]) {
-        const f = frameOf(p, side, 0.1);
-        const y = p.floor + p.wall;
-        const cap = wallBox(f, 0, f.length, y, y + 0.12, -0.12, 0.6);
-        kit.box('stone', cap.min, cap.max, coping, coping);
-        for (let u = 0.6; u < f.length - 1.2; u += 1.9) {
-          const m = wallBox(f, u, u + 1.0, y + 0.12, y + 1.0, -0.04, 0.5);
-          kit.box('stone', m.min, m.max, ashlar, coping);
-        }
-      }
     }
 
     // Furnishings by role.
@@ -461,7 +535,7 @@ export function meshSite(site: Site): SceneDescription {
     masses: kit.masses,
     torches: [...torchesByPlace.values()].flat(),
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
-    spawn: { position: V((approach.x0 + approach.x1) / 2, approach.floor + 1.7, approach.z1 - 1.6), yaw: 0 },
+    spawn: { position: V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,

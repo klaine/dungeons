@@ -364,8 +364,9 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   // ---- the forecourt, outside the south wall
   const ecx = round((entrance.x0 + entrance.x1) / 2);
   const forecourt: Place = {
-    id: places.length, role: 'approach', name: 'forecourt', roof: 'sky', light: 'day',
-    x0: ecx - 4.5, x1: ecx + 4.5, z0: zs[NZ] + T / 2, z1: zs[NZ] + T / 2 + 7.5,
+    id: places.length, role: 'approach', name: 'hollow', roof: 'sky', light: 'day',
+    x0: Math.min(ecx - 7, Math.min(...places.map((p) => p.x0)) - 3), x1: Math.max(ecx + 7, Math.max(...places.map((p) => p.x1)) + 3),
+    z0: zs[NZ] + T / 2, z1: zs[NZ] + T / 2 + 17,
     floor: 0, wall: 3.9, axis: 'x', depth: 0,
   };
   places.push(forecourt);

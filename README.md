@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+You arrive outdoors, across open ground in a hollow of the rock:
+
+![The approach: turf, a flagged path, trees and the house front](docs/images/approach.jpg)
+
 Some houses hide a chamber behind a stretch of wall that is really a door:
 
 ![A secret door shut, passing for wall, and open](docs/images/secret-door.jpg)

@@ -68,7 +68,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, turf: 0.12, leaf: 0.1 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -101,6 +101,9 @@ async function start(): Promise<void> {
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
     rock: makeSiteMaterial(stone, moss, { normalScale: 2.2 }),
+    // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
+    turf: makeSiteMaterial(moss, moss, { normalScale: 0.9 }),
+    leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -284,7 +287,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => d.group) : [],
-    textures: { stone, floor: stone, slate: stone, rock: stone, wood },
+    textures: { stone, floor: stone, slate: stone, rock: stone, wood, turf: moss, leaf: moss },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));

@@ -150,7 +150,9 @@ export class Player {
     }
 
     const delta = seg.start.clone().sub(before);
-    this.onGround = delta.y > Math.abs(dt * this.velocity.y * 0.25);
+    // Standing needs something reasonably level underfoot; a face steeper than about sixty
+    // degrees pushes sideways more than up, and is a wall to slide off, not ground to climb.
+    this.onGround = delta.y > Math.abs(dt * this.velocity.y * 0.25) && delta.y > delta.length() * 0.45;
     this.position.add(delta);
     if (this.onGround) {
       this.velocity.y = Math.max(0, this.velocity.y);

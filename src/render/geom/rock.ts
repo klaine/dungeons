@@ -23,6 +23,10 @@ export interface RockOptions {
   uvScale: number;
   /** Colour at a point, given its normal; and moss, wet and soot written to `field`. */
   shade: (p: Vector3, n: Vector3, field: Float32Array) => [number, number, number];
+  /** Sends a triangle to another mesh by which way it faces: turf for level ground, say. */
+  meshFor?: (faceNormal: Vector3, centre: Vector3) => MeshBuilder | null;
+  /** Texture repeats per metre for triangles sent to another mesh. */
+  otherUvScale?: number;
 }
 
 // Cube corners and the pair of corners each edge joins, in the order the tables expect.
@@ -85,15 +89,17 @@ export function carveRock(mesh: MeshBuilder, density: Density, o: RockOptions): 
       // Texture from the side this triangle mostly faces.
       const ax = Math.abs(F.x), ay = Math.abs(F.y), az = Math.abs(F.z);
       const ids: number[] = [];
+      const target = (o.meshFor && o.meshFor(F, A.copy(P[0]).add(P[1]).add(P[2]).multiplyScalar(1 / 3))) || mesh;
       for (let v = 0; v < 3; v++) {
         const p = P[v];
         const u = ay >= ax && ay >= az ? p.x : ax >= az ? p.z : p.x;
         const w = ay >= ax && ay >= az ? p.z : p.y;
         field[0] = 0; field[1] = 0; field[2] = 0;
         const [r, g, b] = o.shade(p, N[v], field);
-        ids.push(mesh.addVertex(p.x, p.y, p.z, N[v].x, N[v].y, N[v].z, u * o.uvScale, w * o.uvScale, r, g, b, field[0], field[1], field[2], 0));
+        const scale = target === mesh ? o.uvScale : o.otherUvScale ?? o.uvScale;
+        ids.push(target.addVertex(p.x, p.y, p.z, N[v].x, N[v].y, N[v].z, u * scale, w * scale, r, g, b, field[0], field[1], field[2], 0));
       }
-      mesh.addTriangle(ids[0], ids[2], ids[1]);
+      target.addTriangle(ids[0], ids[2], ids[1]);
       triangles++;
     }
   }
