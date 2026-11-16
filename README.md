@@ -66,7 +66,7 @@ Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard
 
 **Export** saves the current place: its plan as an image with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 45 MB for a ten-room place; baked light is not included).
 
-To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished.
+To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished. `npm run range` measures 2,000 sites and writes [a report of what the generator makes](public/range.html), which is published beside the tool as `range.html`.
 
 ## Publishing
 

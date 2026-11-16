@@ -164,16 +164,19 @@ export function generateSite(seed: string): Site {
     kind: pickFrom.pick(['priory', 'abbey', 'charterhouse', 'hospice', 'preceptory']),
     condition: pickFrom.pick<Setting['condition']>(['kept', 'kept', 'damp', 'forsaken', 'forsaken']),
   };
+  // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
+  // chooses the largest, and every site comes out with ten or eleven rooms.
+  const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);
   let best: Site | null = null;
   let bestScore = -Infinity;
   for (let attempt = 0; attempt < CANDIDATES; attempt++) {
     let site: Site;
     try {
-      site = draftSite(seed, setting, base.fork(`site/${attempt}`));
+      site = draftSite(seed, setting, base.fork(`site/${attempt}`), size);
     } catch {
       continue;
     }
-    const s = score(site);
+    const s = score(site, size);
     if (s > bestScore) { bestScore = s; best = site; }
   }
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
@@ -181,13 +184,13 @@ export function generateSite(seed: string): Site {
 }
 
 /** How much there is to a site: loops, gating, things to find, variety. Higher is better. */
-export function score(site: Site): number {
+export function score(site: Site, size = 9): number {
   const solution = solve(site);
   const rooms = site.places.filter((p) => p.roof !== 'sky').length;
   const dark = site.places.filter((p) => p.light === 'dark').length;
   const roofs = new Set(site.places.map((p) => p.roof));
   return Math.min(loopCount(site), 3)
-    + 1.2 * Math.min(solution.moves.length / Math.max(1, solution.direct), 3)
+    + 2.2 * Math.min(solution.moves.length / Math.max(1, solution.direct), 3)
     + 0.8 * site.items.length
     + (site.ways.some((w) => w.door?.barredFrom !== undefined) ? 1 : 0)
     + (site.levers.length ? 1.2 : 0)
@@ -196,10 +199,10 @@ export function score(site: Site): number {
     + (roofs.has('cave') ? 0.8 : 0)
     + (roofs.has('timber') && roofs.has('barrel') ? 0.5 : 0)
     + (dark >= 1 && dark <= 3 ? 1 : 0)
-    - 0.25 * Math.abs(rooms - 9);
+    - 0.5 * Math.abs(rooms - size);
 }
 
-function draftSite(seed: string, setting: Setting, rng: Rng): Site {
+function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): Site {
   const pick = rng.next();
   const draft = pick < 0.34 ? draftRing(rng) : pick < 0.58 ? draftDouble(rng) : pick < 0.8 ? draftStack(rng) : draftSpine(rng);
   const court = draft.court;
@@ -312,7 +315,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   const chambers: Cell[] = [];
   const hosts = shuffle(draft.cells.filter((c) => !isCourt(c) && !same(c, draft.entrance) && !same(c, farCell)), rng);
   for (const host of hosts) {
-    if (chambers.length >= 4 || rooms() >= MAX_ROOMS) break;
+    if (chambers.length >= 4 || rooms() >= size) break;
     const spot = shuffle(around(host).filter(free), rng)[0];
     if (!spot || !rng.chance(0.55)) continue;
     addCell(spot, 'reward', rng.pick(['cell', 'store', 'vestry', 'scriptorium']));
@@ -324,7 +327,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
     chambers.push(spot);
     // A second chamber beyond the first: somewhere properly out of the way.
     const beyond = shuffle(around(spot).filter(free), rng)[0];
-    if (beyond && rooms() < MAX_ROOMS && rng.chance(0.3)) {
+    if (beyond && rooms() < size && rng.chance(0.3)) {
       placeOf(spot).name = 'antechamber';
       placeOf(spot).role = 'passage';
       addCell(beyond, 'reward', rng.pick(['strongroom', 'reliquary', 'oubliette']));

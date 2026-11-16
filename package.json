@@ -6,7 +6,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check": "tsx tools/sites.ts",
+    "range": "tsx tools/range.ts"
   },
   "repository": {
     "type": "git",
