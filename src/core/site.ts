@@ -309,7 +309,8 @@ export interface Stream {
   width: number;
   /** Where it begins: at a spring under the rim, over the rim as a waterfall, or out of the pond. */
   from: 'spring' | 'fall' | 'pond';
-  to: 'pond' | 'sink';
+  /** Where it ends: in the pond; going to ground in a sink at the foot of the rock; or out of the valley by the gap at its foot, beside the track (`out`). */
+  to: 'pond' | 'sink' | 'out';
   /** Where it crosses the track, if it does, and how the track gets over: stepping stones through a brook, a timber bridge over a river. */
   crossing?: { x: number; z: number; by: 'ford' | 'bridge' };
 }

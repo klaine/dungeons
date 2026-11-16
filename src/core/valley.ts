@@ -60,7 +60,7 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
   const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(60, 98), mouth = Math.round((front + length) / step) * step;
   const mid = (meadow.x0 + meadow.x1) / 2, head = (meadow.x1 - meadow.x0) / 2 + rng.range(5.5, 10);
-  const s = rng.range(0, 500), gate = rng.range(5.6, 7.4);
+  const s = rng.range(0, 500), gate = rng.range(7.4, 9.2);
   // It bends: once or twice in its length, and less the nearer the house, which it must stay square to.
   const swing = rng.range(0, 15) * (rng.chance(0.5) ? 1 : -1), wave = rng.range(70, 140), phase = rng.range(0, Math.PI * 2);
   const middle = (z: number) => mid + (swing * (Math.sin(((z - front) / wave) * Math.PI * 2 + phase) - Math.sin(phase)) + (fbm2(z / 46, s, 2) - 0.5) * 12) * smooth((z - meadow.z1 + 4) / 30);

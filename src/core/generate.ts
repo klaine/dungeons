@@ -830,6 +830,20 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
       if (line && line.length >= 3) { streams.push({ course: line, width, from: 'spring', to: 'sink' }); break; }
     }
   }
+  // Water that has come down the valley to its foot does not go to ground there, as a rule: it goes out by the gap, beside the
+  // track, and on into the country beyond. (Where it reaches the foot of the valley on the track's side, it crosses nothing more.)
+  for (const st of streams) {
+    const [lx, lz] = st.course[st.course.length - 1];
+    if (st.to !== 'sink' || lz < v.mouth - 16) continue;
+    const on = Math.sign(lx - trackX(lz)) || 1;
+    // (Through the gap, a few strides to the side of its middle; beyond it, straight on as it went through, wandering a little.)
+    const beside = (z: number): [number, number] => {
+      const at = Math.min(z, v.mouth + 2), w = edgeAt(v, 'w', at), e = edgeAt(v, 'e', at), mid = (w + e) / 2;
+      return [round(mid + on * Math.max(3.2, (e - w) / 2 - 4.4) + (z > v.mouth + 2 ? on * Math.sin(z * 0.11) * 1.5 : 0)), round(z)];
+    };
+    st.course.push(beside(v.mouth - 6), beside(v.mouth + 2), beside(v.mouth + 14), beside(v.mouth + 30), beside(v.mouth + 52));
+    st.to = 'out';
+  }
   // Some of the water that rises under the rim comes over it instead, as a fall: the bigger the stream the likelier.
   const falls = rng.fork('falls');
   for (const st of streams) if (st.from === 'spring' && falls.chance(st.width >= 2.2 ? 0.55 : 0.4)) st.from = 'fall';
