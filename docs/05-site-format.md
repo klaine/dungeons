@@ -72,6 +72,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `grottoes` | Caves in the valley's own walls; see below. May be absent. |
 | `towers` | Towers that stand by themselves in the valley; see below. May be absent. |
 | `buildings` | Other buildings standing in the valley, each in one of two styles; see below. May be absent. |
+| `landmarks` | Things standing on the hills beyond the valley, seen on the skyline: each `{ kind, angle, range }`, where `kind` is `castle`, `tower`, `ruin` or `monument`, `angle` is the bearing from the middle of the valley in degrees from the direction of greater x towards greater z, and `range` is `near` (the wooded hills that ring the valley, about 300 m off) or `far` (the mountains behind, about 450 m). It stands on the highest ground at that bearing in that range. May be absent. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |

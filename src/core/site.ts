@@ -349,6 +349,14 @@ export interface Site {
   towers?: Tower[];
   /** Buildings standing in the valley, apart from the house: see `Building`. */
   buildings?: Building[];
+  /**
+   * Things standing on the hills beyond the valley, to be seen on the skyline: a castle, a lone
+   * tower, the ruin of an abbey, or a monument. `angle` is the bearing from the middle of the
+   * valley, in degrees from the direction of greater x towards greater z; `range` is `near`
+   * for the wooded hills that ring the valley, `far` for the mountains behind them. Whoever
+   * builds it puts it on the highest ground at that bearing in that range.
+   */
+  landmarks?: { kind: 'castle' | 'tower' | 'ruin' | 'monument'; angle: number; range: 'near' | 'far' }[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

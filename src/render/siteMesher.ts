@@ -9,10 +9,11 @@ import { MasonryStyle } from './geom/masonry';
 import { carveRock, smin } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
-import { layMountains, layTerrain, turfColour } from './landscape';
+import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
+import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
@@ -1406,11 +1407,22 @@ export function meshSite(site: Site): SceneDescription {
     wild.group = 'wild';
     // On the nearer hillsides the woods have trees standing in them: each a single tuft of
     // cards with a whole tree painted on it, in the colours of the season.
+    // What stands on the hills: each on the highest ground at its bearing, in its range, on a hilltop levelled for it.
+    const hills = farHeights(cxA, czA, p.floor + 30, s2);
+    const landmarks = (site.landmarks ?? []).map((l) => {
+      const top = crestAt(hills, cxA, czA, (l.angle * Math.PI) / 180, l.range === 'near' ? 255 : 400, l.range === 'near' ? 330 : 540);
+      return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
+    });
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
-    });
+    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })));
+    // (Drawn but solid to nobody, and turned to face the valley.)
+    wild.group = 'soft';
+    landmarkSpots.push(...landmarks.map((l) => ({ kind: l.kind, x: l.x, y: l.y, z: l.z })));
+    landmarks.forEach((l, i) => buildLandmark(l.kind, l.x, l.y, l.z, Math.atan2(czA - l.z, cxA - l.x), (material) => wild.mesh(material), rng.fork(`landmark${i}`), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]]));
+    wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
     farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
@@ -2390,6 +2402,7 @@ export function meshSite(site: Site): SceneDescription {
   const hallTorches: TorchSpec[] = [];
   const unders: { min: Vector3; max: Vector3 }[] = [];
   const sunShafts: { top: Vector3; down: Vector3; length: number; radius: number }[] = [];
+  const landmarkSpots: { kind: string; x: number; y: number; z: number }[] = [];
   const crossings: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
@@ -2872,6 +2885,7 @@ export function meshSite(site: Site): SceneDescription {
     torches: [...[...torchesByPlace.values()].flat(), ...hallTorches],
     unders,
     sunShafts,
+    landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
     spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
     track: arrival.track,

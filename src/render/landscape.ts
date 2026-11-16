@@ -96,24 +96,12 @@ export function turfColour(x: number, z: number, seed: number): [number, number,
 }
 
 /**
- * A ring of mountains round the whole scene, far enough off to be seen through haze. Drawn as a
- * sheet in polar coordinates over a height function.
- *
- * The heights are ridged noise, summed the way water would have it: each finer layer counts for
- * less where the layers before it are already steep. That leaves sharp crests with long smooth
- * flanks below them and gullies between, which is what running water makes of a mountain, where
- * plain noise gives lumps. What covers the ground is decided where it is drawn, by the material
- * for far land, from the height and the hollowness recorded here at each point.
+ * The height of the far land at any point: the three ranges round the valley, as described at
+ * `layMountains`. Given separately so that what is to stand on the hills can be placed on them
+ * before the sheet is laid.
  */
-export function layMountains(
-  rock: MeshBuilder, cx: number, cz: number, base: number, seed: number, stone: [number, number, number] = [1, 1, 1],
-  /** Called for each tree that stands on the nearer slopes: where, whether it is a fir, and a number between 0 and 1 of its own. */
-  tree?: (x: number, y: number, z: number, fir: boolean, own: number) => void,
-): void {
+export function farHeights(cx: number, cz: number, base: number, seed: number): (x: number, z: number) => number {
   const around = 560;
-  const radii: number[] = [];
-  for (let r = 215; r <= 3050; r += 5.5 + (r - 215) * 0.022) radii.push(r);
-  const rings = radii.length;
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(valueNoise2(x, z, s) * 2 - 1); return v * v; };
   /** Ridges and gullies at a point, between 0 and about 1: `grain` is how many of the broadest to the metre. */
   const relief = (x: number, z: number, grain: number, s: number, spacing: number): number => {
@@ -161,6 +149,41 @@ export function layMountains(
     if (far > 0.004) y += far * (0.35 + 1.2 * fbm2(x * 0.0007 - seed, z * 0.0007 + seed, 2)) * (40 + 740 * relief(x, z, 0.0011, seed + 40, spacing));
     return y;
   };
+  return height;
+}
+
+/** The highest point of the far land within a little of a bearing, between two distances from the valley's middle: where something would be built to be seen. */
+export function crestAt(height: (x: number, z: number) => number, cx: number, cz: number, angle: number, r0: number, r1: number): { x: number; z: number; y: number } {
+  let best = { x: cx, z: cz, y: -Infinity };
+  for (let da = -0.07; da <= 0.0701; da += 0.01) for (let r = r0; r <= r1; r += 4) {
+    const x = cx + Math.cos(angle + da) * r, z = cz + Math.sin(angle + da) * r, y = height(x, z);
+    if (y > best.y) best = { x, z, y };
+  }
+  return best;
+}
+
+/**
+ * A ring of mountains round the whole scene, far enough off to be seen through haze. Drawn as a
+ * sheet in polar coordinates over a height function.
+ *
+ * The heights are ridged noise, summed the way water would have it: each finer layer counts for
+ * less where the layers before it are already steep. That leaves sharp crests with long smooth
+ * flanks below them and gullies between, which is what running water makes of a mountain, where
+ * plain noise gives lumps. What covers the ground is decided where it is drawn, by the material
+ * for far land, from the height and the hollowness recorded here at each point.
+ */
+export function layMountains(
+  rock: MeshBuilder, cx: number, cz: number, base: number, seed: number, stone: [number, number, number] = [1, 1, 1],
+  /** Called for each tree that stands on the nearer slopes: where, whether it is a fir, and a number between 0 and 1 of its own. */
+  tree?: (x: number, y: number, z: number, fir: boolean, own: number) => void,
+  /** Places where something stands on the hills: the ground is made level there, `r` across the half of it, at height `y`, and no tree grows on it. */
+  sites: { x: number; z: number; r: number; y: number }[] = [],
+): void {
+  const around = 560;
+  const radii: number[] = [];
+  for (let r = 215; r <= 3050; r += 5.5 + (r - 215) * 0.022) radii.push(r);
+  const rings = radii.length;
+  const height = farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
   for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
     const a = (k / around) * Math.PI * 2, o = ri * around + k;
@@ -178,6 +201,16 @@ export function layMountains(
       const along = Math.hypot(X[at(ri, k + 1)] - X[o], Z[at(ri, k + 1)] - Z[o]), across = radii[ri + 1] - radii[ri];
       const most = Math.min(Math.min(was[at(ri, k + 1)], was[at(ri, k - 1)]) + along * 1.25, Math.min(was[at(ri + 1, k)], was[at(ri - 1, k)]) + across * 1.25);
       if (was[o] > most) H[o] = most;
+    }
+  }
+  // Where something stands, the hilltop is levelled for it, and comes down to the land about it gently.
+  for (const site of sites) for (let ri = 0; ri < rings; ri++) {
+    if (Math.abs(radii[ri] - Math.hypot(site.x - cx, site.z - cz)) > site.r * 3) continue;
+    for (let k = 0; k < around; k++) {
+      const o = ri * around + k, d = Math.hypot(X[o] - site.x, Z[o] - site.z);
+      if (d > site.r * 3) continue;
+      const t = Math.min(1, Math.max(0, (d - site.r) / (site.r * 2))), w = 1 - t * t * (3 - 2 * t);
+      H[o] += (site.y - H[o]) * w;
     }
   }
   const ids = new Int32Array(rings * around);
@@ -221,6 +254,7 @@ export function layMountains(
         const patch = fbm2(x * 0.03 + seed, z * 0.03 - seed, 2) - 0.5;
         const wooded = 0.37 - (y - base) / 190 + 0.13 * hollow + 0.42 * patch;
         if (wooded < 0.02 * own(a * 7 + j, 4) || fall > 0.85) continue;
+        if (sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r * 1.4)) continue;
         tree(x, y, z, fbm2(x * 0.011 + 5, z * 0.011 + 5, 1) + ((y - base) / 190 - 0.2) * 0.5 > 0.5, own(a * 7 + j, 5));
       }
     }

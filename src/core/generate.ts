@@ -257,6 +257,18 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
   layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'));
+  // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
+  {
+    const far = rng.fork('landmarks'), count = far.pick([0, 1, 1, 2, 2, 3]), taken: number[] = [];
+    for (let i = 0; i < count; i++) {
+      // (Not behind the house, where the escarpment hides the hills, and no two near one another.)
+      let angle = 0;
+      for (let tries = 0; tries < 20; tries++) { angle = Math.round(far.range(-25, 205)); if (taken.every((t) => Math.abs(t - angle) > 38)) break; }
+      taken.push(angle);
+      const kind = far.pick(['castle', 'castle', 'tower', 'tower', 'tower', 'ruin', 'ruin', 'monument'] as const);
+      (site.landmarks ??= []).push({ kind, angle, range: kind === 'castle' && far.chance(0.5) ? 'far' : 'near' });
+    }
+  }
 }
 
 /**
