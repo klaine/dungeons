@@ -347,6 +347,47 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   },
   // The ground under grass: a fine, fibrous mat with earth showing in the low places. No pattern
   // large enough to be seen repeating; the grass standing on it carries the look.
+  // Dead grass lying in a mat: last year's blades and stems, pale straw, criss-crossed in every
+  // direction in short strokes, with green coming up through it and dark gaps between.
+  thatch: {
+    normalStrength: 5.5,
+    height: /* glsl */ `
+// Blades lying every which way: each cell of a scattered grid holds one, at its own angle and
+// length, centred somewhere in the cell. (Neighbours two cells off are looked at too, since a
+// blade may be longer than a cell. The grid wraps, so that the picture tiles.)
+float blades(vec2 uv, float n, float seed) {
+  vec2 p = uv * n, i = floor(p);
+  float m = 0.;
+  for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) {
+    vec2 c = i + vec2(float(x), float(y)), cw = mod(c, n);
+    float h = hash21(cw + seed), k = hash21(cw + seed + 17.3);
+    vec2 d = p - (c + vec2(h, k));
+    float a = h * 18.85, len = mix(.7, 1.8, fract(k * 7.3));
+    vec2 dir = vec2(cos(a), sin(a));
+    float along = dot(d, dir), across = dot(d, vec2(-dir.y, dir.x));
+    // A blade is widest at its middle and tapers to its ends, and is a little bent.
+    across += along * along * (fract(h * 5.7) - .5) * .12;
+    float width = .11 * (1. - along * along / (len * len));
+    m = max(m, smoothstep(width, width * .3, abs(across)) * step(abs(along), len) * (.45 + .55 * fract(k * 3.1)));
+  }
+  return m;
+}
+float heightFn(vec2 uv) {
+  float m = max(blades(uv, 22., 1.), max(blades(uv, 34., 7.) * .85, blades(uv, 52., 13.) * .7));
+  return clamp(.16 + m * .72 + fbm(uv, vec2(9.), 3, .5) * .12, 0., 1.);
+}}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float t = fbm(uv + 7.7, vec2(5.), 4, .55), g = fbm(uv + 2.2, vec2(13.), 3, .5);
+  vec3 straw = mix(vec3(.36, .3, .17), vec3(.55, .48, .3), smoothstep(.25, .7, h + (t - .5) * .4));
+  // Some of it still green, and some gone grey.
+  straw = mix(straw, vec3(.2, .26, .1), smoothstep(.1, .5, g) * .45);
+  straw = mix(straw, vec3(.42, .41, .36), smoothstep(.2, .55, -g) * .3);
+  vec3 gap = vec3(.07, .06, .035);
+  albedo = mix(gap, straw, smoothstep(.22, .4, h)) * (1. - cavity * .4) * (.92 + hash21(floor(uv * 512.)) * .16);
+  rough = .93;
+}`,
+  },
   // Lime plaster: laid on by hand, so never quite flat; fine grit in it; a hairline crack here and
   // there. Nearly white, so the wash on a wall comes from the colour given to each point of it.
   plaster: {

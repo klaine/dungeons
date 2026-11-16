@@ -156,7 +156,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
  * textures are read more and more blurred, until a far field is its colour and its broad
  * variation and nothing that could be seen repeating.
  */
-export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
+export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
   // Where on the ground this point of the picture is, in metres; every texture is laid by that.
@@ -170,7 +170,10 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // of the track run straight: they wander, and widen and narrow.
   const wander = turfAt(at0.div(5.3).add(0.61)).a.sub(0.5);
   const off = abs(f.x.sub(100).add(wander.mul(0.34))).add(mid.sub(0.5).mul(0.3));
-  const rut = one(smoothstep(0, 0.34, abs(off.sub(0.58)).sub(0.2).sub(wander.mul(0.14))));
+  const onTrack: N = step(50, f.x);
+  const rut: N = one(smoothstep(0, 0.34, abs(off.sub(0.58)).sub(0.2).sub(wander.mul(0.14)))).toVar();
+  // The bottom of a rut, where wheels have pressed the earth down hard: narrower than the rut.
+  const rutFloor: N = one(smoothstep(0, 0.16, abs(off.sub(0.58)).sub(0.08).sub(wander.mul(0.08)))).mul(onTrack).toVar();
   const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
   const bareV: N = select(f.x.greaterThan(50), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z).toVar();
   const wetV = f.y, litV = f.w;
@@ -197,36 +200,62 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const gUv = at.mul(scale);
   // The turf is read twice, the second time larger and turned, and the two mixed: neither one's repeat survives the other.
   const gTurf: N = mix((texture(turf.map, gUv) as N).bias(blur), (texture(turf.map, at.yx.mul(0.83).add(0.29)) as N).bias(blur), 0.45).toVar();
-  const gSoil: N = (texture(soil.map, at.mul(1.5)) as N).bias(blur), gShingle: N = (texture(shingle.map, at.mul(0.62)) as N).bias(blur), gLitter: N = (texture(litter.map, at.mul(0.9)) as N).bias(blur);
+  const gSoil: N = (texture(soil.map, at.mul(1.5)) as N).bias(blur), gShingle: N = (texture(shingle.map, at.mul(0.62)) as N).bias(blur), gLitter: N = (texture(litter.map, at.mul(1.7)) as N).bias(blur);
   const earthH = mix(gSoil.a, gShingle.a, stony);
   // Grass gives way to earth where its mat is thin and the earth stands high: not along a line.
   const bare: N = smoothstep(0.4, 0.6, bareV.mul(1.12).add(mid.sub(0.5).mul(0.55)).add(earthH.sub(gTurf.a).mul(0.35))).toVar();
   const leafy: N = smoothstep(0.4, 0.62, litV.add(macro.sub(0.5).mul(0.5)).add(gLitter.a.sub(gTurf.a).mul(0.3))).mul(one(bare)).toVar();
-  const base: N = vertexColor().rgb.mul(gTurf.rgb).mul(mix(0.74, 1.3, macro));
+  // (Turf as it is, not as a lawn is painted: a little less green than the texture and the sheet would make it.)
+  const raw: N = vertexColor().rgb.mul(gTurf.rgb).mul(mix(0.74, 1.3, macro));
+  const base: N = mix(raw, vec3(dot(raw, vec3(0.3, 0.55, 0.15))), 0.22);
+  const wide = turfAt(at0.div(23).add(0.71)).a;
+  const lowSpotOf = (p: N): N => (texture(turf.map, p.div(6.1).add(0.19)) as N).a.add(mid.sub(0.5).mul(0.4));
   // Turf is not one green. It is yellower where it has dried, darker and bluer where clover and
   // moss have got into it, and thin enough in places for the earth to show.
   const patch = turfAt(at.div(3.7).add(0.83)).a;
   let turfed: N = mix(base, base.mul(vec3(1.5, 1.22, 0.7)), smoothstep(0.55, 0.8, mid).mul(0.34));
   turfed = mix(turfed, turfed.mul(vec3(0.62, 0.8, 0.86)), smoothstep(0.5, 0.72, patch).mul(0.5));
   turfed = mix(turfed, gSoil.rgb.mul(vec3(0.5, 0.46, 0.4)), sstep(0.4, 0.2, gTurf.a.add(patch.sub(0.5).mul(0.4))).mul(0.55)).toVar();
-  const earthy = mix(gSoil.rgb.mul(vec3(0.6, 0.57, 0.52)), gShingle.rgb.mul(0.62), stony).mul(mix(0.84, 1.14, macro));
+  // (Earth is darker where it is damp, which on a track is in broad patches, and darker in the hollows of the ground.)
+  const damp = smoothstep(0.35, 0.7, wide.add(lowSpotOf(at0)).mul(0.6));
+  const earthy = mix(gSoil.rgb.mul(vec3(0.6, 0.57, 0.52)), gShingle.rgb.mul(0.62), stony).mul(mix(0.84, 1.14, macro)).mul(mix(1, 0.68, damp));
+  // Dead grass lying in the turf, in drifts some metres across: thickest where it is dry and trodden,
+  // along the edges of the track and between its ruts, and least where the ground is wet.
+  const gThatch: N = (texture(thatch.map, at.mul(1.15)) as N).bias(blur).toVar();
+  const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35);
+  const dry: N = smoothstep(0.5, 0.72, wide.mul(0.7).add(mid.mul(0.45)).add(patch.sub(0.5).mul(0.35)).add(trodden).sub(wetV.mul(0.7)).sub(0.08).add(gThatch.a.sub(0.4).mul(0.3))).mul(one(leafy)).toVar();
+  turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.6).add(0.35)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
+  // And moss, low and dark, where it is damp or shaded.
+  const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);
+  const mossy: N = smoothstep(0.55, 0.78, (texture(turf.map, at0.div(7.3).add(0.53)) as N).a.add(wetV.mul(0.45)).add(litV.mul(0.25)).sub(dry.mul(0.4))).mul(one(leafy)).toVar();
+  turfed = mix(turfed, gMoss.rgb.mul(vec3(0.62, 0.72, 0.5)), mossy.mul(0.7));
   let ground: N = mix(turfed, gLitter.rgb.mul(mix(0.6, 0.85, mid)), leafy);
   // Along the edge of bare ground, a fringe of short green that is neither one nor the other.
   ground = mix(ground, turfed.mul(1.25), bare.mul(one(bare)).mul(1.4));
   ground = mix(ground, earthy, bare);
+  // The floor of a rut is pressed hard and smooth, and darker; and in its low places water stands after rain.
+  ground = mix(ground, ground.mul(vec3(0.58, 0.54, 0.5)), rutFloor.mul(bare));
+  const lowSpot = lowSpotOf(at0);
+  const puddle: N = smoothstep(0.55, 0.6, lowSpot).mul(rutFloor).mul(one(stony)).toVar();
+  const wetRim: N = smoothstep(0.45, 0.56, lowSpot).mul(rutFloor).toVar();
+  ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
+  ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
   m.colorNode = vec4(ground.mul(mix(1, 0.52, wetV)), 1);
-  m.roughnessNode = mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare)));
+  m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.04, puddle);
   {
     // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
     const gN: N = (texture(turf.normalMap, gUv) as N).bias(blur).xyz.mul(2).sub(1);
     const gE: N = (texture(soil.normalMap, at.mul(mix(1.5, 0.31, stony))) as N).bias(blur).xyz.mul(2).sub(1);
     const flat = one(leafy.mul(0.6));
-    const n: N = mix(gN.mul(vec3(flat, flat, 1)), gE, bare);
-    const steep = mix(1, stony.mul(1.2).add(1.15), bare);
+    // (Dead grass has a relief of its own, of strands; standing water has none.)
+    const gT: N = (texture(thatch.normalMap, at.mul(1.15)) as N).bias(blur).xyz.mul(2).sub(1);
+    const turfN: N = mix(gN.mul(vec3(flat, flat, 1)), gT, dry.mul(0.8));
+    const n: N = mix(turfN, gE, bare);
+    const steep = mix(1, stony.mul(1.2).add(1.15), bare).mul(one(puddle));
     m.normalNode = normalMap(vec3(n.xy.mul(steep), n.z).mul(0.5).add(0.5));
   }
-  // Ground is matt, except where it is wet stones.
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(0.12, 0.7, wetV.mul(bare)) });
+  // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)) });
   return m;
 }
 

@@ -132,6 +132,7 @@ async function start(): Promise<void> {
   const soil = generateTextureSet('soil', texSize, 31);
   const litter = generateTextureSet('litter', texSize, 37);
   const plaster = generateTextureSet('plaster', texSize, 41);
+  const thatch = generateTextureSet('thatch', texSize, 47);
   const tile = generateTextureSet('tile', texSize, 43);
   doneGenerating();
   const materials: Record<string, Material> = {
@@ -144,7 +145,7 @@ async function start(): Promise<void> {
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
     bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeGroundMaterial(ground, soil, scree, litter),
+    turf: makeGroundMaterial(ground, soil, scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
