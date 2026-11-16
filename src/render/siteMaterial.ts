@@ -76,6 +76,12 @@ float siteWet = vField.y;
       .replace('#include <roughnessmap_fragment>', /* glsl */ `#include <roughnessmap_fragment>
 roughnessFactor *= mix( 1.0, 0.42, siteWet * ( 1.0 - siteMoss ) );
 roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
+      // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside
+      // of a tower in the valley, say. The sun does not reach it through its walls. (See the same
+      // thing said of rock, below.)
+      .replace('#include <lights_fragment_begin>', ShaderChunk.lights_fragment_begin.replace(
+        'getDirectionalLightInfo( directionalLight, directLight );',
+        'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= 1.0 - ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y );'))
       .replace('#include <lights_fragment_end>', /* glsl */ `
 {
   vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
@@ -91,7 +97,7 @@ roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
 ${o.matt ? 'reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecular *= 0.12;' : ''}`);
   };
   // Every site material shares one program per texture layout.
-  m.customProgramCacheKey = () => (o.matt ? 'site-v1-matt' : 'site-v1');
+  m.customProgramCacheKey = () => (o.matt ? 'site-v2-matt' : 'site-v2');
   return m;
 }
 

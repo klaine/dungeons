@@ -195,6 +195,22 @@ export interface Grotto {
   hall?: { length: number; width: number; height: number; drop: number };
 }
 
+/**
+ * A tower: a square building of stone standing by itself in the valley, not far from the track.
+ * Inside it is one room to a storey, `half` metres from its middle to each wall, and a stair
+ * from each storey to the next, the flights against the north and south walls by turns. The
+ * last flight comes out on a flat roof with a parapet. The door is in the wall named, on the
+ * ground; there are slit windows above. It is no part of the house and has nothing to do with
+ * its doors and keys.
+ */
+export interface Tower {
+  x: number;
+  z: number;
+  half: number;
+  storeys: number;
+  door: 'e' | 'w';
+}
+
 export interface Stream {
   /** The line it follows, in order from where it begins to where it ends. */
   course: [number, number][];
@@ -241,6 +257,8 @@ export interface Site {
   terraces?: Terrace[];
   /** Caves in the valley's own walls, entered from its floor. */
   grottoes?: Grotto[];
+  /** Buildings that stand by themselves in the valley. */
+  towers?: Tower[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

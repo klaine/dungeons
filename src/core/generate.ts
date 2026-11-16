@@ -254,6 +254,32 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   site.features = features;
   layOutWater(site, meadow, fromTrack, rng.fork('water'));
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
+  layOutTower(site, meadow, fromTrack, rng.fork('tower'));
+}
+
+/**
+ * A tower in the valley, in something under half of them: a few strides off the track, with
+ * its door towards it, on ground that nothing else has taken.
+ */
+function layOutTower(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const g = site.grounds!;
+  if (!rng.chance(0.55)) return;
+  const round = (v: number) => Math.round(v * 10) / 10;
+  for (let tries = 0; tries < 30; tries++) {
+    const x = round(rng.range(g.x0 + 17, g.x1 - 17)), z = round(rng.range(meadow.z1 + 12, g.z1 - 18)), off = fromTrack(x, z);
+    if (off < 7.5 || off > 15) continue;
+    let free = true;
+    for (const f of site.features ?? []) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 8) free = false;
+    for (const st of site.streams ?? []) for (let k = 0; k < st.course.length - 1 && free; k++) {
+      const [ax, az] = st.course[k], [bx, bz] = st.course[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+      const t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+      if (Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t) < st.width / 2 + 9) free = false;
+    }
+    if (!free) continue;
+    // The door is in whichever of the east and west walls looks at the track.
+    site.towers = [{ x, z, half: 3.1, storeys: 3, door: fromTrack(x + 2, z) < fromTrack(x - 2, z) ? 'e' : 'w' }];
+    return;
+  }
 }
 
 /** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */

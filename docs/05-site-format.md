@@ -70,6 +70,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `streams` | Running water in the valley, if there is any; see below. May be absent. |
 | `terraces` | Ground in the valley that stands above its floor and can be climbed to; see below. May be absent. |
 | `grottoes` | Caves in the valley's own walls; see below. May be absent. |
+| `towers` | Buildings that stand by themselves in the valley; see below. May be absent. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -169,6 +170,12 @@ If a grotto has a `hall`, it is not a cave but a hall cut by hand, and `r` is no
 ```json
 "grottoes": [ { "side": "w", "z": 80.4, "r": 2.1, "hall": { "length": 26.1, "width": 12.6, "height": 9.1, "drop": 5.8 } } ]
 ```
+
+```json
+"towers": [ { "x": 27.1, "z": 75.2, "half": 3.1, "storeys": 3, "door": "w" } ]
+```
+
+A tower is square, centred on `x`, `z`, and `half` is half its breadth inside; its walls are 0.9 metres thick outside that. It has `storeys` storeys, each 3.06 metres from floor to floor (eighteen steps), and a flat roof above the last with a parapet. Its door is in the middle of the wall named by `door`, `e` for the wall of greater x and `w` for the other. The stairs are inside: the first against the wall of lesser z, rising towards greater x, the next against the opposite wall rising the other way, and so on, each a metre wide. A tower is not one of the `places` and no `way` leads into it: it is not part of the house.
 
 ### The solution
 

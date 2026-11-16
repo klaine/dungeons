@@ -172,6 +172,15 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         }
       }
     }
+    // A tower: its walls in ink as a house's are, its floor within, and its door a gap in one wall.
+    for (const t of site.towers ?? []) {
+      const wall = 0.9, door = t.door === 'e' ? 1 : -1;
+      ctx.fillStyle = INK;
+      rect(t.x - t.half - wall, t.z - t.half - wall, t.x + t.half + wall, t.z + t.half + wall);
+      ctx.fillStyle = FLOOR;
+      rect(t.x - t.half, t.z - t.half, t.x + t.half, t.z + t.half);
+      rect(Math.min(t.x + door * t.half, t.x + door * (t.half + wall + 0.1)), t.z - 0.75, Math.max(t.x + door * t.half, t.x + door * (t.half + wall + 0.1)), t.z + 0.75);
+    }
     const track = site.track ?? [];
     if (track.length > 1) {
       ctx.strokeStyle = TRACK;

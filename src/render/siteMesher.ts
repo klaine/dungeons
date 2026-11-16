@@ -214,6 +214,114 @@ export function meshSite(site: Site): SceneDescription {
    * country beyond can be seen. Rock and turf are one carved surface; level ground is sent to the
    * turf mesh and the rest stays rock. A flagged path runs from the door.
    */
+  // ------------------------------------------------------------------ a tower
+  /**
+   * A tower standing by itself: the first thing here that is seen from outside as well as from
+   * within. A house in the hill has only inner faces to its walls. A tower's walls have two,
+   * and the outer is made the same way as the inner: as the inner face of a place imagined on
+   * the other side of the wall, which is what an outer face is. Inside it is built storey by
+   * storey as the house's rooms over rooms are: floors laid round the wells of the stairs,
+   * flights in courses of stone against the north and south walls by turns, a rail round each
+   * well. It is scenery, not part of what is baked: so it is told which of its stones are indoors.
+   */
+  const buildTower = (t: NonNullable<Site['towers']>[number], base: number) => {
+    const TW = 0.9, STEPS = 18, RISE = STEPS * STEP, TREAD = 0.25, RUN = STEPS * TREAD, WIDE = 1.0;
+    const x0 = t.x - t.half, x1 = t.x + t.half, z0 = t.z - t.half, z1 = t.z + t.half;
+    const floorY = (storey: number) => base + 0.15 + storey * RISE, roofY = floorY(t.storeys);
+    const wasGroup = wild.group, wasField = wild.field;
+    wild.group = 'tower';
+    wild.field = outdoorFieldAt(base, 0.7);
+    const room = (storey: number): Place => ({ id: -1, role: 'passage', roof: 'timber', light: 'day', x0, x1, z0, z1, floor: floorY(storey), wall: RISE - 0.3, axis: 'x', depth: 0, name: 'tower' });
+    // The places imagined outside each wall.
+    const beyond: Record<Side, Place> = {
+      n: { ...room(0), x0: x0 - TW, x1: x1 + TW, z0: z0 - TW - 40, z1: z0 - TW }, s: { ...room(0), x0: x0 - TW, x1: x1 + TW, z0: z1 + TW, z1: z1 + TW + 40 },
+      w: { ...room(0), x0: x0 - TW - 40, x1: x0 - TW, z0: z0 - TW, z1: z1 + TW }, e: { ...room(0), x0: x1 + TW, x1: x1 + TW + 40, z0: z0 - TW, z1: z1 + TW },
+    };
+    // What is cut through the walls: the door, and a slit to each storey above it, east and west.
+    const cuts: { side: Side; at: number; w: number; y0: number; ys: number; storey: number }[] = [{ side: t.door, at: t.z, w: 0.75, y0: floorY(0) - 0.1, ys: floorY(0) + 1.95, storey: 0 }];
+    cuts.push({ side: flip[t.door], at: t.z + 0.9, w: 0.2, y0: floorY(0) + 1.35, ys: floorY(0) + 2.15, storey: 0 });
+    for (let k = 1; k < t.storeys; k++) for (const side of ['e', 'w'] as Side[]) cuts.push({ side, at: t.z + (side === 'e' ? -0.8 : 0.8), w: 0.22, y0: floorY(k) + 1.15, ys: floorY(k) + 2.0, storey: k });
+    for (const side of SIDES) {
+      const out = beyond[side], face = flip[side];
+      wild.wallFace('stone', frameOf(out, face, 0), base - 0.7, roofY + 0.02, ashlar, { openings: cuts.filter((c) => c.side === side).map((c) => ({ c: alongFrame(out, face, c.at, 0), w: c.w, y0: c.y0, ys: c.ys })) });
+      for (let k = 0; k < t.storeys; k++) {
+        // (Each storey's face goes up to meet the next: where a stair's well opens the floor, the wall behind it shows.)
+        wild.wallFace('stone', frameOf(room(k), side, 0.1), floorY(k) - 0.1, floorY(k + 1) - 0.1, ashlar, { openings: cuts.filter((c) => c.side === side && c.storey === k).map((c) => ({ c: alongFrame(room(k), side, c.at, 0.1), w: c.w, y0: c.y0, ys: c.ys })) });
+      }
+    }
+    for (const c of cuts) {
+      const f = frameOf(room(c.storey), c.side, 0.1), u = alongFrame(room(c.storey), c.side, c.at, 0.1);
+      wild.openingTrim('stone', f, { c: u, w: c.w, y0: c.y0, ys: c.ys }, TW, dressed, 'both');
+      // A sill through the thickness of the wall: a threshold under the door, a ledge under a slit.
+      const sill = wallBox(f, u - c.w - 0.1, u + c.w + 0.1, c.y0 + (c.storey === 0 && c.w > 0.5 ? 0.1 : 0), c.y0 + (c.storey === 0 && c.w > 0.5 ? 0.1 : 0), 0.1, TW + 0.1);
+      wild.slab('floor', sill.min.x, sill.min.z, sill.max.x, sill.max.z, sill.min.y, { ...hallFlag, course: [0.7, 0.8], length: [0.9, 1.3] });
+    }
+    // The stairs: one to a storey, against the north wall going east, then the south going west, and so on up.
+    const flights = Array.from({ length: t.storeys }, (_, k) => {
+      // (Each begins a stride from one wall, so that it can be walked onto square, and ends most of a stride short of the other: room to step off and turn.)
+      const side: Side = k % 2 === 0 ? 'n' : 's', dir = k % 2 === 0 ? 1 : -1, at = dir > 0 ? x0 + 0.95 : x1 - 0.95;
+      return { side, dir, at, to: at + dir * RUN, well: strip(room(k), side, at + dir * TREAD, at + dir * RUN, WIDE + 0.06) };
+    });
+    const whole: Rect = { x0: x0 - 0.1, x1: x1 + 0.1, z0: z0 - 0.1, z1: z1 + 0.1 };
+    wild.slab('floor', whole.x0, whole.z0, whole.x1, whole.z1, floorY(0), hallFlag);
+    const stepStyle: MasonryStyle = { ...hallFlag, course: [STEP, STEP], length: [0.8, 1.3] };
+    flights.forEach((fl, k) => {
+      const p = room(k), fr = frameOf(p, fl.side, 0), y = floorY(k), up = floorY(k + 1);
+      for (let i = 1; i <= STEPS; i++) {
+        const b = wallBox(fr, alongFrame(p, fl.side, fl.at + fl.dir * (i - 1) * TREAD, 0), alongFrame(p, fl.side, fl.to, 0), y + STEP * (i - 1) - (i === 1 ? 0.05 : 0), y + STEP * i, 0, -WIDE);
+        wild.box('floor', b.min, b.max, stepStyle, hallFlag, 'step');
+      }
+      // The floor above, laid round the well: boards within, flags on the roof; and boards under it for a ceiling, on beams.
+      for (const r of without(whole, [fl.well])) {
+        if (k + 1 < t.storeys) wild.plane('wood', V(r.x0, up, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, 1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
+        else wild.slab('floor', r.x0, r.z0, r.x1, r.z1, up, flag);
+        wild.plane('wood', V(r.x0, up - 0.3, r.z0), V(1, 0, 0), V(0, 0, 1), V(0, -1, 0), r.x1 - r.x0, r.z1 - r.z0, plank);
+      }
+      for (let i = 0; i < 5; i++) {
+        const z = z0 + ((z1 - z0) * (i + 0.5)) / 5;
+        for (const r of without({ x0: x0 - 0.1, x1: x1 + 0.1, z0: z - 0.1, z1: z + 0.1 }, [{ ...fl.well, z0: fl.well.z0 - 0.25, z1: fl.well.z1 + 0.25 }])) {
+          if (r.x1 - r.x0 > 0.2 && r.z1 - r.z0 > 0.15) wild.box('wood', V(r.x0, up - 0.55, r.z0), V(r.x1, up - 0.3, r.z1), beam, beam, 'beam');
+        }
+      }
+      // The well: boarded in where the thickness of the floor shows, and railed on its two open sides.
+      const zi = fl.side === 'n' ? fl.well.z1 : fl.well.z0, zw = fl.side === 'n' ? fl.well.z0 : fl.well.z1, inward = fl.side === 'n' ? 1 : -1, foot = fl.at + fl.dir * TREAD;
+      wild.box('wood', V(fl.well.x0, up - 0.57, Math.min(zi, zi + inward * 0.07)), V(fl.well.x1, up, Math.max(zi, zi + inward * 0.07)), beam, beam, 'trimmer');
+      wild.box('wood', V(Math.min(foot, foot - fl.dir * 0.07), up - 0.57, fl.well.z0), V(Math.max(foot, foot - fl.dir * 0.07), up, fl.well.z1), beam, beam, 'trimmer');
+      const railed = (ax: number, az: number, bx: number, bz: number) => {
+        const posts = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.25) + 1);
+        for (let i = 0; i < posts; i++) {
+          const x = ax + ((bx - ax) * i) / (posts - 1), z = az + ((bz - az) * i) / (posts - 1);
+          wild.box('wood', V(x - 0.05, up - 0.02, z - 0.05), V(x + 0.05, up + 0.98, z + 0.05), beam, beam, 'post');
+        }
+        for (const [low, high] of [[0.86, 0.95], [0.42, 0.5]]) wild.box('wood', V(Math.min(ax, bx) - 0.04, up + low, Math.min(az, bz) - 0.04), V(Math.max(ax, bx) + 0.04, up + high, Math.max(az, bz) + 0.04), beam, beam, 'rail');
+      };
+      railed(foot - fl.dir * 0.05, zi + inward * 0.05, fl.to, zi + inward * 0.05);
+      railed(foot - fl.dir * 0.05, zw + inward * 0.1, foot - fl.dir * 0.05, zi + inward * 0.05);
+      // A torch to each storey, on the wall across from the door.
+      hallTorches.push({ position: V(t.door === 'e' ? x0 + 0.24 : x1 - 0.24, y + 2.25, t.z - 1.3), out: V(t.door === 'e' ? 1 : -1, 0, 0) });
+    });
+    // The roof: a parapet on the walls, breast high, with merlons standing on it.
+    const top = roofY + 1.05;
+    wild.box('stone', V(x0 - TW, roofY, z0 - TW), V(x1 + TW, top, z0), ashlar, coping, 'parapet');
+    wild.box('stone', V(x0 - TW, roofY, z1), V(x1 + TW, top, z1 + TW), ashlar, coping, 'parapet');
+    wild.box('stone', V(x0 - TW, roofY, z0), V(x0, top, z1), ashlar, coping, 'parapet');
+    wild.box('stone', V(x1, roofY, z0), V(x1 + TW, top, z1), ashlar, coping, 'parapet');
+    const span = x1 - x0 + TW * 2, teeth = Math.max(3, Math.round(span / 1.7));
+    for (let i = 0; i < teeth; i++) {
+      const a = -TW + (span * (i + 0.18)) / teeth, b = -TW + (span * (i + 0.72)) / teeth;
+      wild.box('stone', V(x0 + a, top, z0 - TW), V(x0 + b, top + 0.55, z0 - TW + 0.6), ashlar, coping, 'merlon');
+      wild.box('stone', V(x0 + a, top, z1 + TW - 0.6), V(x0 + b, top + 0.55, z1 + TW), ashlar, coping, 'merlon');
+      wild.box('stone', V(x0 - TW, top, z0 + a), V(x0 - TW + 0.6, top + 0.55, z0 + b), ashlar, coping, 'merlon');
+      wild.box('stone', V(x1 + TW - 0.6, top, z0 + a), V(x1 + TW, top + 0.55, z0 + b), ashlar, coping, 'merlon');
+    }
+    finds.push({ at: V(t.x - 1.2, roofY + 0.35, t.z + 1.4), what: 'a hunting horn bound with silver, left on the roof of the tower' });
+    lookouts.push({ x: t.x, y: roofY + 1.2, z: t.z, height: roofY - base });
+    wild.group = wasGroup;
+    wild.field = wasField;
+    // Which of its stones are indoors, and so see no sky and take no sun: everything inside its walls and under its roof.
+    for (const [key, mesh] of wild.meshes) if (key.startsWith('tower|')) mesh.setOpenBy((x, y, z) => (x > x0 - 0.06 && x < x1 + 0.06 && z > z0 - 0.06 && z < z1 + 0.06 && y < roofY - 0.1 ? 0 : 1));
+  };
+
   const buildApproach = (p: Place) => {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
@@ -262,6 +370,8 @@ export function meshSite(site: Site): SceneDescription {
     };
     // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
+    // A tower stands on ground that was levelled for it.
+    const towers = (site.grounds ? site.towers ?? [] : []).map((t) => ({ ...t, base: swells(t.x, t.z) }));
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
     const openings = [...house.filter((q) => q.roof === 'sky').map((q) => ({ x0: q.x0, x1: q.x1, z0: q.z0, z1: q.z1 })), ...skylights];
     const pondList = lies.filter((f) => f.kind === 'pond');
@@ -467,6 +577,13 @@ export function meshSite(site: Site): SceneDescription {
           y += (f.base - y) * k;
           even = Math.min(even, 1 - k);
         }
+      }
+      for (const t of towers) {
+        const d = Math.max(Math.abs(x - t.x), Math.abs(z - t.z));
+        if (d > t.half + 5) continue;
+        const k = 1 - smooth((d - t.half - 1.9) / 2.8);
+        y += (t.base - y) * k;
+        even = Math.min(even, 1 - k);
       }
       y += ((fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough) * even;
       // Running water has cut itself a bed: flat in the middle, with banks that lie back the
@@ -1092,6 +1209,8 @@ export function meshSite(site: Site): SceneDescription {
     const clearOfFeatures = (x: number, z: number) => {
       let clear = Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - (f.kind === 'pond' ? shoreOf(f, x - f.x, z - f.z) : f.r * (f.kind === 'stones' ? 1.5 : 1.15))));
       for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
+      // A tower has clear ground about it.
+      for (const t of towers) clear = Math.min(clear, Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) - t.half - 2.6);
       // Nor before the mouth of a grotto.
       for (const q of grottoes) { const inside = (x - q.edge) * q.inw; if (inside > 2 && inside < 9.5 && Math.abs(z - q.z) < 2.2) clear = Math.min(clear, -1); }
       // Nothing stands in the way up to a terrace.
@@ -1368,7 +1487,7 @@ export function meshSite(site: Site): SceneDescription {
       for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
         const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
         // (Nothing grows in the ruts of the track; what would have is drawn all the same and thrown away.)
-        planting.muted = rutted(x, z) > 0.5;
+        planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4);
         if (!keep(x, z)) continue;
         const off = offTrack(x, z);
         if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
@@ -1405,7 +1524,7 @@ export function meshSite(site: Site): SceneDescription {
     // covered, not dotted.
     for (let gz = g.z0 + 0.5; gz < g.z1; gz += 0.5) for (let gx = g.x0 + 1; gx < g.x1 - 1; gx += 0.5) {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
-      planting.muted = rutted(x, z) > 0.5;
+      planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4);
       // The cheap questions first: most places are settled by them.
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
       const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
@@ -1723,6 +1842,7 @@ export function meshSite(site: Site): SceneDescription {
       }
       finds.push({ at: V(cx - q.inw * 0.8, fy + 0.4, q.z + 0.5), what: 'a lamp of green glass, cold for years, on the floor of the grotto' });
     });
+    for (const t of towers) buildTower(t, t.base);
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {
       const inw = t.side === 'w' ? 1 : -1, edge = t.side === 'w' ? g.x0 : g.x1;
