@@ -58,7 +58,7 @@ export function walkable(v: Valley, x: number, z: number, margin: number): boole
 export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
-  const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(60, 98), mouth = Math.round((front + length) / step) * step;
+  const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(95, 150), mouth = Math.round((front + length) / step) * step;
   const mid = (meadow.x0 + meadow.x1) / 2, head = (meadow.x1 - meadow.x0) / 2 + rng.range(5.5, 10);
   const s = rng.range(0, 500), gate = rng.range(7.4, 9.2);
   // It bends: once or twice in its length, and less the nearer the house, which it must stay square to.
@@ -66,8 +66,8 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   const middle = (z: number) => mid + (swing * (Math.sin(((z - front) / wave) * Math.PI * 2 + phase) - Math.sin(phase)) + (fbm2(z / 46, s, 2) - 0.5) * 12) * smooth((z - meadow.z1 + 4) / 30);
   // Each side has its own breadth, a bay somewhere (more often than not), and its own unevenness.
   const sides = (['w', 'e'] as const).map((_, k) => ({
-    full: rng.range(24, 50), open: rng.range(14, 30), close: rng.range(15, 24),
-    bay: rng.chance(0.65) ? { at: front + length * rng.range(0.3, 0.8), deep: rng.range(7, 15), long: rng.range(7, 13) } : null,
+    full: rng.range(30, 58), open: rng.range(14, 30), close: rng.range(15, 24),
+    bay: rng.chance(0.65) ? { at: front + length * rng.range(0.3, 0.8), deep: rng.range(8, 18), long: rng.range(8, 16) } : null,
     seed: s + 40 + k * 91,
   }));
   // And somewhere in the lower half, as often as not, it draws in between two spurs.
@@ -77,7 +77,7 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   const edge = [mid - ridge.x0, ridge.x1 - mid];
   // The arms past the house, from a stream of their own: on one side, on both, or now and then on neither.
   const arming = rng.fork('arms'), count = arming.pick([0, 1, 1, 1, 2, 2]), first = arming.chance(0.5) ? 0 : 1;
-  const arms = [0, 1].map((k) => (count === 2 || (count === 1 && k === first) ? { length: arming.range(30, 62), width: arming.range(15, 26), seed: arming.range(0, 500) } : null));
+  const arms = [0, 1].map((k) => (count === 2 || (count === 1 && k === first) ? { length: arming.range(36, 72), width: arming.range(16, 28), seed: arming.range(0, 500) } : null));
   // A house that stands free has the valley all round it: on either side a breadth of open ground, and behind it a bowl that closes some way back.
   const round_ = free && house.z0 !== undefined ? { gap: [arming.range(11, 19), arming.range(11, 19)], back: house.z0 - arming.range(14, 28), seed: arming.range(0, 500) } : null;
   const z0 = round_ ? Math.floor((round_.back - 26) / step) * step : front - Math.ceil(Math.max(0, ...arms.map((q) => (q ? q.length + 4 : 0))) / step) * step;
