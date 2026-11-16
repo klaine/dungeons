@@ -316,7 +316,10 @@ export function meshSite(site: Site): SceneDescription {
     if ((p.role === 'goal' || p.role === 'reward') && !cave) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
-      const far = door ? flip[sideOf(door, p)] : 'n';
+      // Against the wall opposite the way in, unless that wall has an opening of its own (a
+      // secret door, say); then against whichever wall is blank.
+      const opposite: Side = door ? flip[sideOf(door, p)] : 'n';
+      const far = [opposite, ...SIDES].find((side) => holesOn(p, side, 0).length === 0) ?? opposite;
       const f = frameOf(p, far, 0);
       const u = f.length / 2;
       // The grand arrangement needs room in front of it; a small chamber gets the plain one.
