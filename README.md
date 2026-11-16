@@ -30,7 +30,11 @@ You arrive outdoors at the far end of a valley, and walk up through woods to the
 
 ![The valley: a track through long grass and woods to the house wall, set into its hillside, with mountains beyond](docs/images/valley.jpg)
 
-There are things out in the valley for whoever walks that far: a ring of standing stones on a rise, and a pond with a landing stage.
+Valleys differ from one place to the next in size and season, and in what they hold for whoever walks that far: a ring of standing stones on a rise, a pond with a landing stage, the ruin of a stone hut.
+
+![Autumn: the same kind of arrival in gold and rust](docs/images/autumn.jpg)
+
+![The ruin of a hut among autumn trees](docs/images/ruin.jpg)
 
 ![Standing stones in a clearing among firs](docs/images/stones.jpg)
 
@@ -88,7 +92,7 @@ Useful URL parameters: `quality` (`low`, `medium` or `high`), `grass` (how far o
 
 **Export** saves the current place: its plan and an ink map as images with a key to the rooms, a battle map rendered from above, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
 
-To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished. `npm run range` measures 2,000 sites and writes [a report of what the generator makes](public/range.html), which is published beside the tool as `range.html`.
+Checks that drive the real program in a headless browser are in [`tools/browser`](tools/browser/README.md). To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished. `npm run range` measures 2,000 sites and writes [a report of what the generator makes](public/range.html), which is published beside the tool as `range.html`.
 
 ## Publishing
 

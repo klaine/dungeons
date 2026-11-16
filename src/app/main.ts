@@ -190,7 +190,9 @@ async function start(): Promise<void> {
   // whole sky, written into the same attributes the bake fills for everything else.
   const scenic: Mesh[] = [];
   const solidScenery: Mesh[] = [];
-  for (const [material, builder] of desc.scenery?.meshes ?? []) {
+  for (const [key, builder] of desc.scenery?.meshes ?? []) {
+    // Keyed as the site's own meshes are, by group and material.
+    const material = key.split('|').pop()!;
     const geometry = builder.build();
     const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
     const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];

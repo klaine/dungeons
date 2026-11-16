@@ -56,6 +56,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `setting.hour` | `morning`, `midday` or `evening`. |
 | `setting.kind` | What the house is called: priory, abbey and so on. Only a name. |
 | `setting.condition` | `kept`, `damp` or `forsaken`. A forsaken house may have lost a roof. |
+| `setting.season` | `spring`, `summer` or `autumn`. It colours what grows: blossom and fresh green, deeper green and drier grass, or gold, rust and straw. |
 | `sun` | Unit vector pointing towards the sun. |
 | `wallThickness` | Thickness of the wall between two neighbouring places. |
 | `top` | Height of the roofline. Courts are open wells down from it. |
@@ -135,7 +136,7 @@ An item says which place it is in, not where in the place. The tool puts keys on
 "features": [ { "kind": "pond", "x": 41.2, "z": 88.5, "r": 9.1 }, { "kind": "stones", "x": 12.4, "z": 71.0, "r": 3.8 } ]
 ```
 
-A `pond` lies in a hollow of radius `r`, the water covering about the inner three quarters of it, with a landing stage built out from the bank nearest the track. `stones` is a ring of standing stones of radius `r` on a low rise, with a flat stone in the middle. The tool leaves something small to be found at each. Heights are not in the document: the ground is made when the world is built.
+A `pond` lies in a hollow of radius `r`, the water covering about the inner three quarters of it, with a landing stage built out from the bank nearest the track. `stones` is a ring of standing stones of radius `r` on a low rise, with a flat stone in the middle. A `ruin` is the broken walls of a small hut, about `1.2 r` by `r`, with its doorway on the side of the track. A valley holds two of the three, sometimes all. The tool leaves something small to be found at each. Heights are not in the document: the ground is made when the world is built.
 
 ### The solution
 

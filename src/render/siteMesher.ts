@@ -212,6 +212,7 @@ export function meshSite(site: Site): SceneDescription {
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
     const ponds = lies.filter((f) => f.kind === 'pond').map((f) => ({ ...f, level: f.base - 0.42 }));
     const rings = lies.filter((f) => f.kind === 'stones');
+    const ruins = lies.filter((f) => f.kind === 'ruin');
     const ground = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
@@ -225,11 +226,16 @@ export function meshSite(site: Site): SceneDescription {
           y += (f.base - y) * k;
           y -= 1.9 * (1 - smooth((d - f.r * 0.22) / (f.r * 0.75)));
           even = Math.min(even, 1 - 0.8 * k);
-        } else {
+        } else if (f.kind === 'stones') {
           if (d > f.r * 3.4) continue;
           const k = 1 - smooth((d - f.r * 1.25) / (f.r * 2.1));
           y += (f.base + 1.3 - y) * k;
           even = Math.min(even, 1 - 0.85 * k);
+        } else {
+          if (d > f.r * 2.2) continue;
+          const k = 1 - smooth((d - f.r * 1.1) / (f.r * 1.1));
+          y += (f.base - y) * k;
+          even = Math.min(even, 1 - k);
         }
       }
       y += ((fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough) * even;
@@ -253,7 +259,7 @@ export function meshSite(site: Site): SceneDescription {
     const worn = (x: number, z: number) => (z < p.z1 - 6 ? 0 : 1 - smooth((Math.abs(x - pathAt(z)) - 0.5) / 1.1)) * smooth((z - p.z1 + 6) / 3);
     const turfAt = (x: number, z: number): Colour => {
       const c = turfColour(x, z, s1), w = worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2));
-      return [c[0] + (2.3 - c[0]) * w, c[1] + (1.0 - c[1]) * w, c[2] + (2.2 - c[2]) * w];
+      return [c[0] + (3.1 - c[0]) * w, c[1] + (0.92 - c[1]) * w, c[2] + (2.6 - c[2]) * w];
     };
     const cliff = site.top - p.floor + 0.5;
     const turf = kit.mesh('turf');
@@ -300,11 +306,9 @@ export function meshSite(site: Site): SceneDescription {
 
     // Boulders: lumps of the same rock, lying where they came to rest. Mossed on top. Those in
     // the meadow are baked with it; those out in the valley are part of the scenery.
-    const sceneryMesh = (material: string) => {
-      let m = scenery.meshes.get(material);
-      if (!m) scenery.meshes.set(material, (m = new MeshBuilder()));
-      return m;
-    };
+    // Everything out in the valley is built with a kit of its own, whose meshes are scenery.
+    wild.field = outdoorFieldAt(p.floor, 1.5);
+    const sceneryMesh = (material: string) => wild.mesh(material);
     const stones: [number, number, number][] = [];
     const boulder = (mesh: MeshBuilder, x: number, z: number, size: number, q: Rng) => {
       const base = ground(x, z), ts = q.range(0, 60), sx = q.range(0.8, 1.3), sz = q.range(0.8, 1.3), sy = q.range(0.55, 0.8);
@@ -331,7 +335,15 @@ export function meshSite(site: Site): SceneDescription {
     }
 
     // Trees in the meadow: a trunk of staves, and a crown of leaf cards.
-    const greens: Colour[] = [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    // The time of year colours everything that grows: fresh greens and blossom in spring, deeper
+    // greens and drier grass in summer, and in autumn gold, orange and rust with the grass gone to straw.
+    const season = site.setting.season ?? 'spring';
+    const greens: Colour[] = season === 'autumn'
+      ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
+      : season === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]]
+      : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    const parched = season === 'autumn' ? 0.55 : season === 'summer' ? 0.25 : 0;
+    const inFlower = season === 'spring' ? 1 : season === 'summer' ? 0.6 : 0.15;
     const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
     const blossom: Colour = [0.85, 0.2, 0.38];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
@@ -391,7 +403,7 @@ export function meshSite(site: Site): SceneDescription {
     const inGrounds = (x: number, z: number, m: number) => x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m;
     const offTrack = (x: number, z: number) => Math.abs(x - pathAt(z)) - pathHalf;
     // How far a point is outside whatever lies in the valley: negative inside a pond's hollow or a ring.
-    const clearOfFeatures = (x: number, z: number) => Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - f.r * (f.kind === 'pond' ? 1.0 : 1.5)));
+    const clearOfFeatures = (x: number, z: number) => Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - f.r * (f.kind === 'pond' ? 1.0 : f.kind === 'stones' ? 1.5 : 1.15)));
     const waterOver = (x: number, z: number, y: number) => Math.max(-Infinity, ...ponds.map((f) => (Math.hypot(x - f.x, z - f.z) < f.r * 1.2 ? f.level - y : -Infinity)));
     // More boulders, some of them large, away from the track.
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
@@ -403,12 +415,12 @@ export function meshSite(site: Site): SceneDescription {
     const grassColour = (x: number, z: number): Colour => {
       const c = turfColour(x, z, s1), t = plant.range(0.75, 1.2);
       // Mostly green; straw-coloured where the ground is dry, and in the odd tuft anywhere.
-      const dry = Math.min(1, Math.max(0, (fbm2(x * 0.07 + s1 * 0.3, z * 0.07 - s1, 3) - 0.5) * 5) + (plant.chance(0.08) ? 0.8 : 0));
+      const dry = Math.min(1, parched + Math.max(0, (fbm2(x * 0.07 + s1 * 0.3, z * 0.07 - s1, 3) - 0.5) * 5) + (plant.chance(0.08) ? 0.8 : 0));
       return [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t];
     };
     const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
     const flowerAt = (x: number, z: number, y: number, size: number) => {
-      if (fbm2(x * 0.13 + s1 * 3, z * 0.13 + s2, 2) < 0.64 || !plant.chance(0.45)) return;
+      if (fbm2(x * 0.13 + s1 * 3, z * 0.13 + s2, 2) < 0.64 || !plant.chance(0.45 * inFlower)) return;
       const hue = flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
       planting.tuft(planting.flowers, x, y - 0.02, z, size, size * plant.range(0.9, 1.3), plant.range(0, Math.PI), hue);
     };
@@ -454,7 +466,7 @@ export function meshSite(site: Site): SceneDescription {
     const tree = (x: number, z: number, y: number, detail: number) => {
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
-      const inBlossom = fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
+      const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
       if (kind > 0.56) {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
         layTrunk(wood, x, y, z, height * 0.9, plant.range(0.16, 0.26), bark);
@@ -550,6 +562,44 @@ export function meshSite(site: Site): SceneDescription {
       boulder(sceneryMesh('rock'), f.x, f.z, 0.62, plant);
       finds.push({ at: V(f.x, top + 0.75, f.z), what: 'an offering left on the stone in the ring: a little figure cut from horn' });
     }
+    for (const f of ruins) {
+      // What is left of a hut: four walls of the house's stone, broken down unevenly, with a
+      // doorway on the side of the track and fallen stones about.
+      const base = ground(f.x, f.z), ts = plant.range(0, 90);
+      const hw = f.r * 0.62, hd = f.r * 0.5, t = 0.55;
+      const doorSide = pathAt(f.z) > f.x ? 1 : -1;
+      const tall = plant.range(0, Math.PI * 2);
+      const heightAt = (x: number, z: number) => {
+        const towards = Math.cos(Math.atan2(z - f.z, x - f.x) - tall);
+        return Math.max(0.35, 0.7 + 1.5 * (0.5 + 0.5 * towards) + (fbm2(x * 0.9 + ts, z * 0.9, 2) - 0.5) * 1.6);
+      };
+      let piece = 0;
+      const run = (x0: number, z0: number, x1: number, z1: number, gap: boolean) => {
+        const along = Math.max(x1 - x0, z1 - z0), n = Math.max(2, Math.round(along / 1.05));
+        for (let k = 0; k < n; k++) {
+          const a0 = k / n, a1 = (k + 1) / n;
+          const ax = x1 - x0 > z1 - z0, mid = (a0 + a1) / 2;
+          // The doorway: a gap in the middle of this wall.
+          if (gap && Math.abs(mid - 0.5) * along < 0.65) continue;
+          const bx0 = ax ? x0 + (x1 - x0) * a0 : x0, bx1 = ax ? x0 + (x1 - x0) * a1 : x1;
+          const bz0 = ax ? z0 : z0 + (z1 - z0) * a0, bz1 = ax ? z1 : z0 + (z1 - z0) * a1;
+          const h = heightAt((bx0 + bx1) / 2, (bz0 + bz1) / 2);
+          wild.box('stone', V(bx0, base - 0.5, bz0), V(bx1, base + h, bz1), dressed, dressed, `ruin${piece++}`);
+        }
+      };
+      run(f.x - hw, f.z - hd, f.x + hw, f.z - hd + t, false);
+      run(f.x - hw, f.z + hd - t, f.x + hw, f.z + hd, false);
+      run(f.x - hw, f.z - hd + t, f.x - hw + t, f.z + hd - t, doorSide < 0);
+      run(f.x + hw - t, f.z - hd + t, f.x + hw, f.z + hd - t, doorSide > 0);
+      for (let k = 0; k < 9; k++) {
+        const a = plant.range(0, Math.PI * 2), d = plant.range(hw + 0.6, hw + 2.6);
+        const x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d * 0.8, sx = plant.range(0.3, 0.6), sz = plant.range(0.25, 0.5), sy = plant.range(0.16, 0.34);
+        // Nothing is left lying in the doorway.
+        if (Math.sign(x - f.x) === doorSide && Math.abs(z - f.z) < 1.4) continue;
+        wild.box('stone', V(x - sx / 2, ground(x, z) - 0.1, z - sz / 2), V(x + sx / 2, ground(x, z) + sy, z + sz / 2), { ...ashlar, length: [1, 1], course: [1, 1], chip: 0.6 }, undefined, `fallen${k}`);
+      }
+      finds.push({ at: V(f.x - doorSide * (hw - 1.3), base + 0.55, f.z), what: 'a pilgrim\'s badge of pewter, dropped in the ruined hut' });
+    }
     // A fence along one side of the track where it comes into the valley: posts and two rails, some of them gone.
     if (site.grounds) {
       const side = plant.chance(0.5) ? 1 : -1;
@@ -577,7 +627,9 @@ export function meshSite(site: Site): SceneDescription {
   const fences: { min: Vector3; max: Vector3 }[] = [];
   const waters: { x: number; z: number; r: number; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
-  const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: new Map(), cards: [] };
+  const wild = new Kit(`${site.seed}/wild`);
+  wild.group = 'wild';
+  const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: wild.meshes, cards: [] };
   const trees: [number, number][] = [];
 
   for (const p of places) {

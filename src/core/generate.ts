@@ -163,6 +163,8 @@ export function generateSite(seed: string): Site {
     hour: pickFrom.pick<Hour>(['morning', 'midday', 'evening', 'evening']),
     kind: pickFrom.pick(['priory', 'abbey', 'charterhouse', 'hospice', 'preceptory']),
     condition: pickFrom.pick<Setting['condition']>(['kept', 'kept', 'damp', 'forsaken', 'forsaken']),
+    // Drawn from a stream of its own, so that adding it did not change any site already seen.
+    season: base.fork('season').pick<NonNullable<Setting['season']>>(['spring', 'spring', 'summer', 'autumn']),
   };
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
@@ -188,8 +190,11 @@ export function generateSite(seed: string): Site {
  * things set back from it, near enough to be seen in passing and far enough to be a walk.
  */
 function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void {
-  const g = site.grounds!;
   const round = (v: number) => Math.round(v * 10) / 10;
+  // The valley itself: wider or narrower, longer or shorter, from one house to the next.
+  const beside = rng.range(30, 48), down = rng.range(50, 78);
+  const g = { x0: round(meadow.x0 - beside), x1: round(meadow.x1 + beside), z0: meadow.z0, z1: round(meadow.z1 + down) };
+  site.grounds = g;
   const track: [number, number][] = [[doorX, meadow.z0]];
   let x = doorX;
   for (let z = meadow.z0 + 8; z <= g.z1 - 10; z += 8) {
@@ -218,8 +223,14 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
       return;
     }
   };
-  place('pond', [7.5, 10.5], 5, 15);
-  place('stones', [3.4, 4.2], 9, 30);
+  // Two of the three things a valley may hold, and now and then all of them.
+  const kinds: Feature['kind'][] = ['pond', 'stones', 'ruin'];
+  const leaveOut = rng.chance(0.3) ? -1 : rng.int(0, 2);
+  for (const kind of kinds.filter((_, k) => k !== leaveOut)) {
+    if (kind === 'pond') place('pond', [7.5, 10.5], 5, 15);
+    if (kind === 'stones') place('stones', [3.4, 4.2], 9, 30);
+    if (kind === 'ruin') place('ruin', [4.2, 5.2], 6, 22);
+  }
   site.features = features;
 }
 
@@ -514,7 +525,6 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
     seed, places, ways, items: [], levers: [], secret: secretId, start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
     // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
-    grounds: { x0: round(forecourt.x0 - 40), x1: round(forecourt.x1 + 40), z0: forecourt.z0, z1: round(forecourt.z1 + 64) },
   };
   layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);

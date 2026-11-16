@@ -105,11 +105,12 @@ export interface Feature {
   /**
    * A pond lies in a hollow, with a landing stage built out into it from the side nearest the
    * track. Stones are a ring of standing stones on a low rise, with a flat stone in the middle.
+   * A ruin is what is left of a small stone hut: broken walls, and a doorway on the side of the track.
    */
-  kind: 'pond' | 'stones';
+  kind: 'pond' | 'stones' | 'ruin';
   x: number;
   z: number;
-  /** Radius: of the hollow the pond lies in, or of the ring. */
+  /** Radius: of the hollow the pond lies in, of the ring, or of the ground the ruin stands on. */
   r: number;
 }
 
@@ -159,6 +160,8 @@ export interface Setting {
   kind: string;
   /** How it has fared: looked after, left to the wet, or abandoned long enough for a roof to fall. */
   condition: 'kept' | 'damp' | 'forsaken';
+  /** The time of year, which colours everything that grows. */
+  season?: 'spring' | 'summer' | 'autumn';
 }
 
 /** The sun and sky at each time of day, in the renderer's light units. */

@@ -87,6 +87,12 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         ctx.beginPath();
         ctx.arc(X(f.x), Z(f.z), f.r * 0.75 * scale, 0, Math.PI * 2);
         ctx.fill();
+      } else if (f.kind === 'ruin') {
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(1.2 * ratio, 0.6 * scale);
+        ctx.setLineDash([2.2 * scale, 1.2 * scale]);
+        ctx.strokeRect(X(f.x - f.r * 0.62), Z(f.z - f.r * 0.5), f.r * 1.24 * scale, f.r * scale);
+        ctx.setLineDash([]);
       } else {
         ctx.fillStyle = INK;
         for (let k = 0; k < 7; k++) {
