@@ -28,6 +28,7 @@ import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms }
 import { Water } from '../render/water';
 import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
+import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
@@ -355,6 +356,10 @@ async function start(): Promise<void> {
   // Gulls over the cliffs, white in the light of the hour.
   const birds = desc.birds?.length ? new Birds(desc.birds, seed, SUN_INTENSITY * 0.55 + 0.4) : null;
   if (birds) scene.add(birds.mesh);
+  // The lighthouse's beam turns once the sun is low enough for it to be lit.
+  const lit = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.32 : site?.setting.hour === 'sunset' ? 0.1 : 0;
+  const beacon = desc.beacon && lit ? new Beacon(desc.beacon, lit) : null;
+  if (beacon) scene.add(beacon.group);
   if (site && (site.setting.hour === 'night' || site.setting.hour === 'dusk')) (materials.lamp as MeshStandardMaterial).emissiveIntensity = site.setting.hour === 'night' ? 60 : 25;
   const buildMs = performance.now() - t0;
 
@@ -901,6 +906,7 @@ async function start(): Promise<void> {
     water.update(time, camera);
     sea?.update(time);
     birds?.update(time);
+    beacon?.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
     atmosphere.update();

@@ -2812,7 +2812,7 @@ export function meshSite(site: Site): SceneDescription {
   };
   // An island in place of a valley: the house front where it meets the forecourt is built here, as for a house standing
   // free in a valley, and everything else out of doors by the island's own builder (see `island.ts`).
-  let islandSea: SeaDesc | undefined, spawnYaw = 0, birdSpots: { x: number; y: number; z: number }[] | undefined;
+  let islandSea: SeaDesc | undefined, spawnYaw = 0, birdSpots: { x: number; y: number; z: number }[] | undefined, beacon: { x: number; y: number; z: number } | undefined;
   const buildIslandApproach = (p: Place) => {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
@@ -2828,6 +2828,7 @@ export function meshSite(site: Site): SceneDescription {
     censuses.push(made.planted);
     unders.push(...made.unders);
     birdSpots = made.birds;
+    beacon = made.lamp;
     scenery.cards.push(...planting.sets);
   };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
@@ -3424,6 +3425,7 @@ export function meshSite(site: Site): SceneDescription {
     far: farCover,
     sea: islandSea,
     birds: birdSpots,
+    beacon,
     finds,
   };
 }

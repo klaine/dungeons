@@ -55,6 +55,8 @@ export interface IslandResult {
   /** Space under the cliff, out of doors: the sea cave, where no mist lies. */
   unders: { min: Vector3; max: Vector3 }[];
   birds: { x: number; y: number; z: number }[];
+  /** The lighthouse's lamp, where its beam turns. */
+  lamp?: { x: number; y: number; z: number };
 }
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
@@ -484,6 +486,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
     sea: { level: sea, x: o.x, z: o.z, bed },
     planted,
+    lamp: coast.lamp,
     // Gulls: off the cliffs at the height of their tops, off the stacks, and over the cove.
     birds: [
       ...Array.from({ length: 4 }, (_, k) => { const a = (k / 4) * Math.PI * 2 + s1, r = coastAt(o, a) + 14; return { x: o.x + Math.cos(a) * r, y: F + 4, z: o.z + Math.sin(a) * r }; }),

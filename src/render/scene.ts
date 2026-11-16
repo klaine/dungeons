@@ -138,6 +138,8 @@ export interface SceneDescription {
   sea?: SeaDesc;
   /** Where gulls wheel, off the cliffs. */
   birds?: { x: number; y: number; z: number }[];
+  /** Where a lighthouse's lamp is, whose beam turns at dusk and by night. */
+  beacon?: { x: number; y: number; z: number };
   /** Small things left lying about for whoever walks that far. */
   finds?: { at: Vector3; what: string }[];
 }

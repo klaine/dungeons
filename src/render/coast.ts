@@ -61,7 +61,7 @@ function frame(x: number, z: number, y: number, facing: number) {
   return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a];
 }
 
-export function buildCoast(c: CoastBuild): { deck: number } {
+export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
   const { site, wild, rng } = c, o = site.island!, sea = o.sea;
   const mesh = (m: string) => wild.mesh(m);
   const { face, solid } = anyAngle(mesh);
@@ -372,7 +372,7 @@ export function buildCoast(c: CoastBuild): { deck: number } {
     const sc = o.seaCave, a = sc.length * 0.8;
     c.finds.push({ at: new Vector3(sc.x + Math.cos(sc.heading) * a, c.caveFloor + a * 0.02 + 0.3, sc.z + Math.sin(sc.heading) * a), what: 'a smuggler\'s lantern' });
   }
-  return { deck };
+  return { deck, lamp: o.lighthouse ? { x: o.lighthouse.x, y: o.lighthouse.y + o.lighthouse.height + 1.6, z: o.lighthouse.z } : undefined };
 }
 
 /** A point in a frame, on the ground plane: for asking how high the ground is under it. */
