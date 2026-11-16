@@ -109,6 +109,14 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     const sand = Math.min(top, o.sea + 0.3) - out * 0.1 - Math.max(0, out - 7) * 0.32;
     y = cliff + (Math.max(sand, bed) - cliff) * beach;
   }
+  // A strand of shingle along the foot of the cove's cliff from the end of the beach to the sea cave, so that it can be walked to dry-shod.
+  if (o.seaCave) {
+    const sc = o.seaCave, c = o.cove, head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(sc.z - c.z, sc.x - c.x);
+    const end = head + Math.sign(turnBetween(head, at)) * c.beach * 0.85, bx = c.x + Math.cos(end) * (c.r - 1), bz = c.z + Math.sin(end) * (c.r - 1);
+    const dx = sc.x - bx, dz = sc.z - bz, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - bx) * dx + (z - bz) * dz) / l2));
+    const off = Math.hypot(x - bx - dx * t, z - bz - dz * t), strand = o.sea + 0.55 + 0.25 * t;
+    if (off < 5.5 && y < strand) y += (strand - y) * (1 - smooth((off - 2.2) / 3.3));
+  }
   // Stacks: pillars standing out of the sea off the cliffs, as steep as the cliffs are.
   for (const s of o.stacks) {
     const r = Math.hypot(x - s.x, z - s.z);
