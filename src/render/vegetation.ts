@@ -178,6 +178,18 @@ attribute vec3 aCentre; uniform float uTime; uniform float uWind; uniform float 
   ${ground ? 'transformed *= 1.0 - smoothstep( uRange * 0.66, uRange, distance( cameraPosition, at ) );' : ''}
 }`);
     shader.fragmentShader = shader.fragmentShader
+      // Light comes through a leaf as well as off it. Seen against the sun a crown glows, and its
+      // shaded side is not black. The light used here has already been through the shadow map,
+      // so leaves in shade stay dark.
+      .replace('#include <lights_physical_pars_fragment>', /* glsl */ `#include <lights_physical_pars_fragment>
+void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
+  RE_Direct_Physical( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
+  float against = pow( saturate( dot( -geometryViewDir, directLight.direction ) ), 3.0 );
+  float behind = saturate( -dot( geometryNormal, directLight.direction ) );
+  reflectedLight.directDiffuse += directLight.color * material.diffuseColor * RECIPROCAL_PI * vec3( 1.2, 1.25, 0.55 ) * ( against * 0.9 + behind * 0.22 );
+}
+#undef RE_Direct
+#define RE_Direct RE_Direct_Leaf`)
       // A two-sided material turns the normal round on back faces; these normals must not turn.
       .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>
 normal = normalize( vNormal );`)
@@ -187,7 +199,7 @@ normal = normalize( vNormal );`)
 reflectedLight.indirectSpecular = vec3( 0.0 );
 reflectedLight.directSpecular *= 0.2;`);
   };
-  material.customProgramCacheKey = () => `cards3-${set.shape}-${sway}-${ground}`;
+  material.customProgramCacheKey = () => `cards4-${set.shape}-${sway}-${ground}`;
   const depth = set.shadow ? new MeshDepthMaterial({ depthPacking: RGBADepthPacking, map: texture, alphaTest: 0.42 }) : null;
 
   // Which block each card falls in.

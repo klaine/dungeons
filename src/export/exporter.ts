@@ -74,7 +74,8 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
     ctx.font = `600 ${line * 0.95}px ui-serif, Georgia, serif`;
     ctx.fillText('The valley', line * 1.5, top);
     ctx.font = `${line * 0.82}px ui-serif, Georgia, serif`;
-    ctx.fillText('The track from where you arrive to the door, the pond, and the standing stones. Rock shuts the valley in.', line * 1.5, top + line * 1.4, size - valley - line * 4);
+    wrap(ctx, 'The track from where you arrive to the door, the pond, and the standing stones. Rock shuts the valley in on three sides.', size - valley - line * 5)
+      .forEach((text, k) => ctx.fillText(text, line * 1.5, top + line * (1.5 + k * 1.15)));
     ctx.drawImage(sheet, size - valley - line * 1.5, top);
   }
   return out;

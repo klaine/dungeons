@@ -253,7 +253,7 @@ export function meshSite(site: Site): SceneDescription {
     const worn = (x: number, z: number) => (z < p.z1 - 6 ? 0 : 1 - smooth((Math.abs(x - pathAt(z)) - 0.5) / 1.1)) * smooth((z - p.z1 + 6) / 3);
     const turfAt = (x: number, z: number): Colour => {
       const c = turfColour(x, z, s1), w = worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2));
-      return [c[0] + (2.5 - c[0]) * w, c[1] + (0.95 - c[1]) * w, c[2] + (0.5 - c[2]) * w];
+      return [c[0] + (2.3 - c[0]) * w, c[1] + (1.0 - c[1]) * w, c[2] + (2.2 - c[2]) * w];
     };
     const cliff = site.top - p.floor + 0.5;
     const turf = kit.mesh('turf');

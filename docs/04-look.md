@@ -153,9 +153,9 @@ What that takes, and what is in place:
 | Ground cover: grass, flowers, low bushes | In place, as instanced cards with wind. Thin at the foot of the banks. |
 | Trees with leafy crowns, several kinds, one in blossom | In place. Crowns are clouds of leaf cards shaded about a common centre; firs are tiers of bough cards. Trunks are plain, without branches. |
 | Land running to the horizon | In place: a fine sheet over the valley and its rim, which can be walked, a coarse one out to 250 metres, and a ring of mountains to 750. |
-| Rock: banks, outcrops, boulders | Shaped and placed, but too smooth close to: it needs a rock material of its own and finer relief. |
-| Leaves lit from behind | Not done. Leaves are matt and opaque to light. |
-| A worn earth path, and ground that is more than one texture | Partly. The track down the valley is turf tinted to earth, with no grass on it; there is still only one ground texture. |
+| Rock: cliffs, outcrops, boulders, standing stones | Shaped and placed, with a rock material of its own: plates split by cracks, bedding and lichen. The shapes themselves are still smooth at the scale of a hand; the relief is all in the material. |
+| Leaves lit from behind | In place. Light that has passed the shadow map is let through each card, strongest when the leaf is seen against the sun. |
+| A worn earth path, and ground that is more than one texture | Partly. The track down the valley is turf tinted to earth, with no grass on it; the ground has a material of its own, a fine mat with earth in the low places, but still only the one. |
 | Water | A pond: a level sheet, dark and nearly a mirror, with drifting ripples. It does not show the bed through shallow water, has no shoreline foam or wet edge, and no running water. |
 | Things built outdoors: fences, steps, bridges, jetties | A landing stage and a post-and-rail fence, in plain squared timber. No steps or bridges. |
 | Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |

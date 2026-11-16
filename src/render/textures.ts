@@ -148,6 +148,59 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   albedo = base * (1. - cavity * .3);
   rough = .96;
 }`,
+  },  // Living rock in the open: plates split by cracks, smaller fractures within them, bedding, and
+  // ridged relief. Pale, like the dressed stone, so that the vertex tint sets its colour.
+  rock: {
+    normalStrength: 9.,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  vec2 warp = vec2(fbm(uv + 1.3, vec2(3.), 3, .5), fbm(uv + 8.9, vec2(3.), 3, .5)) * .9;
+  vec2 w1 = worley(uv * 5. + warp, vec2(5.));
+  vec2 w2 = worley(uv * 13. + warp * 1.7 + 4., vec2(13.));
+  float plates = smoothstep(.0, .14, w1.y - w1.x);
+  float chips = smoothstep(.0, .10, w2.y - w2.x);
+  float tilt = hash21(floor(uv * 5. + warp) + 2.) * .22;
+  float ridge = 1. - abs(fbm(uv + 3.1, vec2(6.), 5, .55)) * 2.4;
+  float bed = gnoise(vec2(uv.x * 3., uv.y * 26.), vec2(3., 26.)) * .5 + gnoise(vec2(uv.x * 7., uv.y * 70.), vec2(7., 70.)) * .25;
+  float grain = fbm(uv + 1.7, vec2(64.), 3, .6);
+  float h = .2 + plates * (.34 + .12 * chips) + tilt * plates + ridge * .2 + bed * .1 + grain * .08;
+  return clamp(h, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float blot = fbm(uv + 9.1, vec2(4.), 4, .5);
+  float speck = hash21(floor(uv * 512.));
+  vec3 base = mix(vec3(.50, .50, .51), vec3(.72, .70, .67), smoothstep(-.3, .35, blot));
+  // Lichen: pale grey-green and ochre crusts on the high, dry parts.
+  float crust = smoothstep(.16, .34, fbm(uv + 21.4, vec2(9.), 4, .6)) * smoothstep(.35, .7, h);
+  base = mix(base, mix(vec3(.62, .66, .50), vec3(.70, .58, .32), step(.5, hash21(floor(uv * 9.) + 5.))), crust * .55);
+  base *= mix(.72, 1.08, smoothstep(.15, .8, h));
+  base *= 1. - cavity * .6;
+  base *= .95 + speck * .1;
+  albedo = base;
+  rough = clamp(.9 + cavity * .08 - smoothstep(.6, .9, h) * .1, .55, 1.);
+}`,
+  },
+  // The ground under grass: a fine, fibrous mat with earth showing in the low places. No pattern
+  // large enough to be seen repeating; the grass standing on it carries the look.
+  ground: {
+    normalStrength: 3.5,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  float clump = fbm(uv + 4.2, vec2(7.), 4, .55);
+  float thatch = gnoise(vec2(uv.x * 40., uv.y * 110.), vec2(40., 110.)) * .5 + gnoise(vec2(uv.x * 120., uv.y * 46.), vec2(120., 46.)) * .5;
+  float fine = fbm(uv, vec2(90.), 3, .6);
+  return clamp(.5 + clump * .55 + thatch * .22 + fine * .16, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float t = fbm(uv + 5.5, vec2(5.), 4, .55);
+  vec3 grass = mix(vec3(.05, .095, .022), vec3(.10, .17, .035), smoothstep(.3, .75, h));
+  grass = mix(grass, vec3(.19, .2, .06), smoothstep(.1, .45, t) * .45);
+  vec3 earth = vec3(.11, .085, .05);
+  albedo = mix(grass, earth, smoothstep(.42, .26, h) * .8) * (1. - cavity * .35);
+  rough = .96;
+}`,
   },
 };
 

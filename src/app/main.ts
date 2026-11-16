@@ -98,14 +98,16 @@ async function start(): Promise<void> {
   const stone = generateTextureSet(renderer, 'stone', texSize, 3);
   const wood = generateTextureSet(renderer, 'wood', texSize, 5);
   const moss = generateTextureSet(renderer, 'moss', texSize / 2, 9);
+  const rock = generateTextureSet(renderer, 'rock', texSize, 13);
+  const ground = generateTextureSet(renderer, 'ground', texSize, 17);
   const materials: Record<string, MeshStandardMaterial> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
-    rock: makeSiteMaterial(stone, moss, { normalScale: 2.2 }),
+    rock: makeSiteMaterial(rock, moss, { normalScale: 1.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeSiteMaterial(moss, moss, { normalScale: 0.9 }),
+    turf: makeSiteMaterial(ground, moss, { normalScale: 1.0 }),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
   };
 
@@ -342,7 +344,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock: stone, wood, turf: moss, leaf: moss },
+    textures: { stone, floor: stone, slate: stone, rock, wood, turf: ground, leaf: moss },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
