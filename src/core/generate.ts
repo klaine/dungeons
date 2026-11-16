@@ -215,7 +215,11 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   const round = (v: number) => Math.round(v * 10) / 10;
   // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
   const others = site.places.filter((q) => q !== meadow), house = { x0: Math.min(...others.map((q) => q.x0)) - site.wallThickness, x1: Math.max(...others.map((q) => q.x1)) + site.wallThickness };
-  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), house);
+  // Half the houses stand free in the valley; the rest are built into the end of a ridge, under the hill.
+  const free = rng.fork('stands').chance(0.5);
+  if (free) site.stands = 'free';
+  const back = Math.min(...others.map((q) => q.z0)) - site.wallThickness;
+  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), { ...house, z0: back }, free);
   site.valley = v;
   const within = v.west.slice(0, Math.round((v.mouth - v.z0) / v.step) + 1), withinE = v.east.slice(0, within.length);
   // (The box that holds it, for whatever only needs to know how far it reaches.)

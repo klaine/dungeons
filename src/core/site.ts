@@ -360,6 +360,12 @@ export interface Site {
   /** The shape of that country, of which `grounds` is only the box that holds it. */
   valley?: Valley;
   /**
+   * How the house stands: built into the end of a ridge, its rooms under the hill with courts
+   * open through it (`hill`, and so when absent); or standing free in the valley, walled and
+   * roofed, with the valley all round it (`free`).
+   */
+  stands?: 'hill' | 'free';
+  /**
    * The way from the door down the valley, as points from the door outwards. Flags as far as the
    * edge of the approach and a worn track after that. The player arrives at the last point.
    */

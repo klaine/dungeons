@@ -37,6 +37,9 @@ interface Hole extends Opening {
   at: number;
 }
 
+/** A window in an outer wall of a house that stands free: a way into nowhere, there only to be cut through the wall. */
+type OuterWindow = Way & { outer: true };
+
 export function meshSite(site: Site): SceneDescription {
   const kit = new Kit(site.seed);
   const rng = new Rng(site.seed).fork('mesh');
@@ -70,13 +73,15 @@ export function meshSite(site: Site): SceneDescription {
   const shape = (w: Way): { y0: number; ys: number } => {
     const lo = Math.min(places[w.a].floor, places[w.b].floor);
     const hi = Math.max(places[w.a].floor, places[w.b].floor);
+    // (A window in an outer wall of a house that stands free: tall and arched in a room lit by day, a slit where torches light it.)
+    if ((w as OuterWindow).outer) { const p = places[w.a]; return { y0: p.floor + 1.05, ys: p.floor + Math.min(p.wall - 0.55, w.halfWidth < 0.3 ? 2.3 : 2.75) }; }
     if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35 };
     return { y0: lo - 0.1, ys: hi + (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0) };
   };
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
   const holesOn = (p: Place, side: Side, e: number): Hole[] =>
-    site.ways.filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
+    [...site.ways, ...(outerWindows.get(p.id) ?? [])].filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
       .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w), ...(hiddenFrom(w, p) ? { band: 0.03 } : {}) }));
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
@@ -139,6 +144,78 @@ export function meshSite(site: Site): SceneDescription {
     }
     return pieces.filter((r) => r.x1 - r.x0 > 0.02 && r.z1 - r.z0 > 0.02);
   };
+
+  // ------------------------------------------------------------------ a house that stands free
+  // A house that stands free in the valley is the same rooms as one built under a hill, but what
+  // the hill hid is now seen: so it is walled outside along its whole outline, from the ground to
+  // the roofline the courts open from, and roofed. The outline is the edge of every room grown by
+  // a wall's thickness; it is traced on a lattice a hand's breadth fine, as runs of wall each
+  // looking one way. Rooms lit by day have windows in their outer walls, rooms lit by torches a
+  // slit, dark rooms none.
+  const free = site.stands === 'free' && !!site.grounds;
+  const outerRects = free ? places.filter((p) => p.role !== 'approach' && (p.level ?? 0) >= 0).map((p) => ({ x0: p.x0 - T, x1: p.x1 + T, z0: p.z0 - T, z1: p.z1 + T })) : [];
+  const insideOuter = (x: number, z: number, m = 0) => outerRects.some((r) => x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m);
+  /** A run of outer wall: the way it looks (`n` is towards lesser z), where it stands across, and where it runs from and to along. */
+  type Run = { side: Side; at: number; from: number; to: number };
+  const runs: Run[] = [];
+  const outerWindows = new Map<number, OuterWindow[]>();
+  if (free) {
+    const C = 0.1, ox = Math.min(...outerRects.map((r) => r.x0)) - C, oz = Math.min(...outerRects.map((r) => r.z0)) - C;
+    const nx = Math.round((Math.max(...outerRects.map((r) => r.x1)) + C - ox) / C) + 1, nz = Math.round((Math.max(...outerRects.map((r) => r.z1)) + C - oz) / C) + 1;
+    const solid = new Uint8Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) solid[j * nx + i] = insideOuter(ox + (i + 0.5) * C, oz + (j + 0.5) * C) ? 1 : 0;
+    const cell = (i: number, j: number) => (i >= 0 && j >= 0 && i < nx && j < nz ? solid[j * nx + i] : 0);
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+    for (let j = 0; j <= nz; j++) {
+      let run: Run | null = null;
+      for (let i = 0; i <= nx; i++) {
+        const a = cell(i, j - 1), b = cell(i, j), side: Side | null = i < nx && a !== b ? (b ? 'n' : 's') : null;
+        if (run && run.side === side) { run.to = r2(ox + (i + 1) * C); continue; }
+        if (run) runs.push(run);
+        run = side ? { side, at: r2(oz + j * C), from: r2(ox + i * C), to: r2(ox + (i + 1) * C) } : null;
+      }
+    }
+    for (let i = 0; i <= nx; i++) {
+      let run: Run | null = null;
+      for (let j = 0; j <= nz; j++) {
+        const a = cell(i - 1, j), b = cell(i, j), side: Side | null = j < nz && a !== b ? (b ? 'w' : 'e') : null;
+        if (run && run.side === side) { run.to = r2(oz + (j + 1) * C); continue; }
+        if (run) runs.push(run);
+        run = side ? { side, at: r2(ox + i * C), from: r2(oz + j * C), to: r2(oz + (j + 1) * C) } : null;
+      }
+    }
+    // Windows: in each room, along each stretch of its wall that is outer wall, spaced evenly, and clear of doors, the ribs of a vault and any stair against that wall.
+    for (const q of places) {
+      if (q.role === 'approach' || (q.level ?? 0) < 0 || q.roof === 'sky' || q.roof === 'cave' || q.light === 'dark') continue;
+      const list: OuterWindow[] = [];
+      for (const side of SIDES) {
+        const along = side === 'n' || side === 's', face = side === 'n' ? q.z0 - T : side === 's' ? q.z1 + T : side === 'w' ? q.x0 - T : q.x1 + T;
+        const lo = along ? q.x0 : q.z0, hi = along ? q.x1 : q.z1;
+        for (const r of runs) {
+          if (r.side !== side || Math.abs(r.at - face) > 0.05) continue;
+          const a = Math.max(lo, r.from) + 0.95, b = Math.min(hi, r.to) - 0.95;
+          if (b < a) continue;
+          const wide = q.light === 'day', count = wide ? Math.max(1, Math.round((b - a) / 3.1)) : 1;
+          const ribs: number[] = [];
+          if (q.roof === 'barrel' && (q.axis === 'x') === along) {
+            const a0 = along ? q.x0 : q.z0, length = hi - lo, n = Math.max(0, Math.round(length / 3.4) - 1);
+            for (let k = 1; k <= n; k++) ribs.push(a0 + (length * k) / (n + 1));
+          }
+          const stairs = [...stairsFrom(q), ...stairsInto(q)].filter((w) => w.side === side).map((w) => [Math.min(w.at, w.to ?? w.at) - 0.7, Math.max(w.at, w.to ?? w.at) + 0.7]);
+          const doors = site.ways.filter((w) => (w.a === q.id || w.b === q.id) && sideOf(w, q) === side && w.kind !== 'stair').map((w) => [w.at - w.halfWidth - 0.9, w.at + w.halfWidth + 0.9]);
+          for (let k = 0; k < count; k++) {
+            const at = count === 1 ? (a + b) / 2 : a + ((b - a) * k) / (count - 1);
+            // (Moved off a rib if it falls on one: to the middle of the bay beside it.)
+            let c = at;
+            for (const rib of ribs) if (Math.abs(c - rib) < 0.85) c = rib + (c >= rib ? 1 : -1) * Math.min(1.6, (hi - lo) / (ribs.length + 1) / 2);
+            if (c < lo + 0.9 || c > hi - 0.9 || [...stairs, ...doors].some(([x0, x1]) => c > x0 && c < x1) || list.some((w) => w.side === side && Math.abs(w.at - c) < 1.8)) continue;
+            list.push({ a: q.id, b: q.id, side, kind: 'window', at: Math.round(c * 100) / 100, halfWidth: wide ? 0.5 : 0.17, outer: true });
+          }
+        }
+      }
+      if (list.length) outerWindows.set(q.id, list);
+    }
+  }
 
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
   const torchesByPlace = new Map<number, TorchSpec[]>();
@@ -392,8 +469,10 @@ export function meshSite(site: Site): SceneDescription {
     kit.field = outdoorFieldAt(p.floor, 1.2);
     const doorway = holesOn(p, 'n', 0)[0];
     const doorX = doorway ? doorway.at : (p.x0 + p.x1) / 2;
-    const front = kit.frame(p.x0 - 0.2, p.z0, p.x1 + 0.2, p.z0);
-    kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - (p.x0 - 0.2) })) });
+    // (A house that stands free has a front no broader than itself; one built into the hill has one as broad as the forecourt, with the hill either side.)
+    const fx0 = free ? Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))) : p.x0 - 0.2, fx1 = free ? Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1))) : p.x1 + 0.2;
+    const front = kit.frame(fx0, p.z0, fx1, p.z0);
+    kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
 
     const r = rng.fork('approach');
     const plant = rng.fork('planting');
@@ -828,7 +907,7 @@ export function meshSite(site: Site): SceneDescription {
       // (On a ridge, all of its top is the house's hill, but for its edges, which are crag.)
       const onRidge = ridge && z < frontZ ? smooth((Math.min(x - ridge.x0, ridge.x1 - x) - 3) / 5) : 0;
       const aside = Math.max(0, houseX0 - x, x - houseX1);
-      let ownHill = !vale ? 1 : z < frontZ ? Math.max(1 - smooth((aside - 1.5) / 6), onRidge) : 1 - smooth((-inside - 2) / 4);
+      let ownHill = !vale ? 1 : free ? 0 : z < frontZ ? Math.max(1 - smooth((aside - 1.5) / 6), onRidge) : 1 - smooth((-inside - 2) / 4);
       // (And the scarp either side of the house front goes no further than the ridge, where an arm of the valley may run on past it.)
       if (ridge && z >= frontZ) ownHill *= smooth((x - ridge.x0 + 1.5) / 2) * smooth((ridge.x1 + 1.5 - x) / 2);
       // An arm rises a little as it goes north, as the upper end of a valley does.
@@ -864,7 +943,7 @@ export function meshSite(site: Site): SceneDescription {
         y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
         // Behind the crags the land does not lie flat, as round a quarry: it goes on up, as a hillside, more on some sides
         // than on others. (North of the house front the hills keep the distance they always kept from it.)
-        const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : north + (out - north) * t;
+        const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : free ? out : north + (out - north) * t;
         const stands = 0.55 + 0.9 * fbm2(x * 0.008 + s2 + 9, z * 0.008 - s1, 2);
         y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
@@ -984,7 +1063,7 @@ export function meshSite(site: Site): SceneDescription {
       const inBand = (x: number, z: number): boolean => {
         const d = insideAt(x, z);
         if (d < -OUT) return false;
-        if (d <= IN || (z <= ZNi && z >= ZNo)) return true;
+        if (d <= IN || (!free && z <= ZNi && z >= ZNo)) return true;
         return shelves.some((q) => z > q.za && z < q.zb && fromSide(q.t.side, x, z) < 4.7 + q.t.depth + 5);
       };
       for (let za = zStart; za < zEnd - 1e-6;) {
@@ -1302,8 +1381,9 @@ export function meshSite(site: Site): SceneDescription {
         fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : p.floor - 6, z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
       }
     }
-    fences.push(
-      { min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) },
+    fences.push({ min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) });
+    // (Across the house front either side of the house, unless the house stands free and can be walked round.)
+    if (!free) fences.push(
       { min: V(armW ? vale!.ridge!.x0 + 1.2 : g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
       { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(armE ? vale!.ridge!.x1 - 1.2 : g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
     );
@@ -1314,8 +1394,10 @@ export function meshSite(site: Site): SceneDescription {
     // Solid rock beside the house, and under the meadow.
     // It stops well behind the face of the scarp, which is cut back in places by a stride or two.
     // (No further than the ridge's edge, where an arm of the valley may run past.)
-    kit.mass(V(Math.max(p.x0 - 30, (vale?.ridge?.x0 ?? -Infinity) + 3.5), p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 - 2.2));
-    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(Math.min(p.x1 + 30, (vale?.ridge?.x1 ?? Infinity) - 3.5), p.floor + cliff - 1.2, p.z0 - 2.2));
+    if (!free) {
+      kit.mass(V(Math.max(p.x0 - 30, (vale?.ridge?.x0 ?? -Infinity) + 3.5), p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 - 2.2));
+      kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(Math.min(p.x1 + 30, (vale?.ridge?.x1 ?? Infinity) - 3.5), p.floor + cliff - 1.2, p.z0 - 2.2));
+    }
     kit.mass(V(p.x0 - 3, p.floor - 5, p.z0), V(p.x1 + 3, p.floor - 3.2, p.z1 + 3));
 
     // The path: flags laid in a strip from the door, following the same gentle wander.
@@ -1446,6 +1528,8 @@ export function meshSite(site: Site): SceneDescription {
       // meadow behind the wall: a cell lying across that would be a ramp through the doorway.
       skip: (c) => {
         const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2;
+        // (Round a house that stands free, the sheet is the ground all the way to its walls, and none of it is under the house.)
+        if (free) return carved(mx, mz) || insideOuter(mx, mz) || houses.some((b) => footprint(b, mx, mz));
         // Behind the front wall the sheet is the hilltop, right up to the wall; everywhere else
         // it gives way to what is carved.
         const behindWall = mx > p.x0 - 0.2 && mx < p.x1 + 0.2 && mz < frontZ - 0.05;
@@ -1458,6 +1542,18 @@ export function meshSite(site: Site): SceneDescription {
       // the turf ends exactly where masonry begins and no gap is left to look down.
       warp: (x, z) => {
         if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = frontZ - 0.05;
+        // (And to the outer walls of a house that stands free, the same way.)
+        if (free && insideOuter(x, z)) {
+          let best: [number, number] = [x, z], least = Infinity;
+          for (const r of outerRects) {
+            const cx = Math.min(r.x1, Math.max(r.x0, x)), cz = Math.min(r.z1, Math.max(r.z0, z));
+            for (const [px, pz] of [[r.x0 - 0.02, cz], [r.x1 + 0.02, cz], [cx, r.z0 - 0.02], [cx, r.z1 + 0.02]] as [number, number][]) {
+              const d = Math.hypot(px - x, pz - z);
+              if (d < least && !insideOuter(px, pz)) { least = d; best = [px, pz]; }
+            }
+          }
+          [x, z] = best;
+        }
         // (And to the faces of a building, so that the ground meets its walls and goes no further: to the nearest
         // point of its outline, which is the edge of one of its rectangles not inside another.)
         for (const b of houses) {
@@ -1485,7 +1581,7 @@ export function meshSite(site: Site): SceneDescription {
     });
     // The top of the front wall is finished with a coping, which also covers the last hand's
     // breadth between wall and turf; and every opening in the hill has a kerb of stone round it.
-    kit.box('stone', V(p.x0 - 0.2, site.top - 0.06, p.z0 - 0.5), V(p.x1 + 0.2, site.top + 0.2, p.z0 + 0.09), coping, coping, 'frontcoping');
+    if (!free) kit.box('stone', V(p.x0 - 0.2, site.top - 0.06, p.z0 - 0.5), V(p.x1 + 0.2, site.top + 0.2, p.z0 + 0.09), coping, coping, 'frontcoping');
     for (const o of house.filter((q) => q.roof === 'sky')) {
       const k = 0.4, y0 = site.top - 0.06, y1 = site.top + 0.3;
       kit.box('stone', V(o.x0 - k, y0, o.z0 - k), V(o.x1 + k, y1, o.z0), coping, coping, `kerbn${o.id}`);
@@ -1558,7 +1654,7 @@ export function meshSite(site: Site): SceneDescription {
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
       const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
-      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || offFoot(x, z) < 1.4 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
+      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || inHouse(x, z, size + 2) || offTrack(x, z) < 2.5 + size || offFoot(x, z) < 1.4 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
     // Small stones are a dozen shapes carved once and set down again and again, each turned,
@@ -1855,7 +1951,7 @@ export function meshSite(site: Site): SceneDescription {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
       planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
       // The cheap questions first: most places are settled by them.
-      if (!inGrounds(x, z, 0)) continue;
+      if (!inGrounds(x, z, 0) || inHouse(x, z, 0.4)) continue;
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
       const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
       if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
@@ -1934,8 +2030,8 @@ export function meshSite(site: Site): SceneDescription {
       }
     }
     // The hill above the house: thin soil over the vaults, so no trees, but rough grass, heather
-    // in mounds, and a bush here and there, all standing clear of the openings.
-    {
+    // in mounds, and a bush here and there, all standing clear of the openings. (A house that stands free has roofs, not a hill.)
+    if (!free) {
       const top = rng.fork('hilltop');
       const clearOf = (x: number, z: number, m: number) => !openings.some((o) => x > o.x0 - m && x < o.x1 + m && z > o.z0 - m && z < o.z1 + m);
       let bushes = 0;
@@ -1960,7 +2056,7 @@ export function meshSite(site: Site): SceneDescription {
       let lying = 0;
       for (let tries = 0; tries < 260 && lying < 16; tries++) {
         const x = dead.range(g.x0 + 8, g.x1 - 8), z = dead.range(g.z0 + 8, g.z1 - 8), a = dead.range(0, Math.PI), len = dead.range(2.2, 5.5), r = dead.range(0.11, 0.26), stump = dead.chance(0.35);
-        if (!inGrounds(x, z, 8) || shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || offFoot(x, z) < 1.5 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
+        if (!inGrounds(x, z, 8) || inHouse(x, z, 2) || shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || offFoot(x, z) < 1.5 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
         if (stump) {
           const y = ground(x, z);
           layLimb(barkMesh, [V(x, y - 0.3, z), V(x, y + 0.1, z), V(x + 0.02, y + dead.range(0.35, 0.8), z)], [r * 1.9, r * 1.5, r * 1.3], 8, grey, 0, () => 0.75);
@@ -1976,7 +2072,7 @@ export function meshSite(site: Site): SceneDescription {
 
     // The other plants, each where it would grow.
     const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
-    const open = (x: number, z: number) => inGrounds(x, z, 0.5) && offTrack(x, z) > 1.6 && offFoot(x, z) > 0.75 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
+    const open = (x: number, z: number) => inGrounds(x, z, 0.5) && !inHouse(x, z, 0.8) && offTrack(x, z) > 1.6 && offFoot(x, z) > 0.75 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
     const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0, scree: screeLaid };
     for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
       const x = gx + plant.range(0, 0.95), z = gz + plant.range(0, 0.95);
@@ -2967,6 +3063,70 @@ export function meshSite(site: Site): SceneDescription {
           barSide: barred === undefined ? 0 : (barred === (highIsHere ? p.id : q.id) ? faces : -faces),
         });
       }
+    }
+  }
+
+  // ------------------------------------------------------------------ the outside of a house that stands free
+  if (free) {
+    const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;
+    const ox0 = Math.min(...outerRects.map((r) => r.x0)), ox1 = Math.max(...outerRects.map((r) => r.x1));
+    // (Where the house front meets the forecourt it is built with the forecourt, and that stretch is left out here.)
+    const fronted: [number, number] = [Math.max(yard.x0 - 0.2, ox0), Math.min(yard.x1 + 0.2, ox1)];
+    const frameFor = (r: Run, a: number, b: number): Frame =>
+      r.side === 'n' ? kit.frame(b, r.at, a, r.at) : r.side === 's' ? kit.frame(a, r.at, b, r.at) : r.side === 'w' ? kit.frame(r.at, a, r.at, b) : kit.frame(r.at, b, r.at, a);
+    const alongRun = (r: Run, a: number, b: number, at: number) => (r.side === 'n' || r.side === 'e' ? b - at : at - a);
+    const outward: Record<Side, [number, number]> = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
+    /** A box standing out from a run of wall: from `a` to `b` along it, `y0` to `y1` up, `out` beyond its face. */
+    const ledge = (r: Run, a: number, b: number, y0: number, y1: number, out: number, style: MasonryStyle, tag: string) => {
+      const [dx, dz] = outward[r.side], alongX = r.side === 'n' || r.side === 's';
+      const p0 = alongX ? V(a, y0, r.at) : V(r.at, y0, a), p1 = alongX ? V(b, y1, r.at + dz * out) : V(r.at + dx * out, y1, b);
+      kit.box('stone', V(Math.min(p0.x, p1.x), y0, Math.min(p0.z, p1.z)), V(Math.max(p0.x, p1.x), y1, Math.max(p0.z, p1.z)), style, style, tag);
+    };
+    kit.field = outdoorFieldAt(low, 1.0);
+    for (const r of runs) {
+      const pieces: [number, number][] = r.side === 's' && Math.abs(r.at - yard.z0) < 0.05
+        ? [[r.from, Math.min(r.to, fronted[0])], [Math.max(r.from, fronted[1]), r.to]].filter(([a, b]) => b - a > 0.05) as [number, number][]
+        : [[r.from, r.to]];
+      // Which room's wall this is, for its windows and for what it is baked with.
+      const owners = places.filter((q) => q.role !== 'approach' && (q.level ?? 0) >= 0 && (r.side === 'n' ? Math.abs(q.z0 - T - r.at) < 0.05 : r.side === 's' ? Math.abs(q.z1 + T - r.at) < 0.05 : r.side === 'w' ? Math.abs(q.x0 - T - r.at) < 0.05 : Math.abs(q.x1 + T - r.at) < 0.05));
+      for (const [a, b] of pieces) {
+        const mid = (a + b) / 2, owner = owners.find((q) => (r.side === 'n' || r.side === 's' ? q.x0 - T <= mid && q.x1 + T >= mid : q.z0 - T <= mid && q.z1 + T >= mid));
+        kit.group = `p${(owner ?? yard).id}`;
+        const holes: Opening[] = [];
+        for (const q of owners) for (const w of outerWindows.get(q.id) ?? []) if (w.side === r.side && w.at > a + 0.3 && w.at < b - 0.3) holes.push({ c: alongRun(r, a, b, w.at), w: w.halfWidth, ...shape(w) });
+        kit.wallFace('stone', frameFor(r, a, b), low - 0.7, site.top, ashlar, { openings: holes });
+        // A plinth along its foot, a band at the height of the rooms' floors upstairs, and a cornice under the roof.
+        ledge(r, a, b, low - 0.4, low + 0.42, 0.14, coping, 'plinth');
+        ledge(r, a, b, site.top - 0.34, site.top + 0.12, 0.24, coping, 'cornice');
+      }
+    }
+    // The windows dressed through the thickness of the wall, each with a sill.
+    for (const [id, list] of outerWindows) for (const w of list) {
+      const q = places[id], f = frameOf(q, w.side, 0.1), c = alongFrame(q, w.side, w.at, 0.1), op: Opening = { c, w: w.halfWidth, ...shape(w) };
+      kit.group = `p${id}`;
+      kit.openingTrim('stone', f, op, T, dressed, 'both');
+      const sill = wallBox(f, c - w.halfWidth - 0.2, c + w.halfWidth + 0.2, op.y0 - 0.13, op.y0, -0.06, T + 0.12);
+      kit.box('stone', sill.min, sill.max, coping, coping);
+    }
+    // Roofs: one over each room that is not open to the sky, hipped, of tiles, from the cornice to a ridge along the room's length.
+    const tiles = kit.mesh('tile'), pitch = 0.62, roofTone: [number, number, number] = site.setting.condition === 'forsaken' ? [0.82, 0.78, 0.74] : [1.12, 1.05, 1.0];
+    const face = (pts: Vector3[], inside: Vector3) => {
+      const n = pts[1].clone().sub(pts[0]).cross(pts[2].clone().sub(pts[0])).normalize();
+      const mid = pts.reduce((m, q) => m.add(q), V(0, 0, 0)).multiplyScalar(1 / pts.length);
+      const list = n.dot(mid.sub(inside)) < 0 ? (n.negate(), [...pts].reverse()) : pts;
+      const ids = list.map((q) => tiles.addVertex(q.x, q.y, q.z, n.x, n.y, n.z, (Math.abs(n.x) > Math.abs(n.z) ? q.z : q.x) * 0.62, (q.y + (Math.abs(n.x) > Math.abs(n.z) ? q.x : q.z) * n.y) * 0.62, roofTone[0], roofTone[1], roofTone[2]));
+      for (let k = 1; k < ids.length - 1; k++) tiles.addTriangle(ids[0], ids[k], ids[k + 1]);
+    };
+    kit.group = 'roofs';
+    for (const q of places) {
+      if (q.role === 'approach' || (q.level ?? 0) !== 0 || q.roof === 'sky' || q.fallen) continue;
+      const e = T / 2 + 0.34, x0 = q.x0 - e, x1 = q.x1 + e, z0 = q.z0 - e, z1 = q.z1 + e, y = site.top + 0.12;
+      const alongX = x1 - x0 >= z1 - z0, half = (alongX ? z1 - z0 : x1 - x0) / 2, rise = half * pitch, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+      const r0 = alongX ? V(x0 + half, y + rise, cz) : V(cx, y + rise, z0 + half), r1 = alongX ? V(x1 - half, y + rise, cz) : V(cx, y + rise, z1 - half);
+      const a = V(x0, y, z0), b = V(x1, y, z0), c = V(x1, y, z1), d = V(x0, y, z1), inside = V(cx, y + rise * 0.3, cz);
+      if (alongX) { face([a, b, r1, r0], inside); face([c, d, r0, r1], inside); face([b, c, r1], inside); face([d, a, r0], inside); }
+      else { face([b, c, r1, r0], inside); face([d, a, r0, r1], inside); face([a, b, r0], inside); face([c, d, r1], inside); }
+      face([a, b, c, d], V(cx, y + 1, cz));
     }
   }
 

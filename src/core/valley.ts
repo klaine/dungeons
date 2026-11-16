@@ -55,7 +55,7 @@ export function walkable(v: Valley, x: number, z: number, margin: number): boole
  * Shapes a valley below a house whose forecourt is `meadow`. Returns it and the line down its
  * middle, which is where a track would go if nothing turned it aside.
  */
-export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number } = meadow): { valley: Valley; middle: (z: number) => number } {
+export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
   const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(60, 98), mouth = Math.round((front + length) / step) * step;
@@ -78,7 +78,15 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   // The arms past the house, from a stream of their own: on one side, on both, or now and then on neither.
   const arming = rng.fork('arms'), count = arming.pick([0, 1, 1, 1, 2, 2]), first = arming.chance(0.5) ? 0 : 1;
   const arms = [0, 1].map((k) => (count === 2 || (count === 1 && k === first) ? { length: arming.range(30, 62), width: arming.range(15, 26), seed: arming.range(0, 500) } : null));
-  const z0 = front - Math.ceil(Math.max(0, ...arms.map((q) => (q ? q.length + 4 : 0))) / step) * step;
+  // A house that stands free has the valley all round it: on either side a breadth of open ground, and behind it a bowl that closes some way back.
+  const round_ = free && house.z0 !== undefined ? { gap: [arming.range(11, 19), arming.range(11, 19)], back: house.z0 - arming.range(14, 28), seed: arming.range(0, 500) } : null;
+  const z0 = round_ ? Math.floor((round_.back - 26) / step) * step : front - Math.ceil(Math.max(0, ...arms.map((q) => (q ? q.length + 4 : 0))) / step) * step;
+  const roundAt = (k: number, z: number): number => {
+    const base = (k === 0 ? mid - house.x0 : house.x1 - mid) + round_!.gap[k] * (1 + 0.3 * (fbm2(z / 15, round_!.seed + k * 17, 2) - 0.5));
+    // (Beside the house it keeps its breadth; behind it, it closes over the last twenty-odd metres, round as the head of a combe.)
+    const t = Math.min(1, Math.max(0, (z - z0) / (round_!.back - z0)));
+    return base * Math.sqrt(t * (2 - t));
+  };
   // How far out from the ridge an arm's side lies at a place along it: nothing at its head, its full breadth by the house front.
   const armAt = (k: number, z: number): number => {
     const q = arms[k];
@@ -87,20 +95,20 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     return t <= 0 ? 0 : q.width * smooth(t / 0.55) * (1 + 0.35 * (fbm2(z / 13, q.seed, 2) - 0.5));
   };
   const half = (side: (typeof sides)[number], z: number, k: number): number => {
-    if (z < front) return edge[k] + armAt(k, z);
+    if (z < front) return round_ ? Math.max(0.5, roundAt(k, z)) : edge[k] + armAt(k, z);
     // (Beyond the gap the country opens out again, unevenly, into a broader vale.)
     if (z >= mouth) return gate + Math.min(64, Math.max(0, z - mouth - 3) * 1.25) * (0.75 + 0.6 * fbm2(z / 17, side.seed + 3, 2));
     let w = side.full * (1 + 0.5 * (fbm2(z / 40, side.seed, 2) - 0.5)) + (fbm2(z / 11, side.seed + 7, 2) - 0.5) * 5;
     if (side.bay) w += side.bay.deep * Math.exp(-(((z - side.bay.at) / side.bay.long) ** 2));
     if (narrows) w *= 1 - narrows.by * Math.exp(-(((z - narrows.at) / narrows.long) ** 2));
     // From the corner of the ridge it opens out, or on from the mouth of an arm; to the gap it draws in.
-    const start = edge[k] + armAt(k, front - 0.01);
+    const start = round_ ? roundAt(k, front - 0.01) : edge[k] + armAt(k, front - 0.01);
     w = Math.max(w, 15, start * 0.9);
     w = start + (w - start) * smooth((z - front - 1.5) / side.open);
     w = gate + (w - gate) * smooth((mouth - z) / side.close);
     return z < meadow.z1 + 2 ? Math.max(w, head, start) : w;
   };
-  const valley: Valley = { z0, step, west: [], east: [], mouth, ridge };
+  const valley: Valley = { z0, step, west: [], east: [], mouth, ...(round_ ? {} : { ridge }) };
   for (let i = 0, n = Math.round((mouth - z0) / step) + 1 + 22; i < n; i++) {
     const z = z0 + i * step, c = z < front ? mid : middle(Math.min(z, mouth + 30));
     valley.west.push(round(c - half(sides[0], z, 0)));
