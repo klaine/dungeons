@@ -1628,6 +1628,14 @@ export function meshSite(site: Site): SceneDescription {
     wild.group = 'soft';
     landmarkSpots.push(...landmarks.map((l) => ({ kind: l.kind, x: l.x, y: l.y, z: l.z })));
     landmarks.forEach((l, i) => buildLandmark(l.kind, l.x, l.y, l.z, Math.atan2(czA - l.z, cxA - l.x), (material) => wild.mesh(material), rng.fork(`landmark${i}`), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]]));
+    // The keep over a village, on the hillside above the valley's side: set as low as the ground falls within its walls, so it is built into the slope, and turned to look down on the valley.
+    if (site.keep && vale) {
+      const k = site.keep, reach = k.kind === 'castle' ? 22 : 8;
+      let low = Infinity;
+      for (let a = 0; a < 12; a++) for (const r of [0, reach * 0.5, reach]) low = Math.min(low, ground(k.x + Math.cos((a / 12) * Math.PI * 2) * r, k.z + Math.sin((a / 12) * Math.PI * 2) * r));
+      const mid = (sideAt('w', k.z) + sideAt('e', k.z)) / 2;
+      buildLandmark(k.kind, k.x, low, k.z, Math.atan2(0, mid - k.x), (material) => wild.mesh(material), rng.fork('keep'), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]], 1.0);
+    }
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
@@ -1848,7 +1856,8 @@ export function meshSite(site: Site): SceneDescription {
       growConifer(planting, barkMesh, f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: leafOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: softBark }, own);
       canopies.push([f.isle.x, f.isle.z, 1.6, 1]);
     }
-    woods(fine, 6.2, eased, () => false);
+    // (Not where the keep stands.)
+    woods(fine, 6.2, eased, (x, z) => !!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16));
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
 
     /**

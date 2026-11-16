@@ -250,12 +250,17 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
     }
     return best;
   };
+  // What kind of settlement the valley has is settled first, and everything else is put round it.
+  const settle = rng.fork('settle').next();
+  site.settlement = settle < 0.4 ? 'village' : settle < 0.6 ? 'hamlet' : settle < 0.78 ? 'manor' : undefined;
+  if (!site.settlement) delete site.settlement;
+  if (site.settlement === 'village' && !layOutVillage(site, meadow, fromTrack, rng.fork('village'))) site.settlement = 'hamlet';
   const features: Feature[] = [];
   const place = (kind: Feature['kind'], radius: [number, number], nearest: number, furthest: number) => {
     for (let tries = 0; tries < 200; tries++) {
       const r = rng.range(radius[0], radius[1]);
       const px = rng.range(g.x0 + 16 + r, g.x1 - 16 - r), pz = rng.range(meadow.z1 + 8 + r, g.z1 - 12 - r);
-      if (!walkable(v, px, pz, 15 + r)) continue;
+      if (!walkable(v, px, pz, 15 + r) || !clearOfBuildings(site, px, pz, r + 6)) continue;
       const d = fromTrack(px, pz);
       if (d < r + nearest || d > r + furthest) continue;
       if (features.some((f) => Math.hypot(f.x - px, f.z - pz) < f.r + r + 14)) continue;
@@ -276,7 +281,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
   layOutArms(site, meadow, doorX, rng.fork('armways'));
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
-  layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'));
+  if (site.settlement && site.settlement !== 'village') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
   {
     const far = rng.fork('landmarks'), count = far.pick([0, 1, 1, 2, 2, 3]), taken: number[] = [];
@@ -405,6 +410,15 @@ function roomAt(site: Site, x: number, z: number, r: number): boolean {
     if (Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t) < st.width / 2 + r) return false;
   }
   for (const t of site.towers ?? []) if (Math.max(Math.abs(t.x - x), Math.abs(t.z - z)) < t.half + 2 + r) return false;
+  return clearOfBuildings(site, x, z, r);
+}
+
+/** Whether a point is at least `r` metres from the ground of every building already in the valley. */
+function clearOfBuildings(site: Site, x: number, z: number, r: number): boolean {
+  for (const b of site.buildings ?? []) {
+    const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+    for (const q of footprintOf(b)) if (u > q.u0 - r && u < q.u1 + r && v > q.v0 - r - (b.style === 'imperial' ? 2 : 0.6) && v < q.v1 + r) return false;
+  }
   return true;
 }
 
@@ -413,9 +427,10 @@ function roomAt(site: Site, x: number, z: number, r: number): boolean {
  * row with their fronts to the track, as a hamlet has them, or one stuccoed building of the
  * classical kind standing back from it. They go where there is room, and face the track.
  */
-function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng, hamlet: boolean): void {
   const g = site.grounds!, track = site.track ?? [];
-  if (track.length < 2 || !rng.chance(0.6)) return;
+  if (track.length < 2) return;
+  rng.next();
   const round = (v: number) => Math.round(v * 10) / 10;
   // Where the track is, across the valley, at a place along it.
   const trackX = (z: number): number => {
@@ -435,7 +450,8 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
   };
   const side = rng.chance(0.5) ? 1 : -1;
   const out: Building[] = [];
-  if (rng.chance(0.5)) {
+  rng.next();
+  if (hamlet) {
     // A hamlet: two to four houses, no two alike, a step or two apart.
     const washes: [number, number, number][] = [[0.86, 0.8, 0.66], [0.82, 0.62, 0.3], [0.78, 0.5, 0.44], [0.55, 0.66, 0.74], [0.6, 0.68, 0.5], [0.88, 0.87, 0.82], [0.74, 0.36, 0.26]];
     // (A row is tried in several places, and each house at several distances from the track; the fullest row found is kept.)
@@ -511,6 +527,71 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
   if (out.length) site.buildings = out;
 }
 
+/** A timber house of the valley's kind, its storeys and its look dealt from `rng`. */
+function timberHouse(rng: Rng, colour: [number, number, number]): Omit<Building, 'x' | 'z' | 'faces'> {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const w = round(rng.range(6, 8.6)), d = round(rng.range(6.2, 7.8)), storeys = rng.chance(0.4) ? 3 : 2, jetty = round(rng.range(0.3, 0.45)), gable = rng.chance(0.6);
+  const tall = rng.fork('heights'), heights = [round(tall.range(2.6, 3.3)), ...Array.from({ length: storeys - 1 }, (_, n) => round(tall.range(2.35, 2.9) - n * 0.1))];
+  return { style: 'timber', w, d, storeys, heights, bays: w > 7.4 ? 3 : 2, colour, jetty, gable };
+}
+
+/**
+ * A village: houses along both sides of the track where the valley is broadest, their fronts to
+ * the track, close together as houses in a street are, with a lane between them here and there;
+ * and above it, on the hillside beyond the valley's side, its keep. Returns false if there was
+ * not room for at least four houses, and leaves nothing.
+ */
+function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): boolean {
+  const v = site.valley!, track = site.track!, round = (x: number) => Math.round(x * 10) / 10;
+  const trackX = (z: number): number => {
+    let k = 0;
+    while (k < track.length - 2 && z > track[k + 1][1]) k++;
+    const t = Math.min(1, Math.max(0, (z - track[k][1]) / ((track[k + 1][1] - track[k][1]) || 1)));
+    return track[k][0] + (track[k + 1][0] - track[k][0]) * t;
+  };
+  // Where the valley is broadest, in the stretch below the house and above the gap.
+  const lo = meadow.z1 + 18, hi = v.mouth - 30;
+  if (hi - lo < 30) return false;
+  let mid = lo, best = -Infinity;
+  for (let z = lo; z <= hi; z += 2) {
+    const broad = edgeAt(v, 'e', z) - edgeAt(v, 'w', z) + rng.range(-4, 4);
+    if (broad > best) { best = broad; mid = z; }
+  }
+  const length = rng.range(38, 58), z0 = Math.max(lo, mid - length / 2), z1 = Math.min(hi + 10, z0 + length);
+  const washes: [number, number, number][] = [[0.86, 0.8, 0.66], [0.82, 0.62, 0.3], [0.78, 0.5, 0.44], [0.55, 0.66, 0.74], [0.6, 0.68, 0.5], [0.88, 0.87, 0.82], [0.74, 0.36, 0.26]];
+  const out: Building[] = [];
+  const fits = (b: Building): boolean => {
+    for (const [du, dv] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const x = b.x + (du * b.d) / 2, z = b.z + (dv * b.w) / 2;
+      if (!walkable(v, x, z, 5) || fromTrack(x, z) < 3.2 || !roomAt(site, x, z, 0.8)) return false;
+    }
+    return !out.some((q) => Math.abs(q.z - b.z) < (q.w + b.w) / 2 + 0.6 && Math.abs(q.x - b.x) < (q.d + b.d) / 2 + 0.6);
+  };
+  let k = 0;
+  for (const side of [-1, 1] as const) {
+    for (let z = z0 + rng.range(0, 4); z < z1;) {
+      const house = timberHouse(rng.fork(`house${k}`), washes[(k * 3 + 1) % washes.length]);
+      let placed = false;
+      for (let step = 0; step < 4 && !placed; step++) {
+        const b: Building = { ...house, x: round(trackX(z + house.w / 2) + side * (4.1 + step * 1.1 + house.d / 2)), z: round(z + house.w / 2), faces: side > 0 ? 'w' : 'e' };
+        if (fits(b)) { out.push(b); placed = true; k++; }
+      }
+      // (Next door: close by, or across a lane.)
+      z += house.w + (rng.chance(0.25) ? rng.range(3.5, 6) : rng.range(0.6, 2.2));
+      if (!placed) z += 2;
+    }
+  }
+  if (out.length < 4) return false;
+  // The inn is the house nearest the middle of the village, which is the first of them.
+  out.sort((p, q) => Math.abs(p.z - mid) - Math.abs(q.z - mid));
+  for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
+  site.buildings = out;
+  // The keep: on the hillside above whichever side of the valley rises higher over the village, back from its edge.
+  const side = rng.chance(0.5) ? 'w' : 'e', zk = round(mid + rng.range(-10, 10)), back = rng.range(24, 34);
+  site.keep = { x: round(edgeAt(v, side, zk) + (side === 'w' ? -back : back)), z: zk, kind: rng.chance(0.45) ? 'castle' : 'tower' };
+  return true;
+}
+
 /** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */
 function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
   const g = site.grounds!, v = site.valley!;
@@ -574,7 +655,7 @@ function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: numb
       if (Math.abs(slantAt(v, side, z)) > 0.85 || edgeAt(v, 'e', z) - edgeAt(v, 'w', z) < depth + 24) free = false;
       for (let out = 3; out <= 4.7 + depth + 3.5 && free; out += 1.5) {
         const x = edgeAt(v, side, z) + inward * out;
-        if (fromTrack(x, z) < 3.5) free = false;
+        if (fromTrack(x, z) < 3.5 || !clearOfBuildings(site, x, z, 3)) free = false;
         for (const f of features) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 3) free = false;
         for (const st of streams) for (let k = 0; k < st.course.length - 1 && free; k++) {
           const [ax, az] = st.course[k], [bx, bz] = st.course[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
@@ -613,7 +694,7 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   // Whether a point of ground is free for water: clear of the track, the meadow, the rim, and anything else out here.
   const free = (x: number, z: number, margin: number, but?: Feature): boolean => {
     if (fromTrack(x, z) < 3 + margin) return false;
-    if (!walkable(v, x, z, 12 + margin) || z < meadow.z1 + 4 + margin) return false;
+    if (!walkable(v, x, z, 12 + margin) || z < meadow.z1 + 4 + margin || !clearOfBuildings(site, x, z, 3 + margin)) return false;
     return !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.1) + 1.5 + margin);
   };
 
@@ -661,7 +742,7 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   // The foot of the rock on the water's side of the valley, at any place down it; and on the other side.
   const rimX = (z: number, on = side) => (on < 0 ? edgeAt(v, 'w', z) + 6.5 : edgeAt(v, 'e', z) - 6.5);
   const clear = (x: number, z: number, but?: Feature, on = side): boolean =>
-    Math.sign(x - trackX(z)) === on && fromTrack(x, z) > 4 && z < v.mouth - 4 && insideOf(v, x, z) > 5.5 && z > meadow.z1 + 3
+    Math.sign(x - trackX(z)) === on && fromTrack(x, z) > 4 && z < v.mouth - 4 && insideOf(v, x, z) > 5.5 && z > meadow.z1 + 3 && clearOfBuildings(site, x, z, 2.5)
     && !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 0.9) + 2);
   // A wandering line from one point to another over free ground, or nothing if there is no way.
   const route = (from: [number, number], to: [number, number], but?: Feature, on = side, q = rng): [number, number][] | null => {

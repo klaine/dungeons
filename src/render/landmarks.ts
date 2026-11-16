@@ -15,11 +15,13 @@ type Colour = [number, number, number];
 export function buildLandmark(
   kind: 'castle' | 'tower' | 'ruin' | 'monument', x: number, y: number, z: number, facing: number,
   mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour,
+  /** How much larger than life it is built: by default enough to read at three hundred metres; a keep over the valley is seen close, and is built true. */
+  scale?: number,
 ): void {
   const c = Math.cos(facing), s = Math.sin(facing);
   // From the landmark's own measures (`a` across its front, `b` back from it, `h` up) to the world.
   // (Built larger than life: at three hundred metres and more, a tower of real size is a speck. Castles less so, being broad.)
-  const grand = kind === 'castle' ? 1.2 : 1.55;
+  const grand = scale ?? (kind === 'castle' ? 1.2 : 1.55);
   const at = (a: number, b: number, h: number): [number, number, number] => [x + (c * b - s * a) * grand, y + h * grand, z + (s * b + c * a) * grand];
   let count = 0;
   const tone = (lift = 1): Colour => { const t = (0.9 + 0.2 * (((count++ * 7919) % 11) / 11)) * lift; return [stone[0] * t, stone[1] * t, stone[2] * t]; };

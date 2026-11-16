@@ -392,6 +392,17 @@ export interface Site {
   /** Buildings standing in the valley, apart from the house: see `Building`. */
   buildings?: Building[];
   /**
+   * What kind of settlement the valley has, decided before anything else is put in it: a
+   * village along the track with a keep above it, a hamlet of a few houses, a manor house of
+   * the classical kind, or none.
+   */
+  settlement?: 'village' | 'hamlet' | 'manor';
+  /**
+   * The keep over a village: a tower, or a small castle, on the hillside above the valley's
+   * side, outside what can be walked, where it is seen from the village. `x` and `z` are where it stands.
+   */
+  keep?: { x: number; z: number; kind: 'tower' | 'castle' };
+  /**
    * Things standing on the hills beyond the valley, to be seen on the skyline: a castle, a lone
    * tower, the ruin of an abbey, or a monument. `angle` is the bearing from the middle of the
    * valley, in degrees from the direction of greater x towards greater z; `range` is `near`
