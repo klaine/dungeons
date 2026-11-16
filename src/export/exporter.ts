@@ -1,5 +1,5 @@
 import {
-  BufferGeometry, CanvasTexture, Group, Mesh, MeshStandardMaterial, Object3D, RepeatWrapping, SRGBColorSpace, Texture, WebGLRenderer,
+  BufferGeometry, CanvasTexture, Group, Mesh, MeshStandardMaterial, Object3D, RepeatWrapping, SRGBColorSpace, Texture,
 } from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -136,12 +136,9 @@ export function exportPlan(site: Site): void {
   planCanvas(site).toBlob((blob) => blob && download(blob, `${site.seed}-plan.png`), 'image/png');
 }
 
-/** Reads a generated texture back from the graphics card into something an exporter can save. */
-function toCanvasTexture(renderer: WebGLRenderer, set: TextureSet, which: 0 | 1 | 2): Texture {
-  const rt = set.targets[which];
-  const w = rt.width, h = rt.height;
-  const pixels = new Uint8Array(w * h * 4);
-  renderer.readRenderTargetPixels(rt, 0, 0, w, h, pixels);
+/** Turns a generated texture into something an exporter can save. */
+function toCanvasTexture(set: TextureSet, which: 0 | 1 | 2): Texture {
+  const w = set.size, h = set.size, pixels = set.pixels[which];
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -174,7 +171,7 @@ export interface ModelSource {
  * Builds a plain copy of the world for export: the same geometry and vertex tints with ordinary
  * materials, without the tool's own shading. Baked light is not included.
  */
-export function buildExportScene(renderer: WebGLRenderer, source: ModelSource): Group {
+export function buildExportScene(source: ModelSource): Group {
   const root = new Group();
   root.name = 'site';
   const materials = new Map<string, MeshStandardMaterial>();
@@ -185,7 +182,7 @@ export function buildExportScene(renderer: WebGLRenderer, source: ModelSource): 
     const set = source.textures[name] ?? source.textures.stone;
     let maps = converted.get(set);
     if (!maps) {
-      maps = [0, 1, 2].map((k) => toCanvasTexture(renderer, set, k as 0 | 1 | 2));
+      maps = [0, 1, 2].map((k) => toCanvasTexture(set, k as 0 | 1 | 2));
       converted.set(set, maps);
     }
     m = new MeshStandardMaterial({ name, map: maps[0], normalMap: maps[1], aoMap: maps[2], roughnessMap: maps[2], metalnessMap: maps[2], roughness: 1, metalness: 1, vertexColors: true });
@@ -250,13 +247,13 @@ export function buildExportScene(renderer: WebGLRenderer, source: ModelSource): 
   return root;
 }
 
-export async function modelGlb(renderer: WebGLRenderer, source: ModelSource): Promise<ArrayBuffer> {
-  const scene = buildExportScene(renderer, source);
+export async function modelGlb(source: ModelSource): Promise<ArrayBuffer> {
+  const scene = buildExportScene(source);
   const exporter = new GLTFExporter();
   return (await exporter.parseAsync(scene, { binary: true })) as ArrayBuffer;
 }
 
-export async function exportModel(renderer: WebGLRenderer, source: ModelSource, name: string): Promise<void> {
-  const glb = await modelGlb(renderer, source);
+export async function exportModel(source: ModelSource, name: string): Promise<void> {
+  const glb = await modelGlb(source);
   download(new Blob([glb], { type: 'model/gltf-binary' }), `${name}.glb`);
 }

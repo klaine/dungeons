@@ -1,8 +1,26 @@
 import {
   AdditiveBlending, Color, CylinderGeometry, DoubleSide, Group, Mesh, PlaneGeometry, PointLight,
-  ShaderMaterial, TorusGeometry, Vector3,
+  TorusGeometry, Vector3,
 } from 'three';
+import { NodeMaterial } from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { makePropMaterial } from './siteMaterial';
+
+// (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type N = any;
+const { Fn, abs, cameraPosition, cameraProjectionMatrix, cameraViewMatrix, dot, float, floor, fract, mix, modelWorldMatrix, normalize, positionGeometry, pow, sin, smoothstep, uniform, uv, vec2, vec3, vec4 } = TSL as N;
+
+const flameHash: N = Fn(([p0]: [N]) => {
+  const p: N = fract(p0.mul(vec2(123.34, 456.21))).toVar();
+  p.addAssign(dot(p, p.add(45.32)));
+  return fract(p.x.mul(p.y));
+});
+const flameNoise: N = Fn(([p]: [N]) => {
+  const i: N = floor(p).toVar(), f0: N = fract(p);
+  const f: N = f0.mul(f0).mul(f0.mul(-2).add(3)).toVar();
+  return mix(mix(flameHash(i), flameHash(i.add(vec2(1, 0))), f.x), mix(flameHash(i.add(vec2(0, 1))), flameHash(i.add(vec2(1, 1))), f.x), f.y);
+});
 
 /**
  * A wall torch: an iron-bound brand on a bracket and an animated flame. It carries no light of its
@@ -16,7 +34,9 @@ export class Torch {
   readonly phase: number;
   /** Brightness of the flame this frame, including flicker. */
   flicker = 1;
-  private flame: ShaderMaterial;
+  private flame: NodeMaterial;
+  private readonly uTime: { value: number } = uniform(0);
+  private readonly uGain: { value: number } = uniform(1);
 
   constructor(position: Vector3, out: Vector3, phase: number) {
     this.phase = phase;
@@ -45,46 +65,33 @@ export class Torch {
     }
 
     this.flamePosition.copy(position).addScaledVector(axis, 0.16);
-    this.flame = new ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uPhase: { value: phase }, uGain: { value: 1 } },
-      vertexShader: /* glsl */ `
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  // Face the camera, staying upright.
-  vec3 centre = (modelMatrix * vec4(0., 0., 0., 1.)).xyz;
-  vec3 toCam = cameraPosition - centre; toCam.y = 0.; toCam = normalize(toCam);
-  vec3 right = vec3(toCam.z, 0., -toCam.x);
-  vec3 wp = centre + right * position.x + vec3(0., 1., 0.) * position.y;
-  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.);
-}`,
-      fragmentShader: /* glsl */ `
-varying vec2 vUv;
-uniform float uTime, uPhase, uGain;
-float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float noise(vec2 p) {
-  vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
-  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
-}
-void main() {
-  vec2 p = vUv * 2. - 1.;
-  float t = uTime + uPhase * 10.;
-  float up = (p.y + 1.) * .5;
-  float n = noise(vec2(p.x * 3., p.y * 2.2 - t * 3.2)) * .6 + noise(vec2(p.x * 7., p.y * 5. - t * 5.5)) * .4;
-  p.x += (n - .5) * .5 * up + sin(t * 2.3 + p.y * 3.) * .06 * up;
-  float width = mix(.52, .05, pow(up, 1.25));
-  float body = 1. - smoothstep(width * .35, width, abs(p.x));
-  body *= smoothstep(-1., -.72, p.y) * (1. - smoothstep(.25, .95, p.y + (n - .5) * .7));
-  float core = body * body * (1. - smoothstep(-.5, .35, p.y));
-  vec3 col = mix(vec3(1., .16, .01), vec3(1., .55, .12), body) * body * 2.2;
-  col += vec3(1., .85, .55) * core * 4.;
-  gl_FragColor = vec4(col * uGain, body);
-}`,
-      transparent: true,
-      blending: AdditiveBlending,
-      depthWrite: false,
-      side: DoubleSide,
-    });
+    // The flame is a sheet that turns to face whoever looks at it, staying upright, with fire drawn on it.
+    const flame = (this.flame = new NodeMaterial());
+    flame.transparent = true;
+    flame.blending = AdditiveBlending;
+    flame.depthWrite = false;
+    flame.side = DoubleSide;
+    flame.vertexNode = Fn(() => {
+      const centre: N = modelWorldMatrix.mul(vec4(0, 0, 0, 1)).xyz;
+      const flat: N = cameraPosition.sub(centre).mul(vec3(1, 0, 1));
+      const toCam: N = normalize(flat);
+      const right = vec3(toCam.z, 0, toCam.x.negate());
+      const wp = centre.add(right.mul(positionGeometry.x)).add(vec3(0, 1, 0).mul(positionGeometry.y));
+      return cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(wp, 1));
+    })();
+    flame.fragmentNode = Fn(() => {
+      const p: N = uv().mul(2).sub(1).toVar();
+      const t: N = (this.uTime as N).add(phase * 10);
+      const up: N = p.y.add(1).mul(0.5).toVar();
+      const n: N = flameNoise(vec2(p.x.mul(3), p.y.mul(2.2).sub(t.mul(3.2)))).mul(0.6).add(flameNoise(vec2(p.x.mul(7), p.y.mul(5).sub(t.mul(5.5)))).mul(0.4)).toVar();
+      p.x.addAssign(n.sub(0.5).mul(0.5).mul(up).add(sin(t.mul(2.3).add(p.y.mul(3))).mul(0.06).mul(up)));
+      const width: N = mix(0.52, 0.05, pow(up, 1.25));
+      const shape = float(1).sub(smoothstep(width.mul(0.35), width, abs(p.x)));
+      const body: N = shape.mul(smoothstep(-1, -0.72, p.y)).mul(float(1).sub(smoothstep(0.25, 0.95, p.y.add(n.sub(0.5).mul(0.7))))).toVar();
+      const core = body.mul(body).mul(float(1).sub(smoothstep(-0.5, 0.35, p.y)));
+      const col = mix(vec3(1, 0.16, 0.01), vec3(1, 0.55, 0.12), body).mul(body).mul(2.2).add(vec3(1, 0.85, 0.55).mul(core).mul(4));
+      return vec4(col.mul(this.uGain as N), body);
+    })();
     const quad = new Mesh(new PlaneGeometry(0.4, 0.7), this.flame);
     quad.position.copy(this.flamePosition);
     quad.frustumCulled = false;
@@ -96,8 +103,8 @@ void main() {
   update(time: number): void {
     const t = time * 7 + this.phase * 31;
     this.flicker = 0.86 + 0.09 * Math.sin(t) + 0.05 * Math.sin(t * 2.7 + 1.3) + 0.04 * Math.sin(t * 5.1 + 0.4);
-    this.flame.uniforms.uTime.value = time;
-    this.flame.uniforms.uGain.value = this.flicker;
+    this.uTime.value = time;
+    this.uGain.value = this.flicker;
   }
 }
 

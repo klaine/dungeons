@@ -1,7 +1,9 @@
 import {
-  CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh, MeshDepthMaterial, MeshStandardMaterial,
-  PlaneGeometry, BufferGeometry, RGBADepthPacking, SRGBColorSpace, StaticDrawUsage, Texture,
+  CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh,
+  PlaneGeometry, BufferGeometry, SRGBColorSpace, StaticDrawUsage, Texture,
 } from 'three';
+import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Rng } from '../core/rng';
 import { CardSet } from './scene';
@@ -12,7 +14,39 @@ import { CardSet } from './scene';
  * the card, so one texture serves spring green, dry yellow and blossom alike.
  */
 
-export const vegetationUniforms = { uTime: { value: 0 }, uWind: { value: 1 } };
+// (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type N = any;
+const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, transformNormalToView, uniform, uv, vec3 } = TSL as N;
+
+export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number } } = { uTime: uniform(0), uWind: uniform(1) };
+
+/**
+ * How light falls on a leaf. Light comes through a leaf as well as off it: seen against the sun
+ * a crown glows, and its shaded side is not black. (The light used here has already been
+ * through the shadow map, so leaves in shade stay dark.) And leaves and blades are matt: left
+ * alone, every card would mirror the sky at a glancing angle, and a meadow seen from head
+ * height is all glancing angles; it turns pale and blue.
+ */
+class LeafLighting extends (PhysicalLightingModel as N) {
+  constructor(private readonly through: number) {
+    super();
+  }
+
+  direct(data: N, builder: N): void {
+    super.direct(data, builder);
+    const against = dot(positionViewDirection.negate(), data.lightDirection).clamp().pow(3);
+    const behind = dot(normalView, data.lightDirection).negate().clamp();
+    data.reflectedLight.directDiffuse.addAssign(data.lightColor.mul(diffuseColor.rgb).mul(vec3(1.2, 1.25, 0.55)).mul(against.mul(0.9).add(behind.mul(0.22))).mul(this.through / Math.PI));
+  }
+
+  indirect(builder: N): void {
+    super.indirect(builder);
+    const reflected = builder.context.reflectedLight;
+    reflected.indirectSpecular.assign(vec3(0));
+    reflected.directSpecular.mulAssign(0.2);
+  }
+}
 
 function canvasOf(size: number): [HTMLCanvasElement, CanvasRenderingContext2D] {
   const c = document.createElement('canvas');
@@ -255,7 +289,7 @@ function shapeGeometry(shape: CardSet['shape']): BufferGeometry {
 }
 
 /** How far off grass and flowers are still drawn. They shrink into the ground over the last third. */
-export const vegetationRange = { value: 75 };
+export const vegetationRange: { value: number } = uniform(75);
 
 /**
  * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
@@ -269,58 +303,28 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   const block = whole ? 220 : ground ? 24 : 48;
   const base = shapeGeometry(set.shape);
   const sway = whole ? 0.004 : ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
-  const material = new MeshStandardMaterial({
+  const material = new MeshStandardNodeMaterial({
     map: texture, alphaTest: 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: true,
   });
   // The sky lights leaves from all round, but as blue as it is it would turn them teal.
   material.envMapIntensity = 0.55;
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = vegetationUniforms.uTime;
-    shader.uniforms.uWind = vegetationUniforms.uWind;
-    shader.uniforms.uRange = vegetationRange;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec3 aCentre; uniform float uTime; uniform float uWind; uniform float uRange;`)
-      // Shade every card as part of one rounded body about its centre, not as a flat sheet.
-      .replace('#include <defaultnormal_vertex>', /* glsl */ `#include <defaultnormal_vertex>
-{
-  vec4 cardWorld = modelMatrix * instanceMatrix * vec4( position, 1.0 );
-  transformedNormal = normalize( ( viewMatrix * vec4( normalize( cardWorld.xyz - aCentre ), 0.0 ) ).xyz );
-}`)
-      // Wind: the free end of each card moves, the fixed end does not.
-      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
-{
-  vec3 at = instanceMatrix[3].xyz;
-  float free = ${set.shape === 'tuft' ? 'uv.y * uv.y' : '1.0'};
-  float gust = sin( uTime * 1.3 + at.x * 0.21 + at.z * 0.17 ) + 0.5 * sin( uTime * 2.9 + at.x * 0.6 - at.z * 0.45 );
-  transformed.x += free * gust * ${sway.toFixed(3)} * uWind;
-  transformed.z += free * cos( uTime * 1.7 + at.z * 0.3 ) * ${(sway * 0.6).toFixed(3)} * uWind;
-  ${ground ? 'transformed *= 1.0 - smoothstep( uRange * 0.66, uRange, distance( cameraPosition, at ) );' : ''}
-}`);
-    shader.fragmentShader = shader.fragmentShader
-      // Light comes through a leaf as well as off it. Seen against the sun a crown glows, and its
-      // shaded side is not black. The light used here has already been through the shadow map,
-      // so leaves in shade stay dark.
-      .replace('#include <lights_physical_pars_fragment>', /* glsl */ `#include <lights_physical_pars_fragment>
-void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryPosition, const in vec3 geometryNormal, const in vec3 geometryViewDir, const in vec3 geometryClearcoatNormal, const in PhysicalMaterial material, inout ReflectedLight reflectedLight ) {
-  RE_Direct_Physical( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
-  float against = pow( saturate( dot( -geometryViewDir, directLight.direction ) ), 3.0 );
-  float behind = saturate( -dot( geometryNormal, directLight.direction ) );
-  reflectedLight.directDiffuse += directLight.color * material.diffuseColor * RECIPROCAL_PI * vec3( 1.2, 1.25, 0.55 ) * ( against * 0.9 + behind * 0.22 )${whole ? ' * 0.25' : ''};
-}
-#undef RE_Direct
-#define RE_Direct RE_Direct_Leaf`)
-      // A two-sided material turns the normal round on back faces; these normals must not turn.
-      .replace('#include <normal_fragment_begin>', /* glsl */ `#include <normal_fragment_begin>
-normal = normalize( vNormal );`)
-      // Leaves and blades are matt. Left alone, every card would mirror the sky at a glancing
-      // angle, and a meadow seen from head height is all glancing angles: it turns pale and blue.
-      .replace('#include <lights_fragment_end>', /* glsl */ `#include <lights_fragment_end>
-reflectedLight.indirectSpecular = vec3( 0.0 );
-reflectedLight.directSpecular *= 0.2;`);
-  };
-  material.customProgramCacheKey = () => `cards5-${set.shape}-${sway}-${ground}-${whole}`;
-  const depth = set.shadow ? new MeshDepthMaterial({ depthPacking: RGBADepthPacking, map: texture, alphaTest: 0.42 }) : null;
+  const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N;
+  // Where each card stands, and how large it is.
+  const at: N = attribute('aAt', 'vec4');
+  // Wind: the free end of each card moves, the fixed end does not. And grass and flowers shrink into the ground as they near the end of their range.
+  material.positionNode = Fn(() => {
+    const p: N = positionLocal.toVar();
+    const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
+    const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
+    p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
+    p.z.addAssign(free.mul(cos(uTime.mul(1.7).add(at.z.mul(0.3)))).mul(uWind).mul(at.w).mul(sway * 0.6));
+    if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, distance(cameraPosition, at.xyz))));
+    return p;
+  })();
+  // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
+  // given like this is not turned round on back faces, which a two-sided material would do to its own.)
+  material.normalNode = transformNormalToView(normalize(positionWorld.sub(attribute('aCentre', 'vec3'))));
+  (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1);
 
   // Which block each card falls in.
   const count = set.matrices.length / 16;
@@ -334,9 +338,11 @@ reflectedLight.directSpecular *= 0.2;`);
   const meshes: InstancedMesh[] = [];
   for (const list of blocks.values()) {
     const n = list.length;
-    const matrices = new Float32Array(n * 16), colours = new Float32Array(n * 3), centres = new Float32Array(n * 3);
+    const matrices = new Float32Array(n * 16), colours = new Float32Array(n * 3), centres = new Float32Array(n * 3), stands = new Float32Array(n * 4);
     list.forEach((i, k) => {
       for (let c = 0; c < 16; c++) matrices[k * 16 + c] = set.matrices[i * 16 + c];
+      for (let c = 0; c < 3; c++) stands[k * 4 + c] = set.matrices[i * 16 + 12 + c];
+      stands[k * 4 + 3] = Math.hypot(set.matrices[i * 16], set.matrices[i * 16 + 1], set.matrices[i * 16 + 2]);
       for (let c = 0; c < 3; c++) { colours[k * 3 + c] = set.colours[i * 3 + c]; centres[k * 3 + c] = set.centres[i * 3 + c]; }
     });
     // Each block has its own geometry object, sharing the shape's buffers, because the centres are per card.
@@ -344,6 +350,7 @@ reflectedLight.directSpecular *= 0.2;`);
     geometry.setIndex(base.getIndex());
     for (const name of ['position', 'normal', 'uv']) geometry.setAttribute(name, base.getAttribute(name));
     geometry.setAttribute('aCentre', new InstancedBufferAttribute(centres, 3));
+    geometry.setAttribute('aAt', new InstancedBufferAttribute(stands, 4));
     const mesh = new InstancedMesh(geometry, material, n);
     mesh.instanceMatrix.setUsage(StaticDrawUsage);
     (mesh.instanceMatrix.array as Float32Array).set(matrices);
@@ -352,7 +359,6 @@ reflectedLight.directSpecular *= 0.2;`);
     mesh.computeBoundingSphere();
     mesh.receiveShadow = true;
     mesh.castShadow = set.shadow;
-    if (depth) mesh.customDepthMaterial = depth;
     mesh.matrixAutoUpdate = false;
     mesh.userData.ground = ground;
     meshes.push(mesh);

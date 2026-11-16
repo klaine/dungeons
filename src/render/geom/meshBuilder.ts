@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry } from 'three';
+import { BufferAttribute, BufferGeometry, InterleavedBuffer, InterleavedBufferAttribute } from 'three';
 
 /** Vertex layout shared by all site geometry. */
 export const FIELD_MOSS = 0;
@@ -166,10 +166,13 @@ export class MeshBuilder {
     g.setAttribute('aField', new BufferAttribute(this.fld.trimmed(), 4));
     const n = this.vertexCount;
     // Baked light: per colour channel, a constant term and a direction term; plus sky and sun visibility.
-    g.setAttribute('aSHr', new BufferAttribute(new Float32Array(n * 4), 4));
-    g.setAttribute('aSHg', new BufferAttribute(new Float32Array(n * 4), 4));
-    g.setAttribute('aSHb', new BufferAttribute(new Float32Array(n * 4), 4));
-    g.setAttribute('aBake', new BufferAttribute(new Float32Array(n * 2), 2));
+    // (All fourteen numbers lie side by side in one run of memory: a graphics card will take only eight
+    // separate runs for one mesh, and with these four apart there would be nine.)
+    const light = new InterleavedBuffer(new Float32Array(n * 14), 14);
+    g.setAttribute('aSHr', new InterleavedBufferAttribute(light, 4, 0));
+    g.setAttribute('aSHg', new InterleavedBufferAttribute(light, 4, 4));
+    g.setAttribute('aSHb', new InterleavedBufferAttribute(light, 4, 8));
+    g.setAttribute('aBake', new InterleavedBufferAttribute(light, 2, 12));
     g.setIndex(new BufferAttribute(new Uint32Array(this.idx), 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();

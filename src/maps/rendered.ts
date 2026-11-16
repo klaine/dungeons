@@ -1,4 +1,5 @@
-import { DirectionalLight, Light, Object3D, OrthographicCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three';
+import { DirectionalLight, Light, Object3D, OrthographicCamera, Scene } from 'three';
+import { WebGPURenderer } from 'three/webgpu';
 import { Site } from '../core/site';
 
 /**
@@ -43,7 +44,7 @@ export interface RenderedMap {
  * Takes the map. The renderer is resized while this runs and is left at the map's size: the
  * caller should set its own size again afterwards.
  */
-export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opts: RenderedOptions): RenderedMap {
+export function renderMap(renderer: WebGPURenderer, scene: Scene, site: Site, opts: RenderedOptions): RenderedMap {
   const square = opts.square ?? 1.5;
   const T = site.wallThickness;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -71,7 +72,7 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
   fill.position.set((x0 + x1) / 2, 300, (z0 + z1) / 2);
   fill.target.position.set((x0 + x1) / 2, 0, (z0 + z1) / 2);
 
-  const was = { exposure: renderer.toneMappingExposure, planes: renderer.clippingPlanes, muted: opts.mute.map((l) => l.intensity) };
+  const was = { exposure: renderer.toneMappingExposure, muted: opts.mute.map((l) => l.intensity) };
   opts.mute.forEach((l) => (l.intensity = 0));
   renderer.setPixelRatio(1);
   renderer.setSize(W, H, false);
@@ -87,7 +88,11 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
     // Indoors: cut open, exposure up, a little light from above.
     scene.add(fill, fill.target);
     for (const o of opts.outdoorOnly ?? []) o.visible = false;
-    renderer.clippingPlanes = [new Plane(new Vector3(0, -1, 0), cut)];
+    // (Cut open by looking down from the height of the cut itself: what is above the eye is not seen.)
+    camera.position.y = cut;
+    camera.near = 0;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
     renderer.toneMappingExposure = opts.indoorExposure;
     renderer.render(scene, camera);
     ctx.drawImage(renderer.domElement, 0, 0);
@@ -96,7 +101,10 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
     // above is turned up to stand in for the sky, or shadows on the ground would come out black.
     fill.intensity = 2.6;
     for (const o of opts.outdoorOnly ?? []) o.visible = true;
-    renderer.clippingPlanes = [];
+    camera.position.y = 200;
+    camera.near = 1;
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
     renderer.toneMappingExposure = opts.outdoorExposure;
     renderer.render(scene, camera);
     ctx.save();
@@ -111,7 +119,6 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
   } finally {
     for (const o of opts.outdoorOnly ?? []) o.visible = true;
     scene.remove(fill, fill.target);
-    renderer.clippingPlanes = was.planes;
     renderer.toneMappingExposure = was.exposure;
     opts.mute.forEach((l, k) => (l.intensity = was.muted[k]));
   }

@@ -1,5 +1,5 @@
 import {
-  LinearFilter, LinearMipmapLinearFilter, Mesh, NoColorSpace, OrthographicCamera, PlaneGeometry, RepeatWrapping,
+  DataTexture, LinearFilter, LinearMipmapLinearFilter, Mesh, NoColorSpace, OrthographicCamera, PlaneGeometry, RepeatWrapping,
   RGBAFormat, Scene, ShaderMaterial, SRGBColorSpace, Texture, UnsignedByteType, WebGLRenderer, WebGLRenderTarget,
 } from 'three';
 
@@ -15,8 +15,9 @@ export interface TextureSet {
   normalMap: Texture;
   /** Occlusion in red, roughness in green, metalness in blue. */
   ormMap: Texture;
-  /** The render targets behind the three maps, in the same order, for reading pixels back. */
-  targets: WebGLRenderTarget[];
+  /** The pictures themselves, in the same order, four bytes to a point, bottom row first: for saving them. */
+  pixels: Uint8Array[];
+  size: number;
 }
 
 const NOISE = /* glsl */ `
@@ -401,7 +402,21 @@ void main() {
 }`;
 }
 
-export function generateTextureSet(renderer: WebGLRenderer, recipe: keyof typeof RECIPES, size: number, seed: number): TextureSet {
+/**
+ * The recipes are small programs written for WebGL, and are still painted with it, though
+ * everything else is now drawn with WebGPU: a WebGL renderer of their own, on a canvas nobody
+ * sees, paints each picture, the picture is read back, and it is handed on as plain data that
+ * either kind of renderer can use. It is made when first wanted and thrown away by `doneGenerating`.
+ */
+let painter: WebGLRenderer | null = null;
+export function doneGenerating(): void {
+  painter?.dispose();
+  painter?.forceContextLoss();
+  painter = null;
+}
+
+export function generateTextureSet(recipe: keyof typeof RECIPES, size: number, seed: number): TextureSet {
+  const renderer = (painter ??= new WebGLRenderer({ canvas: document.createElement('canvas'), antialias: false }));
   const r = RECIPES[recipe];
   const material = new ShaderMaterial({
     uniforms: { uMode: { value: 0 }, uTexel: { value: 1 / size }, uSeed: { value: seed } },
@@ -415,29 +430,31 @@ export function generateTextureSet(renderer: WebGLRenderer, recipe: keyof typeof
   quad.frustumCulled = false;
   scene.add(quad);
   const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  const aniso = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-
-  const targets: WebGLRenderTarget[] = [];
+  const pixels: Uint8Array[] = [];
   const render = (mode: number, srgb: boolean): Texture => {
-    const rt = new WebGLRenderTarget(size, size, {
-      format: RGBAFormat, type: UnsignedByteType, depthBuffer: false,
-      wrapS: RepeatWrapping, wrapT: RepeatWrapping,
-      minFilter: LinearMipmapLinearFilter, magFilter: LinearFilter, generateMipmaps: true,
-      colorSpace: srgb ? SRGBColorSpace : NoColorSpace,
-    });
-    rt.texture.anisotropy = aniso;
+    // (A colour picture is kept as colours are kept in a file, which is how it comes back when read.)
+    const rt = new WebGLRenderTarget(size, size, { format: RGBAFormat, type: UnsignedByteType, depthBuffer: false, generateMipmaps: false, colorSpace: srgb ? SRGBColorSpace : NoColorSpace });
     material.uniforms.uMode.value = mode;
     renderer.setRenderTarget(rt);
     renderer.render(scene, camera);
+    const data = new Uint8Array(size * size * 4);
+    renderer.readRenderTargetPixels(rt, 0, 0, size, size, data);
     renderer.setRenderTarget(null);
-    targets.push(rt);
-    return rt.texture;
+    rt.dispose();
+    pixels.push(data);
+    const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+    texture.wrapS = texture.wrapT = RepeatWrapping;
+    texture.minFilter = LinearMipmapLinearFilter;
+    texture.magFilter = LinearFilter;
+    texture.generateMipmaps = true;
+    texture.anisotropy = 8;
+    texture.colorSpace = srgb ? SRGBColorSpace : NoColorSpace;
+    texture.needsUpdate = true;
+    return texture;
   };
 
-  const prevTone = renderer.toneMapping;
   renderer.toneMapping = 0;
-  const set = { map: render(0, true), normalMap: render(1, false), ormMap: render(2, false), targets };
-  renderer.toneMapping = prevTone;
+  const set = { map: render(0, true), normalMap: render(1, false), ormMap: render(2, false), pixels, size };
   material.dispose();
   quad.geometry.dispose();
   return set;

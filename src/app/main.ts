@@ -1,20 +1,20 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, WebGLCubeRenderTarget, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
-  MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Ray, Scene, SRGBColorSpace,
-  Vector2, Vector3, WebGLRenderer,
+  Material, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Ray, Scene, SRGBColorSpace,
+  Vector2, Vector3,
 } from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { Sky } from 'three/addons/objects/Sky.js';
+import { CubeRenderTarget, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
+import { rtt } from 'three/tsl';
+import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
-import { AtmospherePass } from '../render/post';
+import { Atmosphere } from '../render/post';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
-import { generateTextureSet } from '../render/textures';
+import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite } from '../core/generate';
 import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
@@ -103,7 +103,9 @@ const TORCH_INTENSITY = 3.2;
 
 async function start(): Promise<void> {
   const canvas = document.getElementById('view') as HTMLCanvasElement;
-  const renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+  // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
+  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
+  await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = SRGBColorSpace;
@@ -119,16 +121,17 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ materials
   hud.status.textContent = 'Generating materials';
   const texSize = num('tex', quality.tex);
-  const stone = generateTextureSet(renderer, 'stone', texSize, 3);
-  const wood = generateTextureSet(renderer, 'wood', texSize, 5);
-  const moss = generateTextureSet(renderer, 'moss', texSize / 2, 9);
-  const rock = generateTextureSet(renderer, 'rock', texSize, 13);
-  const ground = generateTextureSet(renderer, 'ground', texSize, 17);
-  const scree = generateTextureSet(renderer, 'scree', texSize, 23);
-  const bark = generateTextureSet(renderer, 'bark', texSize, 29);
-  const soil = generateTextureSet(renderer, 'soil', texSize, 31);
-  const litter = generateTextureSet(renderer, 'litter', texSize, 37);
-  const materials: Record<string, MeshStandardMaterial> = {
+  const stone = generateTextureSet('stone', texSize, 3);
+  const wood = generateTextureSet('wood', texSize, 5);
+  const moss = generateTextureSet('moss', texSize / 2, 9);
+  const rock = generateTextureSet('rock', texSize, 13);
+  const ground = generateTextureSet('ground', texSize, 17);
+  const scree = generateTextureSet('scree', texSize, 23);
+  const bark = generateTextureSet('bark', texSize, 29);
+  const soil = generateTextureSet('soil', texSize, 31);
+  const litter = generateTextureSet('litter', texSize, 37);
+  doneGenerating();
+  const materials: Record<string, Material> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
@@ -307,8 +310,6 @@ async function start(): Promise<void> {
     deep: [(0.55 * SKY.zenith[0] + 0.45 * SKY.horizon[0]) * 0.06 + 0.002, (0.55 * SKY.zenith[1] + 0.45 * SKY.horizon[1]) * 0.17 + 0.003, (0.55 * SKY.zenith[2] + 0.45 * SKY.horizon[2]) * 0.11 + 0.003],
   });
   for (const m of water.meshes) { scene.add(m); scenic.push(m); }
-  // Each time the scene is drawn for the eye, the picture standing in the water is to be made again.
-  scene.onBeforeRender = (_renderer, _scene, viewer) => { if (viewer === camera) water.begin(); };
   const buildMs = performance.now() - t0;
 
   // One merged copy of everything, for collision and for the bake.
@@ -420,23 +421,19 @@ async function start(): Promise<void> {
 
   const cloudSteps = Math.round(num('clouds', quality.clouds));
   const makeSky = (disc: boolean) => {
-    const sky = new Sky();
+    const sky = new SkyMesh();
     sky.scale.setScalar(10000);
-    const u = sky.material.uniforms;
-    u.turbidity.value = 3.2;
-    u.rayleigh.value = 1.4;
-    u.mieCoefficient.value = 0.004;
-    u.mieDirectionalG.value = 0.82;
+    sky.turbidity.value = 3.2;
+    sky.rayleigh.value = 1.4;
+    sky.mieCoefficient.value = 0.004;
+    sky.mieDirectionalG.value = 0.82;
     // The sky is drawn for where the sun itself is, which after sunset is not where the light comes from.
-    if (desc.sun?.disc) u.sunPosition.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]).normalize();
-    else u.sunPosition.value.copy(sunDir);
+    if (desc.sun?.disc) sky.sunPosition.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]).normalize();
+    else sky.sunPosition.value.copy(sunDir);
     // Its own painted clouds are used only when the real ones are turned off.
-    if (u.cloudCoverage) u.cloudCoverage.value = cloudSteps > 0 ? 0 : 0.32;
-    if (u.cloudDensity) u.cloudDensity.value = 0.5;
-    if (u.showSunDisc) u.showSunDisc.value = disc ? 1 : 0;
-    // Open sky is marked in the picture, by leaving its fourth channel empty, so that water
-    // mirroring the picture can tell sky from land and put the clouds where the sky is.
-    sky.material.fragmentShader = sky.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( texColor, 0.0 );');
+    sky.cloudCoverage.value = cloudSteps > 0 ? 0 : 0.32;
+    sky.cloudDensity.value = 0.5;
+    sky.showSunDisc.value = disc ? 1 : 0;
     return sky;
   };
   const sky = makeSky(true);
@@ -467,14 +464,21 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ post
   const size = renderer.getDrawingBufferSize(new Vector2());
-  const composer = new EffectComposer(renderer);
-  const atmosphere = new AtmospherePass(scene, camera, size.x, size.y, Math.max(1, cloudSteps));
+  // The picture is made in steps: the scene; the air put into it; the glow of what is very bright
+  // added; and last the eye's adjustment to light and the screen's colours, which the pipeline does itself.
+  const pipeline = new RenderPipeline(renderer);
+  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps));
+  {
+    // (The air is drawn once into a picture of its own, which the glow then reads; otherwise it would be worked out twice.)
+    const aired = rtt(atmosphere.node);
+    pipeline.outputNode = num('bloom', quality.bloom) ? aired.add(bloom(aired, 0.14, 0.5, 1.8)) : aired;
+  }
   const skyMean = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
   atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
   atmosphere.uniforms.uSkyColor.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.75);
   // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
-  water.mirrorSky(atmosphere.uniforms);
+  water.mirrorSky(atmosphere);
   const night = desc.sun?.night ?? 0;
   {
     const u = atmosphere.uniforms;
@@ -501,7 +505,7 @@ async function start(): Promise<void> {
     // direction is looked in: so the sky, without the sun's disc, is drawn once into a small
     // picture that the haze reads.
     const u = atmosphere.uniforms;
-    const skyPicture = new WebGLCubeRenderTarget(64, { type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter });
+    const skyPicture = new CubeRenderTarget(64, { type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter });
     new CubeCamera(1, 20000, skyPicture).update(renderer, envScene);
     u.tSky.value = skyPicture.texture;
     u.uAirOn.value = 1;
@@ -543,13 +547,8 @@ async function start(): Promise<void> {
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
-  atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
+  atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
-  const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.14, 0.5, 1.8);
-  composer.addPass(atmosphere);
-  if (num('bloom', quality.bloom)) composer.addPass(bloom);
-  composer.addPass(new OutputPass());
-  composer.setSize(window.innerWidth, window.innerHeight);
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
@@ -587,7 +586,7 @@ async function start(): Promise<void> {
   document.getElementById('exportJson')!.addEventListener('click', () => site && exportJson(site));
   document.getElementById('exportModel')!.addEventListener('click', () => {
     toast('Preparing the model. This can take a little while for a large place.');
-    exportModel(renderer, exportSource(), seed).then(() => toast('Model saved.'), (err) => toast(`The model could not be made: ${err.message}`));
+    exportModel(exportSource(), seed).then(() => toast('Model saved.'), (err) => toast(`The model could not be made: ${err.message}`));
   });
   // The battle map is a picture of the scene itself, so it is taken here, where the scene is.
   const battleMap = (maxPixels = 4096) => {
@@ -609,7 +608,7 @@ async function start(): Promise<void> {
       setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     }, 'image/jpeg', 0.92);
   });
-  (window as any).__exports = { battle: (max?: number) => battleMap(max).toDataURL('image/jpeg', 0.9), siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), ink: () => site && inkCanvas(site).toDataURL('image/png'), model: () => modelGlb(renderer, exportSource()) };
+  (window as any).__exports = { battle: (max?: number) => battleMap(max).toDataURL('image/jpeg', 0.9), siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), ink: () => site && inkCanvas(site).toDataURL('image/png'), model: () => modelGlb(exportSource()) };
 
   let revealAll = params.has('reveal');
   window.addEventListener('keydown', (e) => {
@@ -628,7 +627,6 @@ async function start(): Promise<void> {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    composer.setSize(window.innerWidth, window.innerHeight);
   });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyF') atmosphere.uniforms.uEnabled.value = 1 - atmosphere.uniforms.uEnabled.value;
@@ -643,19 +641,15 @@ async function start(): Promise<void> {
   const apply = (r: BakeResult) => {
     for (const p of parts) {
       const g = p.mesh.geometry;
-      const shR = g.getAttribute('aSHr') as BufferAttribute;
-      const shG = g.getAttribute('aSHg') as BufferAttribute;
-      const shB = g.getAttribute('aSHb') as BufferAttribute;
-      const bk = g.getAttribute('aBake') as BufferAttribute;
+      // The baked light of a point is fourteen numbers side by side: twelve of light, then sky seen and sun seen.
+      const light = (g.getAttribute('aSHr') as unknown as InterleavedBufferAttribute).data, numbers = light.array as Float32Array;
       for (let i = 0; i < p.count; i++) {
         const s = (p.offset + i) * 12;
-        (shR.array as Float32Array).set(r.sh.subarray(s, s + 4), i * 4);
-        (shG.array as Float32Array).set(r.sh.subarray(s + 4, s + 8), i * 4);
-        (shB.array as Float32Array).set(r.sh.subarray(s + 8, s + 12), i * 4);
-        bk.array[i * 2] = r.skyVis[p.offset + i];
-        bk.array[i * 2 + 1] = r.sunVis[p.offset + i];
+        numbers.set(r.sh.subarray(s, s + 12), i * 14);
+        numbers[i * 14 + 12] = r.skyVis[p.offset + i];
+        numbers[i * 14 + 13] = r.sunVis[p.offset + i];
       }
-      shR.needsUpdate = shG.needsUpdate = shB.needsUpdate = bk.needsUpdate = true;
+      light.needsUpdate = true;
     }
     // Moving things take their baked light from the nearest part of the building.
     game?.applyBake((at) => {
@@ -760,7 +754,6 @@ async function start(): Promise<void> {
     atmosphere.setLights(torchLights.state().map((s) => ({
       position: s.position, color: glow.set(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16 * s.strength).clone(),
     })));
-    if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
     vegetationUniforms.uTime.value = time;
     // The wind carries the clouds across, slowly, and turns them over as they go.
     atmosphere.uniforms.uCloudDrift.value.set(time * 0.0042, time * 0.0006, time * 0.0017);
@@ -804,15 +797,16 @@ async function start(): Promise<void> {
       sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface, hearing);
     }
     cullCards(cardMeshes, camera.position);
-    water.update(time);
+    water.update(time, camera);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
-    composer.render(dt);
+    atmosphere.update();
+    pipeline.render();
 
     // Eyes adjust: quickly to brightness, slowly to the dark.
     if (tick++ % 6 === 0 && !metering) {
       metering = true;
-      atmosphere.measureAsync(renderer).then((lum) => {
+      atmosphere.measure().then((lum) => {
         exposureTarget = exposureFor(lum);
         metering = false;
       }, () => { metering = false; });
@@ -867,7 +861,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, renderer, composer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, renderer, pipeline, atmosphere, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {
@@ -1041,18 +1035,20 @@ async function start(): Promise<void> {
     return { p: hit.point.toArray(), n: n.toArray(), ndl: n.dot(sunDir), blockedAt: block ? block.distance : -1 };
   };
   // For automated checks: draw a frame and hand back the pixels.
-  (window as any).__capture = (pose?: number[]) => {
+  // (The brightness of a picture cannot be read back at once, so the picture is drawn, measured, and drawn again as the eye would then see it.)
+  (window as any).__capture = async (pose?: number[]) => {
     if (pose) {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
       // Let the torch lights finish moving to the new position before the picture is taken.
       for (let i = 0; i < 12; i++) torchLights.update(1, new Vector3(pose[0], pose[1], pose[2]));
       lantern.intensity = lanternOn ? LANTERN_INTENSITY : 0;
       frame(performance.now());
-      exposure = exposureFor(atmosphere.measure(renderer));
+      exposure = exposureTarget = exposureFor(await atmosphere.measure());
+      (window as any).__lum = exposure;
       renderer.toneMappingExposure = exposure;
-      (window as any).__lum = atmosphere.measure(renderer);
     }
-    composer.render(0);
+    atmosphere.update();
+    pipeline.render();
     return canvas.toDataURL('image/png');
   };
 }

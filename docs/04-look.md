@@ -4,7 +4,7 @@ The site document from the generator is turned into two kinds of visual asset: a
 
 ## Target
 
-A first-person 3D world in WebGL with physically based materials, normal-mapped surfaces and lighting good enough that screenshots are worth taking. Grounded and believable in its materials, heightened in its lighting and colour.
+A first-person 3D world in the browser with physically based materials, normal-mapped surfaces and lighting good enough that screenshots are worth taking. Grounded and believable in its materials, heightened in its lighting and colour.
 
 The standard to hold: **a generated place should not look generated.** No visible grid, no visibly repeating texture, no uniform lighting, no flat walls meeting at perfect corners.
 
@@ -199,6 +199,8 @@ Lights are placed by the generator for reasons (see the lighting layer in docume
 ## Performance
 
 The target is a steady 60 frames per second in a desktop browser on a mid-range laptop, with quality tiers above and below.
+
+**How it is drawn.** With three.js's WebGPU renderer, which draws with WebGPU where a browser has it and with WebGL 2 where it has not. Nothing in the program is written for either: every material is a standard material whose colour, roughness and normal are small programs of nodes built in TypeScript, and whose lighting is the standard lighting with a few things changed by a lighting model of our own (indirect light from the bake and none from the sky's picture; the sun kept off what is under the hill; reflections of the sky only where sky is seen; light coming through leaves). The air, the clouds, water and flames are programs of nodes too. Three things follow from WebGPU's rules. A mesh may carry eight runs of numbers and no more, so the fourteen numbers of baked light at each point lie side by side in one run. Nothing can be read back from the graphics card in the same breath it was drawn, so the meter that sets the eye's adjustment answers a frame or two late. And a picture with several samples to a point cannot have its depths read as an ordinary picture can, so the water's mirror is drawn with one. Measured on a desktop with a Radeon RX 6800 at 1252 by 737, drawing frames back to back: about 10 milliseconds with a lake in view, of which the mirror's second drawing of the scene is the larger part, and about 13 looking down the track. The WebGL renderer it replaced took 20 and 15 at 1298 by 849.
 
 - **The space graph is the visibility structure.** Places and ways are rooms and portals, so what cannot be seen is cheaply skipped underground and indoors.
 - Static geometry merged per zone; repeated things (props, plants, kit parts, rubble) drawn as instances.

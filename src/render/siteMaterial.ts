@@ -1,12 +1,32 @@
-import { Color, MeshStandardMaterial, ShaderChunk, Vector2, Vector3, Vector4 } from 'three';
+import { Color, Vector2, Vector3, Vector4 } from 'three';
+import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { TextureSet } from './textures';
 
 /**
- * The material used for all static site geometry: a standard physically based material with
+ * The materials used for all static site geometry: standard physically based materials with
  *  - indirect light taken from the per-vertex bake instead of a uniform ambient term,
  *  - moss, damp and soot blended in from per-vertex fields, following the height map so growth
  *    starts in the low spots.
+ *
+ * They are written as node materials: each is a standard material whose colour, roughness and
+ * normal are given as small programs built here, and whose lighting is the standard lighting
+ * with three things changed (see `BakedLighting`). The renderer turns them into whatever its
+ * graphics interface wants, WebGPU or WebGL 2.
  */
+
+/**
+ * A piece of such a program. The library's own types for these are stricter than is useful here:
+ * they want every step of a calculation to declare whether it is one number or three, which
+ * the calculation already knows. So the pieces, and the functions that make them, are taken untyped.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type N = any;
+const {
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, mix,
+  normalMap, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
+  uniform, uv, vec2, vec3, vec4, vertexColor,
+} = TSL as N;
 
 export interface SiteUniforms {
   /** 0 before the bake has arrived, 1 once it has. */
@@ -16,88 +36,101 @@ export interface SiteUniforms {
 }
 
 export const siteUniforms: SiteUniforms = {
-  uBake: { value: 0 },
-  uFallback: { value: new Vector3(0.35, 0.4, 0.5) },
+  uBake: uniform(0) as N,
+  uFallback: uniform(new Vector3(0.35, 0.4, 0.5)) as N,
+};
+const uBake = siteUniforms.uBake as N, uFallback = siteUniforms.uFallback as N;
+
+// What every point of the site carries besides where it is and which way it faces: baked light
+// (for each colour a level and the way it comes from), four fields (moss, damp, soot and one
+// more, used differently by each material), and two numbers from the bake: the share of sky
+// seen, and the share of the day in direct sun.
+const shOf = (): N[] => [attribute('aSHr', 'vec4'), attribute('aSHg', 'vec4'), attribute('aSHb', 'vec4')];
+const fieldOf = (): N => attribute('aField', 'vec4');
+const bakeOf = (): N => attribute('aBake', 'vec2');
+const one = (x: N): N => float(1).sub(x);
+/** `smoothstep`, which may also be asked to fall instead of rise (the first edge above the second). */
+const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x)) : smoothstep(a, b, x));
+
+/** The baked light on a surface facing `wn`. */
+const bakedAt = (wn: N): N => {
+  const [r, g, b] = shOf(), n4 = vec4(1, wn);
+  return max(vec3(dot(r, n4), dot(g, n4), dot(b, n4)), 0);
+};
+/**
+ * 1 for what sees no sky out where the sun's shadows are not kept: under the hill, or indoors in
+ * a building that is not baked. (Out there the two numbers a point carries are how much sky it
+ * sees and a fixed share of sun; in the house they come from the bake, which never finds a
+ * place with no sky and half a day's sun.) Such a point is not lit by the sun, whatever the
+ * light thinks, and has light of its own whether or not the house's light has been reckoned.
+ */
+const underHill = (bk: N): N => one(smoothstep(0.004, 0.06, bk.x)).mul(step(0.55, bk.y));
+/** Indirect light: the bake once it has arrived (or at once, for what has light of its own), and a stand-in for the sky until then. */
+const irradianceOf = (wn: N, bk: N): N => mix(uFallback.mul(float(0.55).add(wn.y.mul(0.45))), bakedAt(wn), max(uBake, underHill(bk)));
+
+/**
+ * The standard lighting, with three things changed:
+ *  - indirect light is what is given here (the bake), and nothing is taken from the sky's picture for it;
+ *  - the sun's light is multiplied by `sun` (for what is under the hill and must not have it);
+ *  - reflections of the sky are multiplied by `sky` (they belong only where the sky can be seen),
+ *    and all gleam by `gleam` (ground and dry rock throw back almost none).
+ */
+class BakedLighting extends (PhysicalLightingModel as N) {
+  constructor(private readonly o: { irradiance: N; sun?: N; sky?: N; gleam?: N }) {
+    super();
+  }
+
+  direct(data: N, builder: N): void {
+    if (this.o.sun && data.lightNode?.light?.isDirectionalLight) data = { ...data, lightColor: data.lightColor.mul(this.o.sun) };
+    super.direct(data, builder);
+  }
+
+  indirect(builder: N): void {
+    const c = builder.context;
+    c.irradiance.assign(this.o.irradiance);
+    c.iblIrradiance.assign(vec3(0));
+    if (this.o.sky) c.radiance.mulAssign(this.o.sky);
+    super.indirect(builder);
+    if (this.o.gleam) {
+      c.reflectedLight.directSpecular.mulAssign(this.o.gleam);
+      c.reflectedLight.indirectSpecular.mulAssign(this.o.gleam);
+    }
+  }
+}
+const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; gleam?: N }): void => {
+  (m as N).setupLightingModel = () => new BakedLighting(o);
 };
 
 /**
  * `matt` is for ground: turf and loose stone throw back almost no gleam. With the ordinary sheen
  * every surface has at a glancing angle, land seen from the air goes pale as milk with distance.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean } = {}): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({
-    map: base.map,
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean } = {}): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
     normalScale: new Vector2(o.normalScale ?? 1, o.normalScale ?? 1),
     aoMap: base.ormMap,
     roughnessMap: base.ormMap,
     roughness: o.roughness ?? 1,
     metalness: 0,
-    vertexColors: true,
     color: new Color(1, 1, 1),
   });
-
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.uBake = siteUniforms.uBake;
-    shader.uniforms.uFallback = siteUniforms.uFallback;
-    shader.uniforms.uMossMap = { value: moss.map };
-    shader.uniforms.uMossScale = { value: o.mossScale ?? 1.7 };
-
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec4 aSHr; attribute vec4 aSHg; attribute vec4 aSHb;
-attribute vec4 aField; attribute vec2 aBake;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake;`)
-      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
-vSHr = aSHr; vSHg = aSHg; vSHb = aSHb; vField = aField; vBake = aBake;`);
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-uniform float uBake; uniform vec3 uFallback; uniform sampler2D uMossMap; uniform float uMossScale;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake;`)
-      .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
-float siteMoss = 0.0;
-float siteWet = vField.y;
-{
-  float stoneH = texture2D( map, vMapUv ).a;
-  vec4 mossTex = texture2D( uMossMap, vMapUv * uMossScale );
+  const f = fieldOf(), bk = bakeOf();
+  const stone: N = texture(base.map, uv()), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
+  const wet = f.y;
   // Moss wants sky above it and little direct sun; before the bake arrives, use the raw field.
-  float lightOk = mix( 0.4, smoothstep( 0.03, 0.3, vBake.x ) * ( 1.0 - 0.92 * smoothstep( 0.2, 0.8, vBake.y ) ), uBake );
-  float grow = vField.x * lightOk;
-  float m = grow * 1.5 + ( 1.0 - stoneH ) * 0.4 + mossTex.a * 0.45 - 1.0;
-  siteMoss = smoothstep( 0.0, 0.22, m );
+  const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
+  const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
   // Damp stone is darker; soot is darker still and matt.
-  diffuseColor.rgb *= mix( 1.0, 0.5, siteWet );
-  diffuseColor.rgb = mix( diffuseColor.rgb, mossTex.rgb, siteMoss );
-  diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.012 ), vField.z * 0.9 );
-}`)
-      .replace('#include <roughnessmap_fragment>', /* glsl */ `#include <roughnessmap_fragment>
-roughnessFactor *= mix( 1.0, 0.42, siteWet * ( 1.0 - siteMoss ) );
-roughnessFactor = mix( roughnessFactor, 0.97, max( siteMoss, vField.z ) );`)
-      // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside
-      // of a tower in the valley, say. The sun does not reach it through its walls. (See the same
-      // thing said of rock, below.)
-      .replace('#include <lights_fragment_begin>', ShaderChunk.lights_fragment_begin.replace(
-        'getDirectionalLightInfo( directionalLight, directLight );',
-        'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= 1.0 - ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y );'))
-      .replace('#include <lights_fragment_end>', /* glsl */ `
-{
-  vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
-  vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
-  vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) );
-  iblIrradiance = vec3( 0.0 );
-  // vBake: x = share of sky seen, y = share of the day in direct sun.
+  let colour: N = stone.rgb.mul(vertexColor().rgb).mul(mix(1, 0.5, wet));
+  colour = mix(colour, mossTex.rgb, mossy);
+  colour = mix(colour, vec3(0.012), f.z.mul(0.9));
+  m.colorNode = vec4(colour, 1);
+  m.roughnessNode = mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z));
+  // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
+  // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
-  radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake );
-}
-#include <lights_fragment_end>
-${o.matt ? 'reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecular *= 0.12;' : ''}`);
-  };
-  // Every site material shares one program per texture layout.
-  m.customProgramCacheKey = () => (o.matt ? 'site-v3-matt' : 'site-v3');
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
   return m;
 }
 
@@ -123,124 +156,77 @@ ${o.matt ? 'reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecul
  * textures are read more and more blurred, until a far field is its colour and its broad
  * variation and nothing that could be seen repeating.
  */
-export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, scale = 2.3): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({
-    // (Six textures and no more: with the shadow maps, a graphics card will take sixteen at once.)
-    map: turf.map, normalMap: turf.normalMap, normalScale: new Vector2(1, 1),
-    roughness: 0.96, metalness: 0, vertexColors: true, color: new Color(1, 1, 1),
-  });
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.uBake = siteUniforms.uBake;
-    shader.uniforms.uFallback = siteUniforms.uFallback;
-    shader.uniforms.uSoilMap = { value: soil.map }; shader.uniforms.uSoilNormal = { value: soil.normalMap };
-    shader.uniforms.uShingleMap = { value: shingle.map };
-    shader.uniforms.uLitterMap = { value: litter.map };
-    shader.uniforms.uGroundScale = { value: scale };
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec4 aSHr; attribute vec4 aSHg; attribute vec4 aSHb;
-attribute vec4 aField; attribute vec2 aBake;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake; varying vec3 vGroundPos;`)
-      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
-vSHr = aSHr; vSHg = aSHg; vSHb = aSHb; vField = aField; vBake = aBake;
-vGroundPos = ( modelMatrix * vec4( position, 1.0 ) ).xyz;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-uniform float uBake; uniform vec3 uFallback; uniform float uGroundScale;
-uniform sampler2D uSoilMap; uniform sampler2D uSoilNormal; uniform sampler2D uShingleMap; uniform sampler2D uLitterMap;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake; varying vec3 vGroundPos;`)
-      .replace('#include <map_fragment>', /* glsl */ `
-// Where on the ground this point of the picture is, in metres; every texture is laid by that.
-vec2 gAt = vGroundPos.xz;
-float gFar = length( vViewPosition );
-float gBlur = 5.0 * smoothstep( 70.0, 260.0, gFar );
-float gWetV = vField.y, gBareV = vField.z, gLitV = vField.w;
-// The same turf read very large: slow changes of tone that no repeat can be seen in.
-float gMacro = texture2D( map, gAt / 41.0 + 0.37 ).a, gMid = texture2D( map, gAt / 9.7 + 0.11 ).a;
-// The track: two ruts, a stride apart, and between them bare earth wherever grass is not
-// standing in a clump. (The sheet gives how far this point is to one side of the track's
-// middle, plus a hundred; nothing where there is no track.)
-if ( vField.x > 50.0 ) {
-  // (Neither the ruts nor the edges of the track run straight: they wander, and widen and narrow.)
-  float gWander = texture2D( map, gAt / 5.3 + 0.61 ).a - 0.5;
-  float gOff = abs( vField.x - 100.0 + gWander * 0.34 ) + ( gMid - 0.5 ) * 0.3;
-  float gRut = 1.0 - smoothstep( 0.0, 0.34, abs( gOff - 0.58 ) - 0.2 - gWander * 0.14 );
-  float gClump = sin( gAt.y * 0.9 + 2.2 * sin( gAt.y * 0.31 ) );
-  gBareV = max( gBareV, max( gRut, smoothstep( -0.15, -0.35, gClump ) * ( 1.0 - smoothstep( 0.25, 0.5, gOff ) ) ) );
-}
-float gStony = smoothstep( 0.2, 0.55, gWetV + ( gMid - 0.5 ) * 0.3 );
-// Near the eye, bare ground has depth: the texture is slid along the line of sight until the
-// line meets the height the texture has there, so stones stand up and hide what is behind them.
-float gNear = 1.0 - smoothstep( 6.0, 14.0, gFar );
-if ( gNear > 0.0 && gBareV > 0.04 ) {
-  vec3 eye = normalize( cameraPosition - vGroundPos );
-  vec2 slide = eye.xz / max( eye.y, 0.3 ) * mix( 0.022, 0.05, gStony ) * gNear * smoothstep( 0.04, 0.4, gBareV );
-  float sunk = 0.0;
-  for ( int i = 0; i < 6; i++ ) {
-    vec2 at = gAt - slide * sunk;
-    float h = mix( texture2D( uSoilMap, at * 1.5 ).a, texture2D( uShingleMap, at * 0.62 ).a, gStony );
-    if ( 1.0 - h <= sunk ) break;
-    sunk += 1.0 / 6.0;
-  }
-  gAt -= slide * sunk;
-}
-vec2 gUv = gAt * uGroundScale;
-// The turf is read twice, the second time larger and turned, and the two mixed: neither one's repeat survives the other.
-vec4 gTurf = mix( texture2D( map, gUv, gBlur ), texture2D( map, gAt.yx * 0.83 + 0.29, gBlur ), 0.45 );
-vec4 gSoil = texture2D( uSoilMap, gAt * 1.5, gBlur ), gShingle = texture2D( uShingleMap, gAt * 0.62, gBlur ), gLitter = texture2D( uLitterMap, gAt * 0.9, gBlur );
-float gEarthH = mix( gSoil.a, gShingle.a, gStony );
-// Grass gives way to earth where its mat is thin and the earth stands high: not along a line.
-float gBare = smoothstep( 0.4, 0.6, gBareV * 1.12 + ( gMid - 0.5 ) * 0.55 + ( gEarthH - gTurf.a ) * 0.35 );
-float gLit = smoothstep( 0.4, 0.62, gLitV + ( gMacro - 0.5 ) * 0.5 + ( gLitter.a - gTurf.a ) * 0.3 ) * ( 1.0 - gBare );
-diffuseColor.rgb *= gTurf.rgb * mix( 0.74, 1.3, gMacro );`)
-      .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
-float siteWet = gWetV;
-{
-  // Turf that has dried out in patches.
+export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
+  const f = fieldOf(), bk = bakeOf();
+  // Where on the ground this point of the picture is, in metres; every texture is laid by that.
+  const at0: N = positionWorld.xz, far: N = length(positionView), blur: N = smoothstep(70, 260, far).mul(5);
+  const turfAt = (at: N): N => texture(turf.map, at);
+  // The same turf read very large: slow changes of tone that no repeat can be seen in.
+  const macro = turfAt(at0.div(41).add(0.37)).a, mid = turfAt(at0.div(9.7).add(0.11)).a;
+  // The track: two ruts, a stride apart, and between them bare earth wherever grass is not
+  // standing in a clump. (The sheet gives how far this point is to one side of the track's
+  // middle, plus a hundred; nothing where there is no track.) Neither the ruts nor the edges
+  // of the track run straight: they wander, and widen and narrow.
+  const wander = turfAt(at0.div(5.3).add(0.61)).a.sub(0.5);
+  const off = abs(f.x.sub(100).add(wander.mul(0.34))).add(mid.sub(0.5).mul(0.3));
+  const rut = one(smoothstep(0, 0.34, abs(off.sub(0.58)).sub(0.2).sub(wander.mul(0.14))));
+  const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
+  const bareV: N = select(f.x.greaterThan(50), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z).toVar();
+  const wetV = f.y, litV = f.w;
+  const stony: N = smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))).toVar();
+  // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
+  // line meets the height the texture has there, so stones stand up and hide what is behind them.
+  const near = one(smoothstep(6, 14, far));
+  const at: N = Fn(() => {
+    const p: N = vec2(at0).toVar();
+    If(near.greaterThan(0).and(bareV.greaterThan(0.04)), () => {
+      const eye: N = normalize(cameraPosition.sub(positionWorld));
+      const slide: N = eye.xz.div(max(eye.y, 0.3)).mul(mix(0.022, 0.05, stony)).mul(near).mul(smoothstep(0.04, 0.4, bareV)).toVar();
+      const sunk: N = float(0).toVar();
+      Loop(6, () => {
+        const q = at0.sub(slide.mul(sunk));
+        const h = mix((texture(soil.map, q.mul(1.5)) as N).level(0).a, (texture(shingle.map, q.mul(0.62)) as N).level(0).a, stony);
+        If(one(h).lessThanEqual(sunk), () => { Break(); });
+        sunk.addAssign(1 / 6);
+      });
+      p.subAssign(slide.mul(sunk));
+    });
+    return p;
+  })().toVar();
+  const gUv = at.mul(scale);
+  // The turf is read twice, the second time larger and turned, and the two mixed: neither one's repeat survives the other.
+  const gTurf: N = mix((texture(turf.map, gUv) as N).bias(blur), (texture(turf.map, at.yx.mul(0.83).add(0.29)) as N).bias(blur), 0.45).toVar();
+  const gSoil: N = (texture(soil.map, at.mul(1.5)) as N).bias(blur), gShingle: N = (texture(shingle.map, at.mul(0.62)) as N).bias(blur), gLitter: N = (texture(litter.map, at.mul(0.9)) as N).bias(blur);
+  const earthH = mix(gSoil.a, gShingle.a, stony);
+  // Grass gives way to earth where its mat is thin and the earth stands high: not along a line.
+  const bare: N = smoothstep(0.4, 0.6, bareV.mul(1.12).add(mid.sub(0.5).mul(0.55)).add(earthH.sub(gTurf.a).mul(0.35))).toVar();
+  const leafy: N = smoothstep(0.4, 0.62, litV.add(macro.sub(0.5).mul(0.5)).add(gLitter.a.sub(gTurf.a).mul(0.3))).mul(one(bare)).toVar();
+  const base: N = vertexColor().rgb.mul(gTurf.rgb).mul(mix(0.74, 1.3, macro));
   // Turf is not one green. It is yellower where it has dried, darker and bluer where clover and
   // moss have got into it, and thin enough in places for the earth to show.
-  float gPatch = texture2D( map, gAt / 3.7 + 0.83 ).a;
-  vec3 turfed = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.5, 1.22, 0.7 ), smoothstep( 0.55, 0.8, gMid ) * 0.34 );
-  turfed = mix( turfed, turfed * vec3( 0.62, 0.8, 0.86 ), smoothstep( 0.5, 0.72, gPatch ) * 0.5 );
-  turfed = mix( turfed, gSoil.rgb * vec3( 0.5, 0.46, 0.4 ), smoothstep( 0.4, 0.2, gTurf.a + ( gPatch - 0.5 ) * 0.4 ) * 0.55 );
-  vec3 earthy = mix( gSoil.rgb * vec3( 0.6, 0.57, 0.52 ), gShingle.rgb * 0.62, gStony ) * mix( 0.84, 1.14, gMacro );
-  vec3 ground = mix( turfed, gLitter.rgb * mix( 0.6, 0.85, gMid ), gLit );
+  const patch = turfAt(at.div(3.7).add(0.83)).a;
+  let turfed: N = mix(base, base.mul(vec3(1.5, 1.22, 0.7)), smoothstep(0.55, 0.8, mid).mul(0.34));
+  turfed = mix(turfed, turfed.mul(vec3(0.62, 0.8, 0.86)), smoothstep(0.5, 0.72, patch).mul(0.5));
+  turfed = mix(turfed, gSoil.rgb.mul(vec3(0.5, 0.46, 0.4)), sstep(0.4, 0.2, gTurf.a.add(patch.sub(0.5).mul(0.4))).mul(0.55)).toVar();
+  const earthy = mix(gSoil.rgb.mul(vec3(0.6, 0.57, 0.52)), gShingle.rgb.mul(0.62), stony).mul(mix(0.84, 1.14, macro));
+  let ground: N = mix(turfed, gLitter.rgb.mul(mix(0.6, 0.85, mid)), leafy);
   // Along the edge of bare ground, a fringe of short green that is neither one nor the other.
-  ground = mix( ground, turfed * 1.25, gBare * ( 1.0 - gBare ) * 1.4 );
-  ground = mix( ground, earthy, gBare );
-  diffuseColor.rgb = ground * mix( 1.0, 0.52, siteWet );
-}`)
-      .replace('#include <roughnessmap_fragment>', /* glsl */ `#include <roughnessmap_fragment>
-roughnessFactor = mix( roughnessFactor, 0.94, gBare );
-roughnessFactor *= mix( 1.0, 0.4, siteWet * gBare );`)
-      .replace('#include <normal_fragment_maps>', /* glsl */ `
-#ifdef USE_NORMALMAP_TANGENTSPACE
-{
-  vec3 gN = texture2D( normalMap, gUv, gBlur ).xyz * 2.0 - 1.0;
-  // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
-  vec3 gE = texture2D( uSoilNormal, gAt * mix( 1.5, 0.31, gStony ), gBlur ).xyz * 2.0 - 1.0;
-  gN = mix( gN * vec3( 1.0 - 0.6 * gLit, 1.0 - 0.6 * gLit, 1.0 ), gE, gBare );
-  gN.xy *= normalScale * mix( 1.0, 1.15 + 1.2 * gStony, gBare );
-  normal = normalize( tbn * gN );
-}
-#endif`)
-      .replace('#include <lights_fragment_end>', /* glsl */ `
-{
-  vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
-  vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
-  vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) );
-  iblIrradiance = vec3( 0.0 );
-  radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake );
-}
-#include <lights_fragment_end>
-// Ground is matt, except where it is wet stones.
-float gShine = mix( 0.12, 0.7, siteWet * gBare );
-reflectedLight.directSpecular *= gShine; reflectedLight.indirectSpecular *= gShine;`);
-  };
-  m.customProgramCacheKey = () => 'ground-v6';
+  ground = mix(ground, turfed.mul(1.25), bare.mul(one(bare)).mul(1.4));
+  ground = mix(ground, earthy, bare);
+  m.colorNode = vec4(ground.mul(mix(1, 0.52, wetV)), 1);
+  m.roughnessNode = mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare)));
+  {
+    // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
+    const gN: N = (texture(turf.normalMap, gUv) as N).bias(blur).xyz.mul(2).sub(1);
+    const gE: N = (texture(soil.normalMap, at.mul(mix(1.5, 0.31, stony))) as N).bias(blur).xyz.mul(2).sub(1);
+    const flat = one(leafy.mul(0.6));
+    const n: N = mix(gN.mul(vec3(flat, flat, 1)), gE, bare);
+    const steep = mix(1, stony.mul(1.2).add(1.15), bare);
+    m.normalNode = normalMap(vec3(n.xy.mul(steep), n.z).mul(0.5).add(0.5));
+  }
+  // Ground is matt, except where it is wet stones.
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(0.12, 0.7, wetV.mul(bare)) });
   return m;
 }
 
@@ -249,21 +235,24 @@ reflectedLight.directSpecular *= gShine; reflectedLight.indirectSpecular *= gShi
  * light bake, and left to themselves they would be lit by the open sky wherever they are, indoors
  * included. Here they get a faint fixed ambient instead, and otherwise only the real lights.
  */
-export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({
+export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({
     color: o.color, roughness: o.roughness, metalness: o.metalness,
     emissive: o.emissive ?? new Color(0, 0, 0), emissiveIntensity: o.emissiveIntensity ?? 1,
   });
-  m.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', /* glsl */ `
-irradiance = vec3( 0.05, 0.045, 0.04 );
-iblIrradiance = vec3( 0.0 );
-radiance = vec3( 0.0 );
-#include <lights_fragment_end>`);
-  };
-  m.customProgramCacheKey = () => 'prop-v1';
+  lit(m, { irradiance: vec3(0.05, 0.045, 0.04), sky: float(0) });
   return m;
 }
+
+/**
+ * Shared by all rock. `uShaftTop`, `uShaftUp` and `uShaftSun` are a shaft of sunlight let down into a
+ * hall under the hill: a point on its middle line and how broad it is, the way up it, and the
+ * sun's light. Rock that was told it stands in that light draws its edge itself, point by point
+ * of the picture, so the round of light on the floor is round.
+ */
+export const rockUniforms: { uRockBroad: { value: number }; uShaftTop: { value: Vector4 }; uShaftUp: { value: Vector3 }; uShaftSun: { value: Vector3 } } = {
+  uRockBroad: uniform(0.8) as N, uShaftTop: uniform(new Vector4()) as N, uShaftUp: uniform(new Vector3(0, 1, 0)) as N, uShaftSun: uniform(new Vector3()) as N,
+};
 
 /**
  * The material for natural rock. Carved rock has no texture coordinates worth the name, so the
@@ -274,155 +263,114 @@ radiance = vec3( 0.0 );
  *  - moss and damp from the per-vertex fields, as on masonry.
  * Light comes from the bake where there is one, and from the open sky where there is not.
  */
-/** How strongly rock shows broad flat faces: set for the kind of stone the place is made of. */
-/**
- * Shared by all rock. `uShaftTop`, `uShaftUp` and `uShaftSun` are a shaft of sunlight let down into a
- * hall under the hill: a point on its middle line and how broad it is, the way up it, and the
- * sun's light. Rock that was told it stands in that light draws its edge itself, point by point
- * of the picture, so the round of light on the floor is round.
- */
-export const rockUniforms = { uRockBroad: { value: 0.8 }, uShaftTop: { value: new Vector4() }, uShaftUp: { value: new Vector3(0, 1, 0) }, uShaftSun: { value: new Vector3() } };
-
-export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number] } = {}): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({ roughness: 1, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.uBake = siteUniforms.uBake;
-    shader.uniforms.uFallback = siteUniforms.uFallback;
-    shader.uniforms.uMossMap = { value: moss.map };
-    shader.uniforms.uRockMap = { value: base.map };
-    shader.uniforms.uRockNormal = { value: base.normalMap };
-    shader.uniforms.uRockScale = { value: o.scale ?? 0.3 };
-    shader.uniforms.uRockBump = { value: o.normalScale ?? 1.4 };
-    shader.uniforms.uRockBroad = rockUniforms.uRockBroad;
-    shader.uniforms.uShaftTop = rockUniforms.uShaftTop;
-    shader.uniforms.uShaftUp = rockUniforms.uShaftUp;
-    shader.uniforms.uShaftSun = rockUniforms.uShaftSun;
-    shader.uniforms.uRockDip = { value: new Vector2(o.dip?.[0] ?? 0.05, o.dip?.[1] ?? 0.03) };
-
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec4 aSHr; attribute vec4 aSHg; attribute vec4 aSHb;
-attribute vec4 aField; attribute vec2 aBake;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake;
-varying vec3 vRockPos; varying vec3 vRockNrm;`)
-      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
-vSHr = aSHr; vSHg = aSHg; vSHb = aSHb; vField = aField; vBake = aBake;
-vRockPos = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
-vRockNrm = normalize( mat3( modelMatrix ) * normal );`);
-
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-uniform float uBake; uniform vec3 uFallback; uniform sampler2D uMossMap;
-uniform sampler2D uRockMap; uniform sampler2D uRockNormal; uniform float uRockScale; uniform float uRockBump; uniform float uRockBroad; uniform vec2 uRockDip;
-uniform vec4 uShaftTop; uniform vec3 uShaftUp; uniform vec3 uShaftSun;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec2 vBake;
-varying vec3 vRockPos; varying vec3 vRockNrm;`)
-      .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
-vec3 rockN = normalize( vRockNrm );
-vec3 rockW = pow( abs( rockN ), vec3( 5.0 ) );
-rockW /= rockW.x + rockW.y + rockW.z;
-vec2 rockUx = vRockPos.zy * uRockScale, rockUy = vRockPos.xz * uRockScale, rockUz = vRockPos.xy * uRockScale;
-// From far off the grain of the stone cannot be seen, and what would be seen instead is the
-// same square of it laid side by side to the horizon. So with distance it is read ever more
-// blurred, until a hillside a quarter of a mile away has the stone's colour and none of its pattern.
-float rockBlur = 6.0 * smoothstep( 110.0, 320.0, length( vViewPosition ) );
-vec4 rockTex = texture2D( uRockMap, rockUx, rockBlur ) * rockW.x + texture2D( uRockMap, rockUy, rockBlur ) * rockW.y + texture2D( uRockMap, rockUz, rockBlur ) * rockW.z;
-// The same stone seen from far off: patches some metres across.
-vec4 rockFar = texture2D( uRockMap, vec2( vRockPos.x + vRockPos.z * 0.71, vRockPos.y * 0.9 + vRockPos.z * 0.37 ) * uRockScale * 0.11, rockBlur * 0.6 );
-float siteMoss = 0.0;
-float siteWet = vField.y;
-float rockAo = mix( 0.45, 1.0, smoothstep( 0.08, 0.5, rockTex.a ) );
-{
-  float steep = 1.0 - smoothstep( 0.4, 0.75, abs( rockN.y ) );
-  vec3 rock = rockTex.rgb * mix( vec3( 0.8, 0.79, 0.8 ), vec3( 1.2, 1.17, 1.1 ), smoothstep( 0.25, 0.75, rockFar.a ) );
+export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number] } = {}): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
+  const f = fieldOf(), bk = bakeOf();
+  const P: N = positionWorld, rockN: N = normalize(normalWorldGeometry);
+  const scale = o.scale ?? 0.3, bump = o.normalScale ?? 1.4, dip = o.dip ?? [0.05, 0.03];
+  const uBroad = rockUniforms.uRockBroad as N, uShaftTop = rockUniforms.uShaftTop as N, uShaftUp = rockUniforms.uShaftUp as N, uShaftSun = rockUniforms.uShaftSun as N;
+  const w0: N = pow(abs(rockN), vec3(5));
+  const w: N = w0.div(w0.x.add(w0.y).add(w0.z)).toVar();
+  const ux = P.zy.mul(scale), uy = P.xz.mul(scale), uz = P.xy.mul(scale);
+  // From far off the grain of the stone cannot be seen, and what would be seen instead is the
+  // same square of it laid side by side to the horizon. So with distance it is read ever more
+  // blurred, until a hillside a quarter of a mile away has the stone's colour and none of its pattern.
+  const blur: N = smoothstep(110, 320, length(positionView)).mul(6);
+  const read = (map: N, at: N, b: N = blur): N => (texture(map, at) as N).bias(b);
+  const tex: N = read(base.map, ux).mul(w.x).add(read(base.map, uy).mul(w.y)).add(read(base.map, uz).mul(w.z)).toVar();
+  // The same stone seen from far off: patches some metres across.
+  const farTex: N = read(base.map, vec2(P.x.add(P.z.mul(0.71)), P.y.mul(0.9).add(P.z.mul(0.37))).mul(scale * 0.11), blur.mul(0.6)).toVar();
+  const steep = one(smoothstep(0.4, 0.75, abs(rockN.y)));
+  let rock: N = tex.rgb.mul(mix(vec3(0.8, 0.79, 0.8), vec3(1.2, 1.17, 1.1), smoothstep(0.25, 0.75, farTex.a)));
   // Thin beds within the thick ones: bands a hand or two deep, gathered into broader ones, each
   // its own shade, with a dark line where one lies on the next. They fade out with distance,
   // before they could shimmer.
-  float bedAt = ( vRockPos.y + dot( vRockPos.xz, uRockDip ) ) * 3.3 + ( rockFar.r - 0.5 ) * 4.0;
-  float beds = vField.w * steep * ( 1.0 - smoothstep( 0.2, 0.55, fwidth( bedAt ) ) );
-  float bedIn = fract( bedAt );
-  float bedTone = mix( 0.72, 1.14, fract( sin( floor( bedAt ) * 91.7 ) * 43758.5 ) ) * mix( 0.86, 1.1, fract( sin( floor( bedAt * 0.27 ) * 57.3 ) * 24634.6 ) );
-  float bedLine = smoothstep( 0.0, 0.14, bedIn ) * smoothstep( 1.0, 0.9, bedIn );
-  rock *= mix( 1.0, bedTone * mix( 0.62, 1.0, bedLine ), beds );
-  rockAo *= mix( 1.0, mix( 0.65, 1.0, bedLine ), beds );
+  const bedAt: N = P.y.add(dot(P.xz, vec2(dip[0], dip[1]))).mul(3.3).add(farTex.r.sub(0.5).mul(4)).toVar();
+  const beds = f.w.mul(steep).mul(one(smoothstep(0.2, 0.55, fwidth(bedAt))));
+  const bedIn = fract(bedAt);
+  const bedTone = mix(0.72, 1.14, fract(sin(floor(bedAt).mul(91.7)).mul(43758.5))).mul(mix(0.86, 1.1, fract(sin(floor(bedAt.mul(0.27)).mul(57.3)).mul(24634.6))));
+  const bedLine = smoothstep(0, 0.14, bedIn).mul(sstep(1.0, 0.9, bedIn));
+  rock = rock.mul(mix(1, bedTone.mul(mix(0.62, 1, bedLine)), beds));
+  // The pits and cracks of the texture hold less of the sky's light.
+  const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(0.65, 1, bedLine), beds)).toVar();
   // Where water runs down a face it leaves dark streaks, long and narrow.
-  float streak = texture2D( uRockMap, vec2( vRockPos.z * 0.37, vRockPos.y * 0.03 ) ).a * rockW.x + texture2D( uRockMap, vec2( vRockPos.x * 0.37, vRockPos.y * 0.03 + 0.5 ) ).a * rockW.z;
-  float stain = smoothstep( 0.5, 0.72, streak ) * steep * ( 0.35 + 0.65 * vField.w );
-  rock *= mix( vec3( 1.0 ), vec3( 0.56, 0.53, 0.5 ), stain * 0.75 );
-  siteWet = max( siteWet, stain * 0.25 );
-  diffuseColor.rgb *= rock;
-
+  const streak = (texture(base.map, vec2(P.z.mul(0.37), P.y.mul(0.03))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.37), P.y.mul(0.03).add(0.5))) as N).a.mul(w.z));
+  const stain: N = smoothstep(0.5, 0.72, streak).mul(steep).mul(f.w.mul(0.65).add(0.35)).toVar();
+  rock = rock.mul(mix(vec3(1), vec3(0.56, 0.53, 0.5), stain.mul(0.75)));
+  const wet: N = max(f.y, stain.mul(0.25)).toVar();
   // Moss: from above on what is level, from the side on what is not.
-  vec2 mossUv = ( rockW.x > rockW.z ? rockUx : rockUz ) * 5.5;
-  vec4 mossTex = mix( texture2D( uMossMap, mossUv ), texture2D( uMossMap, rockUy * 5.5 ), rockW.y );
-  float lightOk = mix( 0.4, smoothstep( 0.03, 0.3, vBake.x ) * ( 1.0 - 0.92 * smoothstep( 0.2, 0.8, vBake.y ) ), uBake );
-  float grow = vField.x * lightOk;
-  float mossAt = grow * 1.5 + ( 1.0 - rockTex.a ) * 0.4 + mossTex.a * 0.45 - 1.0;
-  siteMoss = smoothstep( 0.0, 0.22, mossAt );
-  diffuseColor.rgb *= mix( 1.0, 0.5, siteWet );
-  diffuseColor.rgb = mix( diffuseColor.rgb, mossTex.rgb, siteMoss );
-}`)
-      .replace('#include <roughnessmap_fragment>', /* glsl */ `#include <roughnessmap_fragment>
-roughnessFactor = clamp( 0.93 - 0.14 * smoothstep( 0.55, 0.9, rockTex.a ), 0.5, 1.0 );
-roughnessFactor *= mix( 1.0, 0.45, siteWet * ( 1.0 - siteMoss ) );
-roughnessFactor = mix( roughnessFactor, 0.97, siteMoss );`)
-      .replace('#include <normal_fragment_maps>', /* glsl */ `#include <normal_fragment_maps>
-{
+  const mossUv = select(w.x.greaterThan(w.z), ux, uz).mul(5.5);
+  const mossTex: N = mix(texture(moss.map, mossUv), texture(moss.map, uy.mul(5.5)), w.y);
+  const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
+  const mossy: N = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(tex.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1)).toVar();
+  m.colorNode = vec4(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), 1);
+  const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
+  m.roughnessNode = mix(rough, 0.97, mossy);
   // The normal map from three sides, each bent onto the surface and blended as the colour was.
   // It is read twice: as it is, for the grain and the small breaks, and four times larger, for
   // faces a stride or two across, which the carved surface is too coarse to hold an edge on.
-  vec3 tx = texture2D( uRockNormal, rockUx, rockBlur ).xyz * 2.0 - 1.0;
-  vec3 ty = texture2D( uRockNormal, rockUy, rockBlur ).xyz * 2.0 - 1.0;
-  vec3 tz = texture2D( uRockNormal, rockUz, rockBlur ).xyz * 2.0 - 1.0;
-  tx.xy += ( texture2D( uRockNormal, rockUx * 0.23 + 0.37 ).xy * 2.0 - 1.0 ) * uRockBroad;
-  ty.xy += ( texture2D( uRockNormal, rockUy * 0.23 + 0.37 ).xy * 2.0 - 1.0 ) * uRockBroad * 0.5;
-  tz.xy += ( texture2D( uRockNormal, rockUz * 0.23 + 0.37 ).xy * 2.0 - 1.0 ) * uRockBroad;
-  float bump = uRockBump * ( 1.0 - 0.6 * siteMoss );
-  tx = vec3( tx.xy * bump + rockN.zy, abs( tx.z ) * rockN.x );
-  ty = vec3( ty.xy * bump + rockN.xz, abs( ty.z ) * rockN.y );
-  tz = vec3( tz.xy * bump + rockN.xy, abs( tz.z ) * rockN.z );
-  vec3 bent = normalize( tx.zyx * rockW.x + ty.xzy * rockW.y + tz.xyz * rockW.z );
-  normal = normalize( ( viewMatrix * vec4( bent, 0.0 ) ).xyz );
-}`)
-      // Rock that sees no sky, out where the sun's shadows are not kept, is underground: the sun
-      // does not reach it, whatever the light thinks. (Out there the two numbers a point carries
-      // are how much sky it sees and a fixed share of sun; in the house they come from the bake,
-      // which never finds a place with no sky and half a day's sun.)
-      .replace('#include <lights_fragment_begin>', ShaderChunk.lights_fragment_begin.replace(
-        'getDirectionalLightInfo( directionalLight, directLight );',
-        'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= 1.0 - ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y );'))
-      .replace('#include <lights_fragment_end>', /* glsl */ `
-{
-  vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
-  vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
-  vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  // The pits and cracks of the texture hold less of the sky's light.
-  irradiance = mix( fallback, baked, max( uBake, ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y ) ) ) * rockAo;
+  const lift = one(mossy.mul(0.6)).mul(bump);
+  const grain = (at: N, broad: N): N => {
+    const t: N = read(base.normalMap, at).xyz.mul(2).sub(1);
+    const wide: N = (texture(base.normalMap, at.mul(0.23).add(0.37)) as N).xy.mul(2).sub(1).mul(broad);
+    return vec3(t.xy.add(wide), t.z);
+  };
+  const tx = grain(ux, uBroad), ty = grain(uy, uBroad.mul(0.5)), tz = grain(uz, uBroad);
+  const bx: N = vec3(tx.xy.mul(lift).add(rockN.zy), abs(tx.z).mul(rockN.x));
+  const by: N = vec3(ty.xy.mul(lift).add(rockN.xz), abs(ty.z).mul(rockN.y));
+  const bz: N = vec3(tz.xy.mul(lift).add(rockN.xy), abs(tz.z).mul(rockN.z));
+  const bent: N = normalize(bx.zyx.mul(w.x).add(by.xzy.mul(w.y)).add(bz.xyz.mul(w.z))).toVar();
+  m.normalNode = transformNormalToView(bent);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
-  float shaft = smoothstep( 0.62, 0.95, vBake.y ) * step( vBake.x, 0.004 ) * step( 0.001, uShaftTop.w );
-  if ( shaft > 0.0 ) {
-    vec3 sw = vRockPos - uShaftTop.xyz;
-    float off = length( sw - uShaftUp * dot( sw, uShaftUp ) );
-    vec3 bn = inverseTransformDirection( normal, viewMatrix );
-    irradiance += uShaftSun * max( dot( bn, uShaftUp ), 0.0 ) * shaft * ( 1.0 - smoothstep( uShaftTop.w - 0.3, uShaftTop.w + 0.05, off ) ) * rockAo;
-  }
-  iblIrradiance = vec3( 0.0 );
-  radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake ) * rockAo;
-}
-#include <lights_fragment_end>
-// Rough rock gleams little, and less where it is dry.
-reflectedLight.directSpecular *= mix( 0.3, 1.0, siteWet );
-reflectedLight.indirectSpecular *= mix( 0.3, 1.0, siteWet );`);
-  };
-  m.customProgramCacheKey = () => 'rock-v7';
+  const inShaft = smoothstep(0.62, 0.95, bk.y).mul(step(bk.x, 0.004)).mul(step(0.001, uShaftTop.w));
+  const fromAxis: N = P.sub(uShaftTop.xyz);
+  const aside = length(fromAxis.sub(uShaftUp.mul(dot(fromAxis, uShaftUp))));
+  const shaft = uShaftSun.mul(max(dot(bent, uShaftUp), 0)).mul(inShaft).mul(one(smoothstep(uShaftTop.w.sub(0.3), uShaftTop.w.add(0.05), aside)));
+  // Rough rock gleams little, and less where it is dry.
+  lit(m, { irradiance: irradianceOf(rockN, bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(0.3, 1, wet) });
   return m;
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
-export const farUniforms = { uFarWood: { value: new Vector3(0.07, 0.15, 0.06) }, uFarGrass: { value: new Vector3(0.16, 0.2, 0.08) } };
+export const farUniforms: { uFarWood: { value: Vector3 }; uFarGrass: { value: Vector3 } } = {
+  uFarWood: uniform(new Vector3(0.07, 0.15, 0.06)) as N, uFarGrass: uniform(new Vector3(0.16, 0.2, 0.08)) as N,
+};
+
+const farHash: N = Fn(([p]: [N]) => {
+  const q: N = fract(vec3(p.xyx).mul(0.1031)).toVar();
+  q.addAssign(dot(q, q.yzx.add(33.33)));
+  return fract(q.x.add(q.y).mul(q.z));
+});
+const farNoise: N = Fn(([p]: [N]) => {
+  const i: N = floor(p).toVar(), f0: N = fract(p);
+  const f: N = f0.mul(f0).mul(f0.mul(-2).add(3)).toVar();
+  return mix(mix(farHash(i), farHash(i.add(vec2(1, 0))), f.x), mix(farHash(i.add(vec2(0, 1))), farHash(i.add(vec2(1, 1))), f.x), f.y);
+});
+const farFbm: N = Fn(([p0]: [N]) => {
+  const p: N = vec2(p0).toVar(), s: N = float(0).toVar(), a: N = float(0.5).toVar();
+  Loop(4, () => {
+    s.addAssign(a.mul(farNoise(p)));
+    p.assign(p.mul(2.03).add(17.1));
+    a.mulAssign(0.5);
+  });
+  return s;
+});
+// The crowns of a wood seen from above: how high the nearest crown stands at a point (0 between
+// trees, 1 at a top), which way it slopes there, and a number of its own for each tree.
+const farCrowns: N = Fn(([p]: [N]) => {
+  const i: N = floor(p).toVar(), f: N = fract(p).toVar();
+  const best: N = float(9).toVar(), id: N = float(0).toVar(), to: N = vec2(0).toVar();
+  for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) {
+    const g = vec2(x, y);
+    const h: N = farHash(i.add(g)).toVar();
+    const o: N = g.add(0.1).add(vec2(h, fract(h.mul(57.31))).mul(0.8)).sub(f).toVar();
+    const d: N = dot(o, o).div(fract(h.mul(13.7)).mul(0.22).add(0.3)).toVar();
+    If(d.lessThan(best), () => { best.assign(d); to.assign(o); id.assign(h); });
+  }
+  const h: N = max(0, one(best)).toVar();
+  return vec4(h, to.mul(step(0.001, h)).mul(2.4), id);
+});
 
 /**
  * The material for land far off: the hills and mountains round the valley. Nothing out there is
@@ -442,124 +390,54 @@ export const farUniforms = { uFarWood: { value: new Vector3(0.07, 0.15, 0.06) },
  * the height where rock takes over) and how much of a hollow it is, in the fields other
  * materials use for moss and damp.
  */
-export function makeFarMaterial(): MeshStandardMaterial {
-  const m = new MeshStandardMaterial({ roughness: 1, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
-  m.onBeforeCompile = (shader) => {
-    shader.uniforms.uBake = siteUniforms.uBake;
-    shader.uniforms.uFallback = siteUniforms.uFallback;
-    shader.uniforms.uFarWood = farUniforms.uFarWood;
-    shader.uniforms.uFarGrass = farUniforms.uFarGrass;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec4 aSHr; attribute vec4 aSHg; attribute vec4 aSHb;
-attribute vec4 aField;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec3 vFarPos; varying vec3 vFarNrm;`)
-      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
-vSHr = aSHr; vSHg = aSHg; vSHb = aSHb; vField = aField;
-vFarPos = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
-vFarNrm = normalize( mat3( modelMatrix ) * normal );`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', /* glsl */ `#include <common>
-uniform float uBake; uniform vec3 uFallback; uniform vec3 uFarWood; uniform vec3 uFarGrass;
-varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
-varying vec4 vField; varying vec3 vFarPos; varying vec3 vFarNrm;
-float farHash( vec2 p ) {
-  vec3 q = fract( vec3( p.xyx ) * 0.1031 );
-  q += dot( q, q.yzx + 33.33 );
-  return fract( ( q.x + q.y ) * q.z );
-}
-float farNoise( vec2 p ) {
-  vec2 i = floor( p ), f = fract( p );
-  f = f * f * ( 3.0 - 2.0 * f );
-  return mix( mix( farHash( i ), farHash( i + vec2( 1.0, 0.0 ) ), f.x ), mix( farHash( i + vec2( 0.0, 1.0 ) ), farHash( i + vec2( 1.0, 1.0 ) ), f.x ), f.y );
-}
-float farFbm( vec2 p ) {
-  float s = 0.0, a = 0.5;
-  for ( int i = 0; i < 4; i++ ) { s += a * farNoise( p ); p = p * 2.03 + 17.1; a *= 0.5; }
-  return s;
-}
-// The crowns of a wood seen from above: how high the nearest crown stands at a point (0 between
-// trees, 1 at a top), which way it slopes there, and a number of its own for each tree.
-vec4 farCrowns( vec2 p ) {
-  vec2 i = floor( p ), f = fract( p );
-  float best = 9.0, id = 0.0;
-  vec2 to = vec2( 0.0 );
-  for ( int y = -1; y <= 1; y++ ) for ( int x = -1; x <= 1; x++ ) {
-    vec2 g = vec2( float( x ), float( y ) );
-    float h = farHash( i + g );
-    vec2 o = g + 0.1 + 0.8 * vec2( h, fract( h * 57.31 ) ) - f;
-    float d = dot( o, o ) / ( 0.3 + 0.22 * fract( h * 13.7 ) );
-    if ( d < best ) { best = d; to = o; id = h; }
-  }
-  float h = max( 0.0, 1.0 - best );
-  return vec4( h, to * step( 0.001, h ) * 2.4, id );
-}`)
-      .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
-vec3 farN = normalize( vFarNrm );
-float farShine = 0.08;
-{
-  vec2 fp = vFarPos.xz;
-  float high = vField.w, hollow = vField.z;
+export function makeFarMaterial(): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
+  const f = fieldOf();
+  const uWood = farUniforms.uFarWood as N, uGrass = farUniforms.uFarGrass as N;
+  const P: N = positionWorld, fp: N = P.xz, n0: N = normalize(normalWorldGeometry);
+  const high = f.w, hollow = f.z;
   // How much of the picture one metre of ground takes up here: what is smaller than a point of it is left out.
-  float grain = max( length( dFdx( fp ) ), length( dFdy( fp ) ) );
-  float n0 = farFbm( fp * 0.03 ), fine = farNoise( fp * 0.21 );
+  const grain: N = max(length(dFdx(fp)), length(dFdy(fp))).toVar();
+  const broad: N = farFbm(fp.mul(0.03)).toVar(), fine: N = farNoise(fp.mul(0.21)).toVar();
   // Ribs and gullies, as light and shade. Water runs straight down a slope, so what it has cut
   // runs that way too: unevenness drawn out along the line of fall and left as it is across it.
-  vec2 down = farN.xz / max( length( farN.xz ), 0.04 );
-  float run = 0.0;
-  for ( int k = -2; k <= 2; k++ ) run += farNoise( ( fp + down * float( k ) * 10.0 ) * 0.075 ) + 0.5 * farNoise( ( fp + down * float( k ) * 4.0 ) * 0.19 + 9.0 );
-  run = run / 7.5 - 0.5;
-  float sloping = smoothstep( 0.015, 0.16, 1.0 - farN.y ) * ( 1.0 - smoothstep( 3.0, 9.0, grain ) );
-  float steep = 1.0 - smoothstep( 0.52, 0.74, farN.y );
-  float ragged = ( n0 - 0.5 ) + ( fine - 0.5 ) * 0.2 + run * 0.9 * sloping;
+  const down: N = n0.xz.div(max(length(n0.xz), 0.04)).toVar();
+  let run: N = float(0);
+  for (let k = -2; k <= 2; k++) run = run.add(farNoise(fp.add(down.mul(k * 10)).mul(0.075))).add(farNoise(fp.add(down.mul(k * 4)).mul(0.19).add(9)).mul(0.5));
+  run = run.div(7.5).sub(0.5).toVar();
+  const sloping: N = smoothstep(0.015, 0.16, one(n0.y)).mul(one(smoothstep(3, 9, grain))).toVar();
+  const steep: N = one(smoothstep(0.52, 0.74, n0.y)).toVar();
+  const ragged: N = broad.sub(0.5).add(fine.sub(0.5).mul(0.2)).add(run.mul(0.9).mul(sloping)).toVar();
   // Rock, in beds some metres thick, each its own shade; darker where it is steep and in hollows.
-  float bedAt = ( vFarPos.y + n0 * 34.0 + fp.x * 0.06 ) / 7.0;
-  float bed = mix( farHash( vec2( floor( bedAt ), 3.0 ) ), 0.5, smoothstep( 0.25, 0.8, fwidth( bedAt ) ) );
-  vec3 land = diffuseColor.rgb * ( 0.62 + 0.5 * bed + 0.3 * ( n0 - 0.5 ) ) * ( 1.0 - 0.28 * steep ) * ( 1.0 - 0.28 * max( hollow, 0.0 ) );
+  const bedAt: N = P.y.add(broad.mul(34)).add(fp.x.mul(0.06)).div(7).toVar();
+  const bed = mix(farHash(vec2(floor(bedAt), 3)), 0.5, smoothstep(0.25, 0.8, fwidth(bedAt)));
+  let land: N = vertexColor().rgb.mul(bed.mul(0.5).add(0.62).add(broad.sub(0.5).mul(0.3))).mul(one(steep.mul(0.28))).mul(one(max(hollow, 0).mul(0.28)));
   // The gullies are the darker lines.
-  float gullied = 1.0 + run * 1.5 * sloping;
+  const gullied = run.mul(1.5).mul(sloping).add(1);
   // Scree: pale and even, on slopes below the faces that are neither steep nor level.
-  land = mix( land, vec3( 0.33, 0.32, 0.31 ) * ( 0.85 + 0.3 * fine ), 0.65 * smoothstep( 0.3, 0.5, high + ragged * 0.2 ) * ( 1.0 - steep ) * smoothstep( 0.93, 0.83, farN.y ) );
+  land = mix(land, vec3(0.33, 0.32, 0.31).mul(fine.mul(0.3).add(0.85)), smoothstep(0.3, 0.5, high.add(ragged.mul(0.2))).mul(one(steep)).mul(sstep(0.93, 0.83, n0.y)).mul(0.65));
   // Pasture above the trees, on what is not too steep.
-  land = mix( land, uFarGrass * ( 0.8 + 0.45 * n0 ), smoothstep( 0.0, 0.07, 0.62 - high + 0.3 * ragged ) * ( 1.0 - steep ) * 0.9 );
+  land = mix(land, uGrass.mul(broad.mul(0.45).add(0.8)), smoothstep(0, 0.07, float(0.62).sub(high).add(ragged.mul(0.3))).mul(one(steep)).mul(0.9));
   // Woods low down, reaching higher up the gullies than on the spurs between them.
-  float wood = smoothstep( 0.0, 0.05, 0.37 - high + 0.13 * hollow + 0.42 * ragged ) * ( 1.0 - 0.85 * steep );
-  if ( wood > 0.0 ) {
-    // Two sizes of tree, in stands.
-    // Two kinds of tree, in stands: the smaller and darker are firs.
-    float firs = smoothstep( 0.42, 0.58, farNoise( fp * 0.011 + 5.0 ) + ( high - 0.2 ) * 0.5 );
-    float size = mix( 3.7, 2.6, firs );
-    vec4 crown = farCrowns( fp / size );
-    float seen = 1.0 - smoothstep( 0.25, 0.7, grain / size );
-    vec3 green = uFarWood * mix( vec3( 1.0 ), vec3( 0.62, 0.74, 0.82 ), firs ) * ( 0.9 + 0.2 * fine );
-    // Under the trees it is dark, whatever the ground is.
-    land = mix( land, green * 0.45, wood * 0.9 );
-    // A wood thins out a tree at a time, not all together: each tree stands or does not.
-    float standing = step( fract( crown.w * 91.3 ), wood * 1.05 ) * smoothstep( 0.0, 0.3, crown.x );
-    float tone = ( 0.74 + 0.36 * crown.x ) * ( 0.8 + 0.4 * crown.w );
-    land = mix( land, green * mix( 0.84, tone, seen ), mix( wood, standing, seen ) );
-    farN = normalize( farN - vec3( crown.y, 0.0, crown.z ) * 0.3 * seen * standing );
-  }
+  const wood: N = smoothstep(0, 0.05, float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42))).mul(one(steep.mul(0.85))).toVar();
+  // Two kinds of tree, in stands: the smaller and darker are firs.
+  const firs: N = smoothstep(0.42, 0.58, farNoise(fp.mul(0.011).add(5)).add(high.sub(0.2).mul(0.5))).toVar();
+  const size = mix(3.7, 2.6, firs);
+  const crown: N = farCrowns(fp.div(size)).toVar();
+  const seen: N = one(smoothstep(0.25, 0.7, grain.div(size))).toVar();
+  const green: N = uWood.mul(mix(vec3(1), vec3(0.62, 0.74, 0.82), firs)).mul(fine.mul(0.2).add(0.9));
+  // Under the trees it is dark, whatever the ground is.
+  land = mix(land, green.mul(0.45), wood.mul(0.9));
+  // A wood thins out a tree at a time, not all together: each tree stands or does not.
+  const standing: N = step(fract(crown.w.mul(91.3)), wood.mul(1.05)).mul(smoothstep(0, 0.3, crown.x)).toVar();
+  const tone = crown.x.mul(0.36).add(0.74).mul(crown.w.mul(0.4).add(0.8));
+  land = mix(land, green.mul(mix(0.84, tone, seen)), mix(wood, standing, seen).mul(step(0.0001, wood)));
+  const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(step(0.0001, wood)))).toVar();
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
-  float snow = smoothstep( 0.0, 0.08, high - 0.6 + 0.12 * hollow + 0.35 * ragged ) * smoothstep( 0.5, 0.72, farN.y );
-  land = mix( land, vec3( 1.3, 1.34, 1.42 ), snow );
-  farShine = mix( 0.08, 0.5, snow );
-  diffuseColor.rgb = land * mix( gullied, 1.0, snow * 0.7 );
-}`)
-      .replace('#include <normal_fragment_maps>', /* glsl */ `#include <normal_fragment_maps>
-normal = normalize( ( viewMatrix * vec4( farN, 0.0 ) ).xyz );`)
-      .replace('#include <lights_fragment_end>', /* glsl */ `
-{
-  vec3 wn = inverseTransformDirection( normal, viewMatrix );
-  vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
-  vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
-  irradiance = mix( fallback, baked, uBake );
-  iblIrradiance = vec3( 0.0 );
-}
-#include <lights_fragment_end>
-reflectedLight.directSpecular *= farShine; reflectedLight.indirectSpecular *= farShine;`);
-  };
-  m.customProgramCacheKey = () => 'far-v5';
+  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(0.5, 0.72, farN.y)).toVar();
+  land = mix(land, vec3(1.3, 1.34, 1.42), snow);
+  m.colorNode = vec4(land.mul(mix(gullied, 1, snow.mul(0.7))), 1);
+  m.normalNode = transformNormalToView(farN);
+  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), gleam: mix(0.08, 0.5, snow) });
   return m;
 }

@@ -2,7 +2,11 @@
 
 A browser tool that generates places for adventure and lets you walk through them: a house of
 rooms and caves built stone by stone, in a valley you can walk, with maps and exports. TypeScript,
-Vite, three.js. No server; it is published to GitHub Pages from the `gh-pages` branch by a workflow
+Vite, three.js. It is drawn with three.js's WebGPU renderer, which falls back to WebGL 2 by itself
+where a browser has no WebGPU (`?webgl` forces that). So nothing here is written in GLSL or WGSL:
+materials and post-processing are node materials built with three's shading language (`three/tsl`),
+and the one renderer serves both. The exception is the procedural textures, whose recipes are GLSL
+painted once at start by a small WebGL renderer of their own (`textures.ts`). No server; it is published to GitHub Pages from the `gh-pages` branch by a workflow
 on every push to the default branch.
 
 ## Where things are written down
@@ -38,6 +42,11 @@ Keep these up to date in the same commit as the change they describe.
 - Comments say why. Plain prose, no jargon.
 
 ## What has been measured, and what has not
+
+Measured again after the move to WebGPU (November 2026, same desktop, in the app's embedded browser,
+at 1252 by 737, drawing frames back to back): about 10 milliseconds with a lake in view and about
+13 looking down the track; a site builds in 6 to 8 seconds. The WebGL 2 fallback draws the same
+picture but has not been timed. The paragraph below is the earlier WebGL renderer, kept for comparison.
 
 Measured in November 2026 on a desktop with a Radeon RX 6800, in the app's embedded browser: a
 site builds in 5 to 6 seconds (it was 2 before the cliffs were carved; about 1.4 seconds of it is
