@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   for (const seed of process.argv.slice(2)) {
     const page = await browser.newPage({ viewport: { width: 240, height: 135 }, deviceScaleFactor: 1 });
     page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 200)));
-    await page.goto(`http://localhost:5173/?seed=${seed}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
+    await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${seed}${process.env.PLACE ? `&place=${process.env.PLACE}` : ''}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 600000 });
     const r = await page.evaluate(() => {
       const { site, player, desc, groundAt } = window.__dbg;

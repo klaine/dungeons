@@ -198,15 +198,18 @@ export function buildCoast(c: CoastBuild): { deck: number } {
     const inDoor = (a: number) => Math.abs(((a - lh.door + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < doorHalf;
     // The wall, in courses each a little narrower than the last, cut for the door and, up the stair, for small windows.
     const course = 0.75, stepsPerTurn = 16, rise = 0.19, firstStep = lh.door + 1.25;
+    const windows: { k: number; y: number }[] = [];
+    for (let y = 2.55; y < top - 2.5; y += 3.0) {
+      const a = firstStep + ((y - 1.3 - 0.15) / (stepsPerTurn * rise)) * Math.PI * 2;
+      windows.push({ k: ((Math.round((a / (Math.PI * 2)) * N - 0.5) % N) + N) % N, y: Math.round((y + 1.2) / course) * course - 1.2 });
+    }
     for (let h = -1.2; h < top - 1e-6; h += course) {
       const h1 = Math.min(top, h + course);
       for (let k = 0; k < N; k++) {
         const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2, am = (a0 + a1) / 2;
         if (h1 > 0.05 && h < doorTop - 0.01 && inDoor(am)) continue;
-        // A window where the stair passes, every turn, a little above the step there.
-        const turn = ((am - firstStep) / (Math.PI * 2) % 1 + 1) % 1, stepH = 0.15 + turn * stepsPerTurn * rise;
-        const isWindow = h > 3 && h < top - 2 && Math.abs(((h - stepH) % (stepsPerTurn * rise) + stepsPerTurn * rise) % (stepsPerTurn * rise) - 1.4) < course * 0.6 && k % 8 === 3;
-        if (isWindow) continue;
+        // Slits of windows, one every few metres up, each where the stair passes it, a little above the step there.
+        if (windows.some((w) => w.k === k && h > w.y - 0.01 && h < w.y + 1.4)) continue;
         const ro0 = radiusAt(h), ro1 = radiusAt(h1), ri0 = ro0 - wallT, ri1 = ro1 - wallT;
         const colour = banded && Array.from({ length: bands }, (_, j) => top * (0.35 + j * 0.3)).some((y) => h >= y - 0.01 && h < y + course * 2 - 0.01) ? band : white;
         solid('plaster', [ring(a0, ri0, h), ring(a1, ri0, h), ring(a1, ro0, h), ring(a0, ro0, h), ring(a0, ri1, h1), ring(a1, ri1, h1), ring(a1, ro1, h1), ring(a0, ro1, h1)], colour);

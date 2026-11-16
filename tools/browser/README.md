@@ -11,6 +11,8 @@ happened. They need Playwright with Chromium (`npm install --no-save playwright`
 | `node tools/browser/roam.cjs <seed> …` | Drives the player at the edges of the valley from thirty-six directions, jumping, and reports anyone who got out or fell through. Then walks to each thing left in the valley and checks it is picked up. |
 | `node tools/browser/jetty.cjs <seed> …` | Walks out along the landing stage and reports the player's height at each step, to show they stayed on the deck. |
 
+`play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`.
+
 They launch Chromium with a software renderer, so they work without a graphics card, slowly: a
 site takes one to three minutes. On a machine with a graphics card, set `REAL_GPU=1` to open a
 window and use it instead (in PowerShell: `$env:REAL_GPU=1; node tools/browser/play.cjs ink-7`).

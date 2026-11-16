@@ -9,7 +9,7 @@ const { chromium } = require('playwright');
     const errs = [];
     page.on('pageerror', (e) => errs.push(e.message.slice(0, 300)));
     page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
-    await page.goto(`http://localhost:5173/?seed=${seed}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
+    await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${seed}${process.env.PLACE ? `&place=${process.env.PLACE}` : ''}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 400000 });
     const walk = await page.evaluate(() => window.__dbg.walkTest());
     const r = await page.evaluate(() => window.__dbg.playthrough());
