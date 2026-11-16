@@ -484,7 +484,17 @@ export function buildIsland(b: IslandBuild): IslandResult {
     yaw: Math.atan2(-(rx - jx), -(rz - jz)),
     track: [...track].reverse().slice(1, -1) as [number, number][],
     far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
-    sea: { level: sea, x: o.x, z: o.z, bed },
+    sea: {
+      level: sea, x: o.x, z: o.z, bed,
+      // Where the swell breaks at the foot of a cliff, every few strides round the coast that is not beach, and round the stacks.
+      spray: [
+        ...Array.from({ length: 150 }, (_, k) => {
+          const a = (k / 150) * Math.PI * 2, r = coastAt(o, a) + 3.5, x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
+          return { x, z, nx: Math.cos(a), nz: Math.sin(a), ok: beachness(o, x, z) < 0.2 && inland(o, x, z) < -1 && ground(x, z) < sea - 0.3 && ground(x - Math.cos(a) * 4, z - Math.sin(a) * 4) > sea + 2 };
+        }).filter((q) => q.ok).map(({ x, z, nx, nz }) => ({ x, z, nx, nz })),
+        ...o.stacks.flatMap((q) => [0, 1, 2, 3].map((k) => ({ x: q.x + Math.cos(k * 1.57) * (q.r + 1.5), z: q.z + Math.sin(k * 1.57) * (q.r + 1.5), nx: Math.cos(k * 1.57), nz: Math.sin(k * 1.57) }))),
+      ],
+    },
     planted,
     lamp: coast.lamp,
     // Gulls: off the cliffs at the height of their tops, off the stacks, and over the cove.

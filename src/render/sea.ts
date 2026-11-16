@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Mesh } from 'three';
+import { BufferAttribute, BufferGeometry, DoubleSide, Mesh } from 'three';
 import { NodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { Atmosphere, skyParts } from './post';
@@ -21,7 +21,7 @@ import { SeaDesc } from './scene';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Fn, abs, attribute, cos, positionLocal, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize, positionWorld, pow, reflect, sin, smoothstep, texture, uniform, vec2, vec3, vec4,
+  Fn, abs, attribute, cos, positionLocal, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize, positionWorld, pow, reflect, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
 /**
@@ -79,6 +79,53 @@ export class Sea {
     this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
     this.mesh.layers.set(1);
+    const spray = this.sprays(desc.spray ?? [], look.foam);
+    if (spray) this.mesh.add(spray);
+  }
+
+  /**
+   * Spray: where the swell runs against a cliff it bursts up the rock. Each place is an upright
+   * sheet facing out to sea, a soft cloud of white that rises when the swell there is highest and
+   * thins as it falls back. When the swell is highest at a place is worked out from the same
+   * trains of waves that lift the water.
+   */
+  private sprays(points: { x: number; z: number; nx: number; nz: number }[], foam: number[]): Mesh | null {
+    if (!points.length) return null;
+    const position: number[] = [], uvs: number[] = [], index: number[] = [];
+    for (const p of points) {
+      const base = position.length / 3, w = 7, h = 9, ax = -p.nz, az = p.nx;
+      for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+        position.push(p.x + ax * (u - 0.5) * w + p.nx * v * 1.5, this.desc.level - 0.3 + v * h, p.z + az * (u - 0.5) * w + p.nz * v * 1.5);
+        uvs.push(u, v);
+      }
+      index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(position), 3));
+    geometry.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+    geometry.setIndex(index);
+    const material = new NodeMaterial();
+    material.transparent = true;
+    material.depthWrite = false;
+    material.side = DoubleSide;
+    const t = this.uTime, white = vec3(...foam);
+    material.fragmentNode = Fn(() => {
+      const P: N = positionWorld, at: N = uv();
+      // How high the swell stands here now, from -1 to 1: the spray goes up as it peaks.
+      const h: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0)).div(0.8).toVar();
+      const burst: N = smoothstep(0.15, 0.9, h).toVar();
+      const across = one(abs(at.x.mul(2).sub(1)));
+      const tall: N = at.y.div(max(burst, 0.05));
+      const body = smoothstep(0, 0.6, across).mul(one(smoothstep(0.3, 1, tall))).mul(smoothstep(0, 0.06, at.y));
+      const drift = texture(this.ripples, vec2(P.x.add(P.z), P.y).mul(0.08).add(vec2(0.02, -0.11).mul(t))).x.add(texture(this.ripples, vec2(P.x.sub(P.z), P.y).mul(0.19).add(vec2(-0.03, -0.17).mul(t))).y);
+      return vec4(white, body.mul(smoothstep(0.4, 1.6, drift)).mul(burst).mul(0.6));
+    })();
+    const mesh = new Mesh(geometry, material);
+    mesh.renderOrder = 3;
+    mesh.frustumCulled = false;
+    mesh.name = 'water';
+    mesh.layers.set(1);
+    return mesh;
   }
 
   /** How the sea is drawn, given the sky it reflects. To be called once, when the air is made. */
