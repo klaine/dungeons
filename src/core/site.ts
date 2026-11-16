@@ -361,10 +361,14 @@ export interface Site {
   valley?: Valley;
   /**
    * How the house stands: built into the end of a ridge, its rooms under the hill with courts
-   * open through it (`hill`, and so when absent); or standing free in the valley, walled and
-   * roofed, with the valley all round it (`free`).
+   * open through it (`hill`, and so when absent); standing free in the valley, walled and
+   * roofed, with the valley all round it (`free`); or no house at all but a delve (`delve`): the
+   * same plan under the same ridge, but its rooms are caves and its courts caverns lit from
+   * shafts, and only where something had to be built (the way in, the sanctum, a room with a
+   * stair, a secret door, a door to hang) is there masonry. Its front is the rock of the ridge,
+   * with a built portal in it for the door.
    */
-  stands?: 'hill' | 'free';
+  stands?: 'hill' | 'free' | 'delve';
   /**
    * The way from the door down the valley, as points from the door outwards. Flags as far as the
    * edge of the approach and a worn track after that. The player arrives at the last point.

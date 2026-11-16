@@ -215,9 +215,10 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   const round = (v: number) => Math.round(v * 10) / 10;
   // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
   const others = site.places.filter((q) => q !== meadow), house = { x0: Math.min(...others.map((q) => q.x0)) - site.wallThickness, x1: Math.max(...others.map((q) => q.x1)) + site.wallThickness };
-  // Half the houses stand free in the valley; the rest are built into the end of a ridge, under the hill.
-  const free = rng.fork('stands').chance(0.5);
+  // How the house stands: nearly half stand free in the valley; a third are no house but a delve of caves under the ridge; the rest are built into it.
+  const stands = rng.fork('stands').next(), free = stands < 0.45;
   if (free) site.stands = 'free';
+  else if (stands < 0.8) { site.stands = 'delve'; makeDelve(site, rng.fork('delve')); }
   const back = Math.min(...others.map((q) => q.z0)) - site.wallThickness;
   const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), { ...house, z0: back }, free);
   site.valley = v;
@@ -288,6 +289,46 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
       (site.landmarks ??= []).push({ kind, angle, range: kind === 'castle' && far.chance(0.5) ? 'far' : 'near' });
     }
   }
+}
+
+/**
+ * A delve: the plan of the house turned into caves. Every room that need not be built becomes a
+ * chamber of rock; a court becomes a cavern, with a shaft to the sky if there is room for one;
+ * an open arch between two chambers becomes a cleft, so that they are carved as one; windows
+ * between chambers go. What stays built: the way in, the sanctum, the room behind a secret door,
+ * any room a stair goes up or down from, and every wall a door hangs in.
+ */
+function makeDelve(site: Site, rng: Rng): void {
+  const round = (x: number) => Math.round(x * 100) / 100;
+  const stairs = new Set(site.ways.filter((w) => w.kind === 'stair').flatMap((w) => [w.a, w.b]));
+  const secretWays = site.ways.filter((w) => w.door?.leaf === 'secret').flatMap((w) => [w.a, w.b]);
+  const cave = new Set<number>();
+  for (const p of site.places) {
+    if (p.role === 'approach' || p.role === 'entrance' || p.role === 'goal' || p.id === site.secret || secretWays.includes(p.id) || stairs.has(p.id) || p.roof === 'cave') { if (p.roof === 'cave') cave.add(p.id); continue; }
+    const court = p.roof === 'sky', roomy = Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 5;
+    p.roof = 'cave';
+    p.fallen = undefined;
+    cave.add(p.id);
+    if (court && roomy) {
+      p.wall = round(rng.range(5.6, 7));
+      p.light = 'day';
+      p.shaft = { x: round((p.x0 + p.x1) / 2 + rng.range(-0.6, 0.6)), z: round((p.z0 + p.z1) / 2 + rng.range(-0.6, 0.6)), r: round(rng.range(1.7, 2.3)) };
+      p.name = rng.pick(['cavern', 'well of light', 'open cavern']);
+    } else {
+      p.wall = round(rng.range(3.3, 4.8));
+      p.light = rng.chance(0.45) ? 'glow' : 'dark';
+      p.name = rng.pick(['cave', 'hollow', 'chamber', 'rift', 'gallery of rock', 'grotto']);
+    }
+  }
+  site.ways = site.ways.filter((w) => !(w.kind === 'window' && (cave.has(w.a) || cave.has(w.b))));
+  // Never two dark places in a row, here as in a house: a chamber beside a dark one has growths on its rock that glow.
+  for (const id of cave) {
+    const p = site.places[id];
+    if (p.light !== 'dark') continue;
+    if (site.ways.some((w) => w.kind !== 'window' && (w.a === id || w.b === id) && site.places[w.a === id ? w.b : w.a].light === 'dark')) p.light = 'glow';
+  }
+  // (And most doorways between two chambers were never doorways: a cleft, not a wall with a door in it. Some are walled, and keep their doors.)
+  for (const w of site.ways) if (cave.has(w.a) && cave.has(w.b) && (w.kind === 'arch' || (w.kind === 'door' && !w.door && rng.chance(0.6)))) { w.kind = 'arch'; w.natural = true; w.halfWidth = round(rng.range(0.9, 1.3)); }
 }
 
 /**

@@ -153,6 +153,8 @@ export function meshSite(site: Site): SceneDescription {
   // looking one way. Rooms lit by day have windows in their outer walls, rooms lit by torches a
   // slit, dark rooms none.
   const free = site.stands === 'free' && !!site.grounds;
+  // A delve has no house front: the rock of the ridge comes down to the forecourt, with a portal built in it for the door.
+  const delve = site.stands === 'delve' && !!site.grounds;
   const outerRects = free ? places.filter((p) => p.role !== 'approach' && (p.level ?? 0) >= 0).map((p) => ({ x0: p.x0 - T, x1: p.x1 + T, z0: p.z0 - T, z1: p.z1 + T })) : [];
   const insideOuter = (x: number, z: number, m = 0) => outerRects.some((r) => x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m);
   /** A run of outer wall: the way it looks (`n` is towards lesser z), where it stands across, and where it runs from and to along. */
@@ -471,8 +473,16 @@ export function meshSite(site: Site): SceneDescription {
     const doorX = doorway ? doorway.at : (p.x0 + p.x1) / 2;
     // (A house that stands free has a front no broader than itself; one built into the hill has one as broad as the forecourt, with the hill either side.)
     const fx0 = free ? Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))) : p.x0 - 0.2, fx1 = free ? Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1))) : p.x1 + 0.2;
-    const front = kit.frame(fx0, p.z0, fx1, p.z0);
-    kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    if (delve) {
+      // The portal: a face of dressed stone in the recess cut for it, with the door, a moulded head over it, and the rock all round.
+      const px0 = doorX - 2.1, px1 = doorX + 2.1, top = p.floor + 4.2;
+      kit.wallFace('stone', kit.frame(px0, p.z0, px1, p.z0), p.floor - 0.7, top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - px0 })) });
+      kit.box('stone', V(px0 - 0.12, top - 0.05, p.z0 - 0.3), V(px1 + 0.12, top + 0.3, p.z0 + 0.22), coping, coping, 'portalhead');
+      for (const x of [px0, px1 - 0.42]) kit.box('stone', V(x, p.floor - 0.2, p.z0 - 0.1), V(x + 0.42, top - 0.05, p.z0 + 0.14), dressed, dressed, 'portaljamb');
+    } else {
+      const front = kit.frame(fx0, p.z0, fx1, p.z0);
+      kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    }
 
     const r = rng.fork('approach');
     const plant = rng.fork('planting');
@@ -528,7 +538,7 @@ export function meshSite(site: Site): SceneDescription {
      */
     const escarpment = (x: number, z: number, wobble: number): number => {
       if (z < frontZ) return 1;
-      const beside = Math.max(smooth((p.x0 + 2 + wobble * 0.5 - x) / 1.3), smooth((x - (p.x1 - 2 - wobble * 0.5)) / 1.3));
+      const beside = delve ? 1 : Math.max(smooth((p.x0 + 2 + wobble * 0.5 - x) / 1.3), smooth((x - (p.x1 - 2 - wobble * 0.5)) / 1.3));
       return beside * (1 - smooth((z - p.z0 - 0.7 - Math.max(0, wobble)) / 2.4));
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
@@ -1107,7 +1117,7 @@ export function meshSite(site: Site): SceneDescription {
       known[j * land.nx + i] = 1;
       // (This holds for the lattice's margin behind the wall as much as for the meadow itself:
       // were the hill behind let in there, the meadow would find a cliff at its back and turn it to rock.)
-      land.data[j * land.nx + i] = groundBase(x, z < behind ? z + (behind - z) * wallEnds(x) : z);
+      land.data[j * land.nx + i] = groundBase(x, z < behind && !delve ? z + (behind - z) * wallEnds(x) : z);
     }
     const loose = land.like();
     const wornBy = land.like();
@@ -1146,6 +1156,9 @@ export function meshSite(site: Site): SceneDescription {
       }
     }
     const ground = (x: number, z: number): number => (walled && wornBy.holds(x, z) ? groundBase(x, z) + wornBy.at(x, z) : groundBase(x, z));
+    // In a delve, the rock face over the door is cut back square to take the portal: a recess a little broader and higher than it, as deep as the wall.
+    const portalHalf = 2.1, portalTop = p.floor + 4.2;
+    const portalAir = delve ? (x: number, y: number, z: number) => Math.min(portalHalf + 0.05 - Math.abs(x - doorX), y - (p.floor - 0.4), portalTop + 0.1 - y, z - (p.z0 - T - 0.3), p.z0 + 5.2 - z) : null;
     // A grotto's floor is level with the lowest ground before its mouth, as the wall's wearing
     // left it: any higher and there would be a sill to climb over on the way in.
     for (const q of grottoes) {
@@ -1345,7 +1358,7 @@ export function meshSite(site: Site): SceneDescription {
       }
       const turf = into('turf'), scree = into('scree');
       // (Where there is a grotto, its air is taken with the land's.)
-      carveRock(into('rock'), grottoes.length ? (x, y, z) => Math.max(landAir(x, y, z), grottoAir(x, y, z)) : landAir, {
+      carveRock(into('rock'), grottoes.length || portalAir ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9) : landAir, {
         min: V(c.x0, Math.floor((lo - 2) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
@@ -1541,7 +1554,7 @@ export function meshSite(site: Site): SceneDescription {
       // Its corners are drawn back to the line of the wall top and out of every opening, so that
       // the turf ends exactly where masonry begins and no gap is left to look down.
       warp: (x, z) => {
-        if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = frontZ - 0.05;
+        if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = delve ? MZ0 : frontZ - 0.05;
         // (And to the outer walls of a house that stands free, the same way.)
         if (free && insideOuter(x, z)) {
           let best: [number, number] = [x, z], least = Infinity;
@@ -1581,7 +1594,7 @@ export function meshSite(site: Site): SceneDescription {
     });
     // The top of the front wall is finished with a coping, which also covers the last hand's
     // breadth between wall and turf; and every opening in the hill has a kerb of stone round it.
-    if (!free) kit.box('stone', V(p.x0 - 0.2, site.top - 0.06, p.z0 - 0.5), V(p.x1 + 0.2, site.top + 0.2, p.z0 + 0.09), coping, coping, 'frontcoping');
+    if (!free && !delve) kit.box('stone', V(p.x0 - 0.2, site.top - 0.06, p.z0 - 0.5), V(p.x1 + 0.2, site.top + 0.2, p.z0 + 0.09), coping, coping, 'frontcoping');
     for (const o of house.filter((q) => q.roof === 'sky')) {
       const k = 0.4, y0 = site.top - 0.06, y1 = site.top + 0.3;
       kit.box('stone', V(o.x0 - k, y0, o.z0 - k), V(o.x1 + k, y1, o.z0), coping, coping, `kerbn${o.id}`);
@@ -2010,7 +2023,7 @@ export function meshSite(site: Site): SceneDescription {
     // Ivy on the front of the house: it starts at the foot of the wall and climbs, spreading as
     // it goes and narrowing to its growing tip. A kept house has a little; a forsaken one is
     // half covered. In autumn some of it has turned red.
-    {
+    if (!delve) {
       const amount = { kept: 0.35, damp: 0.7, forsaken: 1 }[site.setting.condition];
       const wall = lush.fork('ivy'), openings = holesOn(p, 'n', 0), highest = site.top - p.floor - 0.6;
       for (let k = 0, n = Math.round(((p.x1 - p.x0 - 8) / 4.5) * amount); k < n; k++) {
@@ -2673,6 +2686,9 @@ export function meshSite(site: Site): SceneDescription {
       if (!walled.has('s')) edge = Math.min(edge, p.z1 - z);
       if (!walled.has('w')) edge = Math.min(edge, x - p.x0);
       if (!walled.has('e')) edge = Math.min(edge, p.x1 - x);
+      // And towards a masonry wall, through the wall and half a metre on, no further: so that it does not end in a skin of rock
+      // across the doorway. What it makes beyond the wall, in the next place, is not kept (see where caves are carved).
+      edge = Math.min(edge, z - (p.z0 - T - 0.5), p.z1 + T + 0.5 - z, x - (p.x0 - T - 0.5), p.x1 + T + 0.5 - x);
       let out = Math.min(air, edge - 0.2);
       if (p.shaft) {
         // Where the roof fell in long ago: a hole to the open hill, wider at the top than the bottom.
@@ -2693,7 +2709,10 @@ export function meshSite(site: Site): SceneDescription {
     const seeds = rng.fork(`cleft${w.a}-${w.b}`);
     const t1 = seeds.range(0, 50), bend = seeds.range(-0.5, 0.5);
     // Where the floor begins to climb and where it has done, measured through the wall from the first chamber's edge.
-    const steep = Math.abs(a.floor - b.floor) > 0.6, reach = steep ? Math.min(3.4, 1.4 + Math.abs(a.floor - b.floor) * 0.9) : 0;
+    // (No further into either chamber than it is deep, less a little: a cleft at the far side of a shallow chamber would otherwise run on
+    // through it at its own floor, and out the other side into whatever lies beyond.)
+    const depthA = (alongX ? a.z1 - a.z0 : a.x1 - a.x0) - 0.6, depthB = (alongX ? b.z1 - b.z0 : b.x1 - b.x0) - 0.6;
+    const steep = Math.abs(a.floor - b.floor) > 0.6, reach = steep ? Math.min(3.4, 1.4 + Math.abs(a.floor - b.floor) * 0.9, a.floor >= b.floor ? depthA : depthB) : 0;
     const rise0 = !steep ? 0 : a.floor >= b.floor ? -reach : 0.1, rise1 = !steep ? T : a.floor >= b.floor ? T - 0.1 : T + reach;
     return (x, y, z) => {
       // t runs from the first chamber's edge through the wall; s is the distance to one side.
@@ -2708,7 +2727,7 @@ export function meshSite(site: Site): SceneDescription {
       const high = 2.45 + (fbm2(x * 0.8 + t1, z * 0.8 + 7, 2) - 0.5) * 0.7;
       const air = smin(smin(wide - Math.abs(s), y - floorY, 0.3), floorY + high - y, 0.4);
       // It reaches a good pace into each chamber, and no further.
-      return Math.min(air, t + 1.5 - Math.min(0, rise0 - 0.3), T + 1.5 + Math.max(0, rise1 - T + 0.3) - t);
+      return Math.min(air, t + Math.min(depthA, 1.5 - Math.min(0, rise0 - 0.3)), T + Math.min(depthB, 1.5 + Math.max(0, rise1 - T + 0.3)) - t);
     };
   };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
@@ -2807,11 +2826,14 @@ export function meshSite(site: Site): SceneDescription {
         const shafted = members.some((q) => q.shaft);
         const wetField = indoorField([], Math.min(...members.map((q) => q.floor)));
         const tone1 = rng.fork(`cavetone${p.id}`).range(0, 50), tone2 = rng.fork(`cavetone2${p.id}`).range(0, 50);
+        // (Nothing of the rock is kept inside another place: where a chamber's way in reaches through a wall into a built room, the rock it would end in there is not made.)
+        const others = places.filter((q) => !system.includes(q.id) && q.role !== 'approach');
         carveRock(kit.mesh('rock'), (x, y, z) => {
           let air = -Infinity;
           for (const f of all) air = Math.max(air, f(x, y, z));
           return air;
         }, {
+          keep: (at) => !others.some((q) => at.x > q.x0 - 0.02 && at.x < q.x1 + 0.02 && at.z > q.z0 - 0.02 && at.z < q.z1 + 0.02 && at.y > q.floor - 0.6 && at.y < q.floor + q.wall + 2),
           min: V(Math.min(...members.map((q) => q.x0)) - 0.14, Math.min(...members.map((q) => q.floor)) - 0.9, Math.min(...members.map((q) => q.z0)) - 0.14),
           max: V(Math.max(...members.map((q) => q.x1)) + 0.14, shafted ? site.top - 0.12 : Math.max(...members.map((q) => q.floor + q.wall)) + 1.2, Math.max(...members.map((q) => q.z1)) + 0.14),
           cell: 0.28, uvScale: 0.45,
