@@ -40,6 +40,17 @@ interface Hole extends Opening {
 /** A window in an outer wall of a house that stands free: a way into nowhere, there only to be cut through the wall. */
 type OuterWindow = Way & { outer: true };
 
+/** One flat face of a roof of tiles, through the given corners, wound to face away from `inside`. */
+function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, number], inside: Vector3): void {
+  const n = pts[1].clone().sub(pts[0]).cross(pts[2].clone().sub(pts[0])).normalize();
+  const mid = pts.reduce((m, q) => m.add(q), new Vector3()).multiplyScalar(1 / pts.length);
+  let list = pts;
+  if (n.dot(mid.sub(inside)) < 0) { n.negate(); list = [...pts].reverse(); }
+  const side = Math.abs(n.x) > Math.abs(n.z);
+  const ids = list.map((q) => mesh.addVertex(q.x, q.y, q.z, n.x, n.y, n.z, (side ? q.z : q.x) * 0.62, (q.y + (side ? q.x : q.z) * n.y) * 0.62, colour[0], colour[1], colour[2]));
+  for (let k = 1; k < ids.length - 1; k++) mesh.addTriangle(ids[0], ids[k], ids[k + 1]);
+}
+
 export function meshSite(site: Site): SceneDescription {
   const kit = new Kit(site.seed);
   const rng = new Rng(site.seed).fork('mesh');
@@ -949,8 +960,9 @@ export function meshSite(site: Site): SceneDescription {
         const spread = 1.8 + 44 * smooth((z - vale.mouth - 4) / 20);
         // (Nor does it stand over the house, nor close beside it north of its front, where the house's own hill is; further off to either side it runs on north as the top of the land does.)
         // North of the house front everything is side, but for the house and its hill.
-        const ins = z < frontZ && !ridge ? Math.min(inside, 2.9 + z - frontZ) : inside;
-        y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
+        // (Not so round a house that stands free, which has the valley all round it.)
+        const ins = z < frontZ && !ridge && !free ? Math.min(inside, 2.9 + z - frontZ) : inside;
+        y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (free ? 1 : z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
         // Behind the crags the land does not lie flat, as round a quarry: it goes on up, as a hillside, more on some sides
         // than on others. (North of the house front the hills keep the distance they always kept from it.)
         const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : free ? out : north + (out - north) * t;
@@ -2932,11 +2944,44 @@ export function meshSite(site: Site): SceneDescription {
 
     // Furnishings by role.
     if (p.role === 'court' && !p.fallen) {
-      const wx = cx + (dx > 6 ? rng.range(-0.8, 0.8) : 0), wz = cz + (dz > 6 ? rng.range(-0.8, 0.8) : 0);
+      // (In the middle of a cloister, which the walk round it leaves room for; anywhere near the middle of a smaller court.)
+      // (The same chances are drawn either way, so that nothing drawn after them is dealt differently.)
+      const cloister = Math.min(dx, dz) >= 7.4, nx = dx > 6 ? rng.range(-0.8, 0.8) : 0, nz = dz > 6 ? rng.range(-0.8, 0.8) : 0;
+      const wx = cx + (cloister ? 0 : nx), wz = cz + (cloister ? 0 : nz);
       const y = p.floor;
       kit.roundWall('stone', wx, wz, 0.95, y - 0.1, y + 0.85, { ...ashlar, length: [0.45, 0.6] }, false, { open: { v1: true } });
       kit.roundWall('stone', wx, wz, 0.68, y - 2.5, y + 0.85, { ...ashlar, length: [0.35, 0.5] }, true, { open: { v1: true } });
       kit.ring('stone', wx, wz, 0.68, 0.95, y + 0.85, { ...dressed, length: [0.5, 0.65] });
+      // A cloister walk round a court that has room for one: slender columns a stride and a half in from the walls, a beam along their
+      // heads, and a lean-to roof of tiles from the wall down to the beam. No column stands before a doorway or an arch.
+      if (cloister) {
+        const inset = 1.85, h = 2.9, tilesC = kit.mesh('tile'), roofTone: [number, number, number] = [1.1, 1.03, 0.98];
+        const lineAt = (side: Side) => (side === 'n' ? p.z0 + inset : side === 's' ? p.z1 - inset : side === 'w' ? p.x0 + inset : p.x1 - inset);
+        for (const side of SIDES) {
+          const along = side === 'n' || side === 's', lo = (along ? p.x0 : p.z0) + inset, hi = (along ? p.x1 : p.z1) - inset, line = lineAt(side);
+          const holes = holesOn(p, side, 0), n = Math.max(1, Math.round((hi - lo) / 2.3));
+          for (let k = 0; k <= n; k++) {
+            // (The corner columns are set out from the walls along x, and not again from those along z.)
+            if (!along && (k === 0 || k === n)) continue;
+            const pos = lo + ((hi - lo) * k) / n;
+            if (k > 0 && k < n && holes.some((q) => Math.abs(q.at - pos) < q.w + 0.75)) continue;
+            const x = along ? pos : line, z = along ? line : pos;
+            kit.box('stone', V(x - 0.24, y - 0.05, z - 0.24), V(x + 0.24, y + 0.22, z + 0.24), coping, coping, 'base');
+            kit.box('stone', V(x - 0.15, y + 0.22, z - 0.15), V(x + 0.15, y + h - 0.22, z + 0.15), dressed, coping, 'colonnette');
+            kit.box('stone', V(x - 0.25, y + h - 0.22, z - 0.25), V(x + 0.25, y + h, z + 0.25), coping, coping, 'capital');
+          }
+          const a = lo - 0.25, b = hi + 0.25;
+          kit.box('wood', along ? V(a, y + h, line - 0.14) : V(line - 0.14, y + h, a), along ? V(b, y + h + 0.26, line + 0.14) : V(line + 0.14, y + h + 0.26, b), beam, beam, 'walkbeam');
+          // The roof: from the wall a metre higher than the beam, down to a hand beyond it.
+          const wallLine = side === 'n' ? p.z0 : side === 's' ? p.z1 : side === 'w' ? p.x0 : p.x1, out = side === 'n' || side === 'w' ? 1 : -1;
+          const lowY = y + h + 0.26, highY = lowY + 1.05, past = line + out * 0.35, from = lo - inset, to = hi + inset;
+          const pts = along
+            ? [V(from, highY, wallLine), V(to, highY, wallLine), V(to - (out > 0 ? 0 : 0), lowY, past), V(from, lowY, past)]
+            : [V(wallLine, highY, from), V(wallLine, highY, to), V(past, lowY, to), V(past, lowY, from)];
+          tileFace(tilesC, pts, roofTone, along ? V((from + to) / 2, lowY - 1, line) : V(line, lowY - 1, (from + to) / 2));
+          tileFace(tilesC, pts.map((q) => q.clone().setY(q.y - 0.08)), roofTone, along ? V((from + to) / 2, lowY + 2, line) : V(line, lowY + 2, (from + to) / 2));
+        }
+      }
     }
     if ((p.role === 'goal' || p.role === 'reward') && !cave) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
@@ -3139,25 +3184,125 @@ export function meshSite(site: Site): SceneDescription {
       const sill = wallBox(f, c - w.halfWidth - 0.2, c + w.halfWidth + 0.2, op.y0 - 0.13, op.y0, -0.06, T + 0.12);
       kit.box('stone', sill.min, sill.max, coping, coping);
     }
-    // Roofs: one over each room that is not open to the sky, hipped, of tiles, from the cornice to a ridge along the room's length.
-    const tiles = kit.mesh('tile'), pitch = 0.62, roofTone: [number, number, number] = site.setting.condition === 'forsaken' ? [0.82, 0.78, 0.74] : [1.12, 1.05, 1.0];
-    const face = (pts: Vector3[], inside: Vector3) => {
-      const n = pts[1].clone().sub(pts[0]).cross(pts[2].clone().sub(pts[0])).normalize();
-      const mid = pts.reduce((m, q) => m.add(q), V(0, 0, 0)).multiplyScalar(1 / pts.length);
-      const list = n.dot(mid.sub(inside)) < 0 ? (n.negate(), [...pts].reverse()) : pts;
-      const ids = list.map((q) => tiles.addVertex(q.x, q.y, q.z, n.x, n.y, n.z, (Math.abs(n.x) > Math.abs(n.z) ? q.z : q.x) * 0.62, (q.y + (Math.abs(n.x) > Math.abs(n.z) ? q.x : q.z) * n.y) * 0.62, roofTone[0], roofTone[1], roofTone[2]));
-      for (let k = 1; k < ids.length - 1; k++) tiles.addTriangle(ids[0], ids[k], ids[k + 1]);
-    };
+    // Roofs: one over each room that is not open to the sky, hipped, of tiles, from the cornice to a ridge along the room's length,
+    // with ridge tiles along the top. The sanctum's is steeper and higher, and gabled, with a bell-cote on one gable.
+    const tiles = kit.mesh('tile'), roofTone: [number, number, number] = site.setting.condition === 'forsaken' ? [0.82, 0.78, 0.74] : [1.12, 1.05, 1.0];
     kit.group = 'roofs';
+    const ridgeOf = new Map<number, { y: number; alongX: boolean; a: number; b: number; c: number }>();
     for (const q of places) {
       if (q.role === 'approach' || (q.level ?? 0) !== 0 || q.roof === 'sky' || q.fallen) continue;
+      const sanctum = q.role === 'goal', pitch = sanctum ? 1.05 : 0.62;
       const e = T / 2 + 0.34, x0 = q.x0 - e, x1 = q.x1 + e, z0 = q.z0 - e, z1 = q.z1 + e, y = site.top + 0.12;
       const alongX = x1 - x0 >= z1 - z0, half = (alongX ? z1 - z0 : x1 - x0) / 2, rise = half * pitch, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-      const r0 = alongX ? V(x0 + half, y + rise, cz) : V(cx, y + rise, z0 + half), r1 = alongX ? V(x1 - half, y + rise, cz) : V(cx, y + rise, z1 - half);
+      const tone: [number, number, number] = [roofTone[0] * (0.94 + 0.12 * ((q.id * 7919) % 11) / 11), roofTone[1] * 0.98, roofTone[2] * 0.97];
+      // (A gabled roof runs its ridge the whole length; a hipped one stops half its breadth from each end.)
+      const inset = sanctum ? 0 : half;
+      const r0 = alongX ? V(x0 + inset, y + rise, cz) : V(cx, y + rise, z0 + inset), r1 = alongX ? V(x1 - inset, y + rise, cz) : V(cx, y + rise, z1 - inset);
       const a = V(x0, y, z0), b = V(x1, y, z0), c = V(x1, y, z1), d = V(x0, y, z1), inside = V(cx, y + rise * 0.3, cz);
-      if (alongX) { face([a, b, r1, r0], inside); face([c, d, r0, r1], inside); face([b, c, r1], inside); face([d, a, r0], inside); }
-      else { face([b, c, r1, r0], inside); face([d, a, r0, r1], inside); face([a, b, r0], inside); face([c, d, r1], inside); }
-      face([a, b, c, d], V(cx, y + 1, cz));
+      if (alongX) { tileFace(tiles, [a, b, r1, r0], tone, inside); tileFace(tiles, [c, d, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [b, c, r1], tone, inside); tileFace(tiles, [d, a, r0], tone, inside); } }
+      else { tileFace(tiles, [b, c, r1, r0], tone, inside); tileFace(tiles, [d, a, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [a, b, r0], tone, inside); tileFace(tiles, [c, d, r1], tone, inside); } }
+      tileFace(tiles, [a, b, c, d], tone, V(cx, y + 1, cz));
+      kit.box('tile', alongX ? V(r0.x - 0.05, y + rise - 0.06, cz - 0.13) : V(cx - 0.13, y + rise - 0.06, r0.z - 0.05), alongX ? V(r1.x + 0.05, y + rise + 0.1, cz + 0.13) : V(cx + 0.13, y + rise + 0.1, r1.z + 0.05), coping, coping, 'ridge');
+      ridgeOf.set(q.id, { y: y + rise, alongX, a: alongX ? r0.x : r0.z, b: alongX ? r1.x : r1.z, c: alongX ? cz : cx });
+      if (sanctum) {
+        // The gables: walls of ashlar up under the roof, in courses that step in as the roof narrows; and a bell-cote on the one nearer the front.
+        for (const end of [0, 1]) {
+          const at = alongX ? (end ? x1 - 0.3 : x0 + 0.3) : (end ? z1 - 0.3 : z0 + 0.3), courses = Math.max(3, Math.round(rise / 0.5));
+          for (let k = 0; k < courses; k++) {
+            const w = half * (1 - (k + 0.5) / courses) + 0.12, y0 = y - 0.12 + (rise * k) / courses, y1 = y - 0.12 + (rise * (k + 1)) / courses;
+            if (alongX) kit.box('stone', V(at - 0.3, y0, cz - w), V(at + 0.3, y1, cz + w), ashlar, coping, 'gable'); else kit.box('stone', V(cx - w, y0, at - 0.3), V(cx + w, y1, at + 0.3), ashlar, coping, 'gable');
+          }
+        }
+        const front = alongX ? (Math.abs(x1 - yard.z0) < Math.abs(x0 - yard.z0) ? x1 : x0) : (z1 > z0 ? z1 - 0.3 : z0 + 0.3), top = y + rise + 0.05;
+        const bx = alongX ? front + (front > cx ? -0.3 : 0.3) : cx, bz = alongX ? cz : front;
+        for (const off of [-0.55, 0.55]) {
+          const px = alongX ? bx : bx + off, pz = alongX ? bz + off : bz;
+          kit.box('stone', V(px - 0.17, top, pz - 0.17), V(px + 0.17, top + 1.25, pz + 0.17), dressed, coping, 'belfry');
+        }
+        kit.box('stone', V(bx - 0.8, top + 1.25, bz - 0.8), V(bx + 0.8, top + 1.42, bz + 0.8), coping, coping, 'belfrycap');
+        kit.box('stone', V(bx - 0.5, top + 1.42, bz - 0.5), V(bx + 0.5, top + 1.75, bz + 0.5), coping, coping, 'belfrytop');
+        kit.box('metal', V(bx - 0.2, top + 0.55, bz - 0.2), V(bx + 0.2, top + 1.05, bz + 0.2), coping, coping, 'bell');
+      }
+    }
+    // Chimneys: on the kitchen and the refectory, rising through the roof beside the ridge, with a capping on top.
+    for (const q of places) {
+      const rg = ridgeOf.get(q.id);
+      if (!rg || !['kitchen', 'refectory', 'warming house'].includes(q.name)) continue;
+      const along = rg.a + (rg.b - rg.a) * 0.7 + (rg.b - rg.a < 0.5 ? 0 : 0), across = rg.c + 0.55;
+      const x = rg.alongX ? along : across, z = rg.alongX ? across : along;
+      kit.group = `p${q.id}`;
+      kit.box('stone', V(x - 0.46, site.top - 0.2, z - 0.46), V(x + 0.46, rg.y + 1.35, z + 0.46), ashlar, coping, 'chimney');
+      kit.box('stone', V(x - 0.56, rg.y + 1.35, z - 0.56), V(x + 0.56, rg.y + 1.52, z + 0.56), coping, coping, 'chimneycap');
+    }
+    // Buttresses against the outside of every vaulted room, where the ribs of its vault come down within, to take their thrust;
+    // in two stages, each with a sloping coping; and a clasping buttress round every outer corner.
+    const buttress = (r: Run, at: number) => {
+      const mid = low + (site.top - low) * 0.55;
+      ledge(r, at - 0.38, at + 0.38, low - 0.4, mid, 0.9, ashlar, 'buttress');
+      ledge(r, at - 0.44, at + 0.44, mid, mid + 0.16, 0.98, coping, 'weathering');
+      ledge(r, at - 0.34, at + 0.34, mid + 0.16, site.top - 0.55, 0.5, ashlar, 'buttress');
+      ledge(r, at - 0.4, at + 0.4, site.top - 0.55, site.top - 0.39, 0.58, coping, 'weathering');
+    };
+    kit.field = outdoorFieldAt(low, 1.0);
+    const placed: { side: Side; at: number; pos: number }[] = [];
+    const clearOfWindows = (side: Side, at: number, pos: number) => !places.some((q) => (outerWindows.get(q.id) ?? []).some((w) => w.side === side && Math.abs(w.at - pos) < w.halfWidth + 0.55 && Math.abs((side === 'n' ? q.z0 - T : side === 's' ? q.z1 + T : side === 'w' ? q.x0 - T : q.x1 + T) - at) < 0.05));
+    for (const q of places) {
+      if (q.role === 'approach' || (q.level ?? 0) !== 0) continue;
+      kit.group = `p${q.id}`;
+      for (const sl of pilasterSlots.get(q.id) ?? []) {
+        const face = sl.side === 'n' ? q.z0 - T : sl.side === 's' ? q.z1 + T : sl.side === 'w' ? q.x0 - T : q.x1 + T;
+        const r = runs.find((u) => u.side === sl.side && Math.abs(u.at - face) < 0.05 && sl.pos > u.from + 0.6 && sl.pos < u.to - 0.6);
+        if (!r || (outerWindows.get(q.id) ?? []).some((w) => w.side === sl.side && Math.abs(w.at - sl.pos) < w.halfWidth + 0.55)) continue;
+        if (r.side === 's' && Math.abs(r.at - yard.z0) < 0.05 && sl.pos > fronted[0] - 0.5 && sl.pos < fronted[1] + 0.5) continue;
+        buttress(r, sl.pos);
+        placed.push({ side: r.side, at: r.at, pos: sl.pos });
+      }
+    }
+    // And along any long stretch of wall, evenly, a buttress every four or five metres wherever there is no window: a long wall
+    // with nothing on it is the one thing that most makes a building look unfinished. A string course runs round at the height of a storey.
+    for (const r of runs) {
+      const pieces: [number, number][] = r.side === 's' && Math.abs(r.at - yard.z0) < 0.05
+        ? ([[r.from, Math.min(r.to, fronted[0])], [Math.max(r.from, fronted[1]), r.to]] as [number, number][]).filter(([a, b]) => b - a > 0.05)
+        : [[r.from, r.to]];
+      for (const [a, b] of pieces) {
+        kit.group = 'roofs';
+        ledge(r, a, b, low + 3.55, low + 3.75, 0.12, coping, 'stringcourse');
+        if (b - a < 5) continue;
+        const n = Math.round((b - a) / 4.5);
+        for (let k = 1; k < n; k++) {
+          const pos = a + ((b - a) * k) / n;
+          if (placed.some((q) => q.side === r.side && Math.abs(q.at - r.at) < 0.05 && Math.abs(q.pos - pos) < 1.6) || !clearOfWindows(r.side, r.at, pos)) continue;
+          buttress(r, pos);
+          placed.push({ side: r.side, at: r.at, pos });
+        }
+      }
+    }
+    for (const r of runs) for (const end of [r.from, r.to]) {
+      const dir = end === r.from ? -1 : 1, [ox, oz] = outward[r.side], along = r.side === 'n' || r.side === 's';
+      // (A point just past the end of the run and just inside the wall: if that is outside the house, the corner is an outer one.)
+      const px = along ? end + dir * 0.2 : r.at - ox * 0.2, pz = along ? r.at - oz * 0.2 : end + dir * 0.2;
+      if (insideOuter(px, pz)) continue;
+      kit.group = 'roofs';
+      ledge(r, dir < 0 ? end : end - 0.95, dir < 0 ? end + 0.95 : end, low - 0.4, site.top - 0.75, 0.42, ashlar, 'corner');
+      ledge(r, dir < 0 ? end : end - 1.05, dir < 0 ? end + 1.05 : end, site.top - 0.75, site.top - 0.6, 0.5, coping, 'cornercap');
+    }
+    // The entrance: the bay of the front with the door in it stands forward, its door dressed through the depth it stands out,
+    // and rises over the cornice in a gable of stepped courses.
+    {
+      const door = holesOn(yard, 'n', 0)[0];
+      if (door) {
+        const half = door.w + 1.5, x0 = door.at - half, x1 = door.at + half, zf = yard.z0 + 0.6, top = site.top + 0.9;
+        kit.group = `p${yard.id}`;
+        const f = kit.frame(x0, zf, x1, zf), op: Opening = { c: door.at - x0, w: door.w, y0: door.y0, ys: door.ys };
+        kit.wallFace('stone', f, low - 0.7, top, ashlar, { openings: [op] });
+        kit.openingTrim('stone', f, op, 0.6, dressed, 'front');
+        for (const [a, b] of [[x0 - 0.02, x0 + 0.45], [x1 - 0.45, x1 + 0.02]]) kit.box('stone', V(a, low - 0.5, yard.z0), V(b, top, zf), ashlar, coping, 'porchside');
+        kit.box('stone', V(x0 - 0.1, top - 0.02, yard.z0 - 0.3), V(x1 + 0.1, top + 0.16, zf + 0.12), coping, coping, 'porchcope');
+        for (let k = 0; k < 4; k++) {
+          const inset = (k + 1) * half * 0.2;
+          kit.box('stone', V(x0 + inset, top + 0.16 + k * 0.5, yard.z0 - 0.3), V(x1 - inset, top + 0.16 + (k + 1) * 0.5, zf), ashlar, coping, 'porchgable');
+        }
+      }
     }
   }
 

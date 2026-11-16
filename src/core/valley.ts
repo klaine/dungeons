@@ -79,7 +79,7 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   const arming = rng.fork('arms'), count = arming.pick([0, 1, 1, 1, 2, 2]), first = arming.chance(0.5) ? 0 : 1;
   const arms = [0, 1].map((k) => (count === 2 || (count === 1 && k === first) ? { length: arming.range(36, 72), width: arming.range(16, 28), seed: arming.range(0, 500) } : null));
   // A house that stands free has the valley all round it: on either side a breadth of open ground, and behind it a bowl that closes some way back.
-  const round_ = free && house.z0 !== undefined ? { gap: [arming.range(11, 19), arming.range(11, 19)], back: house.z0 - arming.range(14, 28), seed: arming.range(0, 500) } : null;
+  const round_ = free && house.z0 !== undefined ? { gap: [arming.range(16, 26), arming.range(16, 26)], back: house.z0 - arming.range(18, 32), seed: arming.range(0, 500) } : null;
   const z0 = round_ ? Math.floor((round_.back - 26) / step) * step : front - Math.ceil(Math.max(0, ...arms.map((q) => (q ? q.length + 4 : 0))) / step) * step;
   const roundAt = (k: number, z: number): number => {
     const base = (k === 0 ? mid - house.x0 : house.x1 - mid) + round_!.gap[k] * (1 + 0.3 * (fbm2(z / 15, round_!.seed + k * 17, 2) - 0.5));
