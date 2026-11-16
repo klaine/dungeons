@@ -2417,8 +2417,26 @@ export function meshSite(site: Site): SceneDescription {
     // Buildings by the track. (The first timber house of a row is its inn.)
     houses.forEach((b, i) => {
       wild.group = 'house';
-      buildBuilding(b, b.base, (material) => wild.mesh(material), rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0);
+      buildBuilding(b, b.base, (material) => wild.mesh(material), rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0 && !b.wheel);
       wild.group = 'wild';
+      // A mill's waterwheel: two rims of short timbers, spokes from the hub to each, paddles between the rims, and the axle into the wall.
+      if (b.wheel) {
+        const w = b.wheel, wood = wild.mesh('wood'), oak: [number, number, number] = [0.22, 0.15, 0.1], wet: [number, number, number] = [0.13, 0.1, 0.07];
+        const cy = b.base + w.y, dir = b.faces === 'w' ? 1 : -1, n = 16;
+        const pt = (a: number, r: number, off: number) => V(w.x + off, cy + Math.sin(a) * r, w.z + Math.cos(a) * r);
+        for (const off of [-0.32, 0.32]) {
+          for (let k = 0; k < n; k++) {
+            const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
+            layBeam(wood, pt(a0, w.r, off), pt(a1, w.r, off), 0.12, 0.1, oak, k);
+          }
+          for (let k = 0; k < 6; k++) layBeam(wood, pt((k / 6) * Math.PI * 2, 0.18, off), pt((k / 6) * Math.PI * 2, w.r - 0.05, off), 0.09, 0.09, oak, k + 30);
+        }
+        for (let k = 0; k < n; k++) {
+          const a = ((k + 0.5) / n) * Math.PI * 2;
+          layBeam(wood, pt(a, w.r - 0.02, -0.38), pt(a, w.r - 0.02, 0.38), 0.05, 0.42, wet, k + 60);
+        }
+        layBeam(wood, V(w.x - 0.55, cy, w.z), V(b.x + dir * (b.d / 2 - 0.5), cy, w.z), 0.22, 0.22, oak, 90);
+      }
     });
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {

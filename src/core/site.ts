@@ -267,6 +267,12 @@ export interface Building {
   gable?: boolean;
   /** Of a timber house: where its door is in the front, as a share of the front's breadth from its left end as one stands before it. */
   door?: number;
+  /**
+   * Of a mill: its waterwheel, standing in the stream beside its back wall: where the wheel's
+   * middle is (`x`, `z`, and `y` above the ground before the mill's door), and its radius. The
+   * axle runs through the back wall, square to it.
+   */
+  wheel?: { x: number; z: number; y: number; r: number };
   portico?: boolean;
   /**
    * For a building set into rising ground: how much higher the ground stands at its back than
@@ -387,7 +393,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */

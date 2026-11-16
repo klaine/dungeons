@@ -285,6 +285,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
   layOutFootpaths(site, rng.fork('footpaths'));
   if (site.settlement && site.settlement !== 'village') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
+  layOutMill(site, fromTrack, rng.fork('mill'));
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
   {
     const far = rng.fork('landmarks'), count = far.pick([0, 1, 1, 2, 2, 3]), taken: number[] = [];
@@ -376,6 +377,54 @@ function layOutArms(site: Site, meadow: Place, doorX: number, rng: Rng): void {
     (site.paths ??= []).push({ points, to });
   }
   site.features = features;
+}
+
+/**
+ * A mill, where a stream runs out of a pond: on the stream's bank a little below the pond, where
+ * the stream runs fairly straight down the valley, a timber house with its back to the water and
+ * a waterwheel in the stream beside its back wall; and a footpath from the track to its door.
+ */
+function layOutMill(site: Site, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const v = site.valley!, round = (x: number) => Math.round(x * 10) / 10;
+  const st = (site.streams ?? []).find((q) => q.from === 'pond');
+  if (!st || !rng.chance(0.75)) return;
+  const pond = (site.features ?? []).find((f) => f.kind === 'pond')!;
+  const house = timberHouse(rng.fork('house'), [0.84, 0.8, 0.7]);
+  house.storeys = 2; house.heights = house.heights.slice(0, 2);
+  for (let k = 1; k < st.course.length; k++) {
+    const [ax, az] = st.course[k - 1], [bx, bz] = st.course[k], len = Math.hypot(bx - ax, bz - az);
+    // (Along the valley, fairly straight, and clear of the pond's shore by a few strides.)
+    if (len < 1 || Math.abs(bx - ax) / len > 0.45) continue;
+    const mz = (az + bz) / 2, mx = (ax + bx) / 2;
+    if (Math.hypot(mx - pond.x, mz - pond.z) < shoreOf(pond, mx - pond.x, mz - pond.z) + 5) continue;
+    // (On the track's side of the stream, so that its door, which faces away from the water, faces the track.)
+    const toTrack = Math.sign(site.track!.reduce((best, t) => (Math.abs(t[1] - mz) < Math.abs(best[1] - mz) ? t : best), site.track![0])[0] - mx) || 1;
+    for (const side of [toTrack as -1 | 1]) {
+      const off = house.d / 2 + st.width / 2 + 1.1, x = round(mx + side * off), z = round(mz);
+      // (Its back is the side towards the stream: a house east of the stream faces east, its back to the west.)
+      const b: Building = { ...house, x, z, faces: side > 0 ? 'e' : 'w' };
+      const ok = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]].every(([du, dv]) => {
+        const px = x + (du * b.d) / 2, pz = z + (dv * b.w) / 2;
+        return walkable(v, px, pz, 4) && fromTrack(px, pz) > 3.5 && clearOfBuildings(site, px, pz, 2) && !(site.features ?? []).some((f) => Math.hypot(f.x - px, f.z - pz) < (f.kind === 'pond' ? shoreOf(f, px - f.x, pz - f.z) + 1.5 : f.r * 2.4));
+      });
+      if (!ok) continue;
+      b.door = 0.5;
+      b.plan = planTimber(b);
+      b.wheel = { x: round(mx), z, y: 1.15, r: 1.9 };
+      // The footpath to its door: from the nearest point of the track that has a clear way across to it, past nothing that stands or lies there.
+      const doorX = x + side * (b.d / 2 + 1.2);
+      const clearLine = (tx: number, tz: number) => {
+        const len = Math.hypot(doorX - tx, z - tz);
+        for (let t = 2; t < len; t += 1) { const px = tx + ((doorX - tx) * t) / len, pz = tz + ((z - tz) * t) / len; if (!roomAt(site, px, pz, 0.9)) return false; }
+        return true;
+      };
+      const from = [...site.track!].sort((p, q) => Math.hypot(p[0] - doorX, p[1] - z) - Math.hypot(q[0] - doorX, q[1] - z)).find(([tx, tz]) => clearLine(tx, tz));
+      if (!from) continue;
+      (site.buildings ??= []).push(b);
+      if (Math.hypot(from[0] - doorX, from[1] - z) > 6) (site.paths ??= []).push({ to: 'mill', points: [[round(from[0]), round(from[1])], [round((from[0] + doorX) / 2), round((from[1] + z) / 2)], [round(doorX), z]] });
+      return;
+    }
+  }
 }
 
 /**
