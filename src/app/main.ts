@@ -284,6 +284,7 @@ async function start(): Promise<void> {
   const cardMeshes: InstancedMesh[] = [];
   // Grass is drawn out to this distance, by the level of detail chosen.
   vegetationRange.value = num('grass', quality.grass);
+  vegetationUniforms.uWind.value = num('wind', 1);
   // Trees carry more leaves than a modest machine wants to draw; at the lower levels of detail
   // a share of them is left off, evenly, so every crown thins and none goes bare.
   const leafShare = num('leaves', quality.leaves);
@@ -489,6 +490,29 @@ async function start(): Promise<void> {
   // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
   water.mirrorSky(atmosphere);
+  /**
+   * The weather: how much of the sky is cloud and whether it heaps up or lies in banks, how much
+   * mist lies in the low ground, and how thick the air is with distance. All of it is read by the
+   * air as it is drawn, so it can be changed as one watches.
+   */
+  const applyWeather = (w: { cloud: number; layered: boolean; mist: number; haze: number }) => {
+    const u = atmosphere.uniforms, floor = desc.sun?.floor ?? 0, low = site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk', { haze, mist, layered } = w;
+    u.uCloudCover.value = w.cloud;
+    // Haze: thin enough that the valley is clear across, thick enough that each range of hills
+    // is paler than the one in front of it. A low sun has more air to shine through.
+    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
+    // Mist: a few metres deep on the valley floor, from a veil to a fog.
+    u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
+    // And in the country beyond the valley, on its own higher ground, from some way out.
+    u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
+    // The haze is alight towards the sun only while the sun is up.
+    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
+    // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
+    // banks it is a thin layer; heaped, it towers.
+    u.uCloudBase.value = floor + 310 - 150 * w.cloud;
+    u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
+    u.uCloudFlat.value = layered ? 1 : 0;
+  };
   const night = desc.sun?.night ?? 0;
   {
     const u = atmosphere.uniforms;
@@ -519,23 +543,8 @@ async function start(): Promise<void> {
     new CubeCamera(1, 20000, skyPicture).update(renderer, envScene);
     u.tSky.value = skyPicture.texture;
     u.uAirOn.value = 1;
-    const haze = desc.sun?.haze ?? 0.5, mist = desc.sun?.mist ?? 0, floor = desc.sun?.floor ?? 0, low = site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk';
-    // Haze: thin enough that the valley is clear across, thick enough that each range of hills
-    // is paler than the one in front of it. A low sun has more air to shine through.
-    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
-    // Mist: a few metres deep on the valley floor, from a veil to a fog.
-    u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
-    // And in the country beyond the valley, on its own higher ground, from some way out.
-    u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
     u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
-    // The haze is alight towards the sun only while the sun is up.
-    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
-    // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
-    // banks it is a thin layer; heaped, it towers.
-    const cover = u.uCloudCover.value as number, layered = !!desc.sun?.layered;
-    u.uCloudBase.value = floor + 310 - 150 * cover;
-    u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
-    u.uCloudFlat.value = layered ? 1 : 0;
+    applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
   }
   if (desc.unders?.length) {
     // One box about everything that is under the hill out of doors.
@@ -588,6 +597,40 @@ async function start(): Promise<void> {
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
+  {
+    // The weather menu. What it changes is written into the address too, so that the place comes back as it was left.
+    const panel = document.getElementById('weatherMenu')!, field = (id: string) => document.getElementById(id) as HTMLInputElement;
+    const now = { cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5, wind: vegetationUniforms.uWind.value };
+    field('wCloud').value = String(now.cloud); field('wMist').value = String(now.mist); field('wHaze').value = String(now.haze); field('wWind').value = String(now.wind);
+    (document.getElementById('wForm') as HTMLSelectElement).value = now.layered ? 'layered' : 'heaped';
+    (document.getElementById('wHour') as HTMLSelectElement).value = site?.setting.hour ?? 'midday';
+    const show = () => { for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind']) (panel.querySelector(`output[for=${id}]`) as HTMLOutputElement).value = Number(field(id).value).toFixed(2); };
+    const remember = () => {
+      const next = new URLSearchParams(location.search);
+      next.set('cloud', now.cloud.toFixed(2)); next.set('mist', now.mist.toFixed(2)); next.set('haze', now.haze.toFixed(2)); next.set('layered', now.layered ? '1' : '0');
+      if (now.wind !== 1) next.set('wind', now.wind.toFixed(2)); else next.delete('wind');
+      history.replaceState(null, '', `?${next}`);
+    };
+    const change = () => {
+      now.cloud = Number(field('wCloud').value); now.mist = Number(field('wMist').value); now.haze = Number(field('wHaze').value); now.wind = Number(field('wWind').value);
+      now.layered = (document.getElementById('wForm') as HTMLSelectElement).value === 'layered';
+      applyWeather(now);
+      vegetationUniforms.uWind.value = now.wind;
+      show();
+      remember();
+    };
+    for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind', 'wForm']) document.getElementById(id)!.addEventListener('input', change);
+    // A new hour moves the sun, and with it every shadow and all the light that was worked out: the place is built again, and the eye put back where it was.
+    document.getElementById('wHour')!.addEventListener('change', (e) => {
+      remember();
+      const next = new URLSearchParams(location.search), p = player.position;
+      next.set('hour', (e.target as HTMLSelectElement).value);
+      next.set('at', [p.x, p.y, p.z, player.yaw].map((v) => v.toFixed(2)).join(','));
+      next.set('nointro', '1');
+      location.search = `?${next}`;
+    });
+    document.getElementById('weather')!.addEventListener('click', () => { panel.hidden = !panel.hidden; show(); });
+  }
   (document.getElementById('exportPlan') as HTMLButtonElement).hidden = !site;
   (document.getElementById('exportJson') as HTMLButtonElement).hidden = !site;
   (document.getElementById('exportInk') as HTMLButtonElement).hidden = !site;
@@ -626,9 +669,13 @@ async function start(): Promise<void> {
   });
   // A camera placed by the address, or anyone asking to fly, stays where it is put and does not drop.
   if (params.has('fly') || params.has('cam')) player.fly(true);
+  const at = (params.get('at') ?? '').split(',').map(Number);
   if (params.has('cam')) {
     const c = params.get('cam')!.split(',').map(Number);
     player.place(new Vector3(c[0], c[1], c[2]), c[3] ?? 0, c[4] ?? 0);
+  } else if (at.length >= 3 && at.every(Number.isFinite)) {
+    // Back where they stood when the place was built again for another hour, on their feet.
+    player.place(new Vector3(at[0], at[1] + 1.7, at[2]), at[3] ?? 0, 0);
   } else {
     player.place(desc.spawn.position, desc.spawn.yaw);
   }

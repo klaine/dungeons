@@ -19,10 +19,16 @@
     #place { margin: 3px 0 4px; }
     #seed { opacity: .62; margin-right: 6px; }
     #browse { pointer-events: auto; color: inherit; margin: 0 4px; }
-    #new, #export, #mute, #exportMenu button { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
+    #new, #export, #mute, #weather, #exportMenu button { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
       border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 2px 9px; }
-    #new:hover, #again:hover, #export:hover, #mute:hover, #exportMenu button:hover { background: rgba(224, 176, 112, .35); }
-    #exportMenu[hidden] { display: none; }
+    #new:hover, #again:hover, #export:hover, #mute:hover, #weather:hover, #exportMenu button:hover { background: rgba(224, 176, 112, .35); }
+    #exportMenu[hidden], #weatherMenu[hidden] { display: none; }
+    #weatherMenu { pointer-events: auto; display: grid; grid-template-columns: 92px 150px 34px; gap: 4px 10px; align-items: center; width: 300px;
+      margin: 6px 0 4px; padding: 8px 12px; background: rgba(11, 10, 9, .62); border: 1px solid rgba(232, 226, 214, .3); border-radius: 4px; }
+    #weatherMenu input[type=range] { width: 150px; accent-color: #e0b070; }
+    #weatherMenu select { font: inherit; color: inherit; background: rgba(11, 10, 9, .6); border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; }
+    #weatherMenu output { opacity: .7; font-variant-numeric: tabular-nums; }
+    #weatherMenu .note { grid-column: 1 / -1; opacity: .6; font-size: 12px; }
     #exportMenu button { margin-left: 4px; }
     #keys { min-height: 1.45em; }
     #keys span { display: inline-block; margin-right: 10px; padding-left: 14px; position: relative; }
@@ -129,7 +135,7 @@
     <div>
       <h1>Dungeons</h1>
       <div id="title"></div>
-      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <a id="browse" href="gallery.html">Gallery</a> <button id="mute" type="button">Sound on</button> <button id="export" type="button">Export</button>
+      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <a id="browse" href="gallery.html">Gallery</a> <button id="mute" type="button">Sound on</button> <button id="weather" type="button">Weather</button> <button id="export" type="button">Export</button>
         <span id="exportMenu" hidden>
           <button id="exportPlan" type="button">Plan (PNG)</button>
           <button id="exportInk" type="button">Ink map (PNG)</button>
@@ -138,6 +144,17 @@
           <button id="exportModel" type="button">3D model (GLB)</button>
           <a href="examples/viewer/" target="_blank" rel="noopener" style="color:inherit;margin-left:6px">Viewer</a>
         </span>
+      </div>
+      <div id="weatherMenu" hidden>
+        <label for="wHour">Time of day</label>
+        <select id="wHour"><option value="morning">morning</option><option value="midday">midday</option><option value="evening">evening</option><option value="sunset">sunset</option><option value="dusk">dusk</option><option value="night">night</option></select><span></span>
+        <label for="wCloud">Cloud</label><input id="wCloud" type="range" min="0" max="1" step="0.01"><output for="wCloud"></output>
+        <label for="wForm">Cloud lies</label>
+        <select id="wForm"><option value="heaped">heaped</option><option value="layered">in banks</option></select><span></span>
+        <label for="wMist">Mist</label><input id="wMist" type="range" min="0" max="1" step="0.01"><output for="wMist"></output>
+        <label for="wHaze">Haze</label><input id="wHaze" type="range" min="0" max="1" step="0.01"><output for="wHaze"></output>
+        <label for="wWind">Wind</label><input id="wWind" type="range" min="0" max="2.5" step="0.05"><output for="wWind"></output>
+        <span class="note">The weather changes as you watch; a new time of day builds the place again, and puts you back where you stood.</span>
       </div>
       <div id="keys"></div>
       <div id="stats"></div>
