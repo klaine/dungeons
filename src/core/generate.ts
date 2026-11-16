@@ -456,6 +456,11 @@ function layOutFootpaths(site: Site, rng: Rng): void {
     }
     (site.paths ??= []).push({ points, to });
   };
+  // To the foot of the way up to a shrine, which pilgrims walk.
+  for (const t of site.terraces ?? []) if (t.shrine && site.valley) {
+    const z = t.rise === 'n' ? t.z0 - t.run - 1.5 : t.z1 + t.run + 1.5, x = edgeAt(site.valley, t.side, z) + (t.side === 'w' ? 1 : -1) * 6.2;
+    lead(x, z, 0, 'shrine');
+  }
   for (const f of site.features ?? []) {
     if (f.kind === 'stones') lead(f.x, f.z, f.r * 1.55, 'stones');
     else if (f.kind === 'ruin' && !(site.paths ?? []).some((p) => p.to === 'ruin' && Math.hypot(p.points[p.points.length - 1][0] - f.x, p.points[p.points.length - 1][1] - f.z) < f.r + 3)) lead(f.x, f.z, f.r + 1.2, 'ruin');
@@ -784,7 +789,12 @@ function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: numb
       }
       if (free) fits.push({ side, z0, z1, depth, height, rise, run, way });
     }
-    if (fits.length) { site.terraces = [rng.pick(fits)]; return; }
+    if (fits.length) {
+      site.terraces = [rng.pick(fits)];
+      // Half of them have a shrine at the lookout, which pilgrims climb to. (From a stream of its own.)
+      if (rng.fork('shrine').chance(0.5)) site.terraces[0].shrine = true;
+      return;
+    }
   }
 }
 

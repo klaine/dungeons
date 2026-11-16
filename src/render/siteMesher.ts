@@ -1879,7 +1879,9 @@ export function meshSite(site: Site): SceneDescription {
       canopies.push([f.isle.x, f.isle.z, 1.6, 1]);
     }
     // (Not where the keep stands.)
-    woods(fine, 6.2, eased, (x, z) => !!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16));
+    // (Nor at the far end of a terrace, where a shrine or a cairn stands.)
+    const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
+    woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
 
     /**
@@ -2443,16 +2445,44 @@ export function meshSite(site: Site): SceneDescription {
       const inw = t.side === 'w' ? 1 : -1, z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4;
       const x = sideAt(t.side, z) + inw * (4.7 + t.depth * 0.62), y = ground(x, z);
       const pile = rng.fork('cairn');
+      if (t.shrine) {
+        // A wayside shrine: a stepped base, a pillar with a niche in the face towards the valley, a little roof of tiles, and a lamp burning in the niche.
+        const face = -inw;
+        // (A block about the shrine's middle: `a` along the valley, `d` out towards the valley, `y` up.)
+        const k = (a0: number, a1: number, y0: number, y1: number, d0: number, d1: number, st: MasonryStyle, tag: string) => wild.box('stone', V(x + Math.min(d0 * face, d1 * face), y + y0, z + a0), V(x + Math.max(d0 * face, d1 * face), y + y1, z + a1), st, st, tag);
+        k(-1.1, 1.1, -0.4, 0.22, -1.1, 1.1, coping, 'shrinestep');
+        k(-0.8, 0.8, 0.22, 0.44, -0.8, 0.8, coping, 'shrinestep');
+        k(-0.38, 0.38, 0.44, 2.5, -0.38, 0.38, dressed, 'shrinepillar');
+        // (The niche: a dark recess with a lamp in it, cut in the face towards the valley.)
+        k(-0.24, 0.24, 1.4, 2.1, 0.38, 0.44, coping, 'nichehood');
+        wild.box('metal', V(x + face * 0.33 - 0.06, y + 1.47, z - 0.06), V(x + face * 0.33 + 0.06, y + 1.62, z + 0.06), coping, coping, 'lamp');
+        glows.push({ from: V(x + face * 1.5, y + 1.6, z), position: V(x, y + 1.6, z), colour: [1.0, 0.62, 0.28], strength: 1.4 });
+        const roofY = y + 2.5, tilesS = wild.mesh('tile'), tone: [number, number, number] = [1.08, 1.0, 0.95];
+        const A = V(x - 0.62, roofY, z - 0.62), B = V(x + 0.62, roofY, z - 0.62), C = V(x + 0.62, roofY, z + 0.62), D = V(x - 0.62, roofY, z + 0.62), top = V(x, roofY + 0.75, z);
+        for (const [p0, p1] of [[A, B], [B, C], [C, D], [D, A]]) tileFace(tilesS, [p0, p1, top], tone, V(x, roofY + 0.2, z));
+        tileFace(tilesS, [A, B, C, D], tone, V(x, roofY + 1, z));
+        wild.box('stone', V(x - 0.06, roofY + 0.72, z - 0.04), V(x + 0.06, roofY + 1.15, z + 0.04), coping, coping, 'finial');
+        // Wayside crosses up the way to it, at even spaces: a stone shaft with a short arm, beside the path.
+        const crossAt = (zz: number) => {
+          const xx = sideAt(t.side, zz) + inw * (4.7 + 2.65), yy = ground(xx, zz);
+          wild.box('stone', V(xx - 0.12, yy - 0.3, zz - 0.12), V(xx + 0.12, yy + 1.45, zz + 0.12), dressed, coping, 'waycross');
+          wild.box('stone', V(xx - 0.12, yy + 1.05, zz - 0.38), V(xx + 0.12, yy + 1.27, zz + 0.38), dressed, coping, 'waycross');
+        };
+        for (let u = 2; u < t.run; u += Math.max(3.5, t.run / 3)) crossAt(t.rise === 'n' ? t.z0 - u : t.z1 + u);
+      } else {
       // Big stones at the bottom, small at the top, each sitting in the hollow between those under it.
-      for (let course = 0, up = 0; course < 5; course++) {
-        const size = 0.52 - course * 0.075, ring = Math.max(1, 5 - course * 1.3), out = (0.46 - course * 0.11) * (course < 4 ? 1 : 0);
-        for (let k = 0; k < ring; k++) {
-          const a = (k / ring) * Math.PI * 2 + course * 0.9 + pile.range(-0.2, 0.2);
-          layStone(sceneryMesh('rock'), x + Math.cos(a) * out, y + up - size * 0.2, z + Math.sin(a) * out, size * pile.range(0.9, 1.1), pile.range(0.8, 1.1), pile);
+        for (let course = 0, up = 0; course < 5; course++) {
+          const size = 0.52 - course * 0.075, ring = Math.max(1, 5 - course * 1.3), out = (0.46 - course * 0.11) * (course < 4 ? 1 : 0);
+          for (let k = 0; k < ring; k++) {
+            const a = (k / ring) * Math.PI * 2 + course * 0.9 + pile.range(-0.2, 0.2);
+            layStone(sceneryMesh('rock'), x + Math.cos(a) * out, y + up - size * 0.2, z + Math.sin(a) * out, size * pile.range(0.9, 1.1), pile.range(0.8, 1.1), pile);
+          }
+          up += size * 0.62;
         }
-        up += size * 0.62;
       }
-      finds.push({ at: V(x - inw * 0.9, ground(x - inw * 0.9, z) + 0.35, z + 0.3), what: 'a brass spyglass in a leather case, left by the cairn on the lookout' });
+      // (Before the shrine's steps, or beside the cairn.)
+      const fx = x - inw * (t.shrine ? 1.7 : 0.9);
+      finds.push({ at: V(fx, ground(fx, z) + 0.35, z + 0.3), what: t.shrine ? 'a brass spyglass in a leather case, left before the shrine on the lookout' : 'a brass spyglass in a leather case, left by the cairn on the lookout' });
       if (t.way === 'steps') {
         // Steps cut in the rock, up the middle of the way: each a block a stride broad, its top
         // level with the ground at its upper edge. They are for the eye; what is walked on is

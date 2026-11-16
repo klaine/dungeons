@@ -174,6 +174,8 @@ export interface Terrace {
   run: number;
   /** What the way up is: a ledge the rock happens to offer, or steps somebody cut in it, which are steeper and shorter. */
   way: 'ledge' | 'steps';
+  /** Whether the lookout at its far end is a shrine, which pilgrims climb to, with wayside crosses up the way to it; otherwise there is a cairn. */
+  shrine?: boolean;
 }
 
 /**
@@ -393,7 +395,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */
