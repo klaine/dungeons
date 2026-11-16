@@ -88,6 +88,8 @@ export function placeLine(site: Site, p: Place): string {
   else if (p.roof === 'sky') notes.push('open to the sky');
   else if (p.roof === 'cave') notes.push('natural cave');
   else notes.push(p.roof === 'timber' ? 'timber ceiling' : 'stone vault');
+  if (p.shaft) notes.push('daylight from a hole in the roof');
+  if (p.light === 'glow') notes.push('lit by growths that glow');
   if (p.light === 'dark') notes.push('unlit');
   for (const it of site.items) if (it.place === p.id) notes.push(`${it.key} key`);
   if (site.levers.some((l) => l.place === p.id)) notes.push('lever');

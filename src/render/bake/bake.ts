@@ -16,7 +16,11 @@ export interface BakeLights {
   sunE: [number, number, number];
   /** Sky radiance at the zenith and horizon, and the radiance of whatever lies below the horizon. */
   sky: { zenith: number[]; horizon: number[]; ground: number[] };
-  points: { pos: number[]; intensity: number[]; range: number; size: number }[];
+  /**
+   * Lamps. The light that falls straight from a lamp is normally left out of the result, because a
+   * real light draws it; a lamp marked `keep` has no real light, and its direct light is baked in.
+   */
+  points: { pos: number[]; intensity: number[]; range: number; size: number; keep?: boolean }[];
 }
 
 export interface BakeInput {
@@ -127,11 +131,13 @@ export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (
     // Direct light, needed only as the source of the first bounce.
     const directC = new Float32Array(m * 3);
     const sunVisC = new Float32Array(m);
+    const keptC = new Float32Array(m * 12);
     let done = 0;
     await pool.run(
       ranges.map(([start, end]) => ({ type: 'direct', start, end, salt: 11 })),
-      (r: { start: number; E: Float32Array; sunVis: Float32Array }) => {
+      (r: { start: number; E: Float32Array; sunVis: Float32Array; kept: Float32Array }) => {
         directC.set(r.E, r.start * 3);
+        keptC.set(r.kept, r.start * 12);
         sunVisC.set(r.sunVis, r.start);
         onProgress('Tracing direct light', ++done / ranges.length);
       },
@@ -140,6 +146,8 @@ export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (
     const sunVis = new Float32Array(n);
     spread(directC, direct, 3, true);
     spread(sunVisC, sunVis, 1, false);
+    const kept = new Float32Array(n * 12);
+    spread(keptC, kept, 12, true);
 
     const sh = new Float32Array(n * 12);
     const skyVis = new Float32Array(n);
@@ -171,6 +179,9 @@ export async function bake(input: BakeInput, onProgress: Progress, onPartial?: (
           indirect[i * 3 + c] = Math.max(0, sh[o] + sh[o + 1] * nx + sh[o + 2] * ny + sh[o + 3] * nz);
         }
       }
+      // Direct light from lamps that nothing else draws goes in last, after it has served as a
+      // source of bounces, so that it is not counted twice.
+      for (let i = 0; i < n * 12; i++) sh[i] += kept[i];
       if (onPartial && bounce < input.bounces - 1) onPartial({ sh: sh.slice(), skyVis, sunVis });
     }
     return { sh, skyVis, sunVis };

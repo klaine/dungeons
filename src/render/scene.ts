@@ -83,6 +83,11 @@ export interface SceneDescription {
   doors?: DoorDesc[];
   /** Per place, the spot where a thing can be set down: the top of its chest or pedestal. */
   anchors?: Map<number, Vector3>;
+  /**
+   * Things that give a faint light of their own: growths on the rock of a cave. Each lies where
+   * the line from `from` towards `position` first meets rock. Baked, and drawn as points of light.
+   */
+  glows?: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[];
   scenery?: Scenery;
   /** How many of each kind of plant were set out below the trees, for tuning the rules. */
   planted?: Record<string, number>;

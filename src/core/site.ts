@@ -29,7 +29,9 @@ export type Lighting =
   /** Torches on the walls. */
   | 'torch'
   /** Nothing. Only what the player carries, and what spills in through the doors. */
-  | 'dark';
+  | 'dark'
+  /** In a cave: growths on the rock that give a faint light of their own. */
+  | 'glow';
 
 export interface Place {
   id: number;
@@ -50,6 +52,8 @@ export interface Place {
   name: string;
   /** The roof has come down: open to the sky, with what fell still lying there. */
   fallen?: boolean;
+  /** In a cave: a hole in the roof, open to the sky above the hill, that lets daylight down. */
+  shaft?: { x: number; z: number; r: number };
 }
 
 /** Keys are told apart by their metal. */
@@ -98,6 +102,11 @@ export interface Way {
   /** Position of the centre along the wall: an x coordinate for north and south walls, z for east and west. */
   at: number;
   halfWidth: number;
+  /**
+   * A way between two chambers of a cave: a cleft in the rock, not something built. It has no
+   * door and no steps; its floor slopes from the one chamber's level to the other's.
+   */
+  natural?: boolean;
 }
 
 /** Something out in the valley. */

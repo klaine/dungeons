@@ -1,7 +1,8 @@
 // Drives the player at the edges of the valley from many directions, jumping, and reports whether they ever got out.
 const { chromium } = require('playwright');
 (async () => {
-  const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  // With REAL_GPU=1 a window is opened and the machine's own graphics card is used; otherwise a software renderer, which needs none.
+  const browser = await chromium.launch(process.env.REAL_GPU ? { headless: false } : { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   for (const seed of process.argv.slice(2)) {
     const page = await browser.newPage({ viewport: { width: 240, height: 135 }, deviceScaleFactor: 1 });
     page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 200)));

@@ -57,6 +57,8 @@ function direct(start: number, end: number, salt: number) {
   const n = end - start;
   const E = new Float32Array(n * 3);
   const sunVis = new Float32Array(n);
+  // Direct light to be kept in the result, in the same form as gathered light: a constant and a direction.
+  const kept = new Float32Array(n * 12);
   const sd = lights.sunDir;
   // Sun positions across a day, east to west through the south, for how much sun a spot gets.
   const DAY = 7;
@@ -100,17 +102,28 @@ function direct(start: number, end: number, salt: number) {
       const d = Math.sqrt(d2);
       D.multiplyScalar(1 / d);
       const nl = nx * D.x + ny * D.y + nz * D.z;
-      if (nl <= 0) continue;
+      if (nl <= (L.keep ? -0.3 : 0)) continue;
       ray.origin.copy(O);
       ray.direction.copy(D);
       if (occluded(d - 0.02)) continue;
-      const a = nl / Math.max(d2, 0.04);
+      const fall = 1 / Math.max(d2, 0.04);
+      if (L.keep) {
+        // A light from one direction, as constant plus direction: 1/4 + 1/2 cos fits a clamped cosine.
+        const ko = (slot - start) * 12;
+        for (let c = 0; c < 3; c++) {
+          const s = L.intensity[c] * fall;
+          kept[ko + c * 4] += 0.25 * s;
+          kept[ko + c * 4 + 1] += 0.5 * s * D.x; kept[ko + c * 4 + 2] += 0.5 * s * D.y; kept[ko + c * 4 + 3] += 0.5 * s * D.z;
+        }
+      }
+      if (nl <= 0) continue;
+      const a = nl * fall;
       r += L.intensity[0] * a; g += L.intensity[1] * a; b += L.intensity[2] * a;
     }
     const o = (slot - start) * 3;
     E[o] = r; E[o + 1] = g; E[o + 2] = b;
   }
-  return { E, sunVis };
+  return { E, sunVis, kept };
 }
 
 const skyOut = new Float32Array(3);
@@ -216,7 +229,7 @@ self.onmessage = (e: MessageEvent) => {
     self.postMessage({ type: 'ready' });
   } else if (m.type === 'direct') {
     const r = direct(m.start, m.end, m.salt);
-    self.postMessage({ type: 'direct', start: m.start, end: m.end, ...r }, [r.E.buffer, r.sunVis.buffer]);
+    self.postMessage({ type: 'direct', start: m.start, end: m.end, ...r }, [r.E.buffer, r.sunVis.buffer, r.kept.buffer]);
   } else if (m.type === 'gather') {
     const r = gather(m.start, m.end, radiosity!, m.rays, m.salt);
     self.postMessage({ type: 'gather', start: m.start, end: m.end, ...r }, [r.sh.buffer, r.skyVis.buffer, r.valid.buffer]);

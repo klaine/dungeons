@@ -12,4 +12,5 @@ happened. They need Playwright with Chromium (`npm install --no-save playwright`
 | `node tools/browser/jetty.cjs <seed> …` | Walks out along the landing stage and reports the player's height at each step, to show they stayed on the deck. |
 
 They launch Chromium with a software renderer, so they work without a graphics card, slowly: a
-site takes one to three minutes.
+site takes one to three minutes. On a machine with a graphics card, set `REAL_GPU=1` to open a
+window and use it instead (in PowerShell: `$env:REAL_GPU=1; node tools/browser/play.cjs ink-7`).

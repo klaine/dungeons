@@ -84,11 +84,12 @@ A place is a rectangle of open floor. Walls lie outside it.
 | `wall` | Height of the walls above the floor: to where a vault springs, or to a flat ceiling. |
 | `roof` | `barrel` (a stone vault), `timber` (boards on beams), `sky` (open), or `cave` (not built: natural rock all round, and the open floor is an irregular hollow inside the rectangle). |
 | `axis` | The direction a barrel vault runs, `x` or `z`. |
-| `light` | `day`, `torch` or `dark`. A dark place has no light of its own. |
+| `light` | `day`, `torch`, `dark`, or `glow` (in a cave: growths on the rock that give a faint light). A dark place has no light of its own. |
 | `role` | `approach` (the meadow in front of the door), `entrance`, `passage` (an ordinary room on the way through), `court`, `reward` (a dead end worth reaching), or `goal`. |
 | `name` | What the place is in the fiction: refectory, dormitory, store. Furnishing follows from it. |
 | `depth` | How many places in from the entrance. |
 | `fallen` | Present and `true` if the roof has come down. Such a place has `roof: "sky"`. |
+| `shaft` | In a cave: a hole in the roof open to the sky, as `x`, `z` and radius `r` at its foot. It widens upwards. Such a chamber has `light: "day"`. |
 
 ### Ways
 
@@ -107,6 +108,7 @@ A way is an opening through the wall between two places.
 | `at` | Where the centre of the opening is along the wall: an x coordinate for north and south walls, a z coordinate for east and west. |
 | `halfWidth` | Half the width of the opening. |
 | `door` | Present if a leaf hangs in the opening. |
+| `natural` | Present and `true` for a cleft between two chambers of a cave. It is not built: no arch, no door, no steps. Its floor slopes from one chamber's level to the other's across the thickness of the rock. Chambers joined by clefts are one cave. |
 
 To find the opening on the plan, take the wall of `a` named by `side`. For `n` the wall runs from `z0 - wallThickness` to `z0` of place `a`; for `s`, from `z1` to `z1 + wallThickness`; `w` and `e` likewise in x. Along the wall, the opening runs from `at - halfWidth` to `at + halfWidth`.
 

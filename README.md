@@ -68,6 +68,12 @@ Some dead ends are natural caves, unlit, walled off behind a door:
 
 ![A cave seen from its doorway, and the door set in masonry in the rock](docs/images/cave.jpg)
 
+A cave may run on through several chambers, dark and lit by turns: daylight from a hole in the roof, or growths that glow.
+
+![From a dark chamber, daylight ahead through a cleft in the rock](docs/images/cave-system.jpg)
+
+![Looking up a hole in the roof of a cave to the sky](docs/images/cave-shaft.jpg)
+
 The hand-built scene used to develop the look (`?scene=test`):
 
 ![A vaulted hall with shafts of sunlight from the door and window](docs/images/hall-light-shafts.jpg)

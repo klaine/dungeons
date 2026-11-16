@@ -66,7 +66,7 @@ export function meshSite(site: Site): SceneDescription {
     const lo = Math.min(places[w.a].floor, places[w.b].floor);
     const hi = Math.max(places[w.a].floor, places[w.b].floor);
     if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35 };
-    return { y0: lo - 0.1, ys: hi + (w.kind === 'arch' ? 1.9 : 2.0) };
+    return { y0: lo - 0.1, ys: hi + (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0) };
   };
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
@@ -113,7 +113,7 @@ export function meshSite(site: Site): SceneDescription {
     if (p.roof !== 'sky') {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
       // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none.
-      const want = p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : 3) : p.light === 'day' && area >= 40 ? 1 : 0;
+      const want = p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : 3) : p.light === 'day' && area >= 40 ? 1 : 0;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
       const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
@@ -382,7 +382,8 @@ export function meshSite(site: Site): SceneDescription {
       // inside the meadow are drawn back to its edge, so the sheet meets it without lapping in.
       // Over the house it is the turf of the hill above the vaults, left open over every court.
       skip: (c) => overlaps(c, p.x0 + 1.3, p.x1 - 1.3, frontZ, p.z1 - 1.3) || (c.z0 < frontZ && c.z1 > frontZ && c.x1 > p.x0 - 0.3 && c.x0 < p.x1 + 0.3)
-        || house.some((q) => q.roof === 'sky' && overlaps(c, q.x0 - T / 2 - 0.2, q.x1 + T / 2 + 0.2, q.z0 - T / 2 - 0.2, q.z1 + T / 2 + 0.2)),
+        || house.some((q) => q.roof === 'sky' && overlaps(c, q.x0 - T / 2 - 0.2, q.x1 + T / 2 + 0.2, q.z0 - T / 2 - 0.2, q.z1 + T / 2 + 0.2))
+        || skylights.some((q) => overlaps(c, q.x0, q.x1, q.z0, q.z1)),
       warp: (x, z) => {
         const w = x - (p.x0 - 0.25), e = p.x1 + 0.25 - x, s = p.z1 + 0.25 - z;
         if (w <= 0 || e <= 0 || s <= 0 || z < frontZ) return [x, z];
@@ -745,6 +746,107 @@ export function meshSite(site: Site): SceneDescription {
   const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: wild.meshes, cards: [] };
   const trees: [number, number][] = [];
 
+  // ------------------------------------------------------------------ caves
+  // Chambers joined by clefts make one cave. Each is listed under every chamber it holds, first chamber first.
+  const cavesOf = new Map<number, number[]>();
+  for (const p of places) {
+    if (p.roof !== 'cave' || cavesOf.has(p.id)) continue;
+    const system = [p.id];
+    for (let k = 0; k < system.length; k++) {
+      for (const w of site.ways) {
+        if (!w.natural || (w.a !== system[k] && w.b !== system[k])) continue;
+        const other = w.a === system[k] ? w.b : w.a;
+        if (!system.includes(other)) system.push(other);
+      }
+    }
+    for (const id of system) cavesOf.set(id, system);
+  }
+  /**
+   * The open air of one chamber, as a function that is positive in air and negative in rock: an
+   * uneven dome over a rough oval floor, with a bay reaching towards each way in, and a shaft to
+   * the sky if it has one.
+   */
+  const chamberAir = (p: Place): ((x: number, y: number, z: number) => number) => {
+    const dx = p.x1 - p.x0, dz = p.z1 - p.z0, cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
+    const holes = SIDES.flatMap((side) => holesOn(p, side, 0).map((h) => ({ side, at: h.at, w: h.w, natural: !!h.way.natural })));
+    const doorPoint = (d: { side: Side; at: number }) => (d.side === 'n' ? [d.at, p.z0] : d.side === 's' ? [d.at, p.z1] : d.side === 'w' ? [p.x0, d.at] : [p.x1, d.at]);
+    // Sides the builders walled, where masonry hides the edge of the rock.
+    const walled = new Set(holes.filter((d) => !d.natural).map((d) => d.side));
+    const rx = dx / 2 - 0.35, rz = dz / 2 - 0.35, rMin = Math.min(rx, rz);
+    const seeds = rng.fork(`cave${p.id}`);
+    const s1 = seeds.range(0, 50), s2 = seeds.range(0, 50);
+    const shape = (x: number, z: number): { e: number; nearDoor: number } => {
+      let e = (1 - Math.hypot((x - cx) / rx, (z - cz) / rz)) * rMin;
+      e += (fbm2(x * 0.5 + s1, z * 0.5 + s2, 3) - 0.5) * 1.5;
+      // Keep clear of the sides that have no wall to hide the edge of the rock.
+      let limit = Infinity;
+      if (!walled.has('n')) limit = Math.min(limit, z - p.z0);
+      if (!walled.has('s')) limit = Math.min(limit, p.z1 - z);
+      if (!walled.has('w')) limit = Math.min(limit, x - p.x0);
+      if (!walled.has('e')) limit = Math.min(limit, p.x1 - x);
+      e = Math.min(e, limit - 0.25);
+      let nearDoor = Infinity;
+      for (const d of holes) {
+        const [qx, qz] = doorPoint(d);
+        const dd = Math.hypot(x - qx, z - qz);
+        nearDoor = Math.min(nearDoor, dd);
+        e = Math.max(e, d.w + 0.9 - dd);
+      }
+      return { e, nearDoor };
+    };
+    return (x, y, z) => {
+      let { e, nearDoor } = shape(x, z);
+      // Ledges and hollows a hand's breadth to a pace across, so the walls are not smooth.
+      e += (fbm2(x * 1.9 + y * 1.1 + s1, z * 1.9 - y * 0.8 + s2, 3) - 0.5) * 0.5 * Math.min(1, nearDoor / 1.5);
+      const settle = Math.min(1, Math.max(0, (nearDoor - 1.3) / 1.6));
+      const floorY = p.floor - 0.006 + (fbm2(x * 0.8 + s2, z * 0.8 + s1, 3) - 0.5) * 0.34 * settle;
+      const dome = Math.pow(Math.min(1, Math.max(0, e / rMin)), 0.55);
+      let ceilY = p.floor + p.wall * (0.5 + 0.5 * dome) + (fbm2(x * 0.65 + s1 + 9, z * 0.65 + s2, 3) - 0.5) * 0.9;
+      ceilY = Math.max(ceilY, p.floor + 3.5 - nearDoor * 0.5);
+      const air = smin(smin(e, y - floorY, 0.35), ceilY - y, 0.5);
+      // Whatever the noise does, the rock must close before it reaches the edge of the space
+      // being carved, except towards a masonry wall, which hides the edge.
+      let edge = Math.min(p.floor + p.wall + 1.2 - y, y - (p.floor - 0.6));
+      if (!walled.has('n')) edge = Math.min(edge, z - p.z0);
+      if (!walled.has('s')) edge = Math.min(edge, p.z1 - z);
+      if (!walled.has('w')) edge = Math.min(edge, x - p.x0);
+      if (!walled.has('e')) edge = Math.min(edge, p.x1 - x);
+      let out = Math.min(air, edge - 0.2);
+      if (p.shaft) {
+        // Where the roof fell in long ago: a hole to the open hill, wider at the top than the bottom.
+        const lean = (y - p.floor) * 0.03;
+        const flare = 1 + 0.45 * Math.min(1, Math.max(0, (y - p.floor - p.wall * 0.6) / (site.top - p.floor - p.wall * 0.6)));
+        const r = p.shaft.r * flare * (0.85 + 0.3 * fbm2(y * 0.5 + s1, Math.atan2(z - p.shaft.z, x - p.shaft.x) * 1.5 + s2, 2));
+        out = Math.max(out, Math.min(r - Math.hypot(x - p.shaft.x - lean, z - p.shaft.z + lean * 0.6), y - (p.floor + p.wall * 0.6)));
+      }
+      return out;
+    };
+  };
+  /** The air of a cleft between two chambers: a rough tube through the rock, its floor sloping from one level to the other. */
+  const cleftAir = (w: Way): ((x: number, y: number, z: number) => number) => {
+    const a = places[w.a], b = places[w.b];
+    const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
+    const alongX = w.side === 'n' || w.side === 's';
+    const edge = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
+    const seeds = rng.fork(`cleft${w.a}-${w.b}`);
+    const t1 = seeds.range(0, 50), bend = seeds.range(-0.5, 0.5);
+    return (x, y, z) => {
+      // t runs from the first chamber's edge through the wall; s is the distance to one side.
+      const t = alongX ? (z - edge) * n[1] : (x - edge) * n[0];
+      const f = Math.min(1, Math.max(0, t / T));
+      const s = (alongX ? x : z) - w.at - bend * Math.sin(f * Math.PI);
+      const floorY = a.floor + (b.floor - a.floor) * (f * f * (3 - 2 * f)) + (fbm2(x * 1.1 + t1, z * 1.1, 2) - 0.5) * 0.07;
+      const wide = w.halfWidth + 0.15 + (fbm2(t * 0.9 + t1, y * 0.8, 2) - 0.5) * 0.5;
+      const high = 2.45 + (fbm2(x * 0.8 + t1, z * 0.8 + 7, 2) - 0.5) * 0.7;
+      const air = smin(smin(wide - Math.abs(s), y - floorY, 0.3), floorY + high - y, 0.4);
+      // It reaches a good pace into each chamber, and no further.
+      return Math.min(air, t + 1.5, T + 1.5 - t);
+    };
+  };
+  const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
+  // Where a cave's shaft comes up through the hill, the turf laid over the house is left open.
+  const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
+
   for (const p of places) {
     if (p.role === 'approach') { buildApproach(p); continue; }
     kit.group = `p${p.id}`;
@@ -771,7 +873,7 @@ export function meshSite(site: Site): SceneDescription {
       const R = span(p) / 2;
       const end = p.roof === 'barrel' && isEndWall(p, side);
       // A cave has masonry only where the builders walled it off to hang a door.
-      if (!cave || holesOn(p, side, 0).length) {
+      if (!cave || holesOn(p, side, 0).some((h) => !h.way.natural)) {
         kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, top, ashlar, {
           openings: holesOn(p, side, 0.1),
           keep: end ? (u, y) => y < roofY + 0.3 || Math.hypot(u - mid, y - roofY) < R + 0.45 : undefined,
@@ -784,64 +886,64 @@ export function meshSite(site: Site): SceneDescription {
 
     // Roof.
     if (cave) {
-      // Open air is an uneven dome over a rough oval floor, with a bay reaching each doorway.
-      const doors = SIDES.flatMap((side) => holesOn(p, side, 0).map((h) => ({ side, at: h.at, w: h.w })));
-      const doorPoint = (d: { side: Side; at: number }) => (d.side === 'n' ? [d.at, p.z0] : d.side === 's' ? [d.at, p.z1] : d.side === 'w' ? [p.x0, d.at] : [p.x1, d.at]);
-      const walled = new Set(doors.map((d) => d.side));
-      const rx = dx / 2 - 0.35, rz = dz / 2 - 0.35, rMin = Math.min(rx, rz);
-      const s1 = rng.range(0, 50), s2 = rng.range(0, 50);
-      const shape = (x: number, z: number): { e: number; nearDoor: number } => {
-        let e = (1 - Math.hypot((x - cx) / rx, (z - cz) / rz)) * rMin;
-        e += (fbm2(x * 0.5 + s1, z * 0.5 + s2, 3) - 0.5) * 1.5;
-        // Keep clear of the sides that have no wall to hide the edge of the rock.
-        let limit = Infinity;
-        if (!walled.has('n')) limit = Math.min(limit, z - p.z0);
-        if (!walled.has('s')) limit = Math.min(limit, p.z1 - z);
-        if (!walled.has('w')) limit = Math.min(limit, x - p.x0);
-        if (!walled.has('e')) limit = Math.min(limit, p.x1 - x);
-        e = Math.min(e, limit - 0.25);
-        let nearDoor = Infinity;
-        for (const d of doors) {
-          const [qx, qz] = doorPoint(d);
-          const dd = Math.hypot(x - qx, z - qz);
-          nearDoor = Math.min(nearDoor, dd);
-          e = Math.max(e, d.w + 0.9 - dd);
+      // A cave is carved once, whole, when its first chamber comes up: every chamber and every
+      // cleft between them as one body of air in one body of rock, so nothing has to be joined.
+      const system = cavesOf.get(p.id)!;
+      if (system[0] === p.id) {
+        const airs = system.map((id) => chamberAir(places[id]));
+        const clefts = site.ways.filter((w) => w.natural && system.includes(w.a)).map(cleftAir);
+        const all = [...airs, ...clefts];
+        const members = system.map((id) => places[id]);
+        const shafted = members.some((q) => q.shaft);
+        const wetField = indoorField([], Math.min(...members.map((q) => q.floor)));
+        const tone1 = rng.fork(`cavetone${p.id}`).range(0, 50), tone2 = rng.fork(`cavetone2${p.id}`).range(0, 50);
+        carveRock(kit.mesh('rock'), (x, y, z) => {
+          let air = -Infinity;
+          for (const f of all) air = Math.max(air, f(x, y, z));
+          return air;
+        }, {
+          min: V(Math.min(...members.map((q) => q.x0)) - 0.14, Math.min(...members.map((q) => q.floor)) - 0.9, Math.min(...members.map((q) => q.z0)) - 0.14),
+          max: V(Math.max(...members.map((q) => q.x1)) + 0.14, shafted ? site.top - 0.12 : Math.max(...members.map((q) => q.floor + q.wall)) + 1.2, Math.max(...members.map((q) => q.z1)) + 0.14),
+          cell: 0.28, uvScale: 0.45,
+          shade: (c, n, field) => {
+            wetField(c, n, field);
+            // Under a shaft, where daylight and rain come down, the rock is green.
+            for (const q of members) if (q.shaft) field[0] = Math.max(field[0], (1 - Math.min(1, Math.hypot(c.x - q.shaft.x, c.z - q.shaft.z) / (q.shaft.r * 3.2))) * (0.5 + 0.5 * Math.max(0, n.y)));
+            // Beds of slightly different stone, tilted; darker where water has stood.
+            const bed = fbm2((c.y + c.x * 0.18) * 2.6, c.z * 0.15 + tone1, 3);
+            const blot = fbm2(c.x * 0.9 + tone2, c.z * 0.9 + c.y * 0.7, 3);
+            const tone = 0.72 + 0.4 * bed + 0.24 * blot;
+            return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
+          },
+        });
+      }
+      // Rock above the chamber; where a shaft goes up through it, rock all round the shaft.
+      const above = p.floor + p.wall + 1.25;
+      if (p.shaft) {
+        const h = p.shaft.r * 1.5 + 0.4, sx = p.shaft.x, sz = p.shaft.z;
+        kit.mass(V(p.x0 - T / 2, above, p.z0 - T / 2), V(p.x1 + T / 2, site.top, sz - h));
+        kit.mass(V(p.x0 - T / 2, above, sz + h), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+        kit.mass(V(p.x0 - T / 2, above, sz - h), V(sx - h, site.top, sz + h));
+        kit.mass(V(sx + h, above, sz - h), V(p.x1 + T / 2, site.top, sz + h));
+        // Ferns in the light at the foot of the shaft.
+        const fr = rng.fork(`shaftferns${p.id}`);
+        for (let k = 0; k < 16; k++) {
+          const a = fr.range(0, Math.PI * 2), d = Math.sqrt(fr.next()) * p.shaft.r * 2.1, t = fr.range(0.8, 1.2), size = fr.range(0.55, 1.0);
+          // Cards take their share of sky from the open air; down here that is a fraction, so they are made darker to match.
+          planting.tuft(planting.ferns, sx + Math.cos(a) * d, p.floor - 0.03, sz + Math.sin(a) * d, size, size * fr.range(0.55, 0.8), fr.range(0, Math.PI), [0.03 * t, 0.085 * t, 0.016 * t]);
         }
-        return { e, nearDoor };
-      };
-      const density = (x: number, y: number, z: number): number => {
-        let { e, nearDoor } = shape(x, z);
-        // Ledges and hollows a hand's breadth to a pace across, so the walls are not smooth.
-        e += (fbm2(x * 1.9 + y * 1.1 + s1, z * 1.9 - y * 0.8 + s2, 3) - 0.5) * 0.5 * Math.min(1, nearDoor / 1.5);
-        const settle = Math.min(1, Math.max(0, (nearDoor - 1.3) / 1.6));
-        const floorY = p.floor - 0.006 + (fbm2(x * 0.8 + s2, z * 0.8 + s1, 3) - 0.5) * 0.34 * settle;
-        const dome = Math.pow(Math.min(1, Math.max(0, e / rMin)), 0.55);
-        let ceilY = p.floor + p.wall * (0.5 + 0.5 * dome) + (fbm2(x * 0.65 + s1 + 9, z * 0.65 + s2, 3) - 0.5) * 0.9;
-        ceilY = Math.max(ceilY, p.floor + 3.5 - nearDoor * 0.5);
-        const air = smin(smin(e, y - floorY, 0.35), ceilY - y, 0.5);
-        // Whatever the noise does, the rock must close before it reaches the edge of the space
-        // being carved, except towards a masonry wall, which hides the edge.
-        let edge = Math.min(p.floor + p.wall + 1.2 - y, y - (p.floor - 0.6));
-        if (!walled.has('n')) edge = Math.min(edge, z - p.z0);
-        if (!walled.has('s')) edge = Math.min(edge, p.z1 - z);
-        if (!walled.has('w')) edge = Math.min(edge, x - p.x0);
-        if (!walled.has('e')) edge = Math.min(edge, p.x1 - x);
-        return Math.min(air, edge - 0.2);
-      };
-      const wet = indoorField([], p.floor);
-      carveRock(kit.mesh('rock'), density, {
-        min: V(p.x0 - 0.14, p.floor - 0.6, p.z0 - 0.14), max: V(p.x1 + 0.14, p.floor + p.wall + 1.2, p.z1 + 0.14),
-        cell: 0.28, uvScale: 0.45,
-        shade: (q, n, field) => {
-          wet(q, n, field);
-          // Beds of slightly different stone, tilted; darker where water has stood.
-          const bed = fbm2((q.y + q.x * 0.18) * 2.6, q.z * 0.15 + s1, 3);
-          const blot = fbm2(q.x * 0.9 + s2, q.z * 0.9 + q.y * 0.7, 3);
-          const tone = 0.72 + 0.4 * bed + 0.24 * blot;
-          return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
-        },
-      });
-      kit.mass(V(p.x0 - T / 2, p.floor + p.wall + 1.25, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      } else kit.mass(V(p.x0 - T / 2, above, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      // Growths that glow: clusters low on the rock round the edge of the chamber.
+      if (p.light === 'glow') {
+        const gr = rng.fork(`glow${p.id}`);
+        const count = 3 + gr.int(0, 2), turn = gr.range(0, Math.PI * 2);
+        for (let k = 0; k < count; k++) {
+          const a = turn + (k / count) * Math.PI * 2 + gr.range(-0.4, 0.4);
+          // Aimed from the middle of the chamber; whoever draws it finds the rock along that line.
+          const y = p.floor + gr.range(0.3, 1.4);
+          glows.push({ from: V(cx, y, cz), position: V(cx + Math.cos(a) * dx, y, cz + Math.sin(a) * dz), colour: [0.25, 1.0, 0.72], strength: gr.range(1.1, 1.9) });
+        }
+      }
     } else if (p.roof === 'barrel') {
       const R = span(p) / 2;
       const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1);
@@ -968,9 +1070,9 @@ export function meshSite(site: Site): SceneDescription {
       }
     }
 
-    // Ways are built once, from the side of their first place.
+    // Ways are built once, from the side of their first place. A cleft in a cave is not built at all.
     for (const w of site.ways) {
-      if (w.a !== p.id) continue;
+      if (w.a !== p.id || w.natural) continue;
       const q = places[w.b];
       const f = frameOf(p, w.side, 0.1);
       const c = alongFrame(p, w.side, w.at, 0.1);
@@ -1054,6 +1156,7 @@ export function meshSite(site: Site): SceneDescription {
     doors,
     anchors,
     furnishing,
+    glows,
     scenery,
     planted: censuses[0],
     fences,

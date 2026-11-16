@@ -1,5 +1,6 @@
 import {
   ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  SphereGeometry,
   MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
@@ -21,6 +22,7 @@ import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
 import { Sound, Surface } from './sound';
+import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
@@ -280,6 +282,33 @@ async function start(): Promise<void> {
   merged.setIndex(new BufferAttribute(solidIndex, 1));
   const bvh = new MeshBVH(merged);
 
+  // Growths that glow in the caves. Each cluster sits on the rock, found by looking along its line.
+  const glowLights: { pos: [number, number, number]; intensity: [number, number, number] }[] = [];
+  {
+    const cap = new SphereGeometry(1, 8, 6);
+    const lit = new MeshBasicMaterial({ color: new Color(0.6, 2.6, 1.9) });
+    const spread = new Rng(`${seed}/glow`);
+    for (const g of desc.glows ?? []) {
+      const dir = g.position.clone().sub(g.from).normalize();
+      const hit = bvh.raycastFirst(new Ray(g.from, dir), DoubleSide);
+      if (!hit || !hit.face) continue;
+      const normal = hit.face.normal.clone();
+      if (normal.dot(dir) > 0) normal.negate();
+      const side = new Vector3().crossVectors(normal, new Vector3(0, 1, 0)).normalize(), up = new Vector3().crossVectors(side, normal);
+      for (let k = 0; k < 9; k++) {
+        const m = new Mesh(cap, lit);
+        const r = spread.range(0.025, 0.07);
+        m.position.copy(hit.point).addScaledVector(side, spread.range(-0.4, 0.4)).addScaledVector(up, spread.range(-0.3, 0.3)).addScaledVector(normal, r * 0.3);
+        m.scale.set(r, r * 0.55, r);
+        m.matrixAutoUpdate = false;
+        m.updateMatrix();
+        scene.add(m);
+      }
+      const at = hit.point.clone().addScaledVector(normal, 0.3);
+      glowLights.push({ pos: [at.x, at.y, at.z], intensity: [g.colour[0] * g.strength, g.colour[1] * g.strength, g.colour[2] * g.strength] });
+    }
+  }
+
   const occluders: Mesh[] = [];
   // The solid masses cast shadows. The visible stone is only a skin, and a skin shadows itself
   // unreliably; drawing the mass behind it, from its sunward side, gives walls real thickness.
@@ -500,12 +529,16 @@ async function start(): Promise<void> {
       sunDir: [sunDir.x, sunDir.y, sunDir.z],
       sunE: [SUN_COLOR.r * SUN_INTENSITY, SUN_COLOR.g * SUN_INTENSITY, SUN_COLOR.b * SUN_INTENSITY],
       sky: SKY,
-      points: torches.map((t) => ({
-        pos: [t.lightPosition.x, t.lightPosition.y, t.lightPosition.z],
-        intensity: [1.0 * TORCH_INTENSITY, 0.6 * TORCH_INTENSITY, 0.3 * TORCH_INTENSITY],
-        range: 30,
-        size: 0.12,
-      })),
+      points: [
+        ...torches.map((t) => ({
+          pos: [t.lightPosition.x, t.lightPosition.y, t.lightPosition.z] as [number, number, number],
+          intensity: [1.0 * TORCH_INTENSITY, 0.6 * TORCH_INTENSITY, 0.3 * TORCH_INTENSITY] as [number, number, number],
+          range: 30,
+          size: 0.12,
+        })),
+        // What glows in the caves is a faint light, but in the dark a faint light goes a long way.
+        ...glowLights.map((g) => ({ pos: g.pos, intensity: g.intensity, range: 12, size: 0.3, keep: true })),
+      ],
     };
     const bakeStart = performance.now();
     bake(

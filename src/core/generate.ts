@@ -237,7 +237,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
 /** How much there is to a site: loops, gating, things to find, variety. Higher is better. */
 export function score(site: Site, size = 9): number {
   const solution = solve(site);
-  const rooms = site.places.filter((p) => p.roof !== 'sky').length;
+  const rooms = site.places.filter((p) => p.roof !== 'sky').length - site.ways.filter((w) => w.natural).length;
   const dark = site.places.filter((p) => p.light === 'dark').length;
   const roofs = new Set(site.places.map((p) => p.roof));
   return Math.min(loopCount(site), 3)
@@ -248,6 +248,7 @@ export function score(site: Site, size = 9): number {
     + (site.secret >= 0 ? 0.7 : 0)
     + (roofs.has('sky') && site.places.some((p) => p.role === 'court') ? 0.8 : 0)
     + (roofs.has('cave') ? 0.8 : 0)
+    + 0.4 * Math.min(3, site.ways.filter((w) => w.natural).length)
     + (roofs.has('timber') && roofs.has('barrel') ? 0.5 : 0)
     + (dark >= 1 && dark <= 3 ? 1 : 0)
     - 0.5 * Math.abs(rooms - size);
@@ -324,7 +325,8 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
 
   const around = (c: Cell): Cell[] => [{ i: c.i, j: c.j - 1 }, { i: c.i + 1, j: c.j }, { i: c.i - 1, j: c.j }, { i: c.i, j: c.j + 1 }];
   const free = (c: Cell) => inGrid(c) && !byCell.has(key(c));
-  const rooms = () => places.filter((p) => p.roof !== 'sky' && p.name !== 'hidden chamber').length;
+  // A cave counts as one room however many chambers it runs to.
+  const rooms = () => places.filter((p) => p.roof !== 'sky' && p.name !== 'hidden chamber').length - ways.filter((w) => w.natural).length;
 
   // ---- entrance, and the room farthest from it
   const entrance = placeOf(draft.entrance);
@@ -436,6 +438,56 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
       p.wall = rng.range(3.3, 4.4);
       p.name = rng.pick(['cave', 'grotto', 'hollow']);
     }
+  }
+
+  // ---- a cave does not have to stop at one chamber. Where there is unused ground beside it, it
+  // runs on: more chambers, joined by clefts in the rock, with light that belongs underground. One
+  // chamber may have a shaft open to the sky; others have growths on the rock that glow. Between
+  // them it is dark, so there is always something ahead to walk towards.
+  const cellOf = (id: number): Cell => {
+    for (const [k, v] of byCell) if (v === id) { const [i, j] = k.split(',').map(Number); return { i, j }; }
+    throw new Error('place without a cell');
+  };
+  for (const first of places.filter((p) => p.roof === 'cave')) {
+    if (!rng.chance(0.85)) continue;
+    const chain = [first];
+    const cells = [cellOf(first.id)];
+    const steps = [0];   // how many clefts each chamber lies beyond the first
+    const want = rng.int(1, 3);
+    for (let k = 0; k < want; k++) {
+      // Grow from the far end, or now and then from an earlier chamber, which makes a fork.
+      const from = k > 0 && rng.chance(0.25) ? rng.int(0, cells.length - 1) : cells.length - 1;
+      const spots = shuffle(around(cells[from]).filter(free), rng);
+      if (!spots.length) continue;
+      const q = addCell(spots[0], 'reward', rng.pick(['cavern', 'rift', 'gallery of rock', 'chamber']));
+      q.roof = 'cave';
+      q.light = 'dark';
+      q.wall = rng.range(3.4, 6.4);
+      connect(cells[from], spots[0], 'arch', round(rng.range(0.9, 1.35)));
+      ways[ways.length - 1].natural = true;
+      chain.push(q);
+      cells.push(spots[0]);
+      steps.push(steps[from] + 1);
+    }
+    if (chain.length === 1) continue;
+    // Only chambers that lead nowhere further are rewards; the rest are the way to them.
+    for (const c of chain) {
+      const leads = ways.filter((w) => w.kind !== 'window' && (w.a === c.id || w.b === c.id)).length;
+      c.role = leads > 1 ? 'passage' : 'reward';
+    }
+    // Light, chamber by chamber from the first, which stays as dark as it was found.
+    let shaftGiven = false;
+    chain.forEach((c, k) => {
+      if (steps[k] % 2 === 0) return;
+      const roomy = Math.min(c.x1 - c.x0, c.z1 - c.z0) >= 5;
+      if (!shaftGiven && roomy && rng.chance(0.6)) {
+        shaftGiven = true;
+        c.light = 'day';
+        // Wide enough for daylight to reach the floor through the thickness of the hill.
+        c.shaft = { x: round((c.x0 + c.x1) / 2 + rng.range(-0.6, 0.6)), z: round((c.z0 + c.z1) / 2 + rng.range(-0.6, 0.6)), r: round(rng.range(1.7, 2.3)) };
+        c.wall = Math.max(c.wall, 5.4);
+      } else c.light = 'glow';
+    });
   }
 
   // ---- roofs
@@ -556,8 +608,9 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   const parts = [`${count(rooms())} rooms ${draft.phrase}`];
   if (court && draft.phrase.indexOf('court') < 0) parts.push('with a court to cross');
   if (chambers.length) parts.push(`and ${count(chambers.length)} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
-  const caves = places.filter((p) => p.roof === 'cave').length;
-  if (caves) parts.push(caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
+  const caves = places.filter((p) => p.roof === 'cave').length, clefts = ways.filter((w) => w.natural).length;
+  if (caves) parts.push(clefts ? (caves - clefts === 1 ? `one of them a cave that runs on through ${count(caves)} chambers` : `${count(caves - clefts)} of them caves, ${count(caves)} chambers of rock in all`)
+    : caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
   const dark = places.filter((p) => p.light === 'dark' && p.id !== secretId).length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
   const when = { morning: 'in the morning', midday: 'at midday', evening: 'at evening' }[setting.hour];
