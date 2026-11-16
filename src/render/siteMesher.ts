@@ -10,6 +10,7 @@ import { carveRock, smin } from './geom/rock';
 import { beam, plank, stoneStyles } from './geom/styles';
 import { layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
+import { layBeam } from './geom/timber';
 import { Colour, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -180,7 +181,17 @@ export function meshSite(site: Site): SceneDescription {
     const frontZ = p.z0 - 0.35;
     const pathHalf = 1.15;
     // The way in: flags from the door across the meadow, then a worn track that wanders off down the valley.
-    const pathAt = (z: number) => doorX + Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, Math.max(0, z - p.z0) / 5) + Math.sin(z * 0.06 + s2) * 5 * smooth((z - p.z1 + 4) / 26);
+    const knots = site.track ?? [[doorX, p.z0], [doorX, p.z1]];
+    const pathAt = (z: number): number => {
+      // A smooth curve through the track's points, with a slight wander of its own near the door.
+      const n = knots.length;
+      let k = 0;
+      while (k < n - 2 && z > knots[k + 1][1]) k++;
+      const t = Math.min(1, Math.max(0, (z - knots[k][1]) / (knots[k + 1][1] - knots[k][1])));
+      const a = knots[Math.max(0, k - 1)][0], b = knots[k][0], c = knots[k + 1][0], d = knots[Math.min(n - 1, k + 2)][0];
+      const x = 0.5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
+      return x + Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, Math.max(0, z - p.z0) / 5);
+    };
     /**
      * The height of the ground anywhere. One function serves the carved meadow and the sheets laid
      * beyond it, so they meet. It is made of: gentle swells, level by the path and the door; the
@@ -193,12 +204,35 @@ export function meshSite(site: Site): SceneDescription {
       return beside * (1 - smooth((z - p.z0 - 0.3 - Math.max(0, wobble)) / 3.4));
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
+    const swells = (x: number, z: number): number => {
+      const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
+      return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14);
+    };
+    // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
+    const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
+    const ponds = lies.filter((f) => f.kind === 'pond').map((f) => ({ ...f, level: f.base - 0.42 }));
+    const rings = lies.filter((f) => f.kind === 'stones');
     const ground = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
-      let y = p.floor - 0.03
-        + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14)
-        + (fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough;
+      let y = swells(x, z);
+      let even = 1;
+      for (const f of lies) {
+        const d = Math.hypot(x - f.x, z - f.z);
+        if (f.kind === 'pond') {
+          if (d > f.r * 1.75) continue;
+          const k = 1 - smooth((d - f.r) / (f.r * 0.7));
+          y += (f.base - y) * k;
+          y -= 1.9 * (1 - smooth((d - f.r * 0.22) / (f.r * 0.75)));
+          even = Math.min(even, 1 - 0.8 * k);
+        } else {
+          if (d > f.r * 3.4) continue;
+          const k = 1 - smooth((d - f.r * 1.25) / (f.r * 2.1));
+          y += (f.base + 1.3 - y) * k;
+          even = Math.min(even, 1 - 0.85 * k);
+        }
+      }
+      y += ((fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough) * even;
       const wobble = wobbleAt(x, z);
       // The hillside is level with the roofline over the house and rises behind it; beside the
       // house it starts to rise at once.
@@ -356,11 +390,14 @@ export function meshSite(site: Site): SceneDescription {
     const inMeadow = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
     const inGrounds = (x: number, z: number, m: number) => x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m;
     const offTrack = (x: number, z: number) => Math.abs(x - pathAt(z)) - pathHalf;
+    // How far a point is outside whatever lies in the valley: negative inside a pond's hollow or a ring.
+    const clearOfFeatures = (x: number, z: number) => Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - f.r * (f.kind === 'pond' ? 1.0 : 1.5)));
+    const waterOver = (x: number, z: number, y: number) => Math.max(-Infinity, ...ponds.map((f) => (Math.hypot(x - f.x, z - f.z) < f.r * 1.2 ? f.level - y : -Infinity)));
     // More boulders, some of them large, away from the track.
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
       const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
-      if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5) continue;
+      if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
     const grassColour = (x: number, z: number): Colour => {
@@ -387,6 +424,13 @@ export function meshSite(site: Site): SceneDescription {
         const long = Math.max(0, fbm2(x * 0.3 + s2, z * 0.3 + s1, 2) - 0.5) * 2.4;
         const w = plant.range(0.4, 0.7) * (1 + long * 0.5) * scale, h = plant.range(0.22, 0.42) * (1 + long * 1.7) * Math.sqrt(scale);
         const y = ground(x, z);
+        // Nothing grows under water; at its edge, reeds: tall, close and pale.
+        const depth = waterOver(x, z, y);
+        if (depth > 0.3) continue;
+        if (depth > -0.22) {
+          for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5), plant.range(0, Math.PI), [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
+          continue;
+        }
         planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z));
         if (plant.chance(0.12 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
       }
@@ -397,7 +441,7 @@ export function meshSite(site: Site): SceneDescription {
     // Bushes: by boulders and trees, and along the foot of the rock.
     for (let k = 0; k < 150; k++) {
       const x = plant.range(g.x0 + 3, g.x1 - 3), z = plant.range(g.z0 + 3, g.z1 - 3);
-      if (offTrack(x, z) < 2.4 || slopeOf(ground, x, z, 0.4) > 0.6 || !clearOfStones(x, z, 0.1)) continue;
+      if (offTrack(x, z) < 2.4 || slopeOf(ground, x, z, 0.4) > 0.6 || !clearOfStones(x, z, 0.1) || clearOfFeatures(x, z) < 0.5) continue;
       const byRock = stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + 2.2) || Math.min(x - g.x0, g.x1 - x, g.z1 - z) < 8 || z - g.z0 < 6;
       if (!byRock && !plant.chance(0.25)) continue;
       const size = plant.range(0.6, 1.1);
@@ -425,7 +469,7 @@ export function meshSite(site: Site): SceneDescription {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x = gx + plant.range(0.1, 0.9) * step, z = gz + plant.range(0.1, 0.9) * step;
         if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
-        if (offTrack(x, z) < 3.2 || !clearOfStones(x, z, 0.8)) continue;
+        if (offTrack(x, z) < 3.2 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
         if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
         // Full detail anywhere the player can stand; less with distance beyond the rim.
         const out = Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
@@ -436,9 +480,92 @@ export function meshSite(site: Site): SceneDescription {
     woods(fine, 6.2, eased, () => false);
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
 
+    // ---- what has been built or set up out here
+    const timber: Colour = [0.5, 0.42, 0.33];
+    const beams = sceneryMesh('wood');
+    let grain = 0;
+    const beam = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, w: number, d: number) => layBeam(beams, V(ax, ay, az), V(bx, by, bz), w, d, timber, (grain += 0.173));
+    for (const f of ponds) {
+      waters.push({ x: f.x, z: f.z, r: f.r * 1.15, level: f.level });
+      // A landing stage, built out from the bank nearest the track: a deck of planks on two
+      // bearers, carried on posts that stand on the bed.
+      let near = 0, nearD = Infinity;
+      for (let z = f.z - 30; z <= f.z + 30; z += 1) {
+        const d = Math.hypot(pathAt(z) - f.x, z - f.z);
+        if (d < nearD) { nearD = d; near = z; }
+      }
+      const ux = (pathAt(near) - f.x) / nearD, uz = (near - f.z) / nearD;
+      const deck = f.level + 0.42;
+      let from = f.r * 1.3;
+      while (from > f.r * 0.5 && ground(f.x + ux * from, f.z + uz * from) > deck - 0.1) from -= 0.2;
+      from += 0.5;
+      const to = f.r * 0.2, half = 0.62;
+      const at = (d: number, side: number): [number, number] => [f.x + ux * d - uz * side, f.z + uz * d + ux * side];
+      for (const side of [-half + 0.1, half - 0.1]) {
+        const [ax, az] = at(from, side), [bx, bz] = at(to, side);
+        beam(ax, deck - 0.12, az, bx, deck - 0.12, bz, 0.12, 0.14);
+      }
+      for (let d = from - 0.14; d > to; d -= 0.27) {
+        const [ax, az] = at(d, -half), [bx, bz] = at(d, half);
+        const lift = plant.range(0, 0.012);
+        beam(ax, deck - 0.025 + lift, az, bx, deck - 0.025 + lift, bz, 0.24, 0.05);
+      }
+      for (let d = to + 0.3; d < from - 0.6; d += 1.9) for (const side of [-half + 0.1, half - 0.1]) {
+        const [px, pz] = at(d, side);
+        beam(px, ground(px, pz) - 0.4, pz, px + plant.range(-0.03, 0.03), deck + (d < to + 0.5 ? 0.55 : -0.05), pz, 0.13, 0.13);
+      }
+      const [ex, ez] = at(to + 0.45, 0);
+      finds.push({ at: V(ex, deck + 0.3, ez), what: 'a silver ring, lost off the end of the landing stage' });
+    }
+    for (const f of rings) {
+      // Standing stones: tall rough slabs set on end in a ring, each facing the middle, one fallen.
+      const top = ground(f.x, f.z);
+      const count = 6 + plant.int(0, 2), fallen = plant.int(0, count - 1), turn = plant.range(0, Math.PI * 2);
+      for (let k = 0; k < count; k++) {
+        const a = turn + (k / count) * Math.PI * 2 + plant.range(-0.12, 0.12);
+        const x = f.x + Math.cos(a) * f.r, z = f.z + Math.sin(a) * f.r, base = ground(x, z);
+        const down = k === fallen;
+        const tall = plant.range(1.9, 2.9), wide = plant.range(0.5, 0.75), thick = plant.range(0.24, 0.36), ts = plant.range(0, 80);
+        // Along the ring, across it, and up: a standing stone is tall; a fallen one lies along the ring.
+        const [la, lb, lc] = down ? [tall * 0.5, wide * 0.5, thick * 0.9] : [wide * 0.5, thick * 0.5, tall * 0.5];
+        const cy = base + (down ? thick * 0.3 : tall * 0.42);
+        const ca = Math.cos(a), sa = Math.sin(a), reach = Math.max(la, lb) * 1.5 + 0.4;
+        carveRock(sceneryMesh('rock'), (qx, qy, qz) => {
+          const dx = qx - x, dz = qz - z;
+          const along = -dx * sa + dz * ca, across = dx * ca + dz * sa;
+          // A slab: the largest of the three scaled distances, rounded off, with a rough skin.
+          const d = Math.hypot(Math.max(0, Math.abs(along) / la - 0.55), Math.max(0, Math.abs(across) / lb - 0.55), Math.max(0, Math.abs(qy - cy) / lc - 0.55));
+          return d - 0.45 + (fbm2(qx * 2.1 + qy * 1.3 + ts, qz * 2.1 - qy + ts, 3) - 0.5) * 0.28;
+        }, {
+          min: V(x - reach, base - 0.5, z - reach), max: V(x + reach, cy + lc * 1.25 + 0.3, z + reach),
+          cell: 0.13, uvScale: 0.5,
+          shade: (c, n, field) => {
+            field[0] = Math.max(0, n.y) * 1.0 + 0.25;
+            return rockColour(0.7 + 0.45 * fbm2(c.x * 1.5 + ts, c.z * 1.5 + c.y, 3));
+          },
+        });
+        stones.push([x, z, down ? tall * 0.5 : 0.5]);
+      }
+      // The flat stone in the middle, and what was left on it.
+      boulder(sceneryMesh('rock'), f.x, f.z, 0.62, plant);
+      finds.push({ at: V(f.x, top + 0.75, f.z), what: 'an offering left on the stone in the ring: a little figure cut from horn' });
+    }
+    // A fence along one side of the track where it comes into the valley: posts and two rails, some of them gone.
+    if (site.grounds) {
+      const side = plant.chance(0.5) ? 1 : -1;
+      let last: [number, number, number] | null = null;
+      for (let z = g.z1 - 15; z > g.z1 - 46; z -= 2.3) {
+        const x = pathAt(z) + side * 2.1, y = ground(x, z);
+        if (clearOfFeatures(x, z) < 1 || !clearOfStones(x, z, 0.3)) { last = null; continue; }
+        beam(x, y - 0.35, z, x + plant.range(-0.04, 0.04), y + 1.05, z + plant.range(-0.04, 0.04), 0.13, 0.13);
+        if (last) for (const h of [0.5, 0.9]) if (plant.chance(0.86)) beam(last[0], last[1] + h, last[2], x, y + h, z, 0.06, 0.11);
+        last = [x, y, z];
+      }
+    }
+
     // Where the player comes in: at the far end of the track, facing up the valley to the house.
     if (site.grounds) {
-      const z = g.z1 - 11;
+      const z = knots[knots.length - 1][1];
       arrival.spawn = V(pathAt(z), ground(pathAt(z), z) + 1.75, z);
       for (let w = z - 6; w > p.z1 - 2; w -= 6) arrival.track.push([pathAt(w), w]);
       arrival.track.push([pathAt(p.z1 - 4), p.z1 - 4]);
@@ -448,6 +575,8 @@ export function meshSite(site: Site): SceneDescription {
   const planting = new Planting();
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
+  const waters: { x: number; z: number; r: number; level: number }[] = [];
+  const finds: { at: Vector3; what: string }[] = [];
   const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: new Map(), cards: [] };
   const trees: [number, number][] = [];
 
@@ -762,5 +891,7 @@ export function meshSite(site: Site): SceneDescription {
     furnishing,
     scenery,
     fences,
+    water: waters,
+    finds,
   };
 }

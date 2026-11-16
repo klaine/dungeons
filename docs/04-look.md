@@ -156,8 +156,8 @@ What that takes, and what is in place:
 | Rock: banks, outcrops, boulders | Shaped and placed, but too smooth close to: it needs a rock material of its own and finer relief. |
 | Leaves lit from behind | Not done. Leaves are matt and opaque to light. |
 | A worn earth path, and ground that is more than one texture | Partly. The track down the valley is turf tinted to earth, with no grass on it; there is still only one ground texture. |
-| Water | Not done. |
-| Things built outdoors: fences, steps, bridges, jetties | Not done. |
+| Water | A pond: a level sheet, dark and nearly a mirror, with drifting ripples. It does not show the bed through shallow water, has no shoreline foam or wet edge, and no running water. |
+| Things built outdoors: fences, steps, bridges, jetties | A landing stage and a post-and-rail fence, in plain squared timber. No steps or bridges. |
 | Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |
 | Distant trees cheaper than near ones | Partly: fewer, larger cards with distance. No impostors, and no culling by distance. |
 

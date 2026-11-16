@@ -28,6 +28,12 @@ You arrive outdoors at the far end of a valley, and walk up through woods to the
 
 ![The valley: a track through long grass and woods to the house wall, set into its hillside, with mountains beyond](docs/images/valley.jpg)
 
+There are things out in the valley for whoever walks that far: a ring of standing stones on a rise, and a pond with a landing stage.
+
+![Standing stones in a clearing among firs](docs/images/stones.jpg)
+
+![A pond with a landing stage, under a rock rim and mountains](docs/images/pond.jpg)
+
 ![The approach: a flagged path through grass and flowers to the house front, under trees](docs/images/approach.jpg)
 
 ![Open air: a leafy tree, boulders and bushes below a rock bank, with trees in blossom and firs beyond](docs/images/open-air.jpg)

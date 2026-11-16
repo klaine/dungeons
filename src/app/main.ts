@@ -19,6 +19,7 @@ import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { makeCards, paintCards, vegetationUniforms } from '../render/vegetation';
+import { Water } from '../render/water';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
@@ -175,6 +176,8 @@ async function start(): Promise<void> {
     scenic.push(cards);
     cardTotal += set.matrices.length / 16;
   }
+  const water = new Water(desc.water ?? []);
+  for (const m of water.meshes) { scene.add(m); scenic.push(m); }
   const buildMs = performance.now() - t0;
 
   // One merged copy of everything, for collision and for the bake.
@@ -325,7 +328,7 @@ async function start(): Promise<void> {
     },
     won: (seconds) => {
       const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
-      document.getElementById('wonText')!.textContent = `You reached the heart of the house in ${m ? `${m} min ` : ''}${s} s, having seen ${game!.visited.size - 1} of its ${site.places.length - 1} places${site.secret >= 0 ? (game!.foundSecret ? ', and found what it was hiding' : ', but not what it was hiding') : ''}.`;
+      document.getElementById('wonText')!.textContent = `You reached the heart of the house in ${m ? `${m} min ` : ''}${s} s, having seen ${game!.visited.size - 1} of its ${site.places.length - 1} places${site.secret >= 0 ? (game!.foundSecret ? ', and found what it was hiding' : ', but not what it was hiding') : ''}.${game!.finds.length ? ` Out in the valley you picked up ${game!.finds.filter((f) => f.taken).length} of the ${game!.finds.length} things left there.` : ''}`;
       document.getElementById('won')!.hidden = false;
       document.exitPointerLock?.();
     },
@@ -508,6 +511,7 @@ async function start(): Promise<void> {
     })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
     vegetationUniforms.uTime.value = time;
+    water.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
     composer.render(dt);

@@ -60,6 +60,8 @@ The document is the source. The model and the maps are made from it, so they alw
 | `wallThickness` | Thickness of the wall between two neighbouring places. |
 | `top` | Height of the roofline. Courts are open wells down from it. |
 | `grounds` | The open country that can be walked, as `x0`, `x1`, `z0`, `z1`: a valley with the house front along its north side (`z0`). It contains the approach. The player arrives near its south end. Absent if the site has no more than its approach. |
+| `track` | The way from the door down the valley, as `[x, z]` points from the door outwards. It is flagged as far as the edge of the approach and a worn track after that. The player arrives at the last point. |
+| `features` | Things out in the valley; see below. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -126,6 +128,14 @@ A `door` has:
 ```
 
 An item says which place it is in, not where in the place. The tool puts keys on a chest or a plinth; where that stands is decided when the world is built, and is not in the document. A lever stands on the floor at `x`, `z` in its place, and `opens` is the index of the way whose gate it raises.
+
+### Features
+
+```json
+"features": [ { "kind": "pond", "x": 41.2, "z": 88.5, "r": 9.1 }, { "kind": "stones", "x": 12.4, "z": 71.0, "r": 3.8 } ]
+```
+
+A `pond` lies in a hollow of radius `r`, the water covering about the inner three quarters of it, with a landing stage built out from the bank nearest the track. `stones` is a ring of standing stones of radius `r` on a low rise, with a flat stone in the middle. The tool leaves something small to be found at each. Heights are not in the document: the ground is made when the world is built.
 
 ### The solution
 

@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { allReachable, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way } from './site';
+import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -181,6 +181,46 @@ export function generateSite(seed: string): Site {
   }
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   return best;
+}
+
+/**
+ * What is out in the valley: the track from the door to where the player arrives, and a few
+ * things set back from it, near enough to be seen in passing and far enough to be a walk.
+ */
+function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void {
+  const g = site.grounds!;
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const track: [number, number][] = [[doorX, meadow.z0]];
+  let x = doorX;
+  for (let z = meadow.z0 + 8; z <= g.z1 - 10; z += 8) {
+    if (z > meadow.z1 - 2) x = Math.min(g.x1 - 24, Math.max(g.x0 + 24, x + rng.range(-6.5, 6.5)));
+    track.push([round(x), round(z)]);
+  }
+  site.track = track;
+  const fromTrack = (px: number, pz: number): number => {
+    let best = Infinity;
+    for (let k = 0; k < track.length - 1; k++) {
+      const [ax, az] = track[k], [bx, bz] = track[k + 1];
+      const t = Math.min(1, Math.max(0, ((px - ax) * (bx - ax) + (pz - az) * (bz - az)) / ((bx - ax) ** 2 + (bz - az) ** 2)));
+      best = Math.min(best, Math.hypot(px - ax - (bx - ax) * t, pz - az - (bz - az) * t));
+    }
+    return best;
+  };
+  const features: Feature[] = [];
+  const place = (kind: Feature['kind'], radius: [number, number], nearest: number, furthest: number) => {
+    for (let tries = 0; tries < 60; tries++) {
+      const r = rng.range(radius[0], radius[1]);
+      const px = rng.range(g.x0 + 16 + r, g.x1 - 16 - r), pz = rng.range(meadow.z1 + 8 + r, g.z1 - 12 - r);
+      const d = fromTrack(px, pz);
+      if (d < r + nearest || d > r + furthest) continue;
+      if (features.some((f) => Math.hypot(f.x - px, f.z - pz) < f.r + r + 14)) continue;
+      features.push({ kind, x: round(px), z: round(pz), r: round(r) });
+      return;
+    }
+  };
+  place('pond', [7.5, 10.5], 5, 15);
+  place('stones', [3.4, 4.2], 9, 30);
+  site.features = features;
 }
 
 /** How much there is to a site: loops, gating, things to find, variety. Higher is better. */
@@ -476,6 +516,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
     // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
     grounds: { x0: round(forecourt.x0 - 40), x1: round(forecourt.x1 + 40), z0: forecourt.z0, z1: round(forecourt.z1 + 64) },
   };
+  layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
   const queue = [forecourt.id];

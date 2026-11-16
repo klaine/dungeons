@@ -88,4 +88,8 @@ export interface SceneDescription {
   fences?: { min: Vector3; max: Vector3 }[];
   /** Points along the way from where the player arrives to the door, for anything that must walk it. */
   track?: [number, number][];
+  /** Still water: a level surface over a hollow in the ground. */
+  water?: { x: number; z: number; r: number; level: number }[];
+  /** Small things left lying about for whoever walks that far. */
+  finds?: { at: Vector3; what: string }[];
 }

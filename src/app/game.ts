@@ -67,6 +67,8 @@ export class Game {
   /** Whether the relic in the hidden chamber has been found. */
   foundSecret = false;
   private relic: { group: Group; at: Vector3 } | null = null;
+  /** Small things left about the valley, and whether each has been picked up. */
+  readonly finds: { group: Group; at: Vector3; what: string; taken: boolean }[] = [];
 
   constructor(private site: Site, desc: SceneDescription, scene: Scene, materials: Record<string, Material>, private player: Player, private ui: GameUi) {
     const iron = makePropMaterial({ color: new Color(0.07, 0.065, 0.06), roughness: 0.74, metalness: 0.5 });
@@ -187,6 +189,15 @@ export class Game {
       scene.add(group);
       this.relic = { group, at };
     }
+    for (const f of desc.finds ?? []) {
+      const colour = new Color(0.95, 0.9, 0.75);
+      const thing = new Mesh(new OctahedronGeometry(0.07), makePropMaterial({ color: colour, metalness: 0.6, roughness: 0.25, emissive: colour, emissiveIntensity: 0.35 }));
+      const group = new Group();
+      group.add(thing);
+      group.position.copy(f.at);
+      scene.add(group);
+      this.finds.push({ group, at: f.at.clone(), what: f.what, taken: false });
+    }
     this.goalAt = desc.anchors?.get(site.goal) ?? null;
     this.visited.add(site.start);
   }
@@ -243,6 +254,17 @@ export class Game {
         this.keys.add(k.item.key);
         this.ui.keysChanged([...this.keys]);
         this.ui.toast(`You take the ${k.item.key} key.`);
+      }
+    }
+
+    for (const f of this.finds) {
+      if (f.taken) continue;
+      f.group.rotation.y = time * 1.1;
+      f.group.position.y = f.at.y + Math.sin(time * 1.9 + f.at.x) * 0.03;
+      if (Math.hypot(p.x - f.at.x, p.z - f.at.z) < 1.1 && Math.abs(p.y + 1.0 - f.at.y) < 1.8) {
+        f.taken = true;
+        f.group.visible = false;
+        this.ui.toast(`You find ${f.what}.`);
       }
     }
 

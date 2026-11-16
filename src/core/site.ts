@@ -100,6 +100,19 @@ export interface Way {
   halfWidth: number;
 }
 
+/** Something out in the valley. */
+export interface Feature {
+  /**
+   * A pond lies in a hollow, with a landing stage built out into it from the side nearest the
+   * track. Stones are a ring of standing stones on a low rise, with a flat stone in the middle.
+   */
+  kind: 'pond' | 'stones';
+  x: number;
+  z: number;
+  /** Radius: of the hollow the pond lies in, or of the ring. */
+  r: number;
+}
+
 export interface Site {
   seed: string;
   places: Place[];
@@ -113,6 +126,13 @@ export interface Site {
    * the house front along its north side. Absent in a site that has no more than its approach.
    */
   grounds?: { x0: number; x1: number; z0: number; z1: number };
+  /**
+   * The way from the door down the valley, as points from the door outwards. Flags as far as the
+   * edge of the approach and a worn track after that. The player arrives at the last point.
+   */
+  track?: [number, number][];
+  /** Things in the valley worth walking to. */
+  features?: Feature[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */
