@@ -1,5 +1,5 @@
 import {
-  CanvasTexture, DoubleSide, DynamicDrawUsage, InstancedBufferAttribute, InstancedMesh, Matrix4, MeshDepthMaterial, MeshStandardMaterial,
+  CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh, MeshDepthMaterial, MeshStandardMaterial,
   PlaneGeometry, BufferGeometry, RGBADepthPacking, SRGBColorSpace, StaticDrawUsage, Texture,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -136,12 +136,19 @@ function shapeGeometry(shape: CardSet['shape']): BufferGeometry {
   return mergeGeometries(sheets);
 }
 
-/** One draw call holding every card of a set. */
-export function makeCards(set: CardSet, texture: Texture): InstancedMesh {
-  const count = set.matrices.length / 16;
-  const geometry = shapeGeometry(set.shape);
-  geometry.setAttribute('aCentre', new InstancedBufferAttribute(new Float32Array(set.centres), 3));
-  const sway = set.kind === 'grass' || set.kind === 'flower' ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
+/** How far off grass and flowers are still drawn. They shrink into the ground over the last third. */
+export const vegetationRange = { value: 75 };
+
+/**
+ * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
+ * mesh to a block, so that blocks out of view are not drawn at all; blocks of grass and flowers
+ * too far away to matter are dropped as well (see `cullCards`).
+ */
+export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
+  const ground = set.kind === 'grass' || set.kind === 'flower';
+  const block = ground ? 24 : 48;
+  const base = shapeGeometry(set.shape);
+  const sway = ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
   const material = new MeshStandardMaterial({
     map: texture, alphaTest: 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: true,
   });
@@ -150,9 +157,10 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = vegetationUniforms.uTime;
     shader.uniforms.uWind = vegetationUniforms.uWind;
+    shader.uniforms.uRange = vegetationRange;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', /* glsl */ `#include <common>
-attribute vec3 aCentre; uniform float uTime; uniform float uWind;`)
+attribute vec3 aCentre; uniform float uTime; uniform float uWind; uniform float uRange;`)
       // Shade every card as part of one rounded body about its centre, not as a flat sheet.
       .replace('#include <defaultnormal_vertex>', /* glsl */ `#include <defaultnormal_vertex>
 {
@@ -167,6 +175,7 @@ attribute vec3 aCentre; uniform float uTime; uniform float uWind;`)
   float gust = sin( uTime * 1.3 + at.x * 0.21 + at.z * 0.17 ) + 0.5 * sin( uTime * 2.9 + at.x * 0.6 - at.z * 0.45 );
   transformed.x += free * gust * ${sway.toFixed(3)} * uWind;
   transformed.z += free * cos( uTime * 1.7 + at.z * 0.3 ) * ${(sway * 0.6).toFixed(3)} * uWind;
+  ${ground ? 'transformed *= 1.0 - smoothstep( uRange * 0.66, uRange, distance( cameraPosition, at ) );' : ''}
 }`);
     shader.fragmentShader = shader.fragmentShader
       // A two-sided material turns the normal round on back faces; these normals must not turn.
@@ -178,19 +187,52 @@ normal = normalize( vNormal );`)
 reflectedLight.indirectSpecular = vec3( 0.0 );
 reflectedLight.directSpecular *= 0.2;`);
   };
-  material.customProgramCacheKey = () => `cards2-${set.shape}-${sway}`;
+  material.customProgramCacheKey = () => `cards3-${set.shape}-${sway}-${ground}`;
+  const depth = set.shadow ? new MeshDepthMaterial({ depthPacking: RGBADepthPacking, map: texture, alphaTest: 0.42 }) : null;
 
-  const mesh = new InstancedMesh(geometry, material, count);
-  mesh.instanceMatrix.setUsage(StaticDrawUsage);
-  (mesh.instanceMatrix.array as Float32Array).set(set.matrices);
-  mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(set.colours), 3);
-  mesh.instanceColor.setUsage(DynamicDrawUsage);
-  mesh.name = `cards:${set.kind}`;
-  mesh.frustumCulled = false;
-  mesh.receiveShadow = true;
-  mesh.castShadow = set.shadow;
-  if (set.shadow) mesh.customDepthMaterial = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, map: texture, alphaTest: 0.42 });
-  mesh.matrixAutoUpdate = false;
-  mesh.matrix.copy(new Matrix4());
-  return mesh;
+  // Which block each card falls in.
+  const count = set.matrices.length / 16;
+  const blocks = new Map<string, number[]>();
+  for (let i = 0; i < count; i++) {
+    const key = `${Math.floor(set.matrices[i * 16 + 12] / block)},${Math.floor(set.matrices[i * 16 + 14] / block)}`;
+    let list = blocks.get(key);
+    if (!list) blocks.set(key, (list = []));
+    list.push(i);
+  }
+  const meshes: InstancedMesh[] = [];
+  for (const list of blocks.values()) {
+    const n = list.length;
+    const matrices = new Float32Array(n * 16), colours = new Float32Array(n * 3), centres = new Float32Array(n * 3);
+    list.forEach((i, k) => {
+      for (let c = 0; c < 16; c++) matrices[k * 16 + c] = set.matrices[i * 16 + c];
+      for (let c = 0; c < 3; c++) { colours[k * 3 + c] = set.colours[i * 3 + c]; centres[k * 3 + c] = set.centres[i * 3 + c]; }
+    });
+    // Each block has its own geometry object, sharing the shape's buffers, because the centres are per card.
+    const geometry = new BufferGeometry();
+    geometry.setIndex(base.getIndex());
+    for (const name of ['position', 'normal', 'uv']) geometry.setAttribute(name, base.getAttribute(name));
+    geometry.setAttribute('aCentre', new InstancedBufferAttribute(centres, 3));
+    const mesh = new InstancedMesh(geometry, material, n);
+    mesh.instanceMatrix.setUsage(StaticDrawUsage);
+    (mesh.instanceMatrix.array as Float32Array).set(matrices);
+    mesh.instanceColor = new InstancedBufferAttribute(colours, 3);
+    mesh.name = `cards:${set.kind}`;
+    mesh.computeBoundingSphere();
+    mesh.receiveShadow = true;
+    mesh.castShadow = set.shadow;
+    if (depth) mesh.customDepthMaterial = depth;
+    mesh.matrixAutoUpdate = false;
+    mesh.userData.ground = ground;
+    meshes.push(mesh);
+  }
+  return meshes;
+}
+
+/** Hides blocks of grass and flowers that are wholly beyond the range at which they are drawn. */
+export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; z: number }): void {
+  for (const m of meshes) {
+    if (!m.userData.ground) continue;
+    const s = m.boundingSphere!;
+    m.visible = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z) - s.radius < vegetationRange.value;
+  }
 }

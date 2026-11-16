@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, WebGLRenderer,
 } from 'three';
@@ -18,7 +18,7 @@ import { generateSite } from '../core/generate';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
-import { makeCards, paintCards, vegetationUniforms } from '../render/vegetation';
+import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
@@ -170,10 +170,15 @@ async function start(): Promise<void> {
   }
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
+  const cardMeshes: InstancedMesh[] = [];
+  // Grass is drawn out to this distance; less far on phones and tablets unless asked otherwise.
+  vegetationRange.value = num('grass', window.matchMedia('(pointer: coarse)').matches ? 55 : 75);
   for (const set of desc.scenery?.cards ?? []) {
-    const cards = makeCards(set, paintCards(set.kind));
-    scene.add(cards);
-    scenic.push(cards);
+    for (const cards of makeCards(set, paintCards(set.kind))) {
+      scene.add(cards);
+      scenic.push(cards);
+      cardMeshes.push(cards);
+    }
     cardTotal += set.matrices.length / 16;
   }
   const water = new Water(desc.water ?? []);
@@ -511,6 +516,7 @@ async function start(): Promise<void> {
     })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
     vegetationUniforms.uTime.value = time;
+    cullCards(cardMeshes, camera.position);
     water.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));

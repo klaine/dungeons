@@ -159,7 +159,7 @@ What that takes, and what is in place:
 | Water | A pond: a level sheet, dark and nearly a mirror, with drifting ripples. It does not show the bed through shallow water, has no shoreline foam or wet edge, and no running water. |
 | Things built outdoors: fences, steps, bridges, jetties | A landing stage and a post-and-rail fence, in plain squared timber. No steps or bridges. |
 | Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |
-| Distant trees cheaper than near ones | Partly: fewer, larger cards with distance. No impostors, and no culling by distance. |
+| Keeping the cost down | Cards are sorted into blocks of ground so that those out of view are not drawn, and grass and flowers shrink away and stop being drawn beyond 75 metres (55 on touch devices). Distant trees have fewer, larger cards. No impostors. None of this has been measured on a real graphics card. |
 
 Leaves and blades must be matt. With the standard material every card mirrors the sky at a glancing angle, and a meadow seen from head height is all glancing angles: it turned pale and blue until the mirror term was removed.
 

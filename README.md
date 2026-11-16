@@ -26,6 +26,8 @@ Or as a battle map: the built world itself from straight above, roofs cut away, 
 
 You arrive outdoors at the far end of a valley, and walk up through woods to the meadow below the house. The whole valley can be walked, out to a rim of rock; hills and mountains lie beyond:
 
+![Arriving: a fenced track through the woods, a tree in blossom, and the house wall at the head of the valley](docs/images/arrival.jpg)
+
 ![The valley: a track through long grass and woods to the house wall, set into its hillside, with mountains beyond](docs/images/valley.jpg)
 
 There are things out in the valley for whoever walks that far: a ring of standing stones on a rise, and a pond with a landing stage.
@@ -80,7 +82,7 @@ Doors and keys need no button: walk up to a door to try it, walk up to a key to 
 
 Each place has its seed in the address, so a link reproduces it; **New place** rolls another, and **Gallery** shows a dozen candidates at a time as plans to choose from. Some rooms are dark on purpose; they are shaded on the map.
 
-Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
+Useful URL parameters: `grass` (how far off grass is drawn, in metres; 75 by default and 55 on touch devices), `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
 **Export** saves the current place: its plan and an ink map as images with a key to the rooms, a battle map rendered from above, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
 
