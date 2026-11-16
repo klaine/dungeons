@@ -64,7 +64,8 @@ The document is the source. The model and the maps are made from it, so they alw
 | `sun` | Unit vector pointing towards the sun. |
 | `wallThickness` | Thickness of the wall between two neighbouring places. |
 | `top` | Height of the roofline. Courts are open wells down from it. |
-| `grounds` | The open country that can be walked, as `x0`, `x1`, `z0`, `z1`: a valley with the house front along its north side (`z0`). It contains the approach. The player arrives near its south end. Absent if the site has no more than its approach. |
+| `grounds` | The box that holds the open country that can be walked, as `x0`, `x1`, `z0`, `z1`: from the house front (`z0`) to a little beyond the gap at the valley's foot. It contains the approach. Absent if the site has no more than its approach. |
+| `valley` | The shape of that country: `{ z0, step, west, east, mouth }`. `west` and `east` are where the two sides of the valley lie (as `x`) at `z0`, `z0 + step`, `z0 + 2 step` and so on; the rock rises from those lines, its foot three to five metres inside them. `mouth` is the `z` of the gap by which the track leaves; what is recorded beyond it is the country outside, which is seen and not walked. Beyond either end of what is recorded, each side runs straight on. A terrace or a grotto on a side stands against that side's line where it is. A document without `valley` is read as a box that draws in to a gap at its south end. |
 | `track` | The way from the door down the valley, as `[x, z]` points from the door outwards. It is flagged as far as the edge of the approach and a worn track after that. The player arrives at the last point. |
 | `features` | Things out in the valley; see below. |
 | `streams` | Running water in the valley, if there is any; see below. May be absent. |

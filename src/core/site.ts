@@ -322,6 +322,20 @@ export function shoreOf(f: Feature, dx: number, dz: number): number {
   return f.r * (f.shore[i % n] + (f.shore[(i + 1) % n] - f.shore[i % n]) * u);
 }
 
+/**
+ * The shape of the valley: where its two sides lie, the west (lesser x) and the east, at every
+ * `step` metres down its length from `z0`, which is the front of the house. The rock rises from
+ * those lines. `mouth` is how far down the gap is by which the track leaves; what is recorded
+ * beyond it is the country outside, which is seen and not walked.
+ */
+export interface Valley {
+  z0: number;
+  step: number;
+  west: number[];
+  east: number[];
+  mouth: number;
+}
+
 export interface Site {
   seed: string;
   places: Place[];
@@ -331,10 +345,13 @@ export interface Site {
   /** A place hidden behind a secret door, with something in it worth finding; -1 if there is none. */
   secret: number;
   /**
-   * The open country that can be walked, the approach included: a valley shut in by rock, with
-   * the house front along its north side. Absent in a site that has no more than its approach.
+   * The open country that can be walked, the approach included: the box that holds the valley,
+   * from the house front at its north to the gap at its south. Absent in a site that has no more
+   * than its approach.
    */
   grounds?: { x0: number; x1: number; z0: number; z1: number };
+  /** The shape of that country, of which `grounds` is only the box that holds it. */
+  valley?: Valley;
   /**
    * The way from the door down the valley, as points from the door outwards. Flags as far as the
    * edge of the approach and a worn track after that. The player arrives at the last point.

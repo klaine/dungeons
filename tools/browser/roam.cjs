@@ -17,7 +17,9 @@ const { chromium } = require('playwright');
       const cx = (g.x0 + g.x1) / 2, cz = (g.z0 + g.z1) / 2;
       for (let run = 0; run < 36; run++) {
         // Start somewhere inside, aim at a point well beyond the edge (or at the cliff by the house).
-        const sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16), sz = a.z1 + 4 + rnd() * (g.z1 - a.z1 - 12);
+        // Start somewhere inside the valley: a place in its box is tried until one is found that is in the valley itself.
+        let sx = 0, sz = 0;
+        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = a.z1 + 4 + rnd() * (g.z1 - a.z1 - 12); if (!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) break; }
         const ang = (run / 36) * Math.PI * 2;
         const tx = cx + Math.sin(ang) * 140, tz = cz + Math.cos(ang) * 140;
         player.place({ x: sx, y: groundAt(sx, sz) + 1.8, z: sz }, 0);
@@ -31,7 +33,8 @@ const { chromium } = require('playwright');
         const p = player.position;
         // Inside the house is not outside the valley: the door is open to anyone who walks at it.
         const indoors = site.places.some((q) => p.x > q.x0 - 1.2 && p.x < q.x1 + 1.2 && p.z > q.z0 - 1.2 && p.z < q.z1 + 1.2);
-        const beyond = indoors ? -1 : Math.max(g.x0 - p.x, p.x - g.x1, p.z - g.z1, g.z0 - 2.5 - p.z);
+        // (Outside the valley's own shape, not merely outside the box that holds it.)
+        const beyond = indoors ? -1 : window.__dbg.beyond ? window.__dbg.beyond(p.x, p.z) : Math.max(g.x0 - p.x, p.x - g.x1, p.z - g.z1, g.z0 - 2.5 - p.z);
         out.runs++;
         out.maxOut = Math.max(out.maxOut, beyond);
         out.minY = Math.min(out.minY, p.y);

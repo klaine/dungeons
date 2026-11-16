@@ -1,5 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
+import { edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
@@ -212,16 +213,27 @@ export function generateSite(seed: string): Site {
  */
 function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void {
   const round = (v: number) => Math.round(v * 10) / 10;
-  // The valley itself: wider or narrower, longer or shorter, from one house to the next.
-  const beside = rng.range(30, 48), down = rng.range(50, 78);
-  const g = { x0: round(meadow.x0 - beside), x1: round(meadow.x1 + beside), z0: meadow.z0, z1: round(meadow.z1 + down) };
+  // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
+  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'));
+  site.valley = v;
+  const within = v.west.slice(0, Math.round((v.mouth - v.z0) / v.step) + 1), withinE = v.east.slice(0, within.length);
+  // (The box that holds it, for whatever only needs to know how far it reaches.)
+  const g = { x0: round(Math.min(...within)), x1: round(Math.max(...withinE)), z0: meadow.z0, z1: round(v.mouth + 3) };
   site.grounds = g;
+  // The track goes down it from the door to the gap, wandering, but never close under either side.
   const track: [number, number][] = [[doorX, meadow.z0]];
   let x = doorX;
-  for (let z = meadow.z0 + 8; z <= g.z1 - 10; z += 8) {
-    if (z > meadow.z1 - 2) x = Math.min(g.x1 - 24, Math.max(g.x0 + 24, x + rng.range(-6.5, 6.5)));
+  for (let z = meadow.z0 + 8; z <= v.mouth - 5; z += 8) {
+    if (z > meadow.z1 - 2) {
+      const w = edgeAt(v, 'w', z) + 13, e = edgeAt(v, 'e', z) - 13;
+      x = w < e ? Math.min(e, Math.max(w, x + rng.range(-6.5, 6.5))) : (w + e) / 2;
+      // Towards the gap it draws in to the middle of it.
+      const near = Math.min(1, Math.max(0, (z - (v.mouth - 30)) / 24));
+      x += (middle(v.mouth) - x) * near * near;
+    }
     track.push([round(x), round(z)]);
   }
+  track.push([round((edgeAt(v, 'w', v.mouth) + edgeAt(v, 'e', v.mouth)) / 2), v.mouth - 1]);
   site.track = track;
   const fromTrack = (px: number, pz: number): number => {
     let best = Infinity;
@@ -234,9 +246,10 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   };
   const features: Feature[] = [];
   const place = (kind: Feature['kind'], radius: [number, number], nearest: number, furthest: number) => {
-    for (let tries = 0; tries < 60; tries++) {
+    for (let tries = 0; tries < 200; tries++) {
       const r = rng.range(radius[0], radius[1]);
       const px = rng.range(g.x0 + 16 + r, g.x1 - 16 - r), pz = rng.range(meadow.z1 + 8 + r, g.z1 - 12 - r);
+      if (!walkable(v, px, pz, 15 + r)) continue;
       const d = fromTrack(px, pz);
       if (d < r + nearest || d > r + furthest) continue;
       if (features.some((f) => Math.hypot(f.x - px, f.z - pz) < f.r + r + 14)) continue;
@@ -279,9 +292,9 @@ function layOutTower(site: Site, meadow: Place, fromTrack: (x: number, z: number
   const g = site.grounds!;
   if (!rng.chance(0.55)) return;
   const round = (v: number) => Math.round(v * 10) / 10;
-  for (let tries = 0; tries < 30; tries++) {
+  for (let tries = 0; tries < 120; tries++) {
     const x = round(rng.range(g.x0 + 17, g.x1 - 17)), z = round(rng.range(meadow.z1 + 12, g.z1 - 18)), off = fromTrack(x, z);
-    if (off < 7.5 || off > 15) continue;
+    if (off < 7.5 || off > 15 || !walkable(site.valley!, x, z, 15)) continue;
     let free = true;
     for (const f of site.features ?? []) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 8) free = false;
     for (const st of site.streams ?? []) for (let k = 0; k < st.course.length - 1 && free; k++) {
@@ -327,7 +340,7 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
   };
   // A building fits if its ground is inside the valley, clear of what lies there, and off the track.
   const fits = (b: { x: number; z: number; w: number; d: number }): boolean => {
-    if (b.x - b.d / 2 < g.x0 + 15 || b.x + b.d / 2 > g.x1 - 15 || b.z - b.w / 2 < meadow.z1 + 10 || b.z + b.w / 2 > g.z1 - 16) return false;
+    if (b.z - b.w / 2 < meadow.z1 + 10 || ![[-1, -1], [1, -1], [-1, 1], [1, 1]].every(([du, dv]) => walkable(site.valley!, b.x + (du * b.d) / 2, b.z + (dv * b.w) / 2, 14))) return false;
     for (const [du, dv] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1]]) {
       const x = b.x + (du * b.d) / 2, z = b.z + (dv * b.w) / 2;
       if (!roomAt(site, x, z, 4) || fromTrack(x, z) < 3.2) return false;
@@ -378,7 +391,7 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       const turn = b.faces === 'w' ? 1 : -1;
       for (const r of footprintOf(b)) for (const [u, v] of [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1], [(r.u0 + r.u1) / 2, (r.v0 + r.v1) / 2]]) {
         const x = b.x - (turn * b.d) / 2 + turn * v, z = b.z + turn * u;
-        if (x < g.x0 + 12 || x > g.x1 - 12 || z < meadow.z1 + 8 || z > g.z1 - 12 || !roomAt(site, x, z, 3.5) || fromTrack(x, z) < 3.2) return false;
+        if (!walkable(site.valley!, x, z, 12) || z < meadow.z1 + 8 || !roomAt(site, x, z, 3.5) || fromTrack(x, z) < 3.2) return false;
       }
       return true;
     };
@@ -416,9 +429,12 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
 function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
   const g = site.grounds!;
   if (!rng.chance(0.5)) return;
-  for (let tries = 0; tries < 10; tries++) {
-    const side = rng.chance(0.5) ? 'w' : 'e', z = Math.round(rng.range(meadow.z1 + 9, g.z1 - 14) * 10) / 10, r = Math.round(rng.range(2.0, 2.5) * 10) / 10;
-    const edge = side === 'w' ? g.x0 : g.x1;
+  const v = site.valley!;
+  for (let tries = 0; tries < 30; tries++) {
+    const side = rng.chance(0.5) ? 'w' : 'e', z = Math.round(rng.range(meadow.z1 + 9, v.mouth - 24) * 10) / 10, r = Math.round(rng.range(2.0, 2.5) * 10) / 10;
+    const edge = edgeAt(v, side, z);
+    // (It goes straight in under the hill, so it is made where the side runs fairly straight down the valley.)
+    if (Math.max(Math.abs(slantAt(v, side, z)), Math.abs(slantAt(v, side, z - 4)), Math.abs(slantAt(v, side, z + 4))) > 0.3) continue;
     // Springs, falls and sinks are all at the foot of the walls; a cave keeps away from them, and from any stream.
     if ((site.streams ?? []).some((st) => st.course.some(([x, cz]) => Math.abs(x - edge) < 16 && Math.abs(cz - z) < 9))) continue;
     if ((site.features ?? []).some((f) => Math.abs(f.x - edge) < f.r * 2.4 + 9 && Math.abs(f.z - z) < f.r * 2.4 + 4)) continue;
@@ -453,21 +469,23 @@ function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: numb
   const round = (v: number) => Math.round(v * 10) / 10;
   layOutGrotto(site, meadow, rng.fork('grotto'));
   if (!rng.chance(0.7)) return;
-  for (let tries = 0; tries < 14; tries++) {
+  for (let tries = 0; tries < 120; tries++) {
     const side = rng.chance(0.5) ? 'w' : 'e', rise = rng.chance(0.5) ? 'n' : 's';
     const depth = round(rng.range(5.5, 8.5)), height = round(rng.range(3.4, 5.2)), length = round(rng.range(11, 19));
     // The way up is a ledge no steeper than a hill path, about one in three; or steps cut in the rock, at one in two.
     const way = rng.chance(0.4) ? 'steps' : 'ledge';
     const run = round(height / (way === 'steps' ? 0.5 : 0.34) + 1.5);
-    const lo = meadow.z1 + 8, hi = g.z1 - 14;
+    const v = site.valley!, lo = meadow.z1 + 8, hi = v.mouth - 24;
     if (hi - lo < length + run) continue;
     const start = rng.range(lo, hi - length - run), z0 = round(rise === 'n' ? start + run : start), z1 = round(z0 + length);
-    const edge = side === 'w' ? g.x0 : g.x1, inward = side === 'w' ? 1 : -1;
+    const inward = side === 'w' ? 1 : -1;
     // Everything from the wall to a few paces in front of the shelf must be free; and the wall itself, of any cave in it.
     let free = !(site.grottoes ?? []).some((q) => q.side === side && q.z > start - 8 && q.z < start + length + run + 8);
     for (let z = start - 2; z <= start + length + run + 2 && free; z += 1.5) {
+      // (The shelf follows the side of the valley, which must not swing far in or out along it, and must leave room across from it.)
+      if (Math.abs(slantAt(v, side, z)) > 0.85 || edgeAt(v, 'e', z) - edgeAt(v, 'w', z) < depth + 24) free = false;
       for (let out = 3; out <= 4.7 + depth + 3.5 && free; out += 1.5) {
-        const x = edge + inward * out;
+        const x = edgeAt(v, side, z) + inward * out;
         if (fromTrack(x, z) < 3.5) free = false;
         for (const f of features) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 3) free = false;
         for (const st of streams) for (let k = 0; k < st.course.length - 1 && free; k++) {
@@ -493,7 +511,7 @@ function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: numb
  * where it was.
  */
 function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
-  const g = site.grounds!, features = site.features!, track = site.track!;
+  const g = site.grounds!, v = site.valley!, features = site.features!, track = site.track!;
   const round = (v: number) => Math.round(v * 10) / 10;
   const trackX = (z: number): number => {
     for (let k = 0; k < track.length - 1; k++) {
@@ -507,13 +525,13 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   // Whether a point of ground is free for water: clear of the track, the meadow, the rim, and anything else out here.
   const free = (x: number, z: number, margin: number, but?: Feature): boolean => {
     if (fromTrack(x, z) < 3 + margin) return false;
-    if (x < g.x0 + 12 + margin || x > g.x1 - 12 - margin || z > g.z1 - 12 - margin || z < meadow.z1 + 4 + margin) return false;
+    if (!walkable(v, x, z, 12 + margin) || z < meadow.z1 + 4 + margin) return false;
     return !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.1) + 1.5 + margin);
   };
 
   // A valley that was given no pond may have a pool of its own.
   if (!features.some((f) => f.kind === 'pond') && rng.chance(0.45)) {
-    for (let tries = 0; tries < 40; tries++) {
+    for (let tries = 0; tries < 120; tries++) {
       const r = rng.range(4, 7), x = rng.range(g.x0 + 18, g.x1 - 18), z = rng.range(meadow.z1 + 10, g.z1 - 18);
       if (!free(x, z, r) || fromTrack(x, z) > r + 22) continue;
       features.push({ kind: 'pond', x: round(x), z: round(z), r: round(r) });
@@ -552,9 +570,10 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   }
   // Which side of the track the water keeps to.
   const side = pond ? Math.sign(pond.x - trackX(pond.z)) || 1 : rng.chance(0.5) ? 1 : -1;
-  const rimX = side < 0 ? g.x0 + 6.5 : g.x1 - 6.5;
+  // The foot of the rock on the water's side of the valley, at any place down it; and on the other side.
+  const rimX = (z: number, on = side) => (on < 0 ? edgeAt(v, 'w', z) + 6.5 : edgeAt(v, 'e', z) - 6.5);
   const clear = (x: number, z: number, but?: Feature, on = side): boolean =>
-    Math.sign(x - trackX(z)) === on && fromTrack(x, z) > 4 && x > g.x0 + 5.5 && x < g.x1 - 5.5 && z < g.z1 - 5.5 && z > meadow.z1 + 3
+    Math.sign(x - trackX(z)) === on && fromTrack(x, z) > 4 && z < v.mouth - 4 && insideOf(v, x, z) > 5.5 && z > meadow.z1 + 3
     && !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 0.9) + 2);
   // A wandering line from one point to another over free ground, or nothing if there is no way.
   const route = (from: [number, number], to: [number, number], but?: Feature, on = side, q = rng): [number, number][] | null => {
@@ -578,7 +597,8 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     return line;
   };
   const width = round(rng.chance(0.3) ? rng.range(2.4, 3.8) : rng.range(1.0, 1.9));
-  const south = (x: number): [number, number] => [Math.min(g.x1 - 14, Math.max(g.x0 + 14, x)), g.z1 - 6.5];
+  // Where water goes to ground at the foot of the valley: under the rock on whichever side of the track it is, a little above the gap.
+  const south = (x: number): [number, number] => { const z = v.mouth - 15; return [rimX(z, x < trackX(z) ? -1 : 1), z]; };
   /**
    * Water that crosses the track. Most keeps to its own side; some runs down to the track, over
    * it, and away to a sink on the far side, and then the track has to get across: by stepping
@@ -588,12 +608,13 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   const crossing = rng.fork('crossing'), crosses = crossing.chance(0.4);
   const over = (start: (towards: [number, number]) => [number, number], wide: number, but?: Feature): Stream | null => {
     for (let tries = 0; tries < 6; tries++) {
-      const zc = crossing.range(meadow.z1 + 12, g.z1 - 18), xc = trackX(zc);
+      const zc = crossing.range(meadow.z1 + 12, v.mouth - 26), xc = trackX(zc);
       // It comes to the track a little upstream of where it leaves it, so it crosses at a slant, as water does.
       const near: [number, number] = [xc + side * 7, zc - 1.5], far: [number, number] = [xc - side * 7, zc + 1.5];
       const from = start(near);
       if (from[1] > zc - 5) continue;
-      const sink: [number, number] = crossing.chance(0.55) ? south(xc - side * crossing.range(8, 24)) : [side < 0 ? g.x1 - 6.5 : g.x0 + 6.5, Math.min(g.z1 - 14, zc + crossing.range(8, 22))];
+      const sinkZ = Math.min(v.mouth - 18, zc + crossing.range(8, 22));
+      const sink: [number, number] = crossing.chance(0.55) ? south(xc - side * crossing.range(8, 24)) : [rimX(sinkZ, -side), sinkZ];
       if (Math.sign(sink[0] - trackX(sink[1])) !== -side) continue;
       const down = route(from, near, but, side, crossing), away = down && route(far, sink, but, -side, crossing);
       if (!down || !away) continue;
@@ -609,7 +630,8 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     // In: from a spring under the rim on this side, somewhere up the valley from the pond.
     if (rng.chance(0.85)) {
       for (let tries = 0; tries < 6; tries++) {
-        const spring: [number, number] = [rimX, Math.min(g.z1 - 16, Math.max(meadow.z1 + 5, pond.z + rng.range(-26, 4)))];
+        const springZ = Math.min(v.mouth - 20, Math.max(meadow.z1 + 5, pond.z + rng.range(-26, 4)));
+        const spring: [number, number] = [rimX(springZ), springZ];
         const line = route(spring, edge(spring[0], spring[1]), pond);
         if (line && line.length >= 2) { streams.push({ course: line, width, from: 'spring', to: 'pond' }); break; }
       }
@@ -619,7 +641,8 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
       const across = crosses ? over((towards) => edge(towards[0], towards[1]), round(width + 0.2), pond) : null;
       if (across) streams.push({ ...across, from: 'pond' });
       else for (let tries = 0; tries < 6; tries++) {
-        const sink: [number, number] = rng.chance(0.6) || pond.z > g.z1 - 34 ? south(pond.x + side * rng.range(0, 12) + rng.range(-5, 5)) : [rimX, Math.min(g.z1 - 14, pond.z + rng.range(14, 30))];
+        const sinkZ = Math.min(v.mouth - 18, pond.z + rng.range(14, 30));
+        const sink: [number, number] = rng.chance(0.6) || pond.z > v.mouth - 38 ? south(pond.x + side * rng.range(0, 12) + rng.range(-5, 5)) : [rimX(sinkZ), sinkZ];
         if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
         const line = route(edge(sink[0], sink[1]), sink, pond);
         if (line && line.length >= 2) { streams.push({ course: line, width: round(width + 0.2), from: 'pond', to: 'sink' }); break; }
@@ -627,11 +650,12 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     }
   } else if (rng.chance(0.55)) {
     // No pond: a stream down one side of the valley, from a spring to a sink.
-    const across = crosses ? over(() => [rimX, crossing.range(meadow.z1 + 6, (meadow.z1 + g.z1) / 2)], width) : null;
+    const across = crosses ? over(() => { const z = crossing.range(meadow.z1 + 6, (meadow.z1 + v.mouth) / 2); return [rimX(z), z]; }, width) : null;
     if (across) streams.push(across);
     else for (let tries = 0; tries < 8; tries++) {
-      const spring: [number, number] = [rimX, rng.range(meadow.z1 + 6, (meadow.z1 + g.z1) / 2)];
-      const sink = south(rimX - side * rng.range(10, 26));
+      const springZ = rng.range(meadow.z1 + 6, (meadow.z1 + v.mouth) / 2);
+      const spring: [number, number] = [rimX(springZ), springZ];
+      const sink = south(spring[0]);
       if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
       const line = route(spring, sink);
       if (line && line.length >= 3) { streams.push({ course: line, width, from: 'spring', to: 'sink' }); break; }

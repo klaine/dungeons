@@ -15,6 +15,7 @@ import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
+import { boxValley, edgeAt, insideOf, slantAt } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -401,6 +402,16 @@ export function meshSite(site: Site): SceneDescription {
     // The open country that can be walked: the meadow before the door and the valley round it.
     const g = site.grounds ?? { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 };
     const cxA = (p.x0 + p.x1) / 2, czA = (p.z0 + p.z1) / 2;
+    // Its shape: how far any point is from the nearer of its two sides (less than nothing outside them). Worked out once over the
+    // valley and a little beyond, and read from that; further off, worked out as wanted. A site with no shape recorded is a box.
+    const vale = site.grounds ? site.valley ?? boxValley(site.grounds) : null;
+    const reachOf = vale ? new Grid2(g.x0 - 60, g.z0 - 30, 0.75, Math.ceil((g.x1 - g.x0 + 120) / 0.75) + 1, Math.ceil((g.z1 - g.z0 + 110) / 0.75) + 1).fill((x, z) => insideOf(vale, x, z)) : null;
+    const insideAt = (x: number, z: number): number => (!vale ? Math.min(x - g.x0, g.x1 - x, g.z1 - z) : reachOf!.holds(x, z) ? reachOf!.at(x, z) : insideOf(vale, x, z));
+    /** Where a side of the valley lies at `z`, and how far in from it a point is, measured square to it. */
+    const sideAt = (side: 'w' | 'e', z: number) => (vale ? edgeAt(vale, side, z) : side === 'w' ? g.x0 : g.x1);
+    const fromSide = (side: 'w' | 'e', x: number, z: number) => (side === 'w' ? x - sideAt('w', z) : sideAt('e', z) - x) / (vale ? Math.hypot(1, slantAt(vale, side, z)) : 1);
+    /** Whether a point is in the valley, with `m` metres to spare, and not beyond the gap at its foot. */
+    const inValley = (x: number, z: number, m: number) => z > g.z0 && z < (vale ? vale.mouth - m * 0.5 : g.z1 - m) && insideAt(x, z) > m;
     const houseZ0 = Math.min(...house.map((q) => q.z0)) - T;
     const frontZ = p.z0 - 0.35;
     const pathHalf = 1.15;
@@ -480,7 +491,7 @@ export function meshSite(site: Site): SceneDescription {
       const seeds = rng.fork(`grotto${k}`);
       // (For a hall: where its stair begins, measured as everything in a grotto is, going out of the valley from seven metres inside its edge; how far the stair runs; and where the hall itself begins.)
       const stair0 = 3.9, run = q.hall ? q.hall.drop / 0.5 : 0, hall0 = stair0 + run + 1.6;
-      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0, gs: q.hall?.great?.gallery === 's' ? 1 : -1 };
+      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: sideAt(q.side, q.z), y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0, gs: q.hall?.great?.gallery === 's' ? 1 : -1 };
     });
     /**
      * The air of a hewn hall, at a point given as the grotto's own measures: `t` going out of
@@ -666,7 +677,7 @@ export function meshSite(site: Site): SceneDescription {
     const terraces = site.grounds ? site.terraces ?? [] : [];
     const shelf = { lift: 0, way: 0, top: 0 };
     const shelfAt = (t: (typeof terraces)[number], x: number, z: number): boolean => {
-      const inside = t.side === 'w' ? x - g.x0 : g.x1 - x;
+      const inside = fromSide(t.side, x, z);
       // Along the valley: how far beyond the level part towards the way up, and how far beyond its other end.
       const up = t.rise === 'n' ? t.z0 - z : z - t.z1, past = t.rise === 'n' ? z - t.z1 : t.z0 - z;
       if (inside > 4.7 + t.depth + 4 || inside < -7 || up > t.run + 3 || past > 4) return false;
@@ -797,7 +808,11 @@ export function meshSite(site: Site): SceneDescription {
       const wobble = wobbleAt(x, z);
       // The hillside is level with the roofline over the house and rises behind it; beside the
       // house it starts to rise at once.
-      const clearOfHouse = smooth(Math.max(0, houseX0 - x, x - houseX1) / 8);
+      // (In a valley with a shape of its own, the land to either side of the house is the valley's side run on north, and only the hill behind the house is the house's.)
+      // (Nor does the scarp either side of the house front run on beyond the valley's sides, which are scarp enough.)
+      const inside = insideAt(x, z);
+      const aside = Math.max(0, houseX0 - x, x - houseX1), ownHill = !vale ? 1 : z < frontZ ? 1 - smooth((aside - 1.5) / 6) : 1 - smooth((-inside - 2) / 4);
+      const clearOfHouse = vale ? 0 : smooth(aside / 8);
       const riseFrom = houseZ0 + (frontZ - houseZ0) * clearOfHouse;
       // It lies a little above the top of the walls. (It used to lie a little below, inside the
       // solid that casts the house's shadow, and so was never once in the sun.)
@@ -809,13 +824,29 @@ export function meshSite(site: Site): SceneDescription {
         for (const o of openings) free = Math.min(free, smooth((Math.max(o.x0 - x, x - o.x1, o.z0 - z, z - o.z1) - 0.6) / 3.5));
         if (free > 0) crest += (0.25 + 1.9 * fbm2(x * 0.09 + s2 * 2, z * 0.09 - s1, 3) * fbm2(x * 0.31 + s1, z * 0.31 + s2, 2) * 2) * free;
       }
-      if (crest > y) y += (crest - y) * escarpment(x, z, wobble);
-      const inside = Math.min(x - g.x0, g.x1 - x, g.z1 - z);
-      // The wall goes up in a stride or two. It is made steeper than rock would long stand, and then worn back.
-      // Behind the head of the valley it dies away into the hill, where it would otherwise run on as a bank to the horizon.
-      y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2.9 + wobble) / 1.8)) * smooth((z - (p.z0 - 9)) / 7);
-      const beyond = Math.max(0, -inside);
-      y += smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+      if (crest > y) y += (crest - y) * escarpment(x, z, wobble) * ownHill;
+      if (!vale) {
+        // (A site with no shape recorded: a wall round a box, as valleys were first made.)
+        y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2.9 + wobble) / 1.8)) * smooth((z - (p.z0 - 9)) / 7);
+        const beyond = Math.max(0, -inside);
+        y += smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+      } else {
+        // The rock goes up in a stride or two. It is made steeper than rock would long stand, and then worn back. How high it
+        // stands is not the same all round: here a low broken crag, there a cliff three times the height. It begins at the
+        // corners of the house, whose own scarp is the head of the valley; and beyond the gap at the foot it dies away.
+        const high = 6 + 15 * fbm2(x * 0.021 + s1, z * 0.021 - s2, 2) ** 1.4;
+        // (Dies away, not drops away: beyond the gap the same rise is spread over a broader and broader slope, until it is a hillside like any other.)
+        const spread = 1.8 + 44 * smooth((z - vale.mouth - 4) / 20);
+        // (Nor does it stand over the house, nor close beside it north of its front, where the house's own hill is; further off to either side it runs on north as the top of the land does.)
+        // North of the house front everything is side, but for the house and its hill.
+        const ins = z < frontZ ? Math.min(inside, 2.9 + z - frontZ) : inside;
+        y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
+        // Behind the crags the land does not lie flat, as round a quarry: it goes on up, as a hillside, more on some sides
+        // than on others. (North of the house front the hills keep the distance they always kept from it.)
+        const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = north + (out - north) * t;
+        const stands = 0.55 + 0.9 * fbm2(x * 0.008 + s2 + 9, z * 0.008 - s1, 2);
+        y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+      }
       // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
       for (const nt of notches) {
         const along = (x - nt.x) * nt.out, off = Math.abs(z - nt.z);
@@ -874,7 +905,7 @@ export function meshSite(site: Site): SceneDescription {
       if (stream.from === 'fall') {
         // Out of the valley is towards whichever side wall the stream begins under. Going that
         // way, the lip is the first place the ground has come nearly up to the top of the wall.
-        const out = xs[0] < (g.x0 + g.x1) / 2 ? -1 : 1, foot = groundBase(xs[0], zs[0]);
+        const out = xs[0] < (sideAt('w', zs[0]) + sideAt('e', zs[0])) / 2 ? -1 : 1, foot = groundBase(xs[0], zs[0]);
         let top = foot, back = 8;
         for (let d = 0; d <= 8; d += 0.4) top = Math.max(top, groundBase(xs[0] + out * d, zs[0]));
         for (let d = 0; d <= 8; d += 0.2) if (groundBase(xs[0] + out * d, zs[0]) > foot + 0.85 * (top - foot)) { back = d; break; }
@@ -907,37 +938,62 @@ export function meshSite(site: Site): SceneDescription {
     const snapTo = (v: number, up: boolean) => (up ? Math.ceil(v / SHEET - 1e-6) : Math.floor(v / SHEET + 1e-6)) * SHEET;
     // The band of ground carved as cliff: this far into the valley from its edge, and this far out.
     const IN = 9.6, OUT = 6;
-    const X0o = snapTo(g.x0 - OUT, false), X0i = snapTo(g.x0 + IN, true), X1i = snapTo(g.x1 - IN, false), X1o = snapTo(g.x1 + OUT, true);
-    const Z1i = snapTo(g.z1 - IN, false), Z1o = snapTo(g.z1 + OUT, true), ZNo = snapTo(p.z0 - 7.2, false), ZNi = snapTo(p.z0 + IN, true);
+    const ZNo = snapTo(p.z0 - 7.2, false), ZNi = snapTo(p.z0 + IN, true);
     // The meadow is carved too, and baked with the house. Behind the house front there is nothing to carve.
     const MX0 = snapTo(p.x0 - 0.9, false), MX1 = snapTo(p.x1 + 0.9, true), MZ0 = snapTo(p.z0 - 0.14, false), MZ1 = snapTo(p.z1 + 0.3, true);
     const behind = p.z0 - 0.14;
     type Patch = { x0: number; x1: number; z0: number; z1: number };
     const meadowPatch: Patch = { x0: MX0, x1: MX1, z0: MZ0, z1: MZ1 };
-    // The cliffs proper are only made where there is a valley with room for them.
-    const walled = !!site.grounds && X0i + 2.4 < MX0 && MX1 + 2.4 < X1i && ZNi + 2.4 < Z1i && MZ1 < Z1i;
-    const headPatches: Patch[] = walled ? [{ x0: X0i, x1: MX0, z0: ZNo, z1: ZNi }, { x0: MX1, x1: X1i, z0: ZNo, z1: ZNi }] : [];
-    const rimPatches: Patch[] = walled ? [{ x0: X0o, x1: X0i, z0: ZNo, z1: Z1o }, { x0: X1i, x1: X1o, z0: ZNo, z1: Z1o }, { x0: X0i, x1: X1i, z0: Z1i, z1: Z1o }] : [];
-    // A terrace stands out further than the band of cliff is deep, so more is carved there.
-    const shelfPatches: Patch[] = walled ? terraces.map((t) => {
-      const za = Math.max(ZNi, snapTo((t.rise === 'n' ? t.z0 - t.run : t.z0) - 4.5, false)), zb = Math.min(Z1i, snapTo((t.rise === 's' ? t.z1 + t.run : t.z1) + 4.5, true));
-      return t.side === 'w' ? { x0: X0i, x1: Math.min(snapTo(g.x0 + 4.7 + t.depth + 5, true), MX0 - SHEET), z0: za, z1: zb } : { x0: Math.max(snapTo(g.x1 - 4.7 - t.depth - 5, false), MX1 + SHEET), x1: X1i, z0: za, z1: zb };
-    }) : [];
-    const patches = [meadowPatch, ...headPatches, ...rimPatches, ...shelfPatches];
+    // The cliffs proper are only made where there is a valley.
+    const walled = !!vale;
+    /**
+     * The band follows the valley's two sides wherever they go. It is made up of rows across the valley, each a few strides
+     * deep, and in each row whatever stretches of it lie within the band are carved, each as one piece. The first row is
+     * the head of the valley, about the house: all of it is carved, from side to side, since there the house's own scarp
+     * stands between the two. A terrace stands out further than the band is deep, so more is carved there.
+     */
+    const headPatches: Patch[] = [], rimPatches: Patch[] = [], rows: { z0: number; z1: number; of: Patch[] }[] = [];
+    if (vale) {
+      const zEnd = snapTo(vale.mouth + 19, true), ROW = 9.6, COL = 2.4;
+      let bx0 = Infinity, bx1 = -Infinity;
+      for (let z = ZNo; z <= zEnd; z += 2) { bx0 = Math.min(bx0, sideAt('w', z)); bx1 = Math.max(bx1, sideAt('e', z)); }
+      bx0 = snapTo(bx0 - OUT - 3, false); bx1 = snapTo(bx1 + OUT + 3, true);
+      const shelves = terraces.map((t) => ({ t, za: (t.rise === 'n' ? t.z0 - t.run : t.z0) - 4.5, zb: (t.rise === 's' ? t.z1 + t.run : t.z1) + 4.5 }));
+      const inBand = (x: number, z: number): boolean => {
+        const d = insideAt(x, z);
+        if (d < -OUT) return false;
+        if (d <= IN || z <= ZNi) return true;
+        return shelves.some((q) => z > q.za && z < q.zb && fromSide(q.t.side, x, z) < 4.7 + q.t.depth + 5);
+      };
+      for (let za = ZNo; za < zEnd - 1e-6;) {
+        const zb = za === ZNo ? ZNi : Math.min(zEnd, za + ROW), row = { z0: za, z1: zb, of: [] as Patch[] };
+        let run: Patch | null = null;
+        for (let x = bx0; x < bx1 - 1e-6; x += COL) {
+          let any = false;
+          for (let z = za + 0.6; z < zb && !any; z += 1.2) any = inBand(x + 0.6, z) || inBand(x + 1.8, z);
+          if (any) { if (run) run.x1 = x + COL; else { run = { x0: x, x1: x + COL, z0: za, z1: zb }; row.of.push(run); } } else run = null;
+        }
+        // (Less the meadow, which is a piece of its own.)
+        row.of = row.of.flatMap((c): Patch[] => (c.x1 <= MX0 || c.x0 >= MX1 || c.z1 <= MZ0 || c.z0 >= MZ1 ? [c] : [
+          { x0: c.x0, x1: Math.min(c.x1, MX0), z0: c.z0, z1: c.z1 }, { x0: Math.max(c.x0, MX1), x1: c.x1, z0: c.z0, z1: c.z1 },
+          { x0: Math.max(c.x0, MX0), x1: Math.min(c.x1, MX1), z0: c.z0, z1: Math.min(c.z1, MZ0) }, { x0: Math.max(c.x0, MX0), x1: Math.min(c.x1, MX1), z0: Math.max(c.z0, MZ1), z1: c.z1 },
+        ].filter((q) => q.x1 - q.x0 > 0.01 && q.z1 - q.z0 > 0.01)));
+        (za === ZNo ? headPatches : rimPatches).push(...row.of);
+        rows.push(row);
+        za = zb;
+      }
+    }
+    const shelfPatches: Patch[] = [];
+    const patches = [meadowPatch, ...headPatches, ...rimPatches];
     const inPatch = (c: Patch, x: number, z: number, m: number) => x >= c.x0 - m && x <= c.x1 + m && z >= c.z0 - m && z <= c.z1 + m;
     // With a hair's breadth to spare: a point on the edge of a patch, as lattice points are, belongs to it.
-    const carved = (x: number, z: number) => patches.some((c) => inPatch(c, x, z, 1e-6));
+    const inBandPatch = (x: number, z: number, m: number) => rows.some((r) => z >= r.z0 - m && z <= r.z1 + m && r.of.some((c) => inPatch(c, x, z, m)));
+    const carved = (x: number, z: number) => inPatch(meadowPatch, x, z, 1e-6) || inBandPatch(x, z, 1e-6);
     // How deep a point lies inside the band of cliff, measured from the nearest ground that is
-    // not cliff: the valley floor, the hill outside, or the meadow and the house.
-    const depthInBand = (x: number, z: number): number => {
-      let d = Math.min(x - X0o, X1o - x, z - ZNo, Z1o - z, Math.max(X0i - x, x - X1i, ZNi - z, z - Z1i));
-      if (z < ZNi + 2) d = Math.min(d, Math.max(MX0 - x, x - MX1, z - ZNi));
-      // In the rock carved for a terrace, it is how far in from that piece's three open sides.
-      for (const c of shelfPatches) if (inPatch(c, x, z, 0)) d = Math.max(d, Math.min(c.x0 === X0i ? c.x1 - x : x - c.x0, z - c.z0, c.z1 - z));
-      return d;
-    };
+    // not cliff: the valley floor, the hill outside, or the meadow and the house. (Filled in below, once the lattice is laid.)
+    let depthInBand = (_x: number, _z: number): number => 0;
     const MARGIN = 3.2;
-    const lx0 = (walled ? X0o : MX0) - MARGIN, lz0 = (walled ? ZNo : MZ0) - MARGIN, lx1 = (walled ? X1o : MX1) + MARGIN, lz1 = (walled ? Z1o : MZ1) + MARGIN;
+    const lx0 = Math.min(...patches.map((c) => c.x0)) - MARGIN, lz0 = Math.min(...patches.map((c) => c.z0)) - MARGIN, lx1 = Math.max(...patches.map((c) => c.x1)) + MARGIN, lz1 = Math.max(...patches.map((c) => c.z1)) + MARGIN;
     const land = new Grid2(lx0, lz0, CELL, Math.round((lx1 - lx0) / CELL) + 1, Math.round((lz1 - lz0) / CELL) + 1);
     const known = new Uint8Array(land.data.length);
     // In front of the house the meadow runs level up to the wall; the scarp behind the wall is not this piece's business.
@@ -945,7 +1001,7 @@ export function meshSite(site: Site): SceneDescription {
     for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
       const x = land.x0 + i * CELL, z = land.z0 + j * CELL;
       // A little beyond what is carved is wanted too, because the face is looked up a few paces to one side of where it stands.
-      if (!patches.some((c) => inPatch(c, x, z, MARGIN))) continue;
+      if (!inPatch(meadowPatch, x, z, MARGIN) && !inBandPatch(x, z, MARGIN)) continue;
       known[j * land.nx + i] = 1;
       // (This holds for the lattice's margin behind the wall as much as for the meadow itself:
       // were the hill behind let in there, the meadow would find a cliff at its back and turn it to rock.)
@@ -954,6 +1010,12 @@ export function meshSite(site: Site): SceneDescription {
     const loose = land.like();
     const wornBy = land.like();
     if (walled) {
+      // How far each point of the band is from the nearest ground that is not band, counted in steps of the lattice, there and back.
+      const far = new Float32Array(land.data.length), nxL = land.nx, nzL = land.nz, D1 = CELL, D2 = CELL * Math.SQRT2;
+      for (let j = 0; j < nzL; j++) for (let i = 0; i < nxL; i++) far[j * nxL + i] = i > 0 && j > 0 && i < nxL - 1 && j < nzL - 1 && inBandPatch(land.x0 + i * CELL, land.z0 + j * CELL, 1e-6) ? 1e6 : 0;
+      for (let j = 1; j < nzL - 1; j++) for (let i = 1; i < nxL - 1; i++) { const o = j * nxL + i; if (far[o]) far[o] = Math.min(far[o], far[o - 1] + D1, far[o - nxL] + D1, far[o - nxL - 1] + D2, far[o - nxL + 1] + D2); }
+      for (let j = nzL - 2; j > 0; j--) for (let i = nxL - 2; i > 0; i--) { const o = j * nxL + i; if (far[o]) far[o] = Math.min(far[o], far[o + 1] + D1, far[o + nxL] + D1, far[o + nxL + 1] + D2, far[o + nxL - 1] + D2); }
+      depthInBand = (x, z) => far[Math.min(nzL - 1, Math.max(0, Math.round((z - land.z0) / CELL))) * nxL + Math.min(nxL - 1, Math.max(0, Math.round((x - land.x0) / CELL)))];
       const before = land.data.slice();
       const active = new Uint8Array(land.data.length);
       const foot = land.like();
@@ -1202,16 +1264,19 @@ export function meshSite(site: Site): SceneDescription {
     // The rim of the valley is too steep to climb, but nobody is to leave by it whatever they find.
     // (A grotto runs in under the edge; the rock itself keeps whoever is in it. There the fence
     // begins above the grotto's roof.)
-    for (const [x0, x1, sideOf] of [[g.x0 - 3, g.x0 - 1.2, 'w'], [g.x1 + 1.2, g.x1 + 3, 'e']] as const) {
-      let from = g.z0 - 3;
-      for (const q of grottoes.filter((h) => h.side === sideOf).sort((a, b) => a.z - b.z)) {
-        fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, q.z - q.r * 1.25 - 2.4) }, { min: V(x0, q.y0 + 4.6, q.z - q.r * 1.25 - 2.4), max: V(x1, p.floor + 80, q.z + q.r * 1.25 + 2.4) });
-        from = q.z + q.r * 1.25 + 2.4;
+    // (The fence follows each side a little behind it, in short lengths, as far as a few strides beyond the gap; and one crosses the track there,
+    // where the valley ends for whoever is walking it, though the track and the land go on.)
+    const fenceEnd = vale ? vale.mouth + 8 : g.z1 + 3;
+    for (const sideOf of ['w', 'e'] as const) {
+      const caves = grottoes.filter((h) => h.side === sideOf), out = sideOf === 'w' ? -1 : 1;
+      for (let z = g.z0 - 3; z < fenceEnd; z += 1.5) {
+        const xa = sideAt(sideOf, z), xb = sideAt(sideOf, z + 1.5), near = out < 0 ? Math.max(xa, xb) - 1.2 : Math.min(xa, xb) + 1.2, far = out < 0 ? Math.min(xa, xb) - 3 : Math.max(xa, xb) + 3;
+        const cave = caves.find((q) => z + 1.5 > q.z - q.r * 1.25 - 2.4 && z < q.z + q.r * 1.25 + 2.4);
+        fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : p.floor - 6, z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
       }
-      fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, g.z1 + 3) });
     }
     fences.push(
-      { min: V(g.x0 - 3, p.floor - 6, g.z1 + 1.2), max: V(g.x1 + 3, p.floor + 80, g.z1 + 3) },
+      { min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) },
       { min: V(g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
       { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
     );
@@ -1430,7 +1495,8 @@ export function meshSite(site: Site): SceneDescription {
     // ---- what lies and grows in the valley
     const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
     const inMeadow = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
-    const inGrounds = (x: number, z: number, m: number) => x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m;
+    // (In the valley: between its sides, and no further down than a few strides past the gap, where whoever walks it is stopped.)
+    const inGrounds = (x: number, z: number, m: number) => (vale ? z > g.z0 && z < vale.mouth + 6 - m && insideAt(x, z) > m : x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m);
     const offTrack = (x: number, z: number) => Math.abs(x - pathAt(z)) - pathHalf;
     // How far a point is outside whatever lies in the valley: negative inside a pond's hollow or a ring.
     const clearOfFeatures = (x: number, z: number) => {
@@ -1460,7 +1526,7 @@ export function meshSite(site: Site): SceneDescription {
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
       const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
-      if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
+      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
     // Small stones are a dozen shapes carved once and set down again and again, each turned,
@@ -1629,7 +1695,7 @@ export function meshSite(site: Site): SceneDescription {
         if (offTrack(x, z) < 3.2 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
         if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
         // Full detail anywhere the player can stand; less with distance beyond the rim.
-        const out = Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
+        const out = vale ? Math.max(0, -insideAt(x, z), g.z0 - z, z - vale.mouth - 8) : Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
         tree(x, z, f(x, z), Math.max(0, 1 - out / 50));
       }
     };
@@ -1667,15 +1733,15 @@ export function meshSite(site: Site): SceneDescription {
       const fx = Math.min(snx - 1.001, Math.max(0, (x - sx0) / cellS)), fz = Math.min(snz - 1.001, Math.max(0, (z - sz0) / cellS));
       const ii = Math.floor(fx), jj = Math.floor(fz), tx = fx - ii, tz = fz - jj;
       const canopy = cover[jj * snx + ii] * (1 - tx) * (1 - tz) + cover[jj * snx + ii + 1] * tx * (1 - tz) + cover[(jj + 1) * snx + ii] * (1 - tx) * tz + cover[(jj + 1) * snx + ii + 1] * tx * tz;
-      // The sun stands to the south, so it is the southern rim whose foot lies in shadow.
-      return Math.min(1, canopy + 0.55 * (1 - smooth((g.z1 - z - 3) / 9)));
+      // Under the rock it is shadier than out in the valley, all along its foot.
+      return Math.min(1, canopy + (vale ? 0.4 * (1 - smooth((insideAt(x, z) - 3) / 6)) : 0.55 * (1 - smooth((g.z1 - z - 3) / 9))));
     };
     const wetAt = (x: number, z: number): number => {
       let w = 0.38 - (swells(x, z) - p.floor) * 0.2 + (fbm2(x * 0.05 + s1 * 2, z * 0.05 - s2, 3) - 0.5) * 0.5;
       for (const f of ponds) w = Math.max(w, 1 - smooth((Math.hypot(x - f.x, z - f.z) - shoreOf(f, x - f.x, z - f.z) * 0.75) / 9));
       // A stream waters its banks for a few paces either side.
       for (const c of channels) if (along(c, x, z, 8)) w = Math.max(w, 1 - smooth((nearest.d - nearest.half) / 6));
-      w += 0.3 * (1 - smooth((g.z1 - z - 3) / 9));
+      w += vale ? 0.22 * (1 - smooth((insideAt(x, z) - 3) / 7)) : 0.3 * (1 - smooth((g.z1 - z - 3) / 9));
       return Math.min(1, Math.max(0, w - parched * 0.3));
     };
     // (`close` is for how tall grass stands: it is short only in the track itself, and long right up to the ruts.)
@@ -1694,7 +1760,7 @@ export function meshSite(site: Site): SceneDescription {
       // Nothing much grows on scree.
       if (walled && loose.holds(x, z)) t = Math.max(t, smooth(loose.at(x, z) / 0.3));
       for (const q of stones) t = Math.max(t, 0.7 * (1 - smooth((Math.hypot(q[0] - x, q[1] - z) - q[2] - 0.2) / 1.4)));
-      const rim = Math.min(x - g.x0, g.x1 - x, g.z1 - z, z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
+      const rim = Math.min(vale ? insideAt(x, z) : Math.min(x - g.x0, g.x1 - x, g.z1 - z), z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
       return Math.max(t, 0.75 * (1 - smooth((rim - 2.5) / 3)));
     };
 
@@ -1741,7 +1807,7 @@ export function meshSite(site: Site): SceneDescription {
       }
     };
     grass(p.x0 + 0.2, p.x1 - 0.2, p.z0 + 0.25, p.z1 - 0.2, 0.36, 1, () => true);
-    grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
+    grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 5, 0.56, 1.5, (x, z) => inGrounds(x, z, -2) && !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
     grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
     planting.muted = false;
 
@@ -1755,6 +1821,7 @@ export function meshSite(site: Site): SceneDescription {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
       planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
       // The cheap questions first: most places are settled by them.
+      if (!inGrounds(x, z, 0)) continue;
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
       const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
       if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
@@ -1859,7 +1926,7 @@ export function meshSite(site: Site): SceneDescription {
       let lying = 0;
       for (let tries = 0; tries < 260 && lying < 16; tries++) {
         const x = dead.range(g.x0 + 8, g.x1 - 8), z = dead.range(g.z0 + 8, g.z1 - 8), a = dead.range(0, Math.PI), len = dead.range(2.2, 5.5), r = dead.range(0.11, 0.26), stump = dead.chance(0.35);
-        if (shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
+        if (!inGrounds(x, z, 8) || shadeAt(x, z) < 0.45 || offTrack(x, z) < 3 || inMeadow(x, z, 2) || clearOfFeatures(x, z) < 2 || !clearOfStones(x, z, 1) || slopeOf(ground, x, z, 0.6) > 0.35) continue;
         if (stump) {
           const y = ground(x, z);
           layLimb(barkMesh, [V(x, y - 0.3, z), V(x, y + 0.1, z), V(x + 0.02, y + dead.range(0.35, 0.8), z)], [r * 1.9, r * 1.5, r * 1.3], 8, grey, 0, () => 0.75);
@@ -2181,8 +2248,8 @@ export function meshSite(site: Site): SceneDescription {
     });
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {
-      const inw = t.side === 'w' ? 1 : -1, edge = t.side === 'w' ? g.x0 : g.x1;
-      const x = edge + inw * (4.7 + t.depth * 0.62), z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4, y = ground(x, z);
+      const inw = t.side === 'w' ? 1 : -1, z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4;
+      const x = sideAt(t.side, z) + inw * (4.7 + t.depth * 0.62), y = ground(x, z);
       const pile = rng.fork('cairn');
       // Big stones at the bottom, small at the top, each sitting in the hollow between those under it.
       for (let course = 0, up = 0; course < 5; course++) {
@@ -2198,9 +2265,9 @@ export function meshSite(site: Site): SceneDescription {
         // Steps cut in the rock, up the middle of the way: each a block a stride broad, its top
         // level with the ground at its upper edge. They are for the eye; what is walked on is
         // the slope they are cut from, so no foot catches on a riser.
-        const cut = rng.fork('steps'), mid = edge + inw * (4.7 + 1.45), tread = 0.36;
+        const cut = rng.fork('steps'), tread = 0.36;
         for (let u = t.run - 0.4; u > -0.3; u -= tread) {
-          const zLow = t.rise === 'n' ? t.z0 - u : t.z1 + u, zHigh = t.rise === 'n' ? zLow + tread : zLow - tread, zMid = (zLow + zHigh) / 2;
+          const zLow = t.rise === 'n' ? t.z0 - u : t.z1 + u, zHigh = t.rise === 'n' ? zLow + tread : zLow - tread, zMid = (zLow + zHigh) / 2, mid = sideAt(t.side, zMid) + inw * (4.7 + 1.45);
           const top = ground(mid, zHigh) + 0.015, half = 0.72 + cut.range(-0.05, 0.05), tone = cut.range(0.85, 1.1);
           layBeam(softRock, V(mid - half, top - 0.15, zMid), V(mid + half, top - 0.15, zMid), tread + 0.03, 0.3, rockColour(tone), cut.range(0, 9));
         }

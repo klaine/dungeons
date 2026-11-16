@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { Atmosphere } from '../render/post';
+import { edgeAt, insideOf } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
@@ -1066,6 +1067,14 @@ async function start(): Promise<void> {
   // For diagnosis: what a pixel looks at, and whether that point has a clear line to the sun.
   // For walking the player's body along a line of points, wherever they are: up a tower, through a hall under the hill.
   // It goes straight at each and steps round nothing, so that whatever stops it shows. Says how far it got.
+  // How far a point is outside the valley that can be walked (less than nothing inside it): for the tests that try to get out.
+  // (A cave or a hall in the valley's side runs in under the hill beyond its edge, and whoever is in one has not got out.)
+  (window as any).__dbg.beyond = (x: number, z: number) => {
+    const v = site?.valley;
+    if (!v) return -1;
+    if ((site.grottoes ?? []).some((q) => Math.abs(z - q.z) < (q.hall ? q.hall.width / 2 + 12 : q.r * 1.25 + 4) && (q.side === 'w' ? edgeAt(v, 'w', q.z) - x : x - edgeAt(v, 'e', q.z)) < (q.hall ? q.hall.length + 30 : q.r + 6))) return -1;
+    return Math.max(-insideOf(v, x, z), z - v.mouth - 8.5, v.z0 - 2.5 - z);
+  };
   (window as any).__dbg.walk = (points: [number, number][], reach = 0.35) => {
     const out: { ok: boolean; x: number; y: number; z: number }[] = [];
     for (const [tx, tz] of points) {

@@ -1,4 +1,5 @@
 import { drawStorey } from './buildingPlan';
+import { boxValley, edgeAt } from '../core/valley';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
@@ -60,14 +61,16 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     x0 = Math.min(x0, p.x0 - T); x1 = Math.max(x1, p.x1 + T);
     z0 = Math.min(z0, p.z0 - T); z1 = Math.max(z1, p.z1 + T);
   }
-  const g = opts.valley ? site.grounds : undefined;
+  const g = opts.valley ? site.grounds : undefined, vale = g ? site.valley ?? boxValley(g) : undefined;
+  // Where a side of the valley lies at any place down it.
+  const sideAt = (side: 'w' | 'e', z: number) => edgeAt(vale!, side, z);
   if (g) {
     x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
     // A hall under the hill runs out beyond the valley's edge, and the map is made wide enough to show all of it.
     for (const q of site.grottoes ?? []) {
       if (!q.hall) continue;
       const far = 3.9 + q.hall.drop / 0.5 + 1.6 + q.hall.length - 7 + 3;
-      if (q.side === 'w') x0 = Math.min(x0, g.x0 - far); else x1 = Math.max(x1, g.x1 + far);
+      if (q.side === 'w') x0 = Math.min(x0, sideAt('w', q.z) - far); else x1 = Math.max(x1, sideAt('e', q.z) + far);
     }
   }
   const pad = 10 * ratio;
@@ -87,15 +90,24 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
 
   // The valley: its floor, the rock that shuts it in, the track, and what lies off the track.
   if (g) {
+    // (Its two sides, from the house down to the gap and a little beyond, where it opens out again; the rock is a band along the outside of each.)
+    const outline = (grow: number) => {
+      ctx.beginPath();
+      const end = vale!.mouth + 6;
+      for (let z = g.z0; z <= end; z += 1) { const x = X(sideAt('w', z) - grow); if (z === g.z0) ctx.moveTo(x, Z(z)); else ctx.lineTo(x, Z(z)); }
+      for (let z = end; z >= g.z0; z -= 1) ctx.lineTo(X(sideAt('e', z) + grow), Z(z));
+      ctx.closePath();
+      ctx.fill();
+    };
     ctx.fillStyle = INK;
     ctx.globalAlpha = 0.55;
-    rect(g.x0 - 3, g.z0, g.x1 + 3, g.z1 + 3);
+    outline(3);
     ctx.globalAlpha = 1;
     ctx.fillStyle = COURT;
-    rect(g.x0, g.z0, g.x1, g.z1);
+    outline(0);
     // Terraces: the shelf, with ticks down its front as on any map that shows a drop, and the way up as a dotted line.
     for (const t of site.terraces ?? []) {
-      const edge = t.side === 'w' ? g.x0 : g.x1, inw = t.side === 'w' ? 1 : -1, back = edge + inw * 4.2, front = edge + inw * (4.7 + t.depth);
+      const edge = sideAt(t.side, (t.z0 + t.z1) / 2), inw = t.side === 'w' ? 1 : -1, back = edge + inw * 4.2, front = edge + inw * (4.7 + t.depth);
       ctx.fillStyle = FLOOR;
       ctx.globalAlpha = 0.55;
       ctx.fillRect(Math.min(X(back), X(front)), Z(t.z0), Math.abs(X(front) - X(back)), Z(t.z1) - Z(t.z0));
@@ -112,7 +124,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     }
     // Grottoes: a dark hollow in the rock at the valley's edge.
     for (const q of site.grottoes ?? []) {
-      const edge = q.side === 'w' ? g.x0 : g.x1, inw = q.side === 'w' ? 1 : -1;
+      const edge = sideAt(q.side, q.z), inw = q.side === 'w' ? 1 : -1;
       if (q.hall?.great) {
         // A great hall, drawn at its floor: the ledge it is come upon from, the stair down, the screen with the aisle behind it,
         // the chasm with its bridge and its steps, the upper bridge as a broken line, the pillars, and the room off the upper bridge.
