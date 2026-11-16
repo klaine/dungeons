@@ -32,7 +32,8 @@ for (let n = 0; n < count; n++) {
     for (const w of site.ways) {
       if (w.kind === 'window') continue;
       const d = Math.abs(site.places[w.a].floor - site.places[w.b].floor);
-      if (d > 0.52) throw new Error(`doorway too steep: ${d}`);
+      // A built doorway takes a step or three; a cleft in a cave is a climb, but one that can be made.
+      if (d > (w.natural ? 2.35 : 0.52)) throw new Error(`${w.natural ? 'cleft' : 'doorway'} too steep: ${d}`);
     }
     if (n < 4) console.log(seed, '-', site.title);
   } catch (e) {

@@ -137,6 +137,39 @@ export interface Feature {
  * or goes to ground in a sink at the foot of the rim. The builder cuts it a bed that falls all
  * the way, so it never runs uphill, however the ground lies.
  */
+/**
+ * A terrace: a shelf of level ground standing out from one of the valley's side walls, part-way
+ * up it, with a cliff of its own below and the rest of the wall behind. It is reached by a
+ * ledge that rises along the wall from the valley floor, beginning beyond one end of it. From
+ * the top the whole valley can be seen, and something has been left at its far end.
+ */
+export interface Terrace {
+  /** Which side wall it stands against: `w` is the side of lesser x. */
+  side: 'w' | 'e';
+  /** Its level part lies from `z0` to `z1` along the valley. */
+  z0: number;
+  z1: number;
+  /** How far it stands out from the foot of the wall, and how high above the valley floor, in metres. */
+  depth: number;
+  height: number;
+  /** Which end the way up is at (`n` is towards the house), and how far the way up runs along the wall beyond that end. */
+  rise: 'n' | 's';
+  run: number;
+  /** What the way up is: a ledge the rock happens to offer, or steps somebody cut in it, which are steeper and shorter. */
+  way: 'ledge' | 'steps';
+}
+
+/**
+ * A grotto: a small cave in one of the valley's side walls. Its mouth is at the foot of the
+ * wall, at `z` along the valley; a passage runs in under the hill to a chamber about `r` across
+ * the half of it. It has nothing to do with the house. Something glows in it, and something was left there.
+ */
+export interface Grotto {
+  side: 'w' | 'e';
+  z: number;
+  r: number;
+}
+
 export interface Stream {
   /** The line it follows, in order from where it begins to where it ends. */
   course: [number, number][];
@@ -179,6 +212,10 @@ export interface Site {
   features?: Feature[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
+  /** Ground in the valley that stands above its floor and can be climbed to. */
+  terraces?: Terrace[];
+  /** Caves in the valley's own walls, entered from its floor. */
+  grottoes?: Grotto[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

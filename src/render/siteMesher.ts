@@ -232,6 +232,62 @@ export function meshSite(site: Site): SceneDescription {
      */
     interface Notch { x: number; z: number; out: number; half: number; depth: number; back: number }
     const notches: Notch[] = [];
+    /**
+     * Grottoes: caves in the valley's side walls. The land is carved from heights, which cannot
+     * say "hollow"; so a grotto is given as air of its own, and wherever the land is carved the
+     * two are taken together: what is air in either is air. A passage goes in at the foot of
+     * the wall, bending a little, and opens into a chamber under the hill.
+     */
+    const grottoes = (site.grounds ? site.grottoes ?? [] : []).map((q, k) => {
+      const seeds = rng.fork(`grotto${k}`);
+      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50) };
+    });
+    // How far into a grotto a point is: less than nothing outside it; 0 at its mouth; 1 well inside.
+    let grottoDeep = 0;
+    const grottoAir = (x: number, y: number, z: number): number => {
+      let air = -Infinity;
+      for (const q of grottoes) {
+        const inside = (x - q.edge) * q.inw, t = 7 - inside, off = z - q.z;
+        if (t < -0.5 || t > q.far + q.r + 1.5 || Math.abs(off) > q.r * 1.25 + 2.2 || y > q.y0 + 5.5 || y < q.y0 - 2) continue;
+        // The passage: a stride and a half wide, a little over a man's height, its floor falling gently inwards.
+        const along = Math.min(1, Math.max(0, t / q.far)), side = off - q.bend * 0.55 * Math.sin(along * Math.PI);
+        // (Before the mouth it rises again, so that where the ground outside stands higher the way in is a ramp and not a step.)
+        const floor = q.y0 - 0.045 * Math.max(0, t - 2) + 0.24 * Math.max(0, 2.6 - t) + (fbm2(x * 1.1 + q.n1, z * 1.1, 2) - 0.5) * 0.1;
+        const wide = 0.95 + (fbm2(t * 0.8 + q.n1, y * 0.7, 2) - 0.5) * 0.45, high = 2.25 + (fbm2(x * 0.7 + q.n2, z * 0.7, 2) - 0.5) * 0.6;
+        let a = Math.min(smin(smin(wide - Math.abs(side), y - floor, 0.3), floor + high - y, 0.4), t + 0.4, q.far + 0.8 - t);
+        // The chamber: an uneven dome over a rough oval floor.
+        const e = (1 - Math.hypot((t - q.far) / q.r, off / (q.r * 1.2))) * q.r + (fbm2(x * 0.55 + q.n2, z * 0.55 + q.n1, 3) - 0.5) * 1.1 + (fbm2(x * 1.8 + y * 1.1 + q.n1, z * 1.8 - y * 0.8, 2) - 0.5) * 0.4;
+        const ceil = floor + 1.5 + 2.1 * Math.pow(Math.min(1, Math.max(0, e / q.r)), 0.55) + (fbm2(x * 0.6 + q.n1 + 9, z * 0.6 + q.n2, 2) - 0.5) * 0.7;
+        a = Math.max(a, smin(smin(e, y - floor, 0.35), ceil - y, 0.5));
+        // Whatever the noise does, it stays inside the rock that is carved.
+        a = Math.min(a, inside + 4.75);
+        if (a > air) { air = a; grottoDeep = smooth((t - 2.6) / 3.2); }
+      }
+      return air;
+    };
+    /**
+     * Terraces: shelves against the valley's side walls, each with a ledge rising to it along
+     * the wall. `shelfAt` gives, for a terrace and a point, how much the ground is raised there
+     * (`lift`) and whether the point is on the way up or on the shelf itself (`way`: 1 on it,
+     * falling to 0 a stride outside).
+     */
+    const terraces = site.grounds ? site.terraces ?? [] : [];
+    const shelf = { lift: 0, way: 0, top: 0 };
+    const shelfAt = (t: (typeof terraces)[number], x: number, z: number): boolean => {
+      const inside = t.side === 'w' ? x - g.x0 : g.x1 - x;
+      // Along the valley: how far beyond the level part towards the way up, and how far beyond its other end.
+      const up = t.rise === 'n' ? t.z0 - z : z - t.z1, past = t.rise === 'n' ? z - t.z1 : t.z0 - z;
+      if (inside > 4.7 + t.depth + 4 || inside < -7 || up > t.run + 3 || past > 4) return false;
+      // The way up rises evenly from the valley floor to the shelf; the other end drops off.
+      const high = t.height * (up <= 0 ? 1 : Math.max(0, 1 - up / t.run)) * (1 - smooth(past / 1.4));
+      // The shelf has all its depth where it is level, and a path's width on the way up.
+      const wide = 2.9 + (t.depth - 2.9) * (1 - smooth(up / 3.5));
+      const front = 4.7 + wide + (fbm2(z * 0.23 + s1, s2 + 3.3, 2) - 0.5) * (up <= 0 ? 1.7 : 0.4);
+      shelf.lift = high * (1 - smooth((inside - front) / 1.1)) * smooth((inside + 6) / 5);
+      shelf.way = (1 - smooth((inside - front + 0.3) / 0.9)) * smooth((inside - 3.2) / 1.2) * smooth((t.run + 1.5 - up) / 1.5) * (1 - smooth(past / 1.2));
+      shelf.top = up <= 0 && past <= 0 ? 1 : 0;
+      return true;
+    };
     // How much of its roughness the rock keeps at a point: all of it, except down the line of a fall.
     const roughAt = (x: number, z: number): number => {
       let keep = 1;
@@ -240,6 +296,8 @@ export function meshSite(site: Site): SceneDescription {
         if (along < -nt.back - 1.5 || along > 4 || off > nt.half + 2) continue;
         keep = Math.min(keep, 1 - 0.92 * (1 - smooth((off - nt.half - 0.2) / 1.8)));
       }
+      // Nor where there is a way to walk up it: a path that the rock's own forms had eaten would be no path.
+      for (const t of terraces) if (shelfAt(t, x, z)) keep = Math.min(keep, 1 - 0.8 * shelf.way);
       return keep;
     };
     const nearest = { d: 0, bed: 0, half: 0, depth: 0, t: 0 };
@@ -317,6 +375,8 @@ export function meshSite(site: Site): SceneDescription {
         const floor = nearest.bed + 0.1 * Math.min(1, nearest.d / nearest.half) ** 2;
         y = floor + (y - floor) * smooth((nearest.d - nearest.half) / bank);
       }
+      // A terrace stands on the valley floor as it finds it, against the wall.
+      for (const t of terraces) if (shelfAt(t, x, z)) y += shelf.lift;
       const wobble = wobbleAt(x, z);
       // The hillside is level with the roofline over the house and rises behind it; beside the
       // house it starts to rise at once.
@@ -441,7 +501,12 @@ export function meshSite(site: Site): SceneDescription {
     const walled = !!site.grounds && X0i + 2.4 < MX0 && MX1 + 2.4 < X1i && ZNi + 2.4 < Z1i && MZ1 < Z1i;
     const headPatches: Patch[] = walled ? [{ x0: X0i, x1: MX0, z0: ZNo, z1: ZNi }, { x0: MX1, x1: X1i, z0: ZNo, z1: ZNi }] : [];
     const rimPatches: Patch[] = walled ? [{ x0: X0o, x1: X0i, z0: ZNo, z1: Z1o }, { x0: X1i, x1: X1o, z0: ZNo, z1: Z1o }, { x0: X0i, x1: X1i, z0: Z1i, z1: Z1o }] : [];
-    const patches = [meadowPatch, ...headPatches, ...rimPatches];
+    // A terrace stands out further than the band of cliff is deep, so more is carved there.
+    const shelfPatches: Patch[] = walled ? terraces.map((t) => {
+      const za = Math.max(ZNi, snapTo((t.rise === 'n' ? t.z0 - t.run : t.z0) - 4.5, false)), zb = Math.min(Z1i, snapTo((t.rise === 's' ? t.z1 + t.run : t.z1) + 4.5, true));
+      return t.side === 'w' ? { x0: X0i, x1: Math.min(snapTo(g.x0 + 4.7 + t.depth + 5, true), MX0 - SHEET), z0: za, z1: zb } : { x0: Math.max(snapTo(g.x1 - 4.7 - t.depth - 5, false), MX1 + SHEET), x1: X1i, z0: za, z1: zb };
+    }) : [];
+    const patches = [meadowPatch, ...headPatches, ...rimPatches, ...shelfPatches];
     const inPatch = (c: Patch, x: number, z: number, m: number) => x >= c.x0 - m && x <= c.x1 + m && z >= c.z0 - m && z <= c.z1 + m;
     // With a hair's breadth to spare: a point on the edge of a patch, as lattice points are, belongs to it.
     const carved = (x: number, z: number) => patches.some((c) => inPatch(c, x, z, 1e-6));
@@ -450,6 +515,8 @@ export function meshSite(site: Site): SceneDescription {
     const depthInBand = (x: number, z: number): number => {
       let d = Math.min(x - X0o, X1o - x, z - ZNo, Z1o - z, Math.max(X0i - x, x - X1i, ZNi - z, z - Z1i));
       if (z < ZNi + 2) d = Math.min(d, Math.max(MX0 - x, x - MX1, z - ZNi));
+      // In the rock carved for a terrace, it is how far in from that piece's three open sides.
+      for (const c of shelfPatches) if (inPatch(c, x, z, 0)) d = Math.max(d, Math.min(c.x0 === X0i ? c.x1 - x : x - c.x0, z - c.z0, c.z1 - z));
       return d;
     };
     const MARGIN = 3.2;
@@ -498,6 +565,13 @@ export function meshSite(site: Site): SceneDescription {
       }
     }
     const ground = (x: number, z: number): number => (walled && wornBy.holds(x, z) ? groundBase(x, z) + wornBy.at(x, z) : groundBase(x, z));
+    // A grotto's floor is level with the lowest ground before its mouth, as the wall's wearing
+    // left it: any higher and there would be a sill to climb over on the way in.
+    for (const q of grottoes) {
+      let low = Infinity;
+      for (let i = 3.3; i <= 7.6; i += 0.3) for (const off of [-0.6, 0, 0.6]) low = Math.min(low, ground(q.edge + q.inw * i, q.z + off));
+      q.y0 = low - 0.03;
+    }
     // Three things read off the worn heights: how steep the ground is, which turns a height
     // above it into a distance from it; which way is uphill; and how far the ground is rock,
     // which is where it is steep and bare.
@@ -562,7 +636,7 @@ export function meshSite(site: Site): SceneDescription {
       if (x !== spot.x || z !== spot.z) {
         spot.x = x; spot.z = z;
         // (Down the line of a waterfall the face is worn smooth, so the water lies on it.)
-        spot.rocky = rocky.at(x, z) * (notches.length ? roughAt(x, z) : 1); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
+        spot.rocky = rocky.at(x, z) * (notches.length || terraces.length ? roughAt(x, z) : 1); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
         if (spot.rocky >= 0.002) {
           spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1));
           spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z);
@@ -687,15 +761,21 @@ export function meshSite(site: Site): SceneDescription {
         lo = Math.min(lo, h); hi = Math.max(hi, h);
       }
       const turf = into('turf'), scree = into('scree');
-      carveRock(into('rock'), landAir, {
+      // (Where there is a grotto, its air is taken with the land's.)
+      carveRock(into('rock'), grottoes.length ? (x, y, z) => Math.max(landAir(x, y, z), grottoAir(x, y, z)) : landAir, {
         min: V(c.x0, Math.floor((lo - 2) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
-        meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
+        // (Nor is the floor of a grotto turf, though the hill over it may be.)
+        meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
         shade: (q, n, field, other, open) => {
           if (other === turf) { const c = turfAt(q.x, q.z); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return c; }
           if (other === scree) return earth(q.x, q.z);
-          return shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
+          const c = shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
+          // Rock out here is lit as if the whole sky stood over it. Inside a grotto it does not,
+          // and the rock is made as much darker as the daylight falls off going in.
+          if (grottoes.length && grottoAir(q.x, q.y, q.z) > -0.6) { const dim = 1 - 0.86 * grottoDeep; c[0] *= dim; c[1] *= dim; c[2] *= dim; field[1] = Math.max(field[1], 0.5 * grottoDeep); }
+          return c;
         },
       });
     };
@@ -703,9 +783,17 @@ export function meshSite(site: Site): SceneDescription {
     // Behind the house front, between the ends of the wall, there is nothing to see and nothing is made.
     carveLand(meadowPatch, (m) => kit.mesh(m), (at) => at.z > behind - CELL || at.x < p.x0 - 0.2 || at.x > p.x1 + 0.2);
     // The rim of the valley is too steep to climb, but nobody is to leave by it whatever they find.
+    // (A grotto runs in under the edge; the rock itself keeps whoever is in it. There the fence
+    // begins above the grotto's roof.)
+    for (const [x0, x1, sideOf] of [[g.x0 - 3, g.x0 - 1.2, 'w'], [g.x1 + 1.2, g.x1 + 3, 'e']] as const) {
+      let from = g.z0 - 3;
+      for (const q of grottoes.filter((h) => h.side === sideOf).sort((a, b) => a.z - b.z)) {
+        fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, q.z - q.r * 1.25 - 2.4) }, { min: V(x0, q.y0 + 4.6, q.z - q.r * 1.25 - 2.4), max: V(x1, p.floor + 80, q.z + q.r * 1.25 + 2.4) });
+        from = q.z + q.r * 1.25 + 2.4;
+      }
+      fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, g.z1 + 3) });
+    }
     fences.push(
-      { min: V(g.x0 - 3, p.floor - 6, g.z0 - 3), max: V(g.x0 - 1.2, p.floor + 80, g.z1 + 3) },
-      { min: V(g.x1 + 1.2, p.floor - 6, g.z0 - 3), max: V(g.x1 + 3, p.floor + 80, g.z1 + 3) },
       { min: V(g.x0 - 3, p.floor - 6, g.z1 + 1.2), max: V(g.x1 + 3, p.floor + 80, g.z1 + 3) },
       { min: V(g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
       { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
@@ -740,7 +828,7 @@ export function meshSite(site: Site): SceneDescription {
     kit.group = 'scarp';
     for (const c of headPatches) carveLand(c, (m) => kit.mesh(m), (at) => !overCourt(at));
     kit.group = `p${p.id}`;
-    for (const c of rimPatches) carveLand(c, sceneryMesh);
+    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh);
 
     const stones: [number, number, number][] = [];
     let boulders = 0;
@@ -899,6 +987,10 @@ export function meshSite(site: Site): SceneDescription {
     const clearOfFeatures = (x: number, z: number) => {
       let clear = Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - (f.kind === 'pond' ? shoreOf(f, x - f.x, z - f.z) : f.r * (f.kind === 'stones' ? 1.5 : 1.15))));
       for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
+      // Nor before the mouth of a grotto.
+      for (const q of grottoes) { const inside = (x - q.edge) * q.inw; if (inside > 2 && inside < 9.5 && Math.abs(z - q.z) < 2.2) clear = Math.min(clear, -1); }
+      // Nothing stands in the way up to a terrace.
+      for (const t of terraces) if (shelfAt(t, x, z) && shelf.way > 0.05 && !shelf.top) clear = Math.min(clear, -1);
       return clear;
     };
     // How deep the water stands over a point of ground at height `y`: less than nothing if it is dry.
@@ -1454,6 +1546,44 @@ export function meshSite(site: Site): SceneDescription {
       const banks = reach.map((_, i) => (i < head.length * 2 ? reach[i] : Math.max(reach[Math.max(i % 2, i - 2)], reach[i], reach[Math.min(reach.length - 2 + (i % 2), i + 2)])));
       flows.push({ line, width: c.half * 2 + 0.5, banks, fade });
     }
+    // In a grotto: growths that glow on the rock round the chamber, and something left on its floor.
+    grottoes.forEach((q, k) => {
+      const cx = q.edge - q.inw * (q.far - 7), fy = q.y0 - 0.045 * (q.far - 2);
+      const gr = rng.fork(`grottoglow${k}`), turn = gr.range(0, Math.PI * 2);
+      for (let i = 0; i < 4; i++) {
+        const a = turn + (i / 4) * Math.PI * 2 + gr.range(-0.4, 0.4), y = fy + gr.range(0.4, 1.5);
+        glows.push({ from: V(cx, y, q.z), position: V(cx + Math.cos(a) * q.r * 2, y, q.z + Math.sin(a) * q.r * 2), colour: [0.25, 1.0, 0.72], strength: gr.range(1.1, 1.9) });
+      }
+      finds.push({ at: V(cx - q.inw * 0.8, fy + 0.4, q.z + 0.5), what: 'a lamp of green glass, cold for years, on the floor of the grotto' });
+    });
+    // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
+    for (const t of terraces) {
+      const inw = t.side === 'w' ? 1 : -1, edge = t.side === 'w' ? g.x0 : g.x1;
+      const x = edge + inw * (4.7 + t.depth * 0.62), z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4, y = ground(x, z);
+      const pile = rng.fork('cairn');
+      // Big stones at the bottom, small at the top, each sitting in the hollow between those under it.
+      for (let course = 0, up = 0; course < 5; course++) {
+        const size = 0.52 - course * 0.075, ring = Math.max(1, 5 - course * 1.3), out = (0.46 - course * 0.11) * (course < 4 ? 1 : 0);
+        for (let k = 0; k < ring; k++) {
+          const a = (k / ring) * Math.PI * 2 + course * 0.9 + pile.range(-0.2, 0.2);
+          layStone(sceneryMesh('rock'), x + Math.cos(a) * out, y + up - size * 0.2, z + Math.sin(a) * out, size * pile.range(0.9, 1.1), pile.range(0.8, 1.1), pile);
+        }
+        up += size * 0.62;
+      }
+      finds.push({ at: V(x - inw * 0.9, ground(x - inw * 0.9, z) + 0.35, z + 0.3), what: 'a brass spyglass in a leather case, left by the cairn on the lookout' });
+      if (t.way === 'steps') {
+        // Steps cut in the rock, up the middle of the way: each a block a stride broad, its top
+        // level with the ground at its upper edge. They are for the eye; what is walked on is
+        // the slope they are cut from, so no foot catches on a riser.
+        const cut = rng.fork('steps'), mid = edge + inw * (4.7 + 1.45), tread = 0.36;
+        for (let u = t.run - 0.4; u > -0.3; u -= tread) {
+          const zLow = t.rise === 'n' ? t.z0 - u : t.z1 + u, zHigh = t.rise === 'n' ? zLow + tread : zLow - tread, zMid = (zLow + zHigh) / 2;
+          const top = ground(mid, zHigh) + 0.015, half = 0.72 + cut.range(-0.05, 0.05), tone = cut.range(0.85, 1.1);
+          layBeam(softRock, V(mid - half, top - 0.15, zMid), V(mid + half, top - 0.15, zMid), tread + 0.03, 0.3, rockColour(tone), cut.range(0, 9));
+        }
+      }
+      lookouts.push({ x, y: y + 1.2, z, height: t.height });
+    }
     // Where the track meets water it gets across: over a river by a bridge, through a brook on stones.
     for (const c of channels) {
       const cr = c.of.crossing;
@@ -1645,6 +1775,7 @@ export function meshSite(site: Site): SceneDescription {
   const waters: { x: number; z: number; r: number; level: number; outline?: number[] }[] = [];
   const flows: { line: number[]; width: number; banks?: number[]; fade?: number[] }[] = [];
   const falls: { x: number; y: number; z: number; height: number; width: number }[] = [];
+  const lookouts: { x: number; y: number; z: number; height: number }[] = [];
   const crossings: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
@@ -1737,17 +1868,23 @@ export function meshSite(site: Site): SceneDescription {
     const edge = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
     const seeds = rng.fork(`cleft${w.a}-${w.b}`);
     const t1 = seeds.range(0, 50), bend = seeds.range(-0.5, 0.5);
+    // Where the floor begins to climb and where it has done, measured through the wall from the first chamber's edge.
+    const steep = Math.abs(a.floor - b.floor) > 0.6, reach = steep ? Math.min(3.4, 1.4 + Math.abs(a.floor - b.floor) * 0.9) : 0;
+    const rise0 = !steep ? 0 : a.floor >= b.floor ? -reach : 0.1, rise1 = !steep ? T : a.floor >= b.floor ? T - 0.1 : T + reach;
     return (x, y, z) => {
       // t runs from the first chamber's edge through the wall; s is the distance to one side.
       const t = alongX ? (z - edge) * n[1] : (x - edge) * n[0];
-      const f = Math.min(1, Math.max(0, t / T));
+      // The floor climbs on the side of the higher chamber, where it cuts a way down into that
+      // chamber's floor, and is level with the lower chamber by the time it reaches it: so there
+      // is no ledge to get up at either end.
+      const f = Math.min(1, Math.max(0, (t - rise0) / (rise1 - rise0)));
       const s = (alongX ? x : z) - w.at - bend * Math.sin(f * Math.PI);
       const floorY = a.floor + (b.floor - a.floor) * (f * f * (3 - 2 * f)) + (fbm2(x * 1.1 + t1, z * 1.1, 2) - 0.5) * 0.07;
       const wide = w.halfWidth + 0.15 + (fbm2(t * 0.9 + t1, y * 0.8, 2) - 0.5) * 0.5;
       const high = 2.45 + (fbm2(x * 0.8 + t1, z * 0.8 + 7, 2) - 0.5) * 0.7;
       const air = smin(smin(wide - Math.abs(s), y - floorY, 0.3), floorY + high - y, 0.4);
       // It reaches a good pace into each chamber, and no further.
-      return Math.min(air, t + 1.5, T + 1.5 - t);
+      return Math.min(air, t + 1.5 - Math.min(0, rise0 - 0.3), T + 1.5 + Math.max(0, rise1 - T + 0.3) - t);
     };
   };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
@@ -2071,6 +2208,7 @@ export function meshSite(site: Site): SceneDescription {
     streams: flows,
     falls,
     crossings,
+    lookouts,
     far: farCover,
     finds,
   };

@@ -84,6 +84,32 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     ctx.globalAlpha = 1;
     ctx.fillStyle = COURT;
     rect(g.x0, g.z0, g.x1, g.z1);
+    // Terraces: the shelf, with ticks down its front as on any map that shows a drop, and the way up as a dotted line.
+    for (const t of site.terraces ?? []) {
+      const edge = t.side === 'w' ? g.x0 : g.x1, inw = t.side === 'w' ? 1 : -1, back = edge + inw * 4.2, front = edge + inw * (4.7 + t.depth);
+      ctx.fillStyle = FLOOR;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(Math.min(X(back), X(front)), Z(t.z0), Math.abs(X(front) - X(back)), Z(t.z1) - Z(t.z0));
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = Math.max(0.7 * ratio, 0.16 * scale);
+      for (let z = t.z0 + 0.5; z < t.z1; z += 1.4) { ctx.beginPath(); ctx.moveTo(X(front), Z(z)); ctx.lineTo(X(front + inw * 0.9), Z(z)); ctx.stroke(); }
+      ctx.setLineDash([Math.max(1.5 * ratio, 0.5 * scale), Math.max(1.5 * ratio, 0.5 * scale)]);
+      ctx.beginPath();
+      const way = edge + inw * 6.1;
+      if (t.rise === 'n') { ctx.moveTo(X(way), Z(t.z0 - t.run)); ctx.lineTo(X(way), Z(t.z0)); } else { ctx.moveTo(X(way), Z(t.z1 + t.run)); ctx.lineTo(X(way), Z(t.z1)); }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // Grottoes: a dark hollow in the rock at the valley's edge.
+    for (const q of site.grottoes ?? []) {
+      const edge = q.side === 'w' ? g.x0 : g.x1, inw = q.side === 'w' ? 1 : -1;
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath(); ctx.ellipse(X(edge - inw * (q.r - 0.3)), Z(q.z), q.r * scale, q.r * 1.2 * scale, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillRect(Math.min(X(edge + inw * 4.2), X(edge)), Z(q.z) - 0.9 * scale, Math.abs(X(edge + inw * 4.2) - X(edge)), 1.8 * scale);
+      ctx.globalAlpha = 1;
+    }
     // Streams, drawn before the ponds they run into and out of.
     ctx.strokeStyle = WATER;
     ctx.lineCap = 'round';

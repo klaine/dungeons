@@ -68,6 +68,8 @@ The document is the source. The model and the maps are made from it, so they alw
 | `track` | The way from the door down the valley, as `[x, z]` points from the door outwards. It is flagged as far as the edge of the approach and a worn track after that. The player arrives at the last point. |
 | `features` | Things out in the valley; see below. |
 | `streams` | Running water in the valley, if there is any; see below. May be absent. |
+| `terraces` | Ground in the valley that stands above its floor and can be climbed to; see below. May be absent. |
+| `grottoes` | Caves in the valley's own walls; see below. May be absent. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -113,7 +115,7 @@ A way is an opening through the wall between two places.
 | `at` | Where the centre of the opening is along the wall: an x coordinate for north and south walls, a z coordinate for east and west. |
 | `halfWidth` | Half the width of the opening. |
 | `door` | Present if a leaf hangs in the opening. |
-| `natural` | Present and `true` for a cleft between two chambers of a cave. It is not built: no arch, no door, no steps. Its floor slopes from one chamber's level to the other's across the thickness of the rock. Chambers joined by clefts are one cave. |
+| `natural` | Present and `true` for a cleft between two chambers of a cave. It is not built: no arch, no door, no steps. Its floor climbs from one chamber's level to the other's, which may be two metres or more apart: the climb is made on the side of the higher chamber, cut down into that chamber's floor, and is level with the lower chamber where it reaches it. |
 
 To find the opening on the plan, take the wall of `a` named by `side`. For `n` the wall runs from `z0 - wallThickness` to `z0` of place `a`; for `s`, from `z1` to `z1 + wallThickness`; `w` and `e` likewise in x. Along the wall, the opening runs from `at - halfWidth` to `at + halfWidth`.
 
@@ -150,6 +152,15 @@ A `pond` lies in a hollow whose edge is `r` from its middle, or, if it has a `sh
 ```
 
 A stream follows `course`, a line of `[x, z]` points in the order the water runs, and is `width` metres broad. It begins at a `spring` under the rock of the rim, comes over the rim as a `fall`, or runs out of the `pond`, and ends in the `pond` or at a `sink` at the foot of the rim. Most water keeps to one side of the track. A stream that crosses it has a `crossing`: `x` and `z`, where, and `by`, which is `ford` for a brook (stepping stones) or `bridge` for a river. The builder cuts each stream a bed that falls all the way along it, through any rise in the ground, and sets the pond's level by the stream that feeds it, so the document need not know the heights.
+
+```json
+"terraces": [ { "side": "e", "z0": 90, "z1": 101.7, "depth": 6, "height": 4.7, "rise": "s", "run": 10.9, "way": "steps" } ],
+"grottoes": [ { "side": "w", "z": 80.4, "r": 2.1 } ]
+```
+
+A terrace is a shelf of level ground against one of the valley's side walls: `side` is `w` for the wall of lesser x and `e` for the other. Its level part lies from `z0` to `z1` along the valley, stands out `depth` metres from the foot of the wall, and is `height` metres above the valley floor, with a cliff of its own below it. The way up is beyond its `rise` end (`n` is the end towards the house) and runs `run` metres along the wall, rising evenly from the valley floor; `way` says whether it is a `ledge` or `steps` cut in the rock, which are steeper and shorter. A cairn stands at the other end.
+
+A grotto is a small cave in a side wall, with its mouth at the foot of the wall at `z`. A passage runs in under the hill, beyond the edge of `grounds`, to a chamber about `r` metres across the half of it. It does not join the house.
 
 ### The solution
 

@@ -391,7 +391,8 @@ async function start(): Promise<void> {
   // A dark plane far below, so any hairline gap shows as shadow rather than sky.
   const under = new Mesh(new PlaneGeometry(400, 400), new MeshBasicMaterial({ color: 0x050505, side: DoubleSide }));
   under.rotation.x = -Math.PI / 2;
-  under.position.y = -2.6;
+  // (Below the lowest floor there is, which in a cave may be some way down.)
+  under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6));
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -853,8 +854,10 @@ async function start(): Promise<void> {
       const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
       const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
       const alongX = w.side === 'n' || w.side === 's';
-      const inA = wallA - (alongX ? n[1] : n[0]) * 0.8;
-      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 0.8);
+      // (A cleft between chambers on different levels climbs for some way into the higher one, so it is tried from further in.)
+      const steep = !!w.natural && Math.abs(a.floor - b.floor) > 0.6, climb = Math.min(3.4, 1.4 + Math.abs(a.floor - b.floor) * 0.9) + 0.5;
+      const inA = wallA - (alongX ? n[1] : n[0]) * (steep && a.floor > b.floor ? climb : 0.8);
+      const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + (steep && b.floor > a.floor ? climb : 0.8));
       const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
       for (const [from, to, floorFrom, floorTo] of [[inA, inB, a.floor, b.floor], [inB, inA, b.floor, a.floor]] as const) {
         const [fx, fz] = point(from), [tx, tz] = point(to);
@@ -864,7 +867,7 @@ async function start(): Promise<void> {
         for (let i = 0; i < 480 && !ok; i++) {
           player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
           player.update(1 / 60);
-          ok = Math.hypot(tx - player.position.x, tz - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < 0.12;
+          ok = Math.hypot(tx - player.position.x, tz - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < (steep ? 0.35 : 0.12);
         }
         if (!ok) failures.push(`${w.kind} ${w.a}->${w.b} side ${w.side}: stopped at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), wanted (${tx.toFixed(2)}, ${floorTo.toFixed(2)}, ${tz.toFixed(2)})`);
       }

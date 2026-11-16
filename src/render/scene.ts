@@ -110,6 +110,8 @@ export interface SceneDescription {
   streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
   /** Where water comes down over the rim: the pool at its foot, how far it falls, and how broad the stream is. */
   falls?: { x: number; y: number; z: number; height: number; width: number }[];
+  /** High places that can be climbed to: where the cairn stands on each, and how far above the valley floor. */
+  lookouts?: { x: number; y: number; z: number; height: number }[];
   /** Where the track crosses running water, how it gets over, and how high the water stands there. */
   crossings?: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[];
   /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */

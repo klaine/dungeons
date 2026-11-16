@@ -253,6 +253,62 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   }
   site.features = features;
   layOutWater(site, meadow, fromTrack, rng.fork('water'));
+  layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
+}
+
+/** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */
+function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
+  const g = site.grounds!;
+  if (!rng.chance(0.5)) return;
+  for (let tries = 0; tries < 10; tries++) {
+    const side = rng.chance(0.5) ? 'w' : 'e', z = Math.round(rng.range(meadow.z1 + 9, g.z1 - 14) * 10) / 10, r = Math.round(rng.range(2.0, 2.5) * 10) / 10;
+    const edge = side === 'w' ? g.x0 : g.x1;
+    // Springs, falls and sinks are all at the foot of the walls; a cave keeps away from them, and from any stream.
+    if ((site.streams ?? []).some((st) => st.course.some(([x, cz]) => Math.abs(x - edge) < 16 && Math.abs(cz - z) < 9))) continue;
+    if ((site.features ?? []).some((f) => Math.abs(f.x - edge) < f.r * 2.4 + 9 && Math.abs(f.z - z) < f.r * 2.4 + 4)) continue;
+    site.grottoes = [{ side, z, r }];
+    return;
+  }
+}
+
+/**
+ * Ground to climb to. Most valleys have a terrace against one of their side walls: a shelf some
+ * metres up, with a way to it that rises along the wall. It goes where there is room: clear of
+ * the track, of the water, and of whatever else is out there.
+ */
+function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const g = site.grounds!, features = site.features ?? [], streams = site.streams ?? [];
+  const round = (v: number) => Math.round(v * 10) / 10;
+  layOutGrotto(site, meadow, rng.fork('grotto'));
+  if (!rng.chance(0.7)) return;
+  for (let tries = 0; tries < 14; tries++) {
+    const side = rng.chance(0.5) ? 'w' : 'e', rise = rng.chance(0.5) ? 'n' : 's';
+    const depth = round(rng.range(5.5, 8.5)), height = round(rng.range(3.4, 5.2)), length = round(rng.range(11, 19));
+    // The way up is a ledge no steeper than a hill path, about one in three; or steps cut in the rock, at one in two.
+    const way = rng.chance(0.4) ? 'steps' : 'ledge';
+    const run = round(height / (way === 'steps' ? 0.5 : 0.34) + 1.5);
+    const lo = meadow.z1 + 8, hi = g.z1 - 14;
+    if (hi - lo < length + run) continue;
+    const start = rng.range(lo, hi - length - run), z0 = round(rise === 'n' ? start + run : start), z1 = round(z0 + length);
+    const edge = side === 'w' ? g.x0 : g.x1, inward = side === 'w' ? 1 : -1;
+    // Everything from the wall to a few paces in front of the shelf must be free; and the wall itself, of any cave in it.
+    let free = !(site.grottoes ?? []).some((q) => q.side === side && q.z > start - 8 && q.z < start + length + run + 8);
+    for (let z = start - 2; z <= start + length + run + 2 && free; z += 1.5) {
+      for (let out = 3; out <= 4.7 + depth + 3.5 && free; out += 1.5) {
+        const x = edge + inward * out;
+        if (fromTrack(x, z) < 3.5) free = false;
+        for (const f of features) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 3) free = false;
+        for (const st of streams) for (let k = 0; k < st.course.length - 1 && free; k++) {
+          const [ax, az] = st.course[k], [bx, bz] = st.course[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+          const t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+          if (Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t) < st.width / 2 + 5) free = false;
+        }
+      }
+    }
+    if (!free) continue;
+    site.terraces = [{ side, z0, z1, depth, height, rise, run, way }];
+    return;
+  }
 }
 
 /**
@@ -752,6 +808,29 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   }
   const lowest = Math.min(...level.values());
   for (const p of places) p.floor = Math.round((level.get(p.id)! - lowest) * STEP * 100) / 100;
+
+  // ---- a cave goes down. Each chamber beyond the first lies below the one it is reached from,
+  // and not by a step but by a man's height or more: the cleft between them is a climb. (Down,
+  // because above there is only so much hill.) From a stream of its own, so the houses are as they were.
+  {
+    const deep = rng.fork('cavelevels'), seen = new Set<number>();
+    for (const first of places) {
+      if (first.roof !== 'cave' || seen.has(first.id) || !ways.some((w) => !w.natural && w.kind !== 'window' && (w.a === first.id || w.b === first.id))) continue;
+      const queue = [first.id];
+      seen.add(first.id);
+      while (queue.length) {
+        const id = queue.shift()!;
+        for (const w of ways) {
+          if (!w.natural || (w.a !== id && w.b !== id)) continue;
+          const next = w.a === id ? w.b : w.a;
+          if (seen.has(next)) continue;
+          seen.add(next);
+          places[next].floor = Math.round(Math.max(first.floor - 3.6, places[id].floor - deep.range(1.3, 2.3)) * 100) / 100;
+          queue.push(next);
+        }
+      }
+    }
+  }
 
   // ---- depth from the start, roofline
   const site: Site = {
