@@ -6,7 +6,7 @@ import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { MeshBuilder } from './geom/meshBuilder';
 import { carveRock } from './geom/rock';
-import { cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
+import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
 import { layTerrain, turfColour } from './landscape';
 import { Colour, Planting } from './planting';
 import { CardSet, SeaDesc } from './scene';
@@ -361,6 +361,28 @@ export function buildIsland(b: IslandBuild): IslandResult {
         return shadeRock(q, n, field, open);
       },
     });
+  }
+
+  // ---- boulders fallen from the cliffs, lying at their foot half in the water, where the waves break on them
+  {
+    const q = rng.fork('boulders'), lying: [number, number, number][] = [];
+    for (let tries = 0; tries < 900 && lying.length < 46; tries++) {
+      const a = q.range(0, Math.PI * 2), r = coastAt(o, a) + q.range(2.5, 9), x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
+      if (inland(o, x, z) > -2 || beachness(o, x, z) > 0.25) continue;
+      const y = ground(x, z), size = q.range(0.8, 2.6);
+      if (y < sea - 2.2 || y > sea + 1.2) continue;
+      // Not in the way into the cove.
+      const c = o.cove, along = (x - c.x) * Math.cos(c.out) + (z - c.z) * Math.sin(c.out), across = Math.abs(-(x - c.x) * Math.sin(c.out) + (z - c.z) * Math.cos(c.out));
+      if (along > 0 && across < c.mouth / 2 + 4) continue;
+      if (lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.6)) continue;
+      const form = boulderForm(q.fork(`b${lying.length}`), size, rockKind), cy = y + form.half * q.range(0.2, 0.6), cell = Math.min(0.26, Math.max(0.1, size * 0.13));
+      carveRock(rockMesh, (qx, qy, qz) => form.density(qx - x, qy - cy, qz - z), {
+        min: V(x - form.reach, Math.max(y - 1, cy - form.sink), z - form.reach), max: V(x + form.reach, cy + form.rise, z + form.reach),
+        cell, uvScale: 0.5, fromSamples: true, occlusion: [cell * 2, Math.max(cell * 3, size * 0.45)], sharp: true,
+        shade: (pt, n, field, _other, open) => shadeRock(pt, n, field, open),
+      });
+      lying.push([x, z, size]);
+    }
   }
 
   // ---- the sheet of ground over all that is not carved, out under the sea a little way
