@@ -106,6 +106,23 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     // Grottoes: a dark hollow in the rock at the valley's edge.
     for (const q of site.grottoes ?? []) {
       const edge = q.side === 'w' ? g.x0 : g.x1, inw = q.side === 'w' ? 1 : -1;
+      if (q.hall) {
+        // A hall under the hill: its stair and its length drawn as built things are, with its pillars; it runs off beyond the valley's edge.
+        const h = q.hall, at = (t: number) => edge + inw * (7 - t), hall0 = 3.9 + h.drop / 0.5 + 1.6;
+        ctx.fillStyle = INK;
+        rect(Math.min(at(2.6), at(hall0 + h.length + 0.6)), q.z - h.width / 2 - 0.6, Math.max(at(2.6), at(hall0 + h.length + 0.6)), q.z + h.width / 2 + 0.6);
+        ctx.fillStyle = DARK;
+        rect(Math.min(at(2.6), at(hall0)), q.z - 1.35, Math.max(at(2.6), at(hall0)), q.z + 1.35);
+        rect(Math.min(at(hall0), at(hall0 + h.length)), q.z - h.width / 2, Math.max(at(hall0), at(hall0 + h.length)), q.z + h.width / 2);
+        ctx.fillStyle = INK;
+        for (let u = 3.4; u < h.length - 6.5; u += 4.4) for (const v of [-h.width * 0.27, h.width * 0.27]) rect(at(hall0 + u) - 0.62, q.z + v - 0.62, at(hall0 + u) + 0.62, q.z + v + 0.62);
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(1, 0.6 * ratio);
+        ctx.beginPath();
+        for (let t = 3.9; t < hall0 - 1.6; t += 0.68) { ctx.moveTo(X(at(t)), Z(q.z - 1.35)); ctx.lineTo(X(at(t)), Z(q.z + 1.35)); }
+        ctx.stroke();
+        continue;
+      }
       ctx.fillStyle = INK;
       ctx.globalAlpha = 0.55;
       ctx.beginPath(); ctx.ellipse(X(edge - inw * (q.r - 0.3)), Z(q.z), q.r * scale, q.r * 1.2 * scale, 0, 0, Math.PI * 2); ctx.fill();

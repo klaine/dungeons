@@ -99,6 +99,11 @@ export class MeshBuilder {
    * a colour, a field and its share of sky, any of which it may change: this is how one carved
    * stone becomes many, each turned and tinted differently.
    */
+  /** Says, for every point already laid, how much of the sky it sees, from where the point is: for what is underground and sees none. */
+  setOpenBy(value: (x: number, y: number, z: number) => number): void {
+    for (let i = 0; i < this.vertexCount; i++) this.setOpen(i, value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]));
+  }
+
   /** Sets one of the four fields of every point already laid, from where the point is. Where the function gives nothing, the field is left. */
   setField(channel: number, value: (x: number, y: number, z: number) => number | undefined): void {
     for (let i = 0; i < this.vertexCount; i++) {

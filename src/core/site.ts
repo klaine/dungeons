@@ -177,7 +177,7 @@ export interface Terrace {
 }
 
 /**
- * A grotto: a small cave in one of the valley's side walls. Its mouth is at the foot of the
+ * A grotto: a cave in one of the valley's side walls. Most are small and natural; some are halls cut by hand (see `hall`). Its mouth is at the foot of the
  * wall, at `z` along the valley; a passage runs in under the hill to a chamber about `r` across
  * the half of it. It has nothing to do with the house. Something glows in it, and something was left there.
  */
@@ -185,6 +185,14 @@ export interface Grotto {
   side: 'w' | 'e';
   z: number;
   r: number;
+  /**
+   * If present, this is no natural cave but a hall hewn under the hill, and `r` is not used.
+   * A squared doorway in the rock face opens on a broad stair that goes down `drop` metres, and
+   * at its foot is the hall: `length` metres on from there, `width` across, `height` to the
+   * crown of its roof, with two rows of pillars down it and a tomb on a dais at the far end.
+   * It is lit by torches on the pillars and by nothing else.
+   */
+  hall?: { length: number; width: number; height: number; drop: number };
 }
 
 export interface Stream {

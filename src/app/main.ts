@@ -392,7 +392,7 @@ async function start(): Promise<void> {
   const under = new Mesh(new PlaneGeometry(400, 400), new MeshBasicMaterial({ color: 0x050505, side: DoubleSide }));
   under.rotation.x = -Math.PI / 2;
   // (Below the lowest floor there is, which in a cave may be some way down.)
-  under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6));
+  under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5));
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -515,6 +515,11 @@ async function start(): Promise<void> {
     u.uCloudBase.value = floor + 310 - 150 * cover;
     u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
     u.uCloudFlat.value = layered ? 1 : 0;
+  }
+  if (desc.unders?.length) {
+    // One box about everything that is under the hill out of doors.
+    const lowest = atmosphere.uniforms.uUnderMin.value.set(Infinity, Infinity, Infinity), highest = atmosphere.uniforms.uUnderMax.value.set(-Infinity, -Infinity, -Infinity);
+    for (const u of desc.unders) { lowest.min(u.min); highest.max(u.max); }
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);

@@ -291,14 +291,66 @@ export function meshSite(site: Site): SceneDescription {
      */
     const grottoes = (site.grounds ? site.grottoes ?? [] : []).map((q, k) => {
       const seeds = rng.fork(`grotto${k}`);
-      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50) };
+      // (For a hall: where its stair begins, measured as everything in a grotto is, going out of the valley from seven metres inside its edge; how far the stair runs; and where the hall itself begins.)
+      const stair0 = 3.9, run = q.hall ? q.hall.drop / 0.5 : 0, hall0 = stair0 + run + 1.6;
+      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: q.side === 'w' ? g.x0 : g.x1, y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0 };
     });
+    /**
+     * The air of a hewn hall, at a point given as the grotto's own measures: `t` going out of
+     * the valley, `off` to one side of its middle line, `y` up. Nothing in it is rounded: it
+     * was cut with tools, to a line. A doorway and a passage; a stair down; then the hall, with a
+     * roof that rises to a crown along its middle, two rows of square pillars with spreading
+     * heads and feet, and at the far end a dais three steps high with a tomb on it.
+     */
+    // How far along a hall's way in the land's own carving is kept: beyond this the stair is too deep for it.
+    const UNDER_FROM = 6.7;
+    const pillarsOf = (q: (typeof grottoes)[number]): [number, number][] => {
+      const h = q.hall!, out: [number, number][] = [];
+      for (let u = 3.4; u < h.length - 6.5; u += 4.4) for (const v of [-h.width * 0.27, h.width * 0.27]) out.push([u, v]);
+      return out;
+    };
+    const hallFloor = (q: (typeof grottoes)[number], t: number): number => {
+      const h = q.hall!, u = t - q.hall0;
+      if (u < 0) return q.y0 + 0.24 * Math.max(0, 2.6 - t) - h.drop * Math.min(1, Math.max(0, (t - q.stair0) / q.run));
+      return q.y0 - h.drop + (u > h.length - 5.6 ? 0.51 : 0);
+    };
+    const hallAir = (q: (typeof grottoes)[number], t: number, off: number, y: number): number => {
+      const h = q.hall!, u = t - q.hall0, floor = hallFloor(q, t);
+      // The way in: a doorway's breadth, and half as high again as a man.
+      let air = Math.min(1.35 - Math.abs(off), y - floor, floor + 3.3 - y, t + 0.4, q.hall0 + 0.6 - t);
+      if (u > -0.7 && u < h.length + 0.7) {
+        const half = h.width / 2, crown = floor + h.height * (0.7 + 0.3 * Math.sqrt(Math.max(0, 1 - (off / half) ** 2))) - (u > h.length - 5.6 ? 0.51 : 0);
+        let a = Math.min(u, h.length - u, half - Math.abs(off), y - floor, crown - y);
+        if (a > -1) {
+          // The nearest pillar, found by counting along the row and not by trying them all.
+          const k = Math.round((u - 3.4) / 4.4), pu = 3.4 + k * 4.4, pv = (off < 0 ? -1 : 1) * h.width * 0.27;
+          const d = Math.max(Math.abs(u - pu), Math.abs(off - pv));
+          if (k >= 0 && pu < h.length - 6.5 && d < 1.6) {
+            // Square in the shaft; spreading out under the roof, and a little at the foot.
+            const top = q.y0 - h.drop + h.height * 0.74;
+            a = Math.min(a, d - (0.62 + 0.42 * smooth((y - (top - 1.3)) / 1.2) + 0.2 * (1 - smooth((y - floor - 0.05) / 0.45))));
+          }
+          // The tomb: a block as long as a man, across the hall, on the dais.
+          const tu = h.length - 2.7;
+          a = Math.min(a, Math.max(Math.abs(u - tu) - 0.62, Math.abs(off) - 1.15, y - (floor + 1.0)));
+        }
+        air = Math.max(air, a);
+      }
+      return air;
+    };
     // How far into a grotto a point is: less than nothing outside it; 0 at its mouth; 1 well inside.
     let grottoDeep = 0;
     const grottoAir = (x: number, y: number, z: number): number => {
       let air = -Infinity;
       for (const q of grottoes) {
         const inside = (x - q.edge) * q.inw, t = 7 - inside, off = z - q.z;
+        if (q.hall) {
+          // A hall: only its doorway and the head of its stair lie in the rock that is carved with the land.
+          if (t < -0.5 || t > q.hall0 + 1 || Math.abs(off) > 2.2 || y > q.y0 + 5 || y < q.y0 - q.hall.drop - 1) continue;
+          const a = hallAir(q, t, off, y);
+          if (a > air) { air = a; grottoDeep = smooth((t - 2.6) / 3.2); }
+          continue;
+        }
         if (t < -0.5 || t > q.far + q.r + 1.5 || Math.abs(off) > q.r * 1.25 + 2.2 || y > q.y0 + 5.5 || y < q.y0 - 2) continue;
         // The passage: a stride and a half wide, a little over a man's height, its floor falling gently inwards.
         const along = Math.min(1, Math.max(0, t / q.far)), side = off - q.bend * 0.55 * Math.sin(along * Math.PI);
@@ -879,7 +931,9 @@ export function meshSite(site: Site): SceneDescription {
     kit.group = 'scarp';
     for (const c of headPatches) carveLand(c, (m) => kit.mesh(m), (at) => !overCourt(at));
     kit.group = `p${p.id}`;
-    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh);
+    // (Where the stair of a hall goes down out of the land's reach, the land's rock is left out: the hall's own carving has it.)
+    const underOwn = (at: Vector3) => grottoes.some((q) => q.hall && 7 - (at.x - q.edge) * q.inw > UNDER_FROM && Math.abs(at.z - q.z) < 2.6 && at.y < q.y0 + 4.2);
+    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, grottoes.some((q) => q.hall) ? (at) => !underOwn(at) : undefined);
 
     const stones: [number, number, number][] = [];
     let boulders = 0;
@@ -1598,7 +1652,69 @@ export function meshSite(site: Site): SceneDescription {
       flows.push({ line, width: c.half * 2 + 0.5, banks, fade });
     }
     // In a grotto: growths that glow on the rock round the chamber, and something left on its floor.
+    // A hall under the hill is carved as a body of its own, beyond the rock that is carved with
+    // the land, in two pieces that overlap: the stair, and the hall. It sees no sky at all, and
+    // is told so, so that nothing lights it but what burns in it and what is carried into it.
+    for (const q of grottoes) {
+      if (!q.hall) continue;
+      const h = q.hall, yf = q.y0 - h.drop;
+      wild.group = 'under';
+      const rockUnder = wild.mesh('rock');
+      wild.group = 'wild';
+      const tone1 = rng.fork('hewn').range(0, 50);
+      // From a point of the world to the hall's own measures, and back.
+      const tOf = (x: number) => 7 - (x - q.edge) * q.inw, xOf = (t: number) => q.edge + q.inw * (7 - t);
+      const air = (x: number, y: number, z: number) => hallAir(q, tOf(x), z - q.z, y);
+      const shade = (c: Vector3, n: Vector3): Colour => {
+        // Tool marks, and soot under the roof.
+        const tone = 0.8 + 0.22 * fbm2(c.x * 0.9 + tone1, c.z * 0.9 + c.y * 0.6, 3) - 0.18 * smooth((c.y - (yf + h.height * 0.55)) / (h.height * 0.4)) * Math.max(0, -n.y);
+        return rockColour(tone);
+      };
+      // The land's rock is carved only a little deeper than the valley floor, so it can hold no more than the
+      // head of the stair; this takes over from there, and what the land's carving made of the rest is thrown away.
+      const pieces: [number, number, number, number][] = [[UNDER_FROM - 0.3, q.hall0 + 0.9, 2.4, q.y0 + 3.9], [q.hall0 - 0.3, q.hall0 + h.length + 0.9, h.width / 2 + 0.9, yf + h.height + 0.9]];
+      for (const [t0, t1, half, top] of pieces) {
+        carveRock(rockUnder, air, {
+          min: V(Math.min(xOf(t0), xOf(t1)), yf - 0.9, q.z - half), max: V(Math.max(xOf(t0), xOf(t1)), top, q.z + half),
+          cell: 0.36, uvScale: 0.4, fromSamples: true, sharp: true, shade: (c, n) => shade(c, n),
+        });
+      }
+      // The stair: steps of stone on the slope the rock was cut to, a stride and a half broad, each a hand and a half high.
+      const cut = rng.fork('hallsteps');
+      // (Counted from the bottom, so that the first step up from the hall is no higher than the rest: a step and a bit is a wall.)
+      for (let k = 0; 0.34 * (k + 1) <= q.run + 0.05; k++) {
+        const t = q.stair0 + q.run - 0.34 * (k + 1), top = yf + 0.17 * (k + 1), x0 = xOf(t), x1 = xOf(t + 0.34);
+        layBeam(rockUnder, V((x0 + x1) / 2, top - 0.16, q.z - 1.3), V((x0 + x1) / 2, top - 0.16, q.z + 1.3), 0.36, 0.32, rockColour(cut.range(0.85, 1.05)), cut.range(0, 9));
+      }
+      // And the three steps of the dais.
+      for (let k = 0; k < 3; k++) {
+        const u = h.length - 5.6 - 0.34 * (2 - k), x = xOf(q.hall0 + u + 0.17);
+        layBeam(rockUnder, V(x, yf + 0.17 * (k + 1) - 0.16, q.z - h.width / 2 + 0.4), V(x, yf + 0.17 * (k + 1) - 0.16, q.z + h.width / 2 - 0.4), 0.36, 0.32, rockColour(0.95), k);
+      }
+      // The doorway: where the passage meets the face of the cliff it is dressed, as a made thing
+      // is: two jambs of squared stone, a lintel across them, and a sill. The face is found by
+      // walking in from the valley until the ground stands a doorway's height above the floor.
+      {
+        let face = 3.3;
+        for (let t = 0.5; t < 6; t += 0.15) if (ground(xOf(t), q.z) > q.y0 + 3.2) { face = t; break; }
+        const made = sceneryMesh('rock'), x = xOf(face - 0.25), pale = rockColour(1.18);
+        for (const side of [-1, 1]) layBeam(made, V(x, q.y0 - 0.3, q.z + side * 1.62), V(x, q.y0 + 3.45, q.z + side * 1.62), 0.62, 0.9, pale, side + 2);
+        layBeam(made, V(x, q.y0 + 3.78, q.z - 2.25), V(x, q.y0 + 3.78, q.z + 2.25), 1.0, 0.66, pale, 5);
+        layBeam(made, V(x, q.y0 + 4.26, q.z - 1.5), V(x, q.y0 + 4.26, q.z + 1.5), 0.8, 0.3, rockColour(1.08), 6);
+        layBeam(made, V(xOf(face - 0.6), q.y0 - 0.11, q.z - 1.9), V(xOf(face - 0.6), q.y0 - 0.11, q.z + 1.9), 1.5, 0.2, rockColour(1.0), 7);
+      }
+      // No sky down here: none in the hall, and less and less of it going down the stair.
+      rockUnder.setOpenBy((x) => 0.9 * (1 - smooth((tOf(x) - 2.6) / 5)));
+      // Torches on the pillars, facing the middle of the hall, and one either side of the tomb.
+      for (const [u, v] of pillarsOf(q)) {
+        hallTorches.push({ position: V(xOf(q.hall0 + u), yf + 2.5, q.z + v - Math.sign(v) * 0.76), out: V(0, 0, -Math.sign(v)) });
+      }
+      for (const side of [-1, 1]) hallTorches.push({ position: V(xOf(q.hall0 + h.length - 0.14), yf + 0.51 + 2.5, q.z + side * 3.2), out: V(q.inw, 0, 0) });
+      finds.push({ at: V(xOf(q.hall0 + h.length - 2.7), yf + 0.51 + 1.18, q.z), what: 'a crown of dull gold, lying on the tomb in the hall under the hill' });
+      unders.push({ min: V(Math.min(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf - 1, q.z - h.width / 2 - 1), max: V(Math.max(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf + h.height + 1, q.z + h.width / 2 + 1) });
+    }
     grottoes.forEach((q, k) => {
+      if (q.hall) return;
       const cx = q.edge - q.inw * (q.far - 7), fy = q.y0 - 0.045 * (q.far - 2);
       const gr = rng.fork(`grottoglow${k}`), turn = gr.range(0, Math.PI * 2);
       for (let i = 0; i < 4; i++) {
@@ -1827,6 +1943,8 @@ export function meshSite(site: Site): SceneDescription {
   const flows: { line: number[]; width: number; banks?: number[]; fade?: number[] }[] = [];
   const falls: { x: number; y: number; z: number; height: number; width: number }[] = [];
   const lookouts: { x: number; y: number; z: number; height: number }[] = [];
+  const hallTorches: TorchSpec[] = [];
+  const unders: { min: Vector3; max: Vector3 }[] = [];
   const crossings: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
@@ -2306,7 +2424,8 @@ export function meshSite(site: Site): SceneDescription {
   return {
     meshes: kit.meshes,
     masses: kit.masses,
-    torches: [...torchesByPlace.values()].flat(),
+    torches: [...[...torchesByPlace.values()].flat(), ...hallTorches],
+    unders,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
     spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
     track: arrival.track,

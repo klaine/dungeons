@@ -164,6 +164,12 @@ A terrace is a shelf of level ground against one of the valley's side walls: `si
 
 A grotto is a small cave in a side wall, with its mouth at the foot of the wall at `z`. A passage runs in under the hill, beyond the edge of `grounds`, to a chamber about `r` metres across the half of it. It does not join the house.
 
+If a grotto has a `hall`, it is not a cave but a hall cut by hand, and `r` is not used. A doorway at `z` opens on a passage 2.7 metres wide that runs straight out under the hill, at right angles to the wall. Its stair begins 3.1 metres beyond the edge of `grounds` going in from the valley floor's level, and goes down `drop` metres at one in two. The hall begins 1.6 metres beyond the foot of the stair and runs on `length` metres, `width` across, centred on `z`, and `height` to the crown of its roof. Two rows of pillars 1.24 metres square stand 27 hundredths of the width either side of the middle, every 4.4 metres from 3.4 metres in, stopping 6.5 short of the end; the last 5.6 metres are a dais half a metre high with a tomb on it.
+
+```json
+"grottoes": [ { "side": "w", "z": 80.4, "r": 2.1, "hall": { "length": 26.1, "width": 12.6, "height": 9.1, "drop": 5.8 } } ]
+```
+
 ### The solution
 
 ```json

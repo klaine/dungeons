@@ -97,6 +97,9 @@ export class AtmospherePass extends Pass {
       uAirCentre: { value: new Vector3() },
       uGlare: { value: new Vector3() },
       uCloudFlat: { value: 0 },
+      // A box of space that is underground though it is outside the house: no daylight, no mist.
+      uUnderMin: { value: new Vector3(1, 1, 1) },
+      uUnderMax: { value: new Vector3(0, 0, 0) },
     };
 
     this.quad = new FullScreenQuad(new ShaderMaterial({
@@ -415,6 +418,7 @@ uniform float uDensity, uIndoorDensity, uFrame, uEnabled;
 uniform vec4 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
 uniform float uCloudOn, uShade, uNight;
+uniform vec3 uUnderMin, uUnderMax;
 
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
@@ -479,6 +483,8 @@ void main() {
     vec3 p = uCamPos + rd * t;
     float sky = seen(tSkyDepth, uSkyVP, p, 0.0006);
     float sun = seen(tSunDepth, uSunVP, p, 0.0006);
+    // (Under the hill, though outside the house and off both maps: no sky and no sun there either.)
+    if (all(greaterThan(p, uUnderMin)) && all(lessThan(p, uUnderMax))) { sky = 0.0; sun = 0.0; }
     // Still air indoors holds more dust than the open courtyard.
     float dens = uDensity * mix(uIndoorDensity, 1.0, sky) * exp(-max(p.y, 0.0) * 0.06);
     vec3 light = uSunColor * sun * phase + uSkyColor * sky * 0.0796;

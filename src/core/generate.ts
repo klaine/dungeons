@@ -267,6 +267,11 @@ function layOutGrotto(site: Site, meadow: Place, rng: Rng): void {
     if ((site.streams ?? []).some((st) => st.course.some(([x, cz]) => Math.abs(x - edge) < 16 && Math.abs(cz - z) < 9))) continue;
     if ((site.features ?? []).some((f) => Math.abs(f.x - edge) < f.r * 2.4 + 9 && Math.abs(f.z - z) < f.r * 2.4 + 4)) continue;
     site.grottoes = [{ side, z, r }];
+    // Now and then it is not a cave at all, but a hall somebody cut under the hill: long, high and pillared.
+    if (rng.chance(0.4)) {
+      const round = (v: number) => Math.round(v * 10) / 10;
+      site.grottoes[0].hall = { length: round(rng.range(22, 30)), width: round(rng.range(12, 15)), height: round(rng.range(9, 11)), drop: round(rng.range(5.1, 5.95)) };
+    }
     return;
   }
 }

@@ -1,4 +1,4 @@
-import { Color, MeshStandardMaterial, Vector2, Vector3 } from 'three';
+import { Color, MeshStandardMaterial, ShaderChunk, Vector2, Vector3 } from 'three';
 import { TextureSet } from './textures';
 
 /**
@@ -370,6 +370,13 @@ roughnessFactor = mix( roughnessFactor, 0.97, siteMoss );`)
   vec3 bent = normalize( tx.zyx * rockW.x + ty.xzy * rockW.y + tz.xyz * rockW.z );
   normal = normalize( ( viewMatrix * vec4( bent, 0.0 ) ).xyz );
 }`)
+      // Rock that sees no sky, out where the sun's shadows are not kept, is underground: the sun
+      // does not reach it, whatever the light thinks. (Out there the two numbers a point carries
+      // are how much sky it sees and a fixed share of sun; in the house they come from the bake,
+      // which never finds a place with no sky and half a day's sun.)
+      .replace('#include <lights_fragment_begin>', ShaderChunk.lights_fragment_begin.replace(
+        'getDirectionalLightInfo( directionalLight, directLight );',
+        'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= 1.0 - ( 1.0 - smoothstep( 0.004, 0.06, vBake.x ) ) * step( 0.55, vBake.y );'))
       .replace('#include <lights_fragment_end>', /* glsl */ `
 {
   vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
@@ -385,7 +392,7 @@ roughnessFactor = mix( roughnessFactor, 0.97, siteMoss );`)
 reflectedLight.directSpecular *= mix( 0.3, 1.0, siteWet );
 reflectedLight.indirectSpecular *= mix( 0.3, 1.0, siteWet );`);
   };
-  m.customProgramCacheKey = () => 'rock-v4';
+  m.customProgramCacheKey = () => 'rock-v5';
   return m;
 }
 

@@ -110,6 +110,8 @@ export interface SceneDescription {
   streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
   /** Where water comes down over the rim: the pool at its foot, how far it falls, and how broad the stream is. */
   falls?: { x: number; y: number; z: number; height: number; width: number }[];
+  /** Boxes of space that are underground though outside the house: no mist lies in them and no daylight reaches them. */
+  unders?: { min: Vector3; max: Vector3 }[];
   /** High places that can be climbed to: where the cairn stands on each, and how far above the valley floor. */
   lookouts?: { x: number; y: number; z: number; height: number }[];
   /** Where the track crosses running water, how it gets over, and how high the water stands there. */
