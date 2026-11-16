@@ -64,7 +64,7 @@ Open the address Vite prints.
 
 Doors and keys need no button: walk up to a door to try it, walk up to a key to take it, and reach the chest in the sanctum to finish.
 
-Each place has its seed in the address, so a link reproduces it; **New place** rolls another. Some rooms are dark on purpose; they are shaded on the map.
+Each place has its seed in the address, so a link reproduces it; **New place** rolls another, and **Gallery** shows a dozen candidates at a time as plans to choose from. Some rooms are dark on purpose; they are shaded on the map.
 
 Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
