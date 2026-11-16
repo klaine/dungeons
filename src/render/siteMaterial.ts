@@ -224,7 +224,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const gThatch: N = (texture(thatch.map, at.mul(1.15)) as N).bias(blur).toVar();
   const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35);
   const dry: N = smoothstep(0.5, 0.72, wide.mul(0.7).add(mid.mul(0.45)).add(patch.sub(0.5).mul(0.35)).add(trodden).sub(wetV.mul(0.7)).sub(0.08).add(gThatch.a.sub(0.4).mul(0.3))).mul(one(leafy)).toVar();
-  turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.6).add(0.35)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
+  turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.2).add(0.24)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
   // And moss, low and dark, where it is damp or shaded.
   const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);
   const mossy: N = smoothstep(0.55, 0.78, (texture(turf.map, at0.div(7.3).add(0.53)) as N).a.add(wetV.mul(0.45)).add(litV.mul(0.25)).sub(dry.mul(0.4))).mul(one(leafy)).toVar();

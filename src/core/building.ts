@@ -162,3 +162,85 @@ export function classicalStair(b: Building) {
     : (a: number, e: number) => ({ u: room.u0 + 0.05 + e, v: room.v1 - 0.05 - longest + a });
   return { broad, TREAD, LANDING, START, flights, across, strip, place };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Timber-framed houses.
+
+/** The fixed measures of a timber house: its stone ground walls, its framed walls above, its plinth, the walls between its rooms, and its stair. */
+export const TIMBER = { ground: 0.56, wall: 0.3, plinth: 0.3, partition: 0.14, stair: 0.8, riser: 0.22 };
+
+/** The height of a timber house's floors above the ground before the door: the ground floor is the top of its plinth. */
+export const timberFloor = (b: Building, storey: number): number => TIMBER.plinth + (storey === 0 ? 0.18 : b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0));
+
+/** Where the front of a storey stands: each stands out over the one below. */
+export const timberFront = (b: Building, storey: number): number => -(b.jetty ?? 0.35) * storey;
+
+/** How many bays of framing a wall of a given length has. */
+export const timberBays = (length: number): number => Math.max(2, Math.round(length / 1.55));
+
+/**
+ * The windows of one storey of a timber house, wall by wall (the front, then round by the right):
+ * where each begins and ends along its wall, from the wall's left end as seen from outside. The
+ * ground storey has a window or two beside the door and one small one in each other wall; a framed
+ * storey has them in whole bays of the frame, on the street as many as the house has bays, at the
+ * back one, and at the sides in every other bay.
+ */
+export function timberWindows(b: Building, storey: number): [number, number][][] {
+  const W = b.w, D = b.d - timberFront(b, storey);
+  if (storey === 0) {
+    const door = W * (b.door ?? 0.24);
+    return [[0.2, 0.5, 0.8].filter((c) => Math.abs(c * W - door) > 1.5).map((c): [number, number] => [c * W - 0.55, c * W + 0.55]), [[D / 2 - 0.4, D / 2 + 0.4]], [[W / 2 - 0.4, W / 2 + 0.4]], [[D / 2 - 0.4, D / 2 + 0.4]]];
+  }
+  return [W, D, W, D].map((L, i) => {
+    const bays = timberBays(L), pitch = L / bays, lit = new Set<number>();
+    if (i === 0) for (let n = 0; n < b.bays; n++) lit.add(Math.min(bays - 1, Math.floor(((n + 0.5) * bays) / b.bays)));
+    else if (i === 2) lit.add(Math.floor(bays / 2));
+    else for (let n = 1; n < bays; n += 2) lit.add(n);
+    return [...lit].sort((p, q) => p - q).map((n): [number, number] => [n * pitch + 0.2, (n + 1) * pitch - 0.2]);
+  });
+}
+
+/**
+ * The stair of a timber house: straight flights one over another against the side wall of the
+ * hall, on the side the door is, each rising towards the back. They are steep, as such stairs
+ * are, and all the same length on plan, so that every flight begins over the foot of the one
+ * below and each comes up through the floor at the same place.
+ */
+export function timberStair(b: Building) {
+  const side: -1 | 1 = (b.door ?? 0.24) < 0.5 ? -1 : 1, G = TIMBER.ground;
+  const v0 = G + 1.2, v1 = v0 + Math.min(2.9, b.d - 1.05 - v0);
+  // (`m` is the distance from the outer face of the side wall the stair stands against.)
+  const at = (m: number) => side * (b.w / 2 - m), a = at(G), c = at(G + TIMBER.stair);
+  const flights = Array.from({ length: b.storeys - 1 }, (_, k) => {
+    const height = timberFloor(b, k + 1) - timberFloor(b, k), steps = Math.ceil(height / TIMBER.riser);
+    return { steps, rise: height / steps, tread: (v1 - v0) / (steps - 1) };
+  });
+  return { side, at, u0: Math.min(a, c), u1: Math.max(a, c), v0, v1, flights };
+}
+
+/**
+ * The plan of a timber house. The door opens into a hall along one side of the house, with the
+ * stair in it against the side wall; a framed wall divides it from the room, which has the
+ * windows to the street. Upstairs the stair comes up into a landing, broader than the hall below
+ * since its wall stands at a post of the frame, and off it are two chambers, one to the street
+ * and one to the back, divided at a post of the side wall so that no wall meets a window.
+ */
+export function planTimber(b: Building): BuildingPlan {
+  const { ground: G, wall: T, partition: P } = TIMBER, W = b.w, D = b.d, stair = timberStair(b), left = stair.side < 0;
+  const plan: BuildingPlan = { rooms: [], doors: [], walls: { outer: G, spine: P, cross: P } };
+  const span = (m0: number, m1: number) => { const a = stair.at(m0), c = stair.at(m1); return { u0: Math.min(a, c), u1: Math.max(a, c) }; };
+  // (The walls of a room: front, back, left, right. The hall's outer wall is on the door's side; the room's on the other.)
+  const walls = (outer: number, hall: boolean, front = outer, back = outer): [number, number, number, number] => [front, back, hall === left ? outer : P / 2, hall === left ? P / 2 : outer];
+  const door = (left ? b.door ?? 0.24 : 1 - (b.door ?? 0.76)) * W, between = door + 0.82;
+  plan.rooms.push({ kind: 'hall', ...span(G, between - P / 2), v0: G, v1: D - G, linings: walls(G, true), storey: 0 });
+  plan.rooms.push({ kind: 'front', ...span(between + P / 2, W - G), v0: G, v1: D - G, linings: walls(G, false), storey: 0 });
+  plan.doors.push({ line: 'u', at: stair.at(between), c: G + 1.65, w: 0.85, storey: 0 });
+  for (let storey = 1; storey < b.storeys; storey++) {
+    const front = timberFront(b, storey), post = (2 * W) / timberBays(W), bays = timberBays(D - front), cross = front + (Math.round(bays / 2) * (D - front)) / bays;
+    plan.rooms.push({ kind: 'passage', ...span(T, post - P / 2), v0: front + T, v1: D - T, linings: walls(T, true), storey });
+    plan.rooms.push({ kind: 'front', ...span(post + P / 2, W - T), v0: front + T, v1: cross - P / 2, linings: walls(T, false, T, P / 2), storey });
+    plan.rooms.push({ kind: 'back', ...span(post + P / 2, W - T), v0: cross + P / 2, v1: D - T, linings: walls(T, false, P / 2, T), storey });
+    plan.doors.push({ line: 'u', at: stair.at(post), c: front + T + 0.65, w: 0.8, storey }, { line: 'u', at: stair.at(post), c: D - T - 0.65, w: 0.8, storey });
+  }
+  return plan;
+}

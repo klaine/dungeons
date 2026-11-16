@@ -234,7 +234,8 @@ export interface Grotto {
  * forward under pilasters and a pediment.
  */
 /**
- * The plan of a building's rooms, alike on every storey. Everything is in the building's own
+ * The plan of a building's rooms: alike on every storey, except where a room or a door names the
+ * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
  * measures: `u` across the front from its middle, to the right as seen from outside; `v` back
  * from the face of the front wall. A room is its clear floor, inside its walls.
  */
@@ -244,9 +245,9 @@ export interface BuildingPlan {
    * next room's or the rendered skin outside, in the order front, back, left, right (as `v0`,
    * `v1`, `u0`, `u1`): half a wall between rooms, all of an outer wall within its skin.
    */
-  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number] }[];
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
   /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
-  doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number }[];
+  doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number; storey?: number }[];
   /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
   walls: { outer: number; spine: number; cross: number };
 }
@@ -264,6 +265,8 @@ export interface Building {
   colour: [number, number, number];
   jetty?: number;
   gable?: boolean;
+  /** Of a timber house: where its door is in the front, as a share of the front's breadth from its left end as one stands before it. */
+  door?: number;
   portico?: boolean;
   /**
    * For a building set into rising ground: how much higher the ground stands at its back than

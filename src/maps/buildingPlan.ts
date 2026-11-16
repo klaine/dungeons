@@ -1,4 +1,4 @@
-import { buried, CLASSICAL, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, wingWindows } from '../core/building';
+import { buried, CLASSICAL, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building } from '../core/site';
 
 /**
@@ -17,6 +17,7 @@ export type PageOf = (u: number, v: number) => [number, number];
 export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: number, page: PageOf, scale: number, o: { labels?: boolean } = {}): void {
   const plan = b.plan;
   if (!plan) return;
+  if (b.style === 'timber') { drawTimberStorey(ctx, b, storey, page, scale, o); return; }
   const { outer: T, spine: SPINE, cross: CROSS, out: OUT } = CLASSICAL, W = b.w, D = b.d;
   const { windows, standL, standR } = classicalFront(b);
   const rect = (u0: number, u1: number, v0: number, v1: number, fill: string) => {
@@ -117,6 +118,71 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
   }
 }
 
+/** One storey of a timber house: drawn as the classical ones are, but each storey has its own rooms, and stands further out over the street than the one below. */
+function drawTimberStorey(ctx: CanvasRenderingContext2D, b: Building, storey: number, page: PageOf, scale: number, o: { labels?: boolean }): void {
+  const plan = b.plan!, W = b.w, D = b.d, front = timberFront(b, storey), t = storey === 0 ? TIMBER.ground : TIMBER.wall, stair = timberStair(b);
+  const rect = (u0: number, u1: number, v0: number, v1: number, fill: string) => {
+    const [ax, ay] = page(u0, v0), [bx, by] = page(u1, v1);
+    ctx.fillStyle = fill;
+    ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+  };
+  const line = (u0: number, v0: number, u1: number, v1: number, colour: string, width: number) => {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(...page(u0, v0));
+    ctx.lineTo(...page(u1, v1));
+    ctx.stroke();
+  };
+  rect(-W / 2, W / 2, front, D, INK);
+  const rooms = plan.rooms.filter((r) => r.storey === storey);
+  for (const r of rooms) rect(r.u0, r.u1, r.v0, r.v1, r.kind === 'front' || r.kind === 'back' ? FLOOR : HALL);
+  for (const d of plan.doors) if (d.storey === storey) {
+    const half = TIMBER.partition / 2 + 0.01;
+    if (d.line === 'u') rect(d.at - half, d.at + half, d.c - d.w / 2, d.c + d.w / 2, FLOOR); else rect(d.c - d.w / 2, d.c + d.w / 2, d.at - half, d.at + half, FLOOR);
+  }
+  // Windows, wall by wall, each given along its wall from its left end as seen from outside; and the door.
+  const glass = Math.max(1, scale * 0.04);
+  timberWindows(b, storey).forEach((wall, i) => {
+    for (const [s0, s1] of wall) {
+      if (i === 0) { rect(-W / 2 + s0, -W / 2 + s1, front, front + t, PAPER); line(-W / 2 + s0, front + t / 2, -W / 2 + s1, front + t / 2, LINE, glass); }
+      else if (i === 2) { rect(W / 2 - s1, W / 2 - s0, D - t, D, PAPER); line(W / 2 - s1, D - t / 2, W / 2 - s0, D - t / 2, LINE, glass); }
+      else {
+        const u0 = i === 1 ? W / 2 - t : -W / 2, v0 = i === 1 ? front + s0 : D - s1, v1 = i === 1 ? front + s1 : D - s0;
+        rect(u0, u0 + t, v0, v1, PAPER);
+        line(u0 + t / 2, v0, u0 + t / 2, v1, LINE, glass);
+      }
+    }
+  });
+  if (storey === 0) { const u = -W / 2 + W * (b.door ?? 0.24); rect(u - 0.42, u + 0.42, -0.01, t + 0.01, HALL); }
+  // The stair: the flight that goes up from here, with its treads and an arrow; or, on the top floor, the well it comes up through.
+  const f = stair.flights[storey], mid = (stair.u0 + stair.u1) / 2;
+  if (f || storey > 0) {
+    rect(stair.u0, stair.u1, stair.v0, stair.v1, f ? '#e9dfc9' : '#d8ccb2');
+    const g = f ?? stair.flights[storey - 1];
+    for (let i = 0; i < g.steps; i++) line(stair.u0, stair.v0 + i * g.tread, stair.u1, stair.v0 + i * g.tread, LINE, Math.max(1, scale * 0.025));
+  }
+  if (f) {
+    ctx.strokeStyle = INK;
+    ctx.fillStyle = INK;
+    ctx.lineWidth = Math.max(1, scale * 0.05);
+    const [ax, ay] = page(mid, stair.v0 + 0.1), [bx, by] = page(mid, stair.v1 - 0.3), head = scale * 0.3, ang = Math.atan2(by - ay, bx - ax);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - head * Math.cos(ang - 0.45), by - head * Math.sin(ang - 0.45)); ctx.lineTo(bx - head * Math.cos(ang + 0.45), by - head * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
+  }
+  if (!o.labels) return;
+  ctx.fillStyle = LINE;
+  ctx.font = `${Math.max(9, Math.round(scale * 0.42))}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const r of rooms) {
+    const hall = r.kind === 'hall' || r.kind === 'passage';
+    // (The hall's name is written at its front, clear of the stair; a room has its area.)
+    const [x, y] = page(hall ? (stair.side < 0 ? Math.max(r.u0, stair.u1) + r.u1 : r.u0 + Math.min(r.u1, stair.u0)) / 2 : (r.u0 + r.u1) / 2, hall ? r.v1 - 0.5 : (r.v0 + r.v1) / 2);
+    ctx.fillText(hall ? (storey === 0 ? 'hall' : 'landing') : `${((r.u1 - r.u0) * (r.v1 - r.v0)).toFixed(0)} m²`, x, y);
+  }
+}
+
 /** The name of a storey, as plans name them. */
 export function storeyName(b: Building, storey: number): string {
   const lower = (b.sunk ?? 0) > 0.5;
@@ -127,7 +193,8 @@ export function storeyName(b: Building, storey: number): string {
 
 /** All the storeys of a building, each drawn as a plan with its name and a scale, on one sheet. */
 export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
-  const pad = 1.6, W = b.w, D = b.d + (b.portico ? CLASSICAL.out : 0) + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
+  const timber = b.style === 'timber', jut = timber ? -timberFront(b, b.storeys - 1) : 0;
+  const pad = 1.6 + jut, W = b.w, D = b.d + (b.portico ? CLASSICAL.out : 0) + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
   const pw = Math.max((W + pad * 2) * scale, 250), ph = (D + pad * 2) * scale + 48;
   const cols = W > 17 ? 1 : 2, rows = Math.ceil(b.storeys / cols);
   const canvas = document.createElement('canvas');
@@ -141,7 +208,9 @@ export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
   ctx.font = '600 18px Georgia, serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(`${b.bays} bays, ${b.storeys} ${b.storeys === 1 ? 'storey' : 'storeys'}, ${W.toFixed(1)} by ${b.d.toFixed(1)} m${b.wings ? (b.wings.length === 2 ? ', U-shaped' : ', L-shaped') : ''}${b.portico ? ', pediment' : ''}${b.sunk ? ', on a slope' : ''}`, 14, 12);
+  ctx.fillText(timber
+    ? `Timber-framed, ${b.storeys} storeys, ${W.toFixed(1)} by ${b.d.toFixed(1)} m, ${b.gable ? 'gable' : 'eaves'} to the street`
+    : `${b.bays} bays, ${b.storeys} ${b.storeys === 1 ? 'storey' : 'storeys'}, ${W.toFixed(1)} by ${b.d.toFixed(1)} m${b.wings ? (b.wings.length === 2 ? ', U-shaped' : ', L-shaped') : ''}${b.portico ? ', pediment' : ''}${b.sunk ? ', on a slope' : ''}`, 14, 12);
   for (let s = 0; s < b.storeys; s++) {
     const ox = (s % cols) * pw, oy = 46 + Math.floor(s / cols) * ph;
     // The front is at the foot of the sheet, as one stands before it.
@@ -152,17 +221,17 @@ export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
     ctx.textBaseline = 'top';
     ctx.fillText(storeyName(b, s), ox + 14, oy + 4);
     ctx.font = '12px Georgia, serif';
-    ctx.fillText(`floor ${floorOf(b, s).toFixed(1)} m up, rooms ${b.heights[s].toFixed(1)} m high`, ox + 14, oy + 23);
+    ctx.fillText(`floor ${(timber ? timberFloor(b, s) : floorOf(b, s)).toFixed(1)} m up, rooms ${b.heights[s].toFixed(1)} m high`, ox + 14, oy + 23);
     drawStorey(ctx, b, s, page, scale, { labels: true });
     // A scale of five metres, and an arrow for the way in.
-    const [sx, sy] = page(-W / 2, -1.0);
+    const [sx, sy] = page(-W / 2, (timber ? -1.45 : -1.0) - jut);
     ctx.fillStyle = INK;
     for (let m = 0; m < 5; m++) ctx.fillRect(sx + m * scale, sy, scale, m % 2 ? 2 : 5);
     ctx.font = '12px Georgia, serif';
     ctx.textBaseline = 'top';
     ctx.fillText('5 m', sx + 5 * scale + 6, sy - 4);
     if (s === 0) {
-      const [dx, dy] = page(0, -1.1);
+      const [dx, dy] = page(timber ? -W / 2 + W * (b.door ?? 0.24) : 0, timber ? -0.75 : -1.1);
       ctx.textAlign = 'center';
       ctx.fillText('▲ entrance', dx, dy - 2);
     }

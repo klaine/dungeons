@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
-import { buried, CLASSICAL, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, wingWindows } from '../core/building';
+import { buried, CLASSICAL, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
@@ -154,21 +154,24 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
   // The ground storey: a stone plinth, plastered walls, a door and a window or two to the street, one small window to each side and the back.
   box('stone', -W / 2 - 0.07, W / 2 + 0.07, 0, PLINTH + 0.18, -0.07, D + 0.07, shade(stone, 0.8));
   const ground = k.walls(0);
-  const doorAt = W * rng.pick([0.24, 0.5, 0.76]), door: Gap = { s0: doorAt - 0.52, s1: doorAt + 0.52, y0: PLINTH - 0.12, y1: PLINTH + 2.02 };
+  // (Where the door is, the site document says; the choice made here is kept only so that nothing after it is dealt differently.)
+  const picked = rng.pick([0.24, 0.5, 0.76]), doorAt = W * (b.door ?? picked), door: Gap = { s0: doorAt - 0.52, s1: doorAt + 0.52, y0: PLINTH - 0.12, y1: PLINTH + 2.28 };
   ground.forEach((f, i) => {
     const gaps: Gap[] = [];
-    if (i === 0) {
-      gaps.push(door);
-      for (const c of [0.2, 0.5, 0.8]) if (Math.abs(c * W - doorAt) > 1.5) gaps.push({ s0: c * W - 0.55, s1: c * W + 0.55, y0: PLINTH + 0.95, y1: PLINTH + 2.0 });
-    } else gaps.push({ s0: f.L * 0.5 - 0.4, s1: f.L * 0.5 + 0.4, y0: PLINTH + 1.15, y1: PLINTH + 1.95 });
+    if (i === 0) gaps.push(door);
+    for (const [s0, s1] of timberWindows(b, 0)[i]) gaps.push({ s0, s1, y0: PLINTH + (i === 0 ? 0.95 : 1.15), y1: PLINTH + (i === 0 ? 2.0 : 1.95) });
     // (The ground storey is stone under its plaster, and thick: more than half a metre.)
     pierced(f, 'plaster', 0, f.L, PLINTH + 0.18, PLINTH + H0, 0, 0.56, LIMEWASH, gaps);
     for (const g of gaps) {
       if (g === door) {
         // A door of upright boards in a frame of oak, with a stone step before it.
-        for (let n = 0; n < 5; n++) on(f, 'wood', g.s0 + 0.1 + n * 0.168, g.s0 + 0.1 + (n + 1) * 0.168 - 0.008, PLINTH + 0.02, g.y1 - 0.1, 0.12, 0.17, shade(paint, 0.9 + 0.2 * rng.next()), true);
-        for (const y of [PLINTH + 0.3, PLINTH + 1.55]) on(f, 'metal', g.s0 + 0.1, g.s1 - 0.1, y, y + 0.07, 0.1, 0.125, [0.05, 0.05, 0.055]);
-        on(f, 'metal', g.s1 - 0.26, g.s1 - 0.2, PLINTH + 0.95, PLINTH + 1.1, 0.06, 0.12, [0.06, 0.06, 0.06]);
+        // (The boards of the door are dealt their tones whether it is shut or stands open inside: see the hall.)
+        const tones = Array.from({ length: 5 }, () => 0.9 + 0.2 * rng.next());
+        if (!b.plan) {
+          for (let n = 0; n < 5; n++) on(f, 'wood', g.s0 + 0.1 + n * 0.168, g.s0 + 0.1 + (n + 1) * 0.168 - 0.008, PLINTH + 0.02, g.y1 - 0.1, 0.12, 0.17, shade(paint, tones[n]), true);
+          for (const y of [PLINTH + 0.3, PLINTH + 1.55]) on(f, 'metal', g.s0 + 0.1, g.s1 - 0.1, y, y + 0.07, 0.1, 0.125, [0.05, 0.05, 0.055]);
+          on(f, 'metal', g.s1 - 0.26, g.s1 - 0.2, PLINTH + 0.95, PLINTH + 1.1, 0.06, 0.12, [0.06, 0.06, 0.06]);
+        }
         for (const [a, c] of [[g.s0 - 0.04, g.s0 + 0.1], [g.s1 - 0.1, g.s1 + 0.04]]) on(f, 'wood', a, c, PLINTH, g.y1 + 0.02, -0.03, 0.2, OAK, true);
         on(f, 'wood', g.s0 - 0.1, g.s1 + 0.1, g.y1 - 0.1, g.y1 + 0.1, -0.04, 0.2, OAK, true);
         on(f, 'stone', g.s0 - 0.25, g.s1 + 0.25, 0, PLINTH - 0.1, -0.55, 0.02, shade(stone, 0.9));
@@ -177,6 +180,8 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
         glazed(f, g, 2, i === 0 ? 3 : 2, frame, 0.2);
         on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.1, g.y0, -0.15, 0.2, shade(stone, 0.95));
         on(f, 'wood', g.s0 - 0.08, g.s1 + 0.08, g.y1, g.y1 + 0.14, -0.03, 0.14, OAK, true);
+        // Inside, a board for a sill across the depth of the wall.
+        on(f, 'wood', g.s0 - 0.04, g.s1 + 0.04, g.y0 - 0.05, g.y0, 0.27, 0.6, shade(OAK, 1.5), true);
         if (i === 0) for (const [a, c] of [[g.s0 - 0.52, g.s0 - 0.02], [g.s1 + 0.02, g.s1 + 0.52]]) {
           // Shutters, of boards with two ledges across them, standing open against the wall.
           on(f, 'wood', a, c, g.y0, g.y1, -0.035, 0, paint, true);
@@ -202,10 +207,7 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
     k.walls(fr).forEach((f, i) => {
       const bays = Math.max(2, Math.round(f.L / 1.55)), pitch = f.L / bays;
       // Which bays have windows: on the street as many as the house has, spread evenly; elsewhere every other bay, or one.
-      const lit = new Set<number>();
-      if (i === 0) for (let n = 0; n < b.bays; n++) lit.add(Math.min(bays - 1, Math.floor(((n + 0.5) * bays) / b.bays)));
-      else if (i === 2) lit.add(Math.floor(bays / 2));
-      else for (let n = 1; n < bays; n += 2) lit.add(n);
+      const lit = new Set<number>(timberWindows(b, storey)[i].map(([s0]) => Math.round((s0 - 0.2) / pitch)));
       const gaps: Gap[] = [...lit].map((n) => ({ s0: n * pitch + 0.2, s1: (n + 1) * pitch - 0.2, y0: sill + 0.14, y1: head }));
       pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, 0.045, T, b.colour, gaps);
       // Sill beam and head beam, posts, and the rail under the windows.
@@ -298,6 +300,146 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
     box('stone', u - 0.34, u + 0.34, top + 0.4, ridge + 0.75, v - 0.3, v + 0.3, shade(stone, 0.72));
     box('stone', u - 0.42, u + 0.42, ridge + 0.75, ridge + 0.85, v - 0.38, v + 0.38, shade(stone, 0.6));
     for (const side of [-1, 1]) box('tile', u + side * 0.17 - 0.09, u + side * 0.17 + 0.09, ridge + 0.85, ridge + 1.12, v - 0.09, v + 0.09, [0.9, 0.8, 0.75]);
+  }
+  // ------------------------------------------------------------------ inside
+  // The rooms are as the site document plans them. A hall along one side with the stair in it,
+  // the room beside it; landings and chambers above. Floors are boards on the joists whose ends
+  // show under each storey outside; the walls between rooms are framed and filled as the outer
+  // walls are, and the stair is a steep one of oak, boxed in below and with a screen of slats
+  // along its open side, which is also what keeps anyone on a landing out of the well.
+  if (b.plan) {
+    const plan = b.plan, st = timberStair(b), G = TIMBER.ground, F = (storey: number) => timberFloor(b, storey);
+    const boards: Colour = [0.36, 0.26, 0.16], linen: Colour = [0.8, 0.77, 0.7], iron: Colour = [0.05, 0.05, 0.055], away = -st.side;
+    type Rect = { u0: number; u1: number; v0: number; v1: number };
+    const without = (r: Rect, hole: Rect): Rect[] => [
+      { u0: r.u0, u1: r.u1, v0: r.v0, v1: Math.min(r.v1, hole.v0) },
+      { u0: r.u0, u1: r.u1, v0: Math.max(r.v0, hole.v1), v1: r.v1 },
+      { u0: r.u0, u1: Math.min(r.u1, hole.u0), v0: Math.max(r.v0, hole.v0), v1: Math.min(r.v1, hole.v1) },
+      { u0: Math.max(r.u0, hole.u1), u1: r.u1, v0: Math.max(r.v0, hole.v0), v1: Math.min(r.v1, hole.v1) },
+    ].filter((q) => q.u1 - q.u0 > 0.01 && q.v1 - q.v0 > 0.01);
+    const well: Rect = { u0: st.u0, u1: st.u1, v0: st.v0, v1: st.v1 };
+    // A block between two places across the house (given as distances from the side wall the stair is on, or as `u`), whichever way round they come.
+    const span = (material: string, ua: number, ub: number, y0: number, y1: number, v0: number, v1: number, colour: Colour, grain = false) => box(material, Math.min(ua, ub), Math.max(ua, ub), y0, y1, v0, v1, colour, grain);
+
+    // The floors, and over the top storey its ceiling; under each, its joists.
+    for (let storey = 1; storey <= b.storeys; storey++) {
+      const ceiling = storey === b.storeys, y = floorOf(storey), fr = frontOf(Math.min(storey, b.storeys - 1));
+      const all: Rect = { u0: -W / 2 + 0.25, u1: W / 2 - 0.25, v0: fr + 0.2, v1: D - 0.25 }, under = ceiling ? y : y - 0.13;
+      for (const r of ceiling ? [all] : without(all, well)) box('wood', r.u0, r.u1, under, ceiling ? y + 0.1 : y + 0.012, r.v0, r.v1, boards, true);
+      const below = storey - 1, t = below === 0 ? G : T, deep = ceiling ? 0.15 : 0.2, a = frontOf(below) + t - 0.02, c = D - t + 0.02;
+      for (let u = -W / 2 + 0.2; u < W / 2 - 0.1; u += 0.52) {
+        const cut = !ceiling && u + 0.13 > well.u0 && u < well.u1;
+        for (const [p, q] of cut ? [[a, well.v0 - 0.02], [well.v1 + 0.02, c]] : [[a, c]]) box('wood', u, u + 0.13, under - deep, under, p, q, OAK, true);
+      }
+      // (Round the well, a trimmer at each end to carry the joists that are cut short.)
+      if (!ceiling) for (const v of [well.v0 - 0.14, well.v1 + 0.02]) box('wood', well.u0 - 0.12, well.u1 + 0.12, under - deep, under, v, v + 0.12, OAK, true);
+    }
+    // The room's floor is boarded; the hall's is the stone of the plinth.
+    for (const r of plan.rooms) if (r.storey === 0 && r.kind === 'front') box('wood', r.u0, r.u1, F(0), F(0) + 0.02, r.v0, r.v1, boards, true);
+
+    // A framed wall between rooms: a plate along its top, posts, a rail, the panels between washed white, and its doorways framed in oak.
+    const framed = (line: 'u' | 'v', where: number, from: number, to: number, y0: number, y1: number, doors: { c: number; w: number }[]) => {
+      const put = (material: string, a: number, c: number, lo: number, hi: number, half: number, colour: Colour, grain = false) => {
+        if (c - a < 0.01) return;
+        if (line === 'u') box(material, where - half, where + half, lo, hi, a, c, colour, grain); else box(material, a, c, lo, hi, where - half, where + half, colour, grain);
+      };
+      const head = Math.min(y0 + 1.98, y1 - 0.3), sorted = [...doors].sort((p, q) => p.c - q.c), panels: [number, number][] = [];
+      let s = from;
+      for (const d of sorted) {
+        panels.push([s, d.c - d.w / 2]);
+        put('plaster', d.c - d.w / 2, d.c + d.w / 2, head + 0.1, y1, 0.04, LIMEWASH);
+        for (const e of [d.c - d.w / 2 - 0.1, d.c + d.w / 2]) put('wood', e, e + 0.1, y0, y1, 0.07, OAK, true);
+        put('wood', d.c - d.w / 2, d.c + d.w / 2, head, head + 0.12, 0.07, OAK, true);
+        s = d.c + d.w / 2;
+      }
+      panels.push([s, to]);
+      for (const [a, c] of panels) {
+        put('plaster', a, c, y0, y1, 0.04, LIMEWASH);
+        put('wood', a, c, y0 + 1.0, y0 + 1.1, 0.062, OAK, true);
+        const n = Math.max(1, Math.round((c - a) / 1.3));
+        for (let k = 0; k <= n; k++) { const p = a + ((c - a) * k) / n; put('wood', Math.max(a, p - 0.06), Math.min(c, p + 0.06), y0, y1, 0.07, OAK, true); }
+      }
+      put('wood', from, to, y1 - 0.14, y1, 0.07, OAK, true);
+    };
+    for (let storey = 0; storey < b.storeys; storey++) {
+      const y0 = F(storey), y1 = storey === b.storeys - 1 ? top : floorOf(storey + 1) - 0.13;
+      const rooms = plan.rooms.filter((r) => r.storey === storey), doors = plan.doors.filter((d) => d.storey === storey && d.line === 'u');
+      const hall = rooms.find((r) => r.kind === 'hall' || r.kind === 'passage')!, others = rooms.filter((r) => r !== hall);
+      framed('u', doors[0].at, hall.v0, hall.v1, y0, y1, doors);
+      if (others.length === 2) framed('v', (others[0].v1 + others[1].v0) / 2, others[0].u0, others[0].u1, y0, y1, []);
+
+      // What stands in the rooms.
+      for (const r of others) {
+        const near = st.side < 0 ? r.u0 : r.u1, far = st.side < 0 ? r.u1 : r.u0, oak: Colour = [0.3, 0.2, 0.12];
+        if (storey === 0) {
+          // By the outer wall, under the windows to the street, a table with a bench on either side of it; in the inn, another further back.
+          for (const v of first && r.v1 - r.v0 > 4.6 ? [r.v0 + 0.45, r.v1 - 2.1] : [r.v0 + 0.45]) {
+            span('wood', far - away * 0.5, far - away * 1.25, y0 + 0.72, y0 + 0.78, v, v + 1.5, oak, true);
+            for (const [du, dv] of [[0.54, 0.06], [1.15, 0.06], [0.54, 1.38], [1.15, 1.38]]) span('wood', far - away * du, far - away * (du + 0.06), y0, y0 + 0.72, v + dv, v + dv + 0.06, oak, true);
+            for (const du of [0.08, 1.36]) {
+              span('wood', far - away * du, far - away * (du + 0.3), y0 + 0.42, y0 + 0.47, v + 0.05, v + 1.45, oak, true);
+              for (const dv of [0.12, 1.3]) span('wood', far - away * (du + 0.04), far - away * (du + 0.26), y0, y0 + 0.42, v + dv, v + dv + 0.06, oak, true);
+            }
+          }
+          // Against the wall of the hall, from which it is fed, a stove of green tiles on a stone foot.
+          const v = (r.v0 + r.v1) / 2 + 0.3, tiles: Colour = [0.2, 0.34, 0.24];
+          span('stone', near + away * 0.03, near + away * 0.71, y0, y0 + 0.22, v - 0.03, v + 0.83, [0.3, 0.3, 0.3]);
+          span('metal', near + away * 0.06, near + away * 0.68, y0 + 0.22, y0 + 1.5, v, v + 0.8, tiles);
+          span('metal', near + away * 0.03, near + away * 0.71, y0 + 1.5, y0 + 1.6, v - 0.03, v + 0.83, tiles);
+          span('metal', near + away * 0.14, near + away * 0.6, y0 + 1.6, y0 + 1.85, v + 0.08, v + 0.72, tiles);
+        } else {
+          // A bed along the outer wall, its head to the wall between the chambers, and a chest.
+          const head = r.kind === 'front' ? r.v1 - 0.06 : r.v0 + 0.06, way = r.kind === 'front' ? -1 : 1, foot = head + way * 1.9;
+          const lie = (material: string, du0: number, du1: number, lo: number, hi: number, d0: number, d1: number, colour: Colour, grain = false) => span(material, far - away * du0, far - away * du1, lo, hi, Math.min(head + way * d0, head + way * d1), Math.max(head + way * d0, head + way * d1), colour, grain);
+          lie('wood', 0.06, 1.0, y0 + 0.14, y0 + 0.34, 0, 1.9, oak, true);
+          for (const [du, dd] of [[0.06, 0], [0.92, 0], [0.06, 1.82], [0.92, 1.82]]) lie('wood', du, du + 0.08, y0, y0 + (dd ? 0.5 : 0.95), dd, dd + 0.08, oak, true);
+          lie('wood', 0.06, 1.0, y0 + 0.5, y0 + 0.95, 0, 0.05, oak, true);
+          lie('plaster', 0.1, 0.96, y0 + 0.34, y0 + 0.46, 0.08, 1.82, linen);
+          lie('plaster', 0.2, 0.86, y0 + 0.46, y0 + 0.55, 0.1, 0.5, linen);
+          lie('plaster', 0.08, 0.98, y0 + 0.44, y0 + 0.5, 0.62, 1.84, shade(b.colour, 0.55));
+          void foot;
+          const cv = r.kind === 'front' ? r.v1 - 1.05 : r.v0 + 0.1;
+          span('wood', near + away * 0.1, near + away * 0.55, y0, y0 + 0.45, cv, cv + 0.95, shade(oak, 0.85), true);
+          span('wood', near + away * 0.08, near + away * 0.57, y0 + 0.45, y0 + 0.5, cv - 0.02, cv + 0.97, oak, true);
+          for (const dv of [0.15, 0.75]) span('metal', near + away * 0.09, near + away * 0.56, y0, y0 + 0.51, cv + dv, cv + dv + 0.05, iron);
+        }
+      }
+    }
+
+    // The stair.
+    const rail = st.at(G + TIMBER.stair + 0.04), length = st.v1 - st.v0;
+    st.flights.forEach((f, k) => {
+      const y = F(k), up = F(k + 1) - y, railY = (v: number) => y + 0.95 + (up * (v - st.v0)) / length;
+      for (let i = 0; i < f.steps - 1; i++) {
+        const va = st.v0 + i * f.tread, step = y + (i + 1) * f.rise;
+        // (The lowest flight is boxed in to the floor. Those above are treads only, boards let into a string at each side: a flight
+        // with risers would hang too low over the heads of those coming up the flight beneath it, where the storey is a low one.)
+        if (k === 0) box('wood', st.u0, st.u1, y, step, va, va + f.tread, shade(boards, 0.9), true);
+        else box('wood', st.u0, st.u1, step - 0.05, step, va - 0.02, va + f.tread, shade(boards, 0.9), true);
+        box('wood', rail - 0.022, rail + 0.022, k === 0 ? step : y, railY(va + f.tread / 2), va + f.tread / 2 - 0.022, va + f.tread / 2 + 0.022, OAK, true);
+      }
+      if (k > 0) for (const u of [st.u0 + 0.025, st.u1 - 0.025]) stick(at(u, y + f.rise - 0.16, st.v0), at(u, y + up - 0.16, st.v1 - f.tread), 0.05, 0.24, OAK);
+      stick(at(rail, railY(st.v0), st.v0), at(rail, railY(st.v1), st.v1), 0.07, 0.08, OAK);
+      box('wood', rail - 0.05, rail + 0.05, y, railY(st.v0) + 0.1, st.v0 - 0.05, st.v0 + 0.05, OAK, true);
+      box('wood', rail - 0.05, rail + 0.05, k === 0 ? y + up - f.rise : y, railY(st.v1) + 0.1, st.v1 - 0.05, st.v1 + 0.05, OAK, true);
+    });
+    if (b.storeys > 1) {
+      // On the top floor nothing goes up, and the well has a rail along it and across its end.
+      const y = F(b.storeys - 1), wall = st.at(T), end = st.v0 - 0.04;
+      stick(at(rail, y + 0.95, end), at(rail, y + 0.95, st.v1), 0.07, 0.08, OAK);
+      stick(at(rail, y + 0.95, end), at(wall, y + 0.95, end), 0.07, 0.08, OAK);
+      for (let v = st.v0 + 0.1; v < st.v1 - 0.05; v += 0.2) box('wood', rail - 0.022, rail + 0.022, y, y + 0.95, v - 0.022, v + 0.022, OAK, true);
+      for (let u = Math.min(rail, wall) + 0.12; u < Math.max(rail, wall) - 0.06; u += 0.2) box('wood', u - 0.022, u + 0.022, y, y + 0.95, end - 0.022, end + 0.022, OAK, true);
+      for (const v of [end, st.v1]) box('wood', rail - 0.05, rail + 0.05, y, y + 1.05, v - 0.05, v + 0.05, OAK, true);
+    }
+    // The door stands open, back against the wall of the hall; and at the back of the hall, behind the stair, a barrel.
+    {
+      const m = (st.side < 0 ? doorAt : W - doorAt) + 0.56, y = F(0);
+      span('wood', st.at(m), st.at(m + 0.05), y + 0.02, y + 1.98, G + 0.02, G + 1.0, paint, true);
+      for (const h of [0.3, 1.55]) span('metal', st.at(m - 0.02), st.at(m), y + h, y + h + 0.07, G + 0.06, G + 0.96, iron);
+      span('wood', st.at(G + 0.12), st.at(G + 0.68), y, y + 0.85, st.v1 + 0.15, st.v1 + 0.71, shade(OAK, 1.3), true);
+      for (const h of [0.15, 0.65]) span('metal', st.at(G + 0.1), st.at(G + 0.7), y + h, y + h + 0.05, st.v1 + 0.13, st.v1 + 0.73, iron);
+    }
   }
   // The first house of a row is the inn, and hangs out its sign.
   if (first) {
@@ -690,10 +832,21 @@ export function solids(mesh: (material: string) => MeshBuilder) {
 
 /** Builds one building where the site document says it stands, on ground at the height `base`. `stone` is the tint of the country's stone. */
 export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
-  if (b.style === 'timber') { timberHouse(b, base, mesh, rng, stone, first); return; }
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
   const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
+  if (b.style === 'timber') {
+    timberHouse(b, base, noting, rng, stone, first);
+    // Indoors is whatever is within the walls of the storey it is on: each storey stands further out over the street than the one below.
+    const turn = b.faces === 'w' ? 1 : -1, top = timberFloor(b, b.storeys);
+    for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
+      const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2, h = y - base;
+      let storey = 0;
+      while (storey < b.storeys - 1 && h > timberFloor(b, storey + 1) - 0.14) storey++;
+      return Math.abs(u) < b.w / 2 - 0.24 && v > timberFront(b, storey) + 0.24 && v < b.d - 0.24 && h > 0.4 && h < top + 0.05 ? 0.32 : 1;
+    }, from);
+    return;
+  }
   imperialHouse(b, base, noting, rng, stone);
   // Indoors, only a share of the sky is seen, through the windows: so a room is dimmer than the street, and the sun lies on its floor where it comes in.
   const turn = b.faces === 'w' ? 1 : -1, height = 0.5 + b.heights.reduce((sum, h) => sum + h, 0), rects = footprintOf(b).map((r, i) => (i ? { ...r, v0: r.v0 - 0.5 } : r));

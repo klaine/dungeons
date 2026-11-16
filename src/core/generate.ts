@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { classicalFront, floorOf, footprintOf, planClassical } from './building';
+import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
 /**
@@ -403,6 +403,11 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       }
       b.plan = planClassical(b, rng.fork('plan'));
     }
+  }
+  // A timber house has its door to one side of its front, and is planned inside from that.
+  for (const [k, b] of out.entries()) if (b.style === 'timber') {
+    b.door = rng.fork(`door${k}`).pick([0.24, 0.76]);
+    b.plan = planTimber(b);
   }
   if (out.length) site.buildings = out;
 }

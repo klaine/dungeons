@@ -12,6 +12,8 @@ const EYE = 1.68;
 const GRAVITY = 22;
 /** The highest step taken in a stride. Steps up to about 0.17 are ridden up by the round foot alone; this is for the rest. */
 const STEP_UP = 0.34;
+/** How long a stride is tried when stepping up: see `stepUp`. */
+const STEP_REACH = 0.16;
 
 export class Player {
   readonly position = new Vector3();
@@ -237,14 +239,25 @@ export class Player {
     if (want < 1e-4) return;
     const along = (p: Vector3) => ((p.x - start.x) * wx + (p.z - start.z) * wz) / want;
     if (along(this.position) > want * 0.6) return;
-    const up = start.clone().add(new Vector3(wx, STEP_UP, wz));
+    // The foot is round, and the edge of a step stops it while its middle is still a hand's
+    // breadth short of that edge. So the stride tried from higher up is a longer one, long
+    // enough to bring the middle of the foot nearly over the edge.
+    const reach = Math.max(want, STEP_REACH), k = reach / want;
+    const up = start.clone().add(new Vector3(wx * k, STEP_UP, wz * k));
     up.add(this.pushOut(up, start));
-    if (along(up) < want * 0.8) return;
+    if (along(up) < reach * 0.8) return;
+    // Then it is let down a little at a time until it meets something, so that what it meets is
+    // met from above: let down all at once it would be deep in the step's edge, and be pushed
+    // back out of its face instead of up onto its top.
     const down = up.clone();
-    down.y -= STEP_UP + 0.02;
-    const lift = this.pushOut(down, up);
-    // (Pushed up out of something, and onto something that can be stood on: a step, not the edge of a wall.)
-    if (lift.y < 0.004 || lift.y < Math.hypot(lift.x, lift.z) * 1.5) return;
+    let lift: Vector3 | null = null;
+    for (let fall = 0; fall < STEP_UP + 0.02 && !lift; fall += 0.04) {
+      down.y -= 0.04;
+      const push = this.pushOut(down, up);
+      if (push.lengthSq() > 1e-10) lift = push;
+    }
+    // (Onto something that can be stood on: a step, not the edge of a wall.)
+    if (!lift || lift.y < 0.004 || lift.y < Math.hypot(lift.x, lift.z) * 1.5) return;
     down.add(lift);
     if (down.y < start.y + 0.02 || along(down) < want * 0.5) return;
     this.position.copy(down);

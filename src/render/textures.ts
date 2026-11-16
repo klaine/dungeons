@@ -375,7 +375,7 @@ float blades(vec2 uv, float n, float seed) {
 float heightFn(vec2 uv) {
   float m = max(blades(uv, 22., 1.), max(blades(uv, 34., 7.) * .85, blades(uv, 52., 13.) * .7));
   return clamp(.16 + m * .72 + fbm(uv, vec2(9.), 3, .5) * .12, 0., 1.);
-}}`,
+}`,
     surface: /* glsl */ `
 void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
   float t = fbm(uv + 7.7, vec2(5.), 4, .55), g = fbm(uv + 2.2, vec2(13.), 3, .5);
