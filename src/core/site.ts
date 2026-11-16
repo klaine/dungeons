@@ -381,7 +381,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */

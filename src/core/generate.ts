@@ -281,6 +281,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
   layOutArms(site, meadow, doorX, rng.fork('armways'));
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
+  layOutFootpaths(site, rng.fork('footpaths'));
   if (site.settlement && site.settlement !== 'village') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
   {
@@ -376,6 +377,43 @@ function layOutArms(site: Site, meadow: Place, doorX: number, rng: Rng): void {
 }
 
 /**
+ * A footpath from the track to each thing that lies off it and is worth walking to: the ring of
+ * stones, the ruin, the landing stage of a pond, the tower's door. Each leaves the track at the
+ * nearest point and goes straight there, wandering a little, and stops at the thing's edge.
+ */
+function layOutFootpaths(site: Site, rng: Rng): void {
+  const track = site.track ?? [], round = (x: number) => Math.round(x * 10) / 10;
+  if (track.length < 2) return;
+  const nearestOnTrack = (x: number, z: number): [number, number] => {
+    let best: [number, number] = track[0], bd = Infinity;
+    for (let k = 0; k < track.length - 1; k++) {
+      const [ax, az] = track[k], [bx, bz] = track[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+      const t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2)), px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
+      const d = Math.hypot(x - px, z - pz);
+      if (d < bd) { bd = d; best = [px, pz]; }
+    }
+    return best;
+  };
+  const lead = (x: number, z: number, edge: number, to: NonNullable<Site['paths']>[number]['to']) => {
+    const [tx, tz] = nearestOnTrack(x, z), d = Math.hypot(x - tx, z - tz);
+    if (d - edge < 5) return;
+    const ux = (x - tx) / d, uz = (z - tz) / d, n = Math.max(2, Math.round((d - edge) / 4));
+    const points: [number, number][] = [];
+    for (let k = 0; k <= n; k++) {
+      const t = ((d - edge) * k) / n, w = k === 0 || k === n ? 0 : Math.sin((k / n) * Math.PI) * rng.range(-1.4, 1.4);
+      points.push([round(tx + ux * t - uz * w), round(tz + uz * t + ux * w)]);
+    }
+    (site.paths ??= []).push({ points, to });
+  };
+  for (const f of site.features ?? []) {
+    if (f.kind === 'stones') lead(f.x, f.z, f.r * 1.55, 'stones');
+    else if (f.kind === 'ruin' && !(site.paths ?? []).some((p) => p.to === 'ruin' && Math.hypot(p.points[p.points.length - 1][0] - f.x, p.points[p.points.length - 1][1] - f.z) < f.r + 3)) lead(f.x, f.z, f.r + 1.2, 'ruin');
+    else if (f.kind === 'pond') { const [tx, tz] = nearestOnTrack(f.x, f.z); lead(f.x, f.z, shoreOf(f, tx - f.x, tz - f.z) * 0.98, 'pond'); }
+  }
+  for (const t of site.towers ?? []) lead(t.x + (t.door === 'e' ? t.half + 1.2 : -t.half - 1.2), t.z, 0, 'tower');
+}
+
+/**
  * A tower in the valley, in something under half of them: a few strides off the track, with
  * its door towards it, on ground that nothing else has taken.
  */
@@ -383,8 +421,11 @@ function layOutTower(site: Site, meadow: Place, fromTrack: (x: number, z: number
   const g = site.grounds!;
   if (!rng.chance(0.55)) return;
   const round = (v: number) => Math.round(v * 10) / 10;
+  // Where the track crosses water, the tower stands to watch the crossing: tried there first, a few strides off it.
+  const crossing = (site.streams ?? []).find((st) => st.crossing)?.crossing, watch = rng.fork('watch');
   for (let tries = 0; tries < 120; tries++) {
-    const x = round(rng.range(g.x0 + 17, g.x1 - 17)), z = round(rng.range(meadow.z1 + 12, g.z1 - 18)), off = fromTrack(x, z);
+    const near = crossing && tries < 40, a = watch.range(0, Math.PI * 2), r = watch.range(9, 15);
+    const x = round(near ? crossing.x + Math.cos(a) * r : rng.range(g.x0 + 17, g.x1 - 17)), z = round(near ? crossing.z + Math.sin(a) * r : rng.range(meadow.z1 + 12, g.z1 - 18)), off = fromTrack(x, z);
     if (off < 7.5 || off > 15 || !walkable(site.valley!, x, z, 15)) continue;
     let free = true;
     for (const f of site.features ?? []) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + 8) free = false;

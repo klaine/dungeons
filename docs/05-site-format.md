@@ -69,7 +69,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `settlement` | What kind of settlement the valley has: `village`, `hamlet`, `manor`, or absent for none. It is decided first and the rest is placed round it. |
 | `keep` | Over a village: `{ x, z, kind }`, a `tower` or a small `castle` on the hillside beyond the valley's side, outside what can be walked. |
 | `stands` | How the house stands: `hill` (built into the end of a ridge, its rooms under the hill; also when absent), `free` (standing free in the valley, walled and roofed, with the valley all round it: `valley` then has no `ridge`, and its sides go round behind the house), or `delve` (no house: the plan under the ridge as caves, `roof` `cave`, its courts caverns with a `shaft`, most ways between caves `natural` clefts; the entrance, the goal, the secret room and rooms with stairs stay built). |
-| `paths` | Footpaths, each `{ points, to }`: its points from where it leaves the track to where it ends, and what it leads to (`cave` or `ruin`). May be absent. |
+| `paths` | Footpaths, each `{ points, to }`: its points from where it leaves the track to where it ends, and what it leads to (`cave`, `ruin`, `stones`, `pond` or `tower`). May be absent. |
 | `track` | The way from the door down the valley, as `[x, z]` points from the door outwards. It is flagged as far as the edge of the approach and a worn track after that. The player arrives at the last point. |
 | `features` | Things out in the valley; see below. |
 | `streams` | Running water in the valley, if there is any; see below. May be absent. |
