@@ -33,11 +33,11 @@ let shown = 0, tried = 0;
 function card(site: Site): HTMLElement {
   const a = document.createElement('a');
   a.className = 'card';
-  a.href = `./?seed=${encodeURIComponent(site.seed)}`;
+  a.href = `./?seed=${encodeURIComponent(site.seed)}${site.island ? '&place=island' : ''}`;
   const canvas = document.createElement('canvas');
   // The whole plan, as a referee would see it: nothing is hidden in the gallery.
   drawPlan(canvas, site, {
-    pixels: 540, items: site.items, levers: site.levers, showSecrets: true,
+    pixels: 540, items: site.items, levers: site.levers, showSecrets: true, valley: !!site.island,
     shut: new Set(site.ways.map((w, i) => (w.door && w.door.leaf !== 'open' ? i : -1))),
   });
   const solution = solve(site);
@@ -59,7 +59,8 @@ function more(): void {
   const test = want.value in TESTS ? TESTS[want.value] : null;
   let added = 0;
   for (let attempt = 0; attempt < 400 && added < 12; attempt++) {
-    const site = generateSite(randomSeed());
+    // (Islands are a kind of place of their own, drawn whole, coast and all.)
+    const site = generateSite(randomSeed(), want.value === 'island' ? 'island' : 'valley');
     tried++;
     if (test && !test(site)) continue;
     grid.append(card(site));

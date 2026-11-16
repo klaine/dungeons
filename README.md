@@ -94,7 +94,7 @@ Open the address Vite prints.
 
 Doors and keys need no button: walk up to a door to try it, walk up to a key to take it, and reach the chest in the sanctum to finish.
 
-Each place has its seed in the address, so a link reproduces it; **New place** rolls another, **An island** (or, on an island, **A valley**) rolls one of the other kind, and **Gallery** shows a dozen candidates at a time as plans to choose from. Some rooms are dark on purpose; they are shaded on the map.
+Each place has its seed in the address, so a link reproduces it; **New place** rolls another, **An island** (or, on an island, **A valley**) rolls one of the other kind, and **Gallery** shows a dozen candidates at a time as plans to choose from (islands among them, drawn whole). Some rooms are dark on purpose; they are shaded on the map.
 
 An opening card names the place, shows the controls for your device, and offers three levels of detail; the choice is remembered. Touch devices start on Medium.
 
