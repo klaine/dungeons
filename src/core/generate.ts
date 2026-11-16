@@ -833,6 +833,54 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   }
 
   // ---- depth from the start, roofline
+  // ---- storeys. Some rooms have another over them, or a cellar under them, reached by a stair
+  // that runs up one long wall and comes through the floor above. The room on the other storey
+  // has the same outline; nothing else opens off it, so it is a place to go and come back from,
+  // and a good place to hide a key. All from a stream of its own, and added after everything
+  // else, so the house on the ground is what it would have been without them.
+  {
+    const up = rng.fork('storeys');
+    const TREAD = 0.25, STEPS = 18, RISE = STEPS * STEP, RUN = STEPS * TREAD;
+    const want = up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0;
+    const hosts = shuffle(places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && !p.fallen && p.id !== secretId && p.role !== 'goal' && p.role !== 'entrance' && p.id !== forecourt.id
+      && Math.max(p.x1 - p.x0, p.z1 - p.z0) >= RUN + 1.55 && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 3.7), up);
+    let made = 0;
+    for (const host of hosts) {
+      if (made >= want) break;
+      const alongX = host.x1 - host.x0 >= host.z1 - host.z0, lo = alongX ? host.x0 : host.z0, hi = alongX ? host.x1 : host.z1;
+      // A long wall with nothing opening through it where the flight would stand.
+      const clear = (side: Side, from: number, to: number) => !ways.some((w) => {
+        if (w.a !== host.id && w.b !== host.id) return false;
+        const on = w.a === host.id ? w.side : ({ n: 's', s: 'n', e: 'w', w: 'e' } as const)[w.side];
+        return on === side && w.at + w.halfWidth > Math.min(from, to) - 0.5 && w.at - w.halfWidth < Math.max(from, to) + 0.5;
+      });
+      const options: { side: Side; at: number; to: number }[] = [];
+      for (const side of (alongX ? ['n', 's'] : ['w', 'e']) as Side[]) {
+        for (const forward of [true, false]) {
+          const slack = hi - lo - RUN - 1.5, shift = up.range(0, Math.max(0, slack));
+          const at = forward ? lo + 0.7 + shift : hi - 0.7 - shift, to = forward ? at + RUN : at - RUN;
+          if (clear(side, at, to)) options.push({ side, at: round(at), to: round(forward ? round(at) + RUN : round(at) - RUN) });
+        }
+      }
+      if (!options.length) continue;
+      const stair = up.pick(options), down = up.chance(0.5);
+      const other: Place = {
+        ...host, id: places.length, role: 'reward', roof: 'timber', fallen: undefined, shaft: undefined,
+        wall: down ? RISE - 0.3 : up.range(2.9, 3.5),
+        floor: Math.round((down ? host.floor - RISE : host.floor + RISE) * 100) / 100,
+        level: down ? -1 : 1,
+        // Never two dark rooms in a row: a cellar is dark unless the room over it is.
+        light: down ? (host.light === 'dark' ? 'torch' : 'dark') : up.chance(0.5) && host.light !== 'dark' ? 'dark' : 'torch',
+        name: down ? up.pick(['cellar', 'undercroft', 'crypt', 'cold store']) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
+      };
+      // The lower of the two has a flat ceiling at the height the stair climbs to.
+      if (!down) { host.roof = 'timber'; host.wall = RISE - 0.3; }
+      places.push(other);
+      ways.push({ a: down ? other.id : host.id, b: down ? host.id : other.id, side: stair.side, kind: 'stair', at: stair.at, to: stair.to, halfWidth: 0.55 });
+      made++;
+    }
+  }
+
   const site: Site = {
     seed, places, ways, items: [], levers: [], secret: secretId, start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
@@ -875,6 +923,10 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
   const when = WHEN[setting.hour];
   if (places.some((p) => p.fallen)) parts.push('one with its roof fallen in');
+  const below = places.filter((p) => (p.level ?? 0) < 0), above = places.filter((p) => (p.level ?? 0) > 0);
+  const a = (name: string) => `${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`;
+  if (below.length) parts.push(below.length === 1 ? `${a(below[0].name)} below` : `${count(below.length)} cellars below`);
+  if (above.length) parts.push(above.length === 1 ? `${a(above[0].name)} above` : `${count(above.length)} rooms above`);
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
   site.title = `A ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;

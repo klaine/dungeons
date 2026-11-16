@@ -64,7 +64,8 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
   camera.lookAt((x0 + x1) / 2, 0, (z0 + z1) / 2);
   camera.updateMatrixWorld();
 
-  const house = site.places.filter((p) => p.role !== 'approach');
+  // (The picture is cut through the ground storey; what is over it is taken off with the roofs.)
+  const house = site.places.filter((p) => p.role !== 'approach' && !p.level);
   const cut = Math.max(...house.map((p) => p.floor)) + 2.05;
   const fill = new DirectionalLight(0xfff4e6, 0.5);
   fill.position.set((x0 + x1) / 2, 300, (z0 + z1) / 2);

@@ -1,6 +1,6 @@
 # 5. The site format
 
-What the tool exports, and how to use it somewhere else. This describes **version 1** of the format, which is what the tool writes today.
+What the tool exports, and how to use it somewhere else. This describes **version 2** of the format, which is what the tool writes today. Version 1 had every place on one plan and every way through a wall. Version 2 adds storeys: a place may have a `level`, and a way may be a `stair`. A reader of version 1 that meets neither will find a version 2 document unchanged; one that ignores them will find two places with the same outline where there is a room over a room.
 
 A generated place leaves the tool as up to four files, all named for the seed:
 
@@ -97,6 +97,7 @@ A place is a rectangle of open floor. Walls lie outside it.
 | `depth` | How many places in from the entrance. |
 | `fallen` | Present and `true` if the roof has come down. Such a place has `roof: "sky"`. |
 | `shaft` | In a cave: a hole in the roof open to the sky, as `x`, `z` and radius `r` at its foot. It widens upwards. Such a chamber has `light: "day"`. |
+| `level` | Which storey the place is on. Absent or 0 for the ground storey; 1 for a room over a ground-storey room; -1 for a cellar under one. A place on another storey has the same `x0`, `x1`, `z0`, `z1` as the place it is over or under, and is joined to it by a `stair`. Its `floor` says how high it lies. The maps show the ground storey; rooms on other storeys are listed in the key as over or under the room they belong to. |
 
 ### Ways
 
@@ -111,9 +112,10 @@ A way is an opening through the wall between two places.
 | --- | --- |
 | `a`, `b` | The two places. |
 | `side` | Which wall of place `a` the way goes through: `n`, `s`, `e` or `w`. |
-| `kind` | `door` (a person-sized arch), `arch` (a wide open bay), or `window` (cannot be walked through). |
+| `kind` | `door` (a person-sized arch), `arch` (a wide open bay), `window` (cannot be walked through), or `stair`. A stair does not go through a wall. It joins place `a`, the lower, to place `b` directly over it: a straight flight standing in the lower place hard against its `side` wall, rising from `at` to `to` along that wall, and coming up through a well in the floor above. `halfWidth` is half the flight's breadth. Steps rise 0.17 m each; the well has a rail on the two sides that are neither wall nor the head of the stair. |
 | `at` | Where the centre of the opening is along the wall: an x coordinate for north and south walls, a z coordinate for east and west. |
 | `halfWidth` | Half the width of the opening. |
+| `to` | For a stair only: where along the wall its head is, as `at` is where its foot is. |
 | `door` | Present if a leaf hangs in the opening. |
 | `natural` | Present and `true` for a cleft between two chambers of a cave. It is not built: no arch, no door, no steps. Its floor climbs from one chamber's level to the other's, which may be two metres or more apart: the climb is made on the side of the higher chamber, cut down into that chamber's floor, and is level with the lower chamber where it reaches it. |
 

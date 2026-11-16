@@ -207,7 +207,7 @@ export class Game {
   update(dt: number, time: number): void {
     const p = this.player.position;
     this.elapsed += dt;
-    const here = placeAt(this.site, p.x, p.z);
+    const here = placeAt(this.site, p.x, p.z, p.y);
     if (here) this.visited.add(here.id);
 
     for (const d of this.doors) {

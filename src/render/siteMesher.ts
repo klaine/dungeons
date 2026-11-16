@@ -72,7 +72,7 @@ export function meshSite(site: Site): SceneDescription {
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
   const holesOn = (p: Place, side: Side, e: number): Hole[] =>
-    site.ways.filter((w) => (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
+    site.ways.filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
       .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w), ...(hiddenFrom(w, p) ? { band: 0.03 } : {}) }));
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
@@ -90,6 +90,52 @@ export function meshSite(site: Site): SceneDescription {
     const b = f.a.clone().addScaledVector(f.dir, u1).addScaledVector(f.normal, -t1);
     return { min: V(Math.min(a.x, b.x), y0, Math.min(a.z, b.z)), max: V(Math.max(a.x, b.x), y1, Math.max(a.z, b.z)) };
   };
+  // ------------------------------------------------------------------ storeys
+  // A stair joins a place to the one over it. Both have the same outline; the flight stands in
+  // the lower one against a wall, and comes up through a well in the floor of the upper.
+  const stairsFrom = (p: Place) => site.ways.filter((w) => w.kind === 'stair' && w.a === p.id);
+  const stairsInto = (p: Place) => site.ways.filter((w) => w.kind === 'stair' && w.b === p.id);
+  const roomOver = (p: Place) => stairsFrom(p).length > 0, roomUnder = (p: Place) => stairsInto(p).length > 0;
+  /** A strip of a place's floor against one of its walls: from `u0` to `u1` along the wall, and `deep` out from it. */
+  const strip = (p: Place, side: Side, u0: number, u1: number, deep: number): Rect => {
+    const lo = Math.min(u0, u1), hi = Math.max(u0, u1);
+    return side === 'n' ? { x0: lo, x1: hi, z0: p.z0, z1: p.z0 + deep } : side === 's' ? { x0: lo, x1: hi, z0: p.z1 - deep, z1: p.z1 }
+      : side === 'w' ? { x0: p.x0, x1: p.x0 + deep, z0: lo, z1: hi } : { x0: p.x1 - deep, x1: p.x1, z0: lo, z1: hi };
+  };
+  /** What a stair is made of: how many steps, how deep each, which way it climbs along its wall, and how broad. */
+  const flightOf = (w: Way) => {
+    const steps = Math.max(1, Math.round((places[w.b].floor - places[w.a].floor) / STEP)), to = w.to ?? w.at;
+    return { steps, tread: Math.abs(to - w.at) / steps, dir: to >= w.at ? 1 : -1, wide: w.halfWidth * 2, to };
+  };
+  // How many steps can be climbed before the head comes to the beams of the ceiling: the well must have begun by then.
+  // (With room to spare: whoever climbs is a stride deep, front to back, as well as a man high.)
+  const stepsUnderCeiling = (w: Way) => Math.max(0, Math.floor((places[w.a].wall - 0.27 - 2.3) / STEP));
+  /** Where a stair stands on the floor of the lower place, and the well it comes up through in the floor of the upper. */
+  const flightRect = (w: Way): Rect => strip(places[w.a], w.side, w.at, flightOf(w).to, flightOf(w).wide);
+  const wellRect = (w: Way): Rect => {
+    const f = flightOf(w);
+    // The well begins where there would otherwise be less than a man's height over the steps.
+    const clearSteps = stepsUnderCeiling(w);
+    return strip(places[w.a], w.side, w.at + f.dir * clearSteps * f.tread, f.to, f.wide + 0.06);
+  };
+  /** A rectangle with other rectangles cut out of it, as rectangles: for a floor with a stairwell in it. */
+  const without = (whole: Rect, holes: Rect[]): Rect[] => {
+    let pieces = [whole];
+    for (const h of holes) {
+      const next: Rect[] = [];
+      for (const r of pieces) {
+        if (h.x0 >= r.x1 || h.x1 <= r.x0 || h.z0 >= r.z1 || h.z1 <= r.z0) { next.push(r); continue; }
+        if (h.z0 > r.z0) next.push({ x0: r.x0, x1: r.x1, z0: r.z0, z1: h.z0 });
+        if (h.z1 < r.z1) next.push({ x0: r.x0, x1: r.x1, z0: h.z1, z1: r.z1 });
+        const z0 = Math.max(r.z0, h.z0), z1 = Math.min(r.z1, h.z1);
+        if (h.x0 > r.x0) next.push({ x0: r.x0, x1: h.x0, z0, z1 });
+        if (h.x1 < r.x1) next.push({ x0: h.x1, x1: r.x1, z0, z1 });
+      }
+      pieces = next;
+    }
+    return pieces.filter((r) => r.x1 - r.x0 > 0.02 && r.z1 - r.z0 > 0.02);
+  };
+
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
   const torchesByPlace = new Map<number, TorchSpec[]>();
   const pilasterSlots = new Map<number, { pos: number; side: Side; clear: boolean }[]>();
@@ -135,6 +181,11 @@ export function meshSite(site: Site): SceneDescription {
           const taken = slots.some((s) => s.side === side && Math.abs(s.pos - at) < 0.9);
           if (clear && !taken) candidates.push(onWall(side, at, 0.24));
         }
+      }
+      // No torch on the wall where a stair stands against it.
+      for (const w of [...stairsFrom(p), ...stairsInto(p)]) {
+        const r = flightRect(w);
+        for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
       }
       // Spread them out: take the candidate farthest from those already chosen.
       while (list.length < want && candidates.length) {
@@ -1905,8 +1956,50 @@ export function meshSite(site: Site): SceneDescription {
     if (cave) {
       kit.mass(V(p.x0, p.floor - 1.6, p.z0), V(p.x1, p.floor - 0.7, p.z1));
     } else {
-      kit.slab('floor', p.x0 - 0.1, p.z0 - 0.1, p.x1 + 0.1, p.z1 + 0.1, p.floor, open ? flag : hallFlag);
-      kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
+      // The floor: flags on the ground, boards over another room; and left open over any stair that comes up through it.
+      const wells = stairsInto(p).map(wellRect);
+      for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
+        if ((p.level ?? 0) > 0) kit.plane('wood', V(r.x0, p.floor, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, 1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
+        else kit.slab('floor', r.x0, r.z0, r.x1, r.z1, p.floor, open ? flag : hallFlag);
+      }
+      // Solid under it, unless there is a room there.
+      if (!roomUnder(p)) kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
+      for (const w of stairsInto(p)) {
+        // The thickness of the floor shows round the well: it is boarded in, on the two sides that are not wall or stair.
+        const r = wellRect(w), under = places[w.a], y0 = under.floor + under.wall - 0.27, alongX = w.side === 'n' || w.side === 's', f = flightOf(w);
+        const foot = w.at + f.dir * stepsUnderCeiling(w) * f.tread;
+        // And a rail stands on those two sides, so nobody walks into the well: posts, a top rail and one below it.
+        // The end where the stair comes up is left open.
+        const railed = (ax: number, az: number, bx: number, bz: number) => {
+          const length = Math.hypot(bx - ax, bz - az), posts = Math.max(2, Math.ceil(length / 1.25) + 1);
+          for (let i = 0; i < posts; i++) {
+            const x = ax + ((bx - ax) * i) / (posts - 1), z = az + ((bz - az) * i) / (posts - 1);
+            kit.box('wood', V(x - 0.05, p.floor - 0.02, z - 0.05), V(x + 0.05, p.floor + 0.98, z + 0.05), beam, beam, 'post');
+          }
+          for (const [low, high] of [[0.86, 0.95], [0.42, 0.5]]) kit.box('wood', V(Math.min(ax, bx) - 0.04, p.floor + low, Math.min(az, bz) - 0.04), V(Math.max(ax, bx) + 0.04, p.floor + high, Math.max(az, bz) + 0.04), beam, beam, 'rail');
+        };
+        if (alongX) {
+          const zi = w.side === 'n' ? r.z1 : r.z0, zw = w.side === 'n' ? r.z0 : r.z1;
+          kit.box('wood', V(r.x0, y0, Math.min(zi, zi + (w.side === 'n' ? 0.07 : -0.07))), V(r.x1, p.floor, Math.max(zi, zi + (w.side === 'n' ? 0.07 : -0.07))), beam, beam, 'trimmer');
+          kit.box('wood', V(Math.min(foot, foot - f.dir * 0.07), y0, r.z0), V(Math.max(foot, foot - f.dir * 0.07), p.floor, r.z1), beam, beam, 'trimmer');
+          railed(foot - f.dir * 0.05, zi + (w.side === 'n' ? 0.05 : -0.05), f.to, zi + (w.side === 'n' ? 0.05 : -0.05));
+          railed(foot - f.dir * 0.05, zw + (w.side === 'n' ? 0.1 : -0.1), foot - f.dir * 0.05, zi + (w.side === 'n' ? 0.05 : -0.05));
+        } else {
+          const xi = w.side === 'w' ? r.x1 : r.x0, xw = w.side === 'w' ? r.x0 : r.x1;
+          kit.box('wood', V(Math.min(xi, xi + (w.side === 'w' ? 0.07 : -0.07)), y0, r.z0), V(Math.max(xi, xi + (w.side === 'w' ? 0.07 : -0.07)), p.floor, r.z1), beam, beam, 'trimmer');
+          kit.box('wood', V(r.x0, y0, Math.min(foot, foot - f.dir * 0.07)), V(r.x1, p.floor, Math.max(foot, foot - f.dir * 0.07)), beam, beam, 'trimmer');
+          railed(xi + (w.side === 'w' ? 0.05 : -0.05), foot - f.dir * 0.05, xi + (w.side === 'w' ? 0.05 : -0.05), f.to);
+          railed(xw + (w.side === 'w' ? 0.1 : -0.1), foot - f.dir * 0.05, xi + (w.side === 'w' ? 0.05 : -0.05), foot - f.dir * 0.05);
+        }
+      }
+      for (const w of stairsFrom(p)) {
+        // The flight: courses of stone a step high, each a step shorter than the one under it.
+        const f = flightOf(w), fr = frameOf(p, w.side, 0), stepStyle: MasonryStyle = { ...hallFlag, course: [STEP, STEP], length: [0.8, 1.3] };
+        for (let k = 1; k <= f.steps; k++) {
+          const b = wallBox(fr, alongFrame(p, w.side, w.at + f.dir * (k - 1) * f.tread, 0), alongFrame(p, w.side, f.to, 0), p.floor + STEP * (k - 1) - (k === 1 ? 0.05 : 0), p.floor + STEP * k, 0, -f.wide);
+          kit.box('floor', b.min, b.max, stepStyle, hallFlag, 'step');
+        }
+      }
     }
 
     // Walls, and the solid behind them.
@@ -2013,16 +2106,24 @@ export function meshSite(site: Site): SceneDescription {
       }
     } else if (p.roof === 'timber') {
       const alongX = dx >= dz;
-      if (alongX) kit.plane('wood', V(p.x0 - 0.1, roofY, p.z0 - 0.1), V(1, 0, 0), V(0, 0, 1), V(0, -1, 0), dx + 0.2, dz + 0.2, plank);
-      else kit.plane('wood', V(p.x0 - 0.1, roofY, p.z0 - 0.1), V(0, 0, 1), V(1, 0, 0), V(0, -1, 0), dz + 0.2, dx + 0.2, plank);
+      // Boards on beams; with a well left in them wherever a stair goes up through to the room above.
+      const wells = stairsFrom(p).map(wellRect);
+      for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
+        if (alongX) kit.plane('wood', V(r.x0, roofY, r.z0), V(1, 0, 0), V(0, 0, 1), V(0, -1, 0), r.x1 - r.x0, r.z1 - r.z0, plank);
+        else kit.plane('wood', V(r.x0, roofY, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, -1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
+      }
       const long = alongX ? dx : dz;
       const count = Math.max(2, Math.round(long / 1.05));
       for (let k = 0; k < count; k++) {
         const at = (alongX ? p.x0 : p.z0) + (long * (k + 0.5)) / count;
-        if (alongX) kit.box('wood', V(at - 0.1, roofY - 0.27, p.z0 - 0.1), V(at + 0.1, roofY, p.z1 + 0.1), beam, beam, 'beam');
-        else kit.box('wood', V(p.x0 - 0.1, roofY - 0.27, at - 0.1), V(p.x1 + 0.1, roofY, at + 0.1), beam, beam, 'beam');
+        // A beam that would cross a well stops at its edge.
+        const whole: Rect = alongX ? { x0: at - 0.1, x1: at + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 } : { x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: at - 0.1, z1: at + 0.1 };
+        for (const r of without(whole, wells.map((h) => (alongX ? { ...h, x0: h.x0 - 0.2, x1: h.x1 + 0.2 } : { ...h, z0: h.z0 - 0.2, z1: h.z1 + 0.2 })))) {
+          if (r.x1 - r.x0 > 0.15 && r.z1 - r.z0 > 0.15) kit.box('wood', V(r.x0, roofY - 0.27, r.z0), V(r.x1, roofY, r.z1), beam, beam, 'beam');
+        }
       }
-      kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      // Solid above, unless there is a room there.
+      if (!roomOver(p)) kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
     }
 
     // Furnishings by role.
@@ -2038,8 +2139,10 @@ export function meshSite(site: Site): SceneDescription {
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
       // Against the wall opposite the way in, unless that wall has an opening of its own (a
       // secret door, say); then against whichever wall is blank.
-      const opposite: Side = door ? flip[sideOf(door, p)] : 'n';
-      const far = [opposite, ...SIDES].find((side) => holesOn(p, side, 0).length === 0) ?? opposite;
+      // (A room reached only by a stair has its chest across the room from the stair.)
+      const stairSides = [...stairsFrom(p), ...stairsInto(p)].map((w) => w.side);
+      const opposite: Side = door ? flip[sideOf(door, p)] : stairSides.length ? flip[stairSides[0]] : 'n';
+      const far = [opposite, ...SIDES].find((side) => holesOn(p, side, 0).length === 0 && !stairSides.includes(side)) ?? opposite;
       const f = frameOf(p, far, 0);
       const u = f.length / 2;
       // The grand arrangement needs room in front of it; a small chamber gets the plain one.
@@ -2080,6 +2183,20 @@ export function meshSite(site: Site): SceneDescription {
           : { x0: p.x1 - reach, x1: p.x1, z0: h.at - half, z1: h.at + half });
       }
     }
+    for (const w of stairsFrom(p)) {
+      // The flight itself, and the floor at its foot.
+      const f = flightOf(w);
+      keepClear.push(flightRect(w), strip(p, w.side, w.at - f.dir * 1.3, w.at, f.wide + 0.4));
+      const foot = strip(p, w.side, w.at - f.dir * 0.9, w.at - f.dir * 0.5, f.wide);
+      doorPoints.push([(foot.x0 + foot.x1) / 2, (foot.z0 + foot.z1) / 2]);
+    }
+    for (const w of stairsInto(p)) {
+      // The well, with room to walk round it, and the floor at the head of the stair.
+      const f = flightOf(w), r = wellRect(w);
+      keepClear.push({ x0: r.x0 - 0.5, x1: r.x1 + 0.5, z0: r.z0 - 0.5, z1: r.z1 + 0.5 }, strip(p, w.side, f.to, f.to + f.dir * 1.3, f.wide + 0.4));
+      const head = strip(p, w.side, f.to + f.dir * 0.4, f.to + f.dir * 0.8, f.wide);
+      doorPoints.push([(head.x0 + head.x1) / 2, (head.z0 + head.z1) / 2]);
+    }
     const anchor = anchors.get(p.id);
     const solids: Rect[] = [];
     if (anchor) {
@@ -2116,7 +2233,7 @@ export function meshSite(site: Site): SceneDescription {
 
     // Ways are built once, from the side of their first place. A cleft in a cave is not built at all.
     for (const w of site.ways) {
-      if (w.a !== p.id || w.natural) continue;
+      if (w.a !== p.id || w.natural || w.kind === 'stair') continue;
       const q = places[w.b];
       const f = frameOf(p, w.side, 0.1);
       const c = alongFrame(p, w.side, w.at, 0.1);

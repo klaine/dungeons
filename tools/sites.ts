@@ -23,6 +23,7 @@ for (let n = 0; n < count; n++) {
     bump(`barred=${site.ways.some((w) => w.door?.barredFrom !== undefined)}`);
     bump(`gate=${site.levers.length > 0}`);
     bump(`secret=${site.secret >= 0}`);
+    bump(`storeys=${site.places.filter((p) => p.level).map((p) => (p.level! > 0 ? 'up' : 'down')).sort().join('+') || 'none'}`);
     bump(`moves/direct=${(solution.moves.length / solution.direct).toFixed(0)}x`);
     if (n < 4) console.log('    ', solution.moves.map((m) => [...m.events, `to ${site.places[m.to].name}`].join(', ')).join(' > '));
     bump(`dark=${site.places.filter((p) => p.light === 'dark').length}`);
@@ -30,7 +31,7 @@ for (let n = 0; n < count; n++) {
       if (w.kind !== 'window' && site.places[w.a].light === 'dark' && site.places[w.b].light === 'dark') throw new Error('two dark rooms in a row');
     }
     for (const w of site.ways) {
-      if (w.kind === 'window') continue;
+      if (w.kind === 'window' || w.kind === 'stair') continue;
       const d = Math.abs(site.places[w.a].floor - site.places[w.b].floor);
       // A built doorway takes a step or three; a cleft in a cave is a climb, but one that can be made.
       if (d > (w.natural ? 2.35 : 0.52)) throw new Error(`${w.natural ? 'cleft' : 'doorway'} too steep: ${d}`);

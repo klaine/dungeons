@@ -28,7 +28,7 @@ function download(blob: Blob, name: string): void {
 export function siteJson(site: Site): string {
   const solution = solve(site);
   return JSON.stringify({
-    format: 'dungeons-site', version: 1,
+    format: 'dungeons-site', version: 2,
     ...site,
     solution: solution.moves.map((m) => ({ way: m.way, to: m.to, events: m.events })),
     // Numbers are written to a tenth of a millimetre, which drops the noise of binary fractions.
@@ -84,6 +84,11 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
 /** One line of the key to a map: a place's number, its name and what is to be found there. */
 export function placeLine(site: Site, p: Place): string {
   const notes: string[] = [];
+  // A room on another storey says which room it is over or under: its number is not on the plan.
+  if (p.level) {
+    const stair = site.ways.find((w) => w.kind === 'stair' && (w.a === p.id || w.b === p.id));
+    if (stair) notes.push(`${p.level > 0 ? 'over' : 'under'} ${(stair.a === p.id ? stair.b : stair.a) + 1}, by a stair`);
+  }
   if (p.fallen) notes.push('the roof has fallen');
   else if (p.roof === 'sky') notes.push('open to the sky');
   else if (p.roof === 'cave') notes.push('natural cave');

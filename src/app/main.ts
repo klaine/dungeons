@@ -17,7 +17,7 @@ import { ROCK } from '../render/geom/rockForms';
 import { generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite } from '../core/generate';
-import { Hour, SKIES, WHEN } from '../core/site';
+import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
 import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
@@ -740,7 +740,7 @@ async function start(): Promise<void> {
     atmosphere.uniforms.uCloudDrift.value.set(time * 0.0042, time * 0.0006, time * 0.0017);
     {
       // What is underfoot and overhead, for sound: a roof or the sky, and grass, earth, stone or planks.
-      const at = site ? placeAt(site, player.position.x, player.position.z) : undefined;
+      const at = site ? placeAt(site, player.position.x, player.position.z, player.position.y) : undefined;
       const open = !site || !at || at.roof === 'sky';
       // (Worked out a few times a second: it changes no faster than a walk.)
       if (listened++ % 6 === 0) {
@@ -806,9 +806,11 @@ async function start(): Promise<void> {
         items: game?.things.filter((k) => !k.taken).map((k) => k.item),
         levers: game?.levers.filter((l) => !l.thrown).map((l) => l.lever),
         // Out of doors the plan takes in the whole valley; indoors, the house alone.
-        valley: (placeAt(site, player.position.x, player.position.z)?.role ?? 'approach') === 'approach',
+        valley: (placeAt(site, player.position.x, player.position.z, player.position.y)?.role ?? 'approach') === 'approach',
+        // The storey the player is on is the one that is drawn.
+        level: placeAt(site, player.position.x, player.position.z, player.position.y)?.level ?? 0,
       });
-      const here = placeAt(site, player.position.x, player.position.z);
+      const here = placeAt(site, player.position.x, player.position.z, player.position.y);
       if (here && here.id !== lastPlace) {
         lastPlace = here.id;
         hud.seed.textContent = `${seed} · ${here.name}`;
@@ -851,6 +853,22 @@ async function start(): Promise<void> {
     for (const w of site.ways) {
       if (w.kind === 'window') continue;
       const a = site.places[w.a], b = site.places[w.b];
+      if (w.kind === 'stair') {
+        // A stair is walked from a stride before its foot to a stride beyond its head, and back.
+        const { foot, head } = stairEnds(site, w);
+        for (const [from, to, floorFrom, floorTo] of [[foot, head, a.floor, b.floor], [head, foot, b.floor, a.floor]] as const) {
+          player.place(new Vector3(from[0], floorFrom + 1.68 + 0.05, from[1]), 0);
+          player.analog.set(0, -1);
+          let ok = false;
+          for (let i = 0; i < 900 && !ok; i++) {
+            player.yaw = Math.atan2(-(to[0] - player.position.x), -(to[1] - player.position.z));
+            player.update(1 / 60);
+            ok = Math.hypot(to[0] - player.position.x, to[1] - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < 0.12;
+          }
+          if (!ok) failures.push(`stair ${w.a}->${w.b} ${floorTo > floorFrom ? 'up' : 'down'}: stopped at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), wanted (${to[0].toFixed(2)}, ${floorTo.toFixed(2)}, ${to[1].toFixed(2)})`);
+        }
+        continue;
+      }
       const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
       const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
       const alongX = w.side === 'n' || w.side === 's';
@@ -915,6 +933,15 @@ async function start(): Promise<void> {
     for (const m of solve(site).moves) {
       const w = site.ways[m.way];
       const a = site.places[w.a];
+      if (w.kind === 'stair') {
+        const { foot, head } = stairEnds(site, w), [near, far] = at === w.a ? [foot, head] : [head, foot];
+        if (!(walkTo(near[0], near[1], 0.3) && walkTo(far[0], far[1], 0.3))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
+        at = m.to;
+        const kept = desc.anchors?.get(at);
+        if (kept && game.things.some((k) => !k.taken && k.item.place === at) && !walkTo(kept.x, kept.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
+        log.push(`${site.places[at].name}${m.events.length ? ` (${m.events.join(', ')})` : ''}`);
+        continue;
+      }
       const n = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0] }[w.side];
       const alongX = w.side === 'n' || w.side === 's';
       const wallA = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
@@ -922,7 +949,27 @@ async function start(): Promise<void> {
       const inB = wallA + (alongX ? n[1] : n[0]) * (site.wallThickness + 0.8);
       const [near, far] = at === w.a ? [inA, inB] : [inB, inA];
       const point = (v: number) => (alongX ? [w.at, v] : [v, w.at]);
-      const ok = walkTo(point(near)[0], point(near)[1], 0.3) && walkTo(point(far)[0], point(far)[1], 0.3);
+      // Straight to the doorway if that works; if something stands in the way (a stair against
+      // the wall, as a rule), by way of the middle of the room, or of a point a stride in from the door.
+      const here = site.places[at], inward = point(near + (near - far) * 0.7);
+      const toDoor = () => walkTo(point(near)[0], point(near)[1], 0.3);
+      // (Then by each corner of the room in turn, nearest way round first: a room with tables
+      // down the middle is walked round, not through.)
+      const corners = [[here.x0 + 1.1, here.z0 + 1.1], [here.x1 - 1.1, here.z0 + 1.1], [here.x0 + 1.1, here.z1 - 1.1], [here.x1 - 1.1, here.z1 - 1.1]]
+        .map(([x, z]) => ({ x, z, round: Math.hypot(x - player.position.x, z - player.position.z) + Math.hypot(x - point(near)[0], z - point(near)[1]) }))
+        .sort((p, q) => p.round - q.round);
+      const attempt = () => (toDoor() || (walkTo((here.x0 + here.x1) / 2, (here.z0 + here.z1) / 2, 0.8) && toDoor()) || (walkTo(inward[0], inward[1], 0.6) && toDoor())
+        || corners.some((c) => walkTo(c.x, c.z, 0.7) && toDoor())) && walkTo(point(far)[0], point(far)[1], 0.3);
+      let ok = attempt();
+      if (!ok) {
+        // Found on another storey than the one being walked (down a stairwell, say): back by the stair, and once more.
+        const now = placeAt(site, player.position.x, player.position.z, player.position.y);
+        const stair = now && now.id !== at ? site.ways.find((q) => q.kind === 'stair' && ((q.a === now.id && q.b === at) || (q.b === now.id && q.a === at))) : undefined;
+        if (stair) {
+          const ends = stairEnds(site, stair), [from, to] = stair.a === now!.id ? [ends.foot, ends.head] : [ends.head, ends.foot];
+          ok = walkTo(from[0], from[1], 0.3) && walkTo(to[0], to[1], 0.3) && attempt();
+        }
+      }
       if (!ok) { log.push(`stuck going from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
       at = m.to;
       for (const l of game.levers) {

@@ -1,8 +1,10 @@
 /**
  * The site document: what a generated place is, independent of how it is drawn.
  *
- * This is the first, small version. A site is a set of rectangular places on a shared plan, joined
- * by ways through the walls between them. Axes: +x east, +y up, +z south; lengths in metres.
+ * A site is a set of rectangular places, joined by ways. In the first version of this document
+ * every place stood on one shared plan and every way went through the wall between two of them.
+ * In the second, places may also lie one above another, on storeys, and a way may be a stair
+ * that climbs from a place to the one over it. Axes: +x east, +y up, +z south; lengths in metres.
  */
 
 export type Side = 'n' | 's' | 'e' | 'w';
@@ -54,6 +56,13 @@ export interface Place {
   fallen?: boolean;
   /** In a cave: a hole in the roof, open to the sky above the hill, that lets daylight down. */
   shaft?: { x: number; z: number; r: number };
+  /**
+   * Which storey the place is on: 0, or left out, for the ground storey that all the places of
+   * version 1 stand on; 1 for a room over one of those; -1 for a cellar under one. A place on
+   * another storey has the same outline as the place it is over or under, and is reached from
+   * it by a stair.
+   */
+  level?: number;
 }
 
 /** Keys are told apart by their metal. */
@@ -97,11 +106,19 @@ export interface Way {
   b: number;
   side: Side;
   door?: DoorSpec;
-  /** A door is a person-sized arch; an arch is a wide open bay; a window cannot be walked through. */
-  kind: 'door' | 'arch' | 'window';
+  /**
+   * A door is a person-sized arch; an arch is a wide open bay; a window cannot be walked through.
+   * A stair does not go through a wall at all. It joins a place (`a`, the lower) to the place
+   * directly over it (`b`): a straight flight inside the lower place, hard against its `side`
+   * wall, rising from `at` along that wall to `to`, where it comes up through the floor above.
+   * `halfWidth` is half the breadth of the flight.
+   */
+  kind: 'door' | 'arch' | 'window' | 'stair';
   /** Position of the centre along the wall: an x coordinate for north and south walls, z for east and west. */
   at: number;
   halfWidth: number;
+  /** For a stair: where along the wall its head is, as `at` is where its foot is. */
+  to?: number;
   /**
    * A way between two chambers of a cave: a cleft in the rock, not something built. It has no
    * door and no steps; its floor slopes from the one chamber's level to the other's.
@@ -304,6 +321,17 @@ export function neighbours(site: Site): Map<number, number[]> {
     adj.get(w.b)!.push(w.a);
   }
   return adj;
+}
+
+/**
+ * Where a stair is stood at to go up it, and where one stands having come up: a stride before
+ * its foot on the lower floor, and a stride beyond its head on the upper, each in the middle of
+ * the flight's breadth. Walking from one to the other in a straight line is walking the stair.
+ */
+export function stairEnds(site: Site, w: Way): { foot: [number, number]; head: [number, number] } {
+  const p = site.places[w.a], to = w.to ?? w.at, dir = to >= w.at ? 1 : -1, off = w.halfWidth;
+  const at = (u: number): [number, number] => (w.side === 'n' ? [u, p.z0 + off] : w.side === 's' ? [u, p.z1 - off] : w.side === 'w' ? [p.x0 + off, u] : [p.x1 - off, u]);
+  return { foot: at(w.at - dir * 0.6), head: at(to + dir * 0.6) };
 }
 
 /** Number of independent loops in the walkable graph: edges minus places plus one, for a connected site. */

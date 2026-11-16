@@ -1,4 +1,4 @@
-import { Item, Lever, Place, shoreOf, Site, Way } from '../core/site';
+import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
  * The plan map: a clean drawing of a site from above, north up. Drawn from the site document, so
@@ -7,6 +7,8 @@ import { Item, Lever, Place, shoreOf, Site, Way } from '../core/site';
  */
 
 export interface PlanOptions {
+  /** Which storey to draw: 0, the ground storey, if left out. Places on other storeys are left off; the stairs to them are shown. */
+  level?: number;
   /** Where the player is and which way they face (yaw as used by the camera). */
   player?: { x: number; z: number; yaw: number };
   /** Draw room numbers. */
@@ -206,18 +208,21 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   // Fog of war: places that have been entered are drawn in full; places seen through an open
   // doorway, arch or window are sketched; everything else is left off the page.
   const shut = opts.shut ?? new Set<number>();
-  const known = (p: Place) => !opts.visited || opts.visited.has(p.id);
+  // A plan is of one storey. Places on another are not on it, and neither is anything in them.
+  const storey = opts.level ?? 0, onStorey = (p: Place) => (p.level ?? 0) === storey;
+  const entered = (p: Place) => !opts.visited || opts.visited.has(p.id);
+  const known = (p: Place) => onStorey(p) && entered(p);
   const glimpsed = new Set<number>();
   if (opts.visited) {
     site.ways.forEach((w, i) => {
-      if (shut.has(i)) return;
+      if (shut.has(i) || w.kind === 'stair') return;
       if (opts.visited!.has(w.a) && !opts.visited!.has(w.b)) glimpsed.add(w.b);
       if (opts.visited!.has(w.b) && !opts.visited!.has(w.a)) glimpsed.add(w.a);
     });
   }
-  const drawn = (p: Place) => known(p) || glimpsed.has(p.id);
+  const drawn = (p: Place) => known(p) || (onStorey(p) && glimpsed.has(p.id));
   const hidden = (w: Way, i: number) => w.door?.leaf === 'secret' && shut.has(i) && !opts.showSecrets;
-  const wayDrawn = (w: Way, i: number) => !hidden(w, i) && (known(site.places[w.a]) || known(site.places[w.b]));
+  const wayDrawn = (w: Way, i: number) => w.kind !== 'stair' && !hidden(w, i) && (known(site.places[w.a]) || known(site.places[w.b]));
 
   // Masonry: every place grown by half a wall, in ink. Low outer walls are drawn thinner.
   for (const p of site.places) {
@@ -245,7 +250,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.ellipse(X((p.x0 + p.x1) / 2), Z((p.z0 + p.z1) / 2), ((p.x1 - p.x0) / 2 - 0.4) * scale, ((p.z1 - p.z0) / 2 - 0.4) * scale, 0, 0, Math.PI * 2);
       ctx.fill();
       for (const w of site.ways) {
-        if (w.kind === 'window' || (w.a !== p.id && w.b !== p.id)) continue;
+        if (w.kind === 'window' || w.kind === 'stair' || (w.a !== p.id && w.b !== p.id)) continue;
         const side = w.a === p.id ? w.side : ({ n: 's', s: 'n', e: 'w', w: 'e' } as const)[w.side];
         const qx = side === 'w' ? p.x0 : side === 'e' ? p.x1 : w.at, qz = side === 'n' ? p.z0 : side === 's' ? p.z1 : w.at;
         ctx.beginPath();
@@ -296,9 +301,44 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     }
   });
 
+  // Stairs: the flight ruled across with its treads, and an arrowhead at the end that is higher.
+  // Shown on the storey it climbs from and on the one it climbs to, wherever either is known.
+  for (const w of site.ways) {
+    if (w.kind !== 'stair') continue;
+    const lower = site.places[w.a], upper = site.places[w.b];
+    if (!((onStorey(lower) && entered(lower)) || (onStorey(upper) && entered(upper)))) continue;
+    const to = w.to ?? w.at, dir = to >= w.at ? 1 : -1, wide = w.halfWidth * 2, alongX = w.side === 'n' || w.side === 's';
+    const near = w.side === 'n' ? lower.z0 : w.side === 's' ? lower.z1 - wide : w.side === 'w' ? lower.x0 : lower.x1 - wide;
+    ctx.fillStyle = FLOOR;
+    if (alongX) rect(Math.min(w.at, to), near, Math.max(w.at, to), near + wide); else rect(near, Math.min(w.at, to), near + wide, Math.max(w.at, to));
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = Math.max(1, 0.6 * ratio);
+    ctx.beginPath();
+    for (let u = w.at; dir > 0 ? u <= to + 1e-6 : u >= to - 1e-6; u += dir * 0.5) {
+      if (alongX) { ctx.moveTo(X(u), Z(near)); ctx.lineTo(X(u), Z(near + wide)); } else { ctx.moveTo(X(near), Z(u)); ctx.lineTo(X(near + wide), Z(u)); }
+    }
+    ctx.stroke();
+    ctx.fillStyle = INK;
+    ctx.beginPath();
+    if (alongX) { ctx.moveTo(X(to), Z(near + wide / 2)); ctx.lineTo(X(to - dir * 0.7), Z(near + 0.12)); ctx.lineTo(X(to - dir * 0.7), Z(near + wide - 0.12)); }
+    else { ctx.moveTo(X(near + wide / 2), Z(to)); ctx.lineTo(X(near + 0.12), Z(to - dir * 0.7)); ctx.lineTo(X(near + wide - 0.12), Z(to - dir * 0.7)); }
+    ctx.fill();
+  }
+
   // Furnishings and marks.
   for (const it of opts.items ?? []) {
     const p = site.places[it.place];
+    if (!onStorey(p) && !opts.visited) {
+      // Something kept on another storey: marked, smaller and hollow, at the foot or head of the stair that leads to it.
+      const stair = site.ways.find((w) => w.kind === 'stair' && (w.a === p.id || w.b === p.id));
+      if (stair) {
+        const ends = stairEnds(site, stair), at = stair.a === p.id ? ends.head : ends.foot;
+        ctx.globalAlpha = 0.55;
+        diamond(ctx, X(at[0]), Z(at[1]), Math.max(2.6 * ratio, 0.42 * scale), KEY_COLOUR[it.key]);
+        ctx.globalAlpha = 1;
+      }
+      continue;
+    }
     if (!known(p)) continue;
     diamond(ctx, X((p.x0 + p.x1) / 2), Z((p.z0 + p.z1) / 2), Math.max(3.5 * ratio, 0.6 * scale), KEY_COLOUR[it.key]);
   }
@@ -379,7 +419,14 @@ function star(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, co
   ctx.fill();
 }
 
-/** Which place a point is in, if any. */
-export function placeAt(site: Site, x: number, z: number): Place | undefined {
-  return site.places.find((p) => x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1);
+/**
+ * Which place a point is in, if any. Where places lie one above another, `y` (the height of
+ * the feet) says which: the one whose floor is nearest below. Without it, the one on the ground storey.
+ */
+export function placeAt(site: Site, x: number, z: number, y?: number): Place | undefined {
+  const here = site.places.filter((p) => x >= p.x0 && x <= p.x1 && z >= p.z0 && z <= p.z1);
+  if (here.length < 2) return here[0];
+  if (y === undefined) return here.find((p) => !p.level) ?? here[0];
+  // (On a stair the feet are between two floors: they belong to the lower until they are nearly up.)
+  return here.filter((p) => p.floor <= y + 0.5).sort((a, b) => b.floor - a.floor)[0] ?? here.sort((a, b) => a.floor - b.floor)[0];
 }

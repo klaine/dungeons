@@ -90,8 +90,9 @@ export function drawInk(canvas: HTMLCanvasElement, site: Site, opts: InkOptions 
   const seed = Math.floor(rng.next() * 1e6);
   const T = site.wallThickness;
 
-  const shown = (p: Place) => secrets || p.id !== site.secret;
-  const wayShown = (w: Way) => secrets || w.door?.leaf !== 'secret';
+  // The map is of the ground storey: rooms over it and cellars under it are named in the key, not drawn.
+  const shown = (p: Place) => !p.level && (secrets || p.id !== site.secret);
+  const wayShown = (w: Way) => w.kind !== 'stair' && (secrets || w.door?.leaf !== 'secret');
   const places = site.places.filter(shown);
 
   // ---- the page: a heading, the map, then a scale and a compass
