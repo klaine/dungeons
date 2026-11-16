@@ -285,6 +285,21 @@ The same numbers colour the grass: green where it is wet, straw where it is dry.
 
 Leaves and blades must be matt. With the standard material every card mirrors the sky at a glancing angle, and a meadow seen from head height is all glancing angles: it turned pale and blue until the mirror term was removed.
 
+### The island
+
+An island (`?place=island`) is the other kind of open place, and the target is a different picture: a high green island in a grey-blue sea, ringed with cliffs that stand straight out of the water, stacks off its headlands, a cove with a beach and a few white cottages, a lighthouse on the far point, and a long coast of hills across the water. The western isles of Scotland and Ireland, the Skelligs, the north coast of Cornwall.
+
+| Ingredient | How it is made |
+|---|---|
+| Sea cliffs | As the valley's cliffs are: beds, frost wearing on a lattice of heights, then carving with the beds stepped and split into blocks. The plain shape falls from the cliff top to a sea bed some metres down over a few strides, so nearly all of it is carved as rock. Below a few metres under the water nothing is carved: the sea is too deep to see into there. The lattice is 40 centimetres, coarser than the valley's 30, because there is far more cliff. |
+| Rock by the sea | Banded as real sea cliffs are: under the water dark and furred; between the tides hung with olive wrack; above that a band of black lichen as deep as the spray reaches; higher, orange and grey-green lichens in patches on what takes the weather, and white under the ledges near the top where the birds sit. The smaller breaks are scoured off where the waves reach. |
+| Stacks | Pillars of the same rock standing out of the sea off the headlands, made as part of the land's heights and carved with it. |
+| Beach | At the head of the cove the land comes down to the water through a hollow, and the bare ground there is sand: the turf's material, with a sand texture in place of beaten earth, darker where it is wet. |
+| The sea | A sheet in rings about the island to 3.4 kilometres, each point of which knows how deep the water is under it. It is not a mirror: a long swell and two sizes of waves on it break the sky's reflection into glints, finer and fainter with distance. It is clear and green over sand, dark blue-green where deep. Where it shoals it breaks in lines that run in to the shore, and against every cliff foot and stack there is a fringe of foam; out on the open water a crest breaks white now and then. |
+| What grows | Decided by the wind (see `islandPlanting.ts`): short turf burnt by salt at the cliff edge, with thrift and sea campion in it; heath of heather and gorse in from the edge; marram on the sand; bracken, foxgloves and low trees only in the shelter of the hollow; a windbreak of pines beside the house. Thrift, marram and gorse are new cards. |
+| Mainland | One sheet in rings, drawn with the far material: open sea, then a coast of low cliffs filling an arc of the horizon, rising into hills and mountains behind; and two or three islets between. |
+| Built things | The jetty, of big stones with a coping, bollards and an iron ladder; the cottages of whitewashed rubble, thatched or slated, with a chimney at one gable and pots and boxes at the door; boats drawn up on the sand, painted above and tarred below; the lighthouse, white, perhaps banded, with a stair winding up inside to a gallery with an iron rail, a lantern of glass in iron bars, a domed roof, and a lamp that shines by night; and the castle of the far hills, at true size, on a headland. |
+
 ## 2D maps
 
 Maps are assets in their own right, for use in games, on virtual tabletops and in print, and they double as the in-tool navigation aid.

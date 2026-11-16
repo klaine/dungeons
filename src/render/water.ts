@@ -11,7 +11,7 @@ import { Rng } from '../core/rng';
  */
 
 /** A tiling pattern of ripples, as a normal map: a sum of waves that all fit the square exactly. */
-function rippleMap(size = 256): Texture {
+export function rippleMap(size = 256): Texture {
   const rng = new Rng('ripples');
   const waves: [number, number, number, number][] = [];
   for (let k = 0; k < 22; k++) {

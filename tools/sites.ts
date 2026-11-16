@@ -2,6 +2,7 @@
 import { generateSite } from '../src/core/generate';
 import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
+import { inland } from '../src/core/island';
 
 const count = Number(process.argv[2] ?? 200);
 const tally = new Map<string, number>();
@@ -47,3 +48,31 @@ for (let n = 0; n < count; n++) {
 }
 console.log(`${count} sites, ${failures} failures`);
 for (const k of [...tally.keys()].sort()) console.log(' ', k.padEnd(14), tally.get(k));
+
+// Islands: the same houses on islands in the sea. Each must be completable, and what is built on
+// it must stand on the land, well in from the cliffs, with the track on land all the way to the jetty.
+const isles = new Map<string, number>();
+let isleFailures = 0;
+for (let n = 0; n < Math.ceil(count / 4); n++) {
+  const seed = `isle-check-${n}`;
+  try {
+    const site = generateSite(seed, 'island'), o = site.island!;
+    if (!solve(site).ok) throw new Error('cannot be completed');
+    for (const q of o.cottages) if (inland(o, q.x, q.z) < Math.max(q.w, q.d) / 2 + 3) throw new Error('a cottage at the cliff edge');
+    if (o.lighthouse && inland(o, o.lighthouse.x, o.lighthouse.z) < 8) throw new Error('the lighthouse at the cliff edge');
+    const track = site.track!;
+    for (const [x, z] of track.slice(0, -3)) if (inland(o, x, z) < 3) throw new Error(`the track off the land at ${x}, ${z}`);
+    const tally2 = (k: string) => isles.set(k, (isles.get(k) ?? 0) + 1);
+    tally2(`cottages=${o.cottages.length}`);
+    tally2(`lighthouse=${!!o.lighthouse}`);
+    tally2(`castle=${!!o.castle}`);
+    tally2(`cave=${!!o.seaCave}`);
+    tally2(`stacks=${o.stacks.length}`);
+  } catch (e) {
+    isleFailures++;
+    console.log(seed, 'FAILED', (e as Error).message);
+  }
+}
+console.log(`${Math.ceil(count / 4)} islands, ${isleFailures} failures`);
+for (const k of [...isles.keys()].sort()) console.log(' ', k.padEnd(14), isles.get(k));
+if (failures || isleFailures) process.exitCode = 1;

@@ -1,0 +1,318 @@
+import { Vector3 } from 'three';
+import { Rng } from '../core/rng';
+import { Site } from '../core/site';
+import { Kit } from './geom/kit';
+import { MeshBuilder } from './geom/meshBuilder';
+import { buildLandmark } from './landmarks';
+import { Colour } from './planting';
+
+/**
+ * What people have built on the island, other than the house: the jetty where the boats come
+ * in, the fishermen's cottages above the beach, their boats, the lighthouse on its headland, the
+ * castle on another, and what was left in the sea cave. Like the buildings of the valley, every
+ * part is a closed solid of its own; unlike them, these stand at any angle, so they are made of
+ * solids with eight corners given in the world, not of blocks square to it.
+ */
+
+export interface CoastBuild {
+  site: Site;
+  wild: Kit;
+  rng: Rng;
+  ground: (x: number, z: number) => number;
+  stoneTint: Colour;
+  finds: { at: Vector3; what: string }[];
+  fences: { min: Vector3; max: Vector3 }[];
+  caveFloor: number;
+}
+
+type P3 = [number, number, number];
+const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
+
+/** Solids at any angle: a face through points, wound away from a point inside; and a solid of eight corners, bottom four then top four, going round the same way. */
+export function anyAngle(mesh: (material: string) => MeshBuilder) {
+  let count = 0;
+  const face = (material: string, pts: P3[], colour: Colour, inside: P3, scale = 0.5) => {
+    const m = mesh(material);
+    const [a, b, c] = pts;
+    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const l = Math.hypot(nx, ny, nz);
+    if (l < 1e-9) return;
+    nx /= l; ny /= l; nz /= l;
+    const mid = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+    let list = pts;
+    if ((mid[0] - inside[0]) * nx + (mid[1] - inside[1]) * ny + (mid[2] - inside[2]) * nz < 0) { nx = -nx; ny = -ny; nz = -nz; list = [...pts].reverse(); }
+    // Texture laid from where the point is, on whichever plane the face lies most nearly in.
+    const flat = Math.abs(ny) > 0.7, side = Math.abs(nx) > Math.abs(nz);
+    const ids = list.map((q) => m.addVertex(q[0], q[1], q[2], nx, ny, nz, (flat ? q[0] : side ? q[2] : q[0]) * scale, (flat ? q[2] : q[1]) * scale, colour[0], colour[1], colour[2]));
+    for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+  };
+  const solid = (material: string, c: P3[], colour: Colour, scale = 0.5) => {
+    const tone = shade(colour, 0.95 + 0.1 * (((count++ * 7919) % 13) / 13));
+    const inside: P3 = [0, 0, 0];
+    for (const q of c) { inside[0] += q[0] / 8; inside[1] += q[1] / 8; inside[2] += q[2] / 8; }
+    for (const f of [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]) face(material, f.map((i) => c[i]), tone, inside, scale);
+  };
+  return { face, solid };
+}
+
+/** A frame turned to face a bearing: `a` along to the right as one faces it, `f` forward, `y` up, about an origin. */
+function frame(x: number, z: number, y: number, facing: number) {
+  const fx = Math.cos(facing), fz = Math.sin(facing);
+  return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a];
+}
+
+export function buildCoast(c: CoastBuild): { deck: number } {
+  const { site, wild, rng } = c, o = site.island!, sea = o.sea;
+  const mesh = (m: string) => wild.mesh(m);
+  const { face, solid } = anyAngle(mesh);
+  const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
+  /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
+  const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
+    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
+
+  // ---- the jetty: a pier of big stones from the beach out into the cove, its deck a little above high water
+  const deck = sea + 1.35;
+  {
+    const [ax, az] = o.jetty.from, [bx, bz] = o.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
+    const at = frame(ax, az, 0, heading), half = o.jetty.width / 2, q = rng.fork('jetty');
+    // (Where it starts on the beach, its deck comes down to the sand as a ramp.)
+    const rootY = Math.min(deck, c.ground(ax, az) + 0.04);
+    for (let f = 0; f < len - 1e-6;) {
+      const f1 = Math.min(len, f + q.range(1.1, 1.6)), y0 = rootY + (deck - rootY) * Math.min(1, f / 4), y1 = rootY + (deck - rootY) * Math.min(1, f1 / 4);
+      const foot = Math.min(c.ground(...at2(at, 0, f)), c.ground(...at2(at, 0, f1))) - 0.6;
+      // Each length is a course of big blocks, with its top following the ramp.
+      solid('stone', [at(-half, foot, f), at(half, foot, f), at(half, foot, f1), at(-half, foot, f1), at(-half, y0, f), at(half, y0, f), at(half, y1, f1), at(-half, y1, f1)], shade(stone, q.range(0.85, 1.05)), 0.35);
+      f = f1;
+    }
+    // Coping along either edge, bollards, and a ladder of iron down the end into the water.
+    for (const side of [-1, 1]) for (let f = 4.5; f < len - 0.3; f += 0.9) box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), shade(stone, 1.08), 0.4);
+    for (const f of [len * 0.55, len - 0.9]) for (const side of [-1, 1]) {
+      const a = side * (half - 0.7);
+      for (let k = 0; k < 6; k++) {
+        const t0 = (k / 6) * Math.PI * 2, t1 = ((k + 1) / 6) * Math.PI * 2, r = 0.16;
+        solid('metal', [at(a, deck, f), at(a + Math.cos(t0) * r, deck, f + Math.sin(t0) * r), at(a + Math.cos(t1) * r, deck, f + Math.sin(t1) * r), at(a, deck, f), at(a, deck + 0.55, f), at(a + Math.cos(t0) * r, deck + 0.55, f + Math.sin(t0) * r), at(a + Math.cos(t1) * r, deck + 0.55, f + Math.sin(t1) * r), at(a, deck + 0.55, f)], [0.05, 0.05, 0.05]);
+      }
+    }
+    for (const a of [-0.22, 0.22]) box(at, 'metal', a - 0.025, a + 0.025, sea - 1.2, deck + 0.9, len + 0.02, len + 0.07, [0.12, 0.07, 0.04]);
+    for (let y = sea - 1; y < deck + 0.8; y += 0.3) box(at, 'metal', -0.22, 0.22, y, y + 0.03, len + 0.03, len + 0.06, [0.12, 0.07, 0.04]);
+  }
+
+  // ---- the fishermen's cottages
+  o.cottages.forEach((h, n) => buildCottage(h, rng.fork(`cottage${n}`)));
+  function buildCottage(h: (typeof o.cottages)[number], q: Rng) {
+    // Facing the front: `a` along the front, `f` out of it; the house lies behind the front, from f = -d to 0.
+    const at = frame(h.x + Math.cos(h.faces) * h.d / 2, h.z + Math.sin(h.faces) * h.d / 2, h.y, h.faces);
+    const W = h.w / 2, D = h.d, eaves = q.range(2.3, 2.8), ridge = eaves + D * q.range(0.55, 0.72), wash = h.wash, t = 0.6;
+    const base = -0.5;
+    // The walls: whitewashed rubble, a plinth tarred dark at the foot, and a gable at each end.
+    box(at, 'plaster', -W, W, base, eaves, -D, 0, wash);
+    // (Each gable a closed wedge of wall, the thickness of the wall, up to the ridge.)
+    for (const side of [-1, 1]) solid('plaster', [at(side * W, eaves, -D), at(side * W, eaves, 0), at(side * (W - t), eaves, 0), at(side * (W - t), eaves, -D), at(side * W, ridge - 0.2, -D / 2), at(side * W, ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2)], wash);
+    box(at, 'plaster', -W - 0.03, W + 0.03, base, 0.32, -D - 0.03, 0.03, [0.09, 0.09, 0.09]);
+    // The door, and a window either side of it, set into the thickness of the wall with dark glass and white frames.
+    const doorAt = q.range(-W * 0.25, W * 0.25), doorCol: Colour = q.pick([[0.12, 0.22, 0.32], [0.32, 0.1, 0.08], [0.12, 0.25, 0.14], [0.22, 0.2, 0.16]] as Colour[]);
+    box(at, 'wood', doorAt - 0.45, doorAt + 0.45, 0.32, 2.0, -0.02, 0.06, doorCol, 0.9);
+    box(at, 'stone', doorAt - 0.6, doorAt + 0.6, 0, 0.32, 0, 0.42, shade(stone, 0.95));
+    for (const side of [-1, 1]) {
+      const wa = doorAt + side * q.range(1.4, Math.max(1.5, W - 0.9));
+      if (Math.abs(wa) > W - 0.6) continue;
+      box(at, 'glass', wa - 0.38, wa + 0.38, 0.95, 1.75, -0.02, 0.02, [0.03, 0.04, 0.05]);
+      box(at, 'wood', wa - 0.42, wa + 0.42, 0.9, 0.97, -0.02, 0.1, [0.85, 0.85, 0.82]);
+      box(at, 'wood', wa - 0.42, wa + 0.42, 1.73, 1.8, -0.02, 0.05, [0.85, 0.85, 0.82]);
+      box(at, 'wood', wa - 0.03, wa + 0.03, 0.97, 1.73, -0.02, 0.05, [0.85, 0.85, 0.82]);
+    }
+    // The roof: thatch, thick and rounded over the eaves and roped down against the wind; or slate, thin and dark.
+    const over = h.roof === 'thatch' ? 0.45 : 0.25, thick = h.roof === 'thatch' ? 0.42 : 0.1;
+    const roofCol: Colour = h.roof === 'thatch' ? [0.52, 0.42, 0.27] : [0.2, 0.21, 0.23];
+    const material = h.roof === 'thatch' ? 'thatch' : 'slate';
+    for (const side of [-1, 1]) {
+      const fe = side < 0 ? -D - over : over, ye = eaves - over * (ridge - eaves) / (D / 2);
+      solid(material, [at(-W - over, ye, fe), at(W + over, ye, fe), at(W + over, ridge, -D / 2), at(-W - over, ridge, -D / 2), at(-W - over, ye + thick, fe), at(W + over, ye + thick, fe), at(W + over, ridge + thick, -D / 2), at(-W - over, ridge + thick, -D / 2)], roofCol, h.roof === 'thatch' ? 0.6 : 0.9);
+    }
+    if (h.roof === 'thatch') {
+      box(at, 'thatch', -W - over, W + over, ridge + thick - 0.1, ridge + thick + 0.22, -D / 2 - 0.35, -D / 2 + 0.35, shade(roofCol, 0.85), 0.6);
+      // Ropes over the thatch, weighted with stones at the eaves.
+      for (let a = -W; a <= W + 0.01; a += (2 * W) / 3) for (const side of [-1, 1]) {
+        const fe = side < 0 ? -D - over : over, ye = eaves - over * (ridge - eaves) / (D / 2);
+        box(at, 'stone', a - 0.2, a + 0.2, ye - 0.55, ye - 0.15, fe - 0.15 * side - 0.12, fe - 0.15 * side + 0.12, shade(stone, 0.8));
+      }
+    } else box(at, 'stone', -W - over, W + over, ridge + thick - 0.02, ridge + thick + 0.12, -D / 2 - 0.12, -D / 2 + 0.12, [0.25, 0.22, 0.2]);
+    // A chimney at one gable.
+    const end = q.chance(0.5) ? 1 : -1;
+    box(at, 'plaster', end * (W - 0.75), end * (W - 0.05), ridge - 0.6, ridge + 1.0, -D / 2 - 0.4, -D / 2 + 0.4, wash);
+    box(at, 'stone', end * (W - 0.85), end * (W + 0.05), ridge + 1.0, ridge + 1.12, -D / 2 - 0.5, -D / 2 + 0.5, shade(stone, 0.7));
+    // Things about the door: lobster pots, a fish box, a barrel.
+    const side = doorAt > 0 ? -1 : 1;
+    for (let k = 0; k < q.int(1, 4); k++) {
+      const a = doorAt + side * (1.2 + k * 0.65), f = q.range(0.6, 1.4), y = 0, s = 0.28;
+      if (Math.abs(a) > W + 1) break;
+      box(at, 'wood', a - s, a + s, y, y + 0.42 + (k % 2) * 0.0, f - s * 0.8, f + s * 0.8, [0.36, 0.3, 0.22], 0.9);
+    }
+  }
+
+  // ---- boats, drawn up on the beach or riding in the cove
+  o.boats.forEach((bt, n) => {
+    const q = rng.fork(`boat${n}`), L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
+    const y = bt.afloat ? sea - depth * 0.45 : c.ground(bt.x, bt.z) + 0.08;
+    const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
+    const at = frame(bt.x, bt.z, y, bt.heading);
+    const tilt = (a: number, h: number, f: number): P3 => at(a * Math.cos(roll) - h * Math.sin(roll), h * Math.cos(roll) + a * Math.sin(roll), f);
+    const paint: Colour = q.pick([[0.12, 0.27, 0.4], [0.5, 0.12, 0.08], [0.18, 0.35, 0.2], [0.75, 0.74, 0.7], [0.55, 0.42, 0.12]] as Colour[]);
+    // The hull: stations from stern to bow, each a rounded bottom and flaring sides; the outside painted, tarred below, the inside bare wood.
+    const S = 9, R = 5, sec: P3[][] = [], inner: P3[][] = [];
+    for (let i = 0; i <= S; i++) {
+      const f = -L + (2 * L * i) / S, t = i / S, w = B * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * t)), 0.6) * (t > 0.6 ? 1 - (t - 0.6) * 0.9 : 1), sheer = depth * (1 + 0.5 * (t > 0.5 ? (t - 0.5) * 2 : (0.5 - t) * 0.6));
+      const ring: P3[] = [], ringIn: P3[] = [];
+      for (let k = 0; k <= R; k++) {
+        const u = -1 + (2 * k) / R, a = u * w, h = sheer - depth * (1 - u * u) * 1.1 * (t > 0.92 ? 0.3 : 1) - (Math.abs(u) < 1 ? 0 : 0);
+        ring.push(tilt(a, h - sheer * 0.4 + depth * 0.6, f));
+        ringIn.push(tilt(a * 0.88, h - sheer * 0.4 + depth * 0.6 + 0.05, f));
+      }
+      sec.push(ring); inner.push(ringIn);
+    }
+    const mid = at(0, depth * 2, 0);
+    for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
+      const low = Math.abs(-1 + (2 * (k + 0.5)) / R) < 0.6;
+      face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], low ? [0.05, 0.045, 0.04] : paint, mid, 0.9);
+      face('wood', [inner[i][k], inner[i][k + 1], inner[i + 1][k + 1], inner[i + 1][k]], [0.42, 0.33, 0.22], at(0, -depth * 3, 0), 0.9);
+    }
+    // The gunwale joins inside to out along both sides, and the stern and bow are closed.
+    for (let i = 0; i < S; i++) for (const k of [0, R]) face('wood', [sec[i][k], sec[i + 1][k], inner[i + 1][k], inner[i][k]], [0.85, 0.83, 0.78], at(0, -depth * 5, 0), 0.9);
+    for (const i of [0, S]) for (let k = 0; k < R; k++) face('wood', [sec[i][k], sec[i][k + 1], inner[i][k + 1], inner[i][k]], paint, at(0, depth, i ? -L * 3 : L * 3), 0.9);
+    // Thwarts across, and a pair of oars laid in her.
+    for (const f of [-L * 0.45, 0.1, L * 0.4]) {
+      const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
+      solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
+    }
+  });
+
+  // ---- the lighthouse
+  const lh = o.lighthouse;
+  if (lh) {
+    const q = rng.fork('lighthouse'), r0 = lh.r, top = lh.height, rT = r0 * 0.8, wallT = 0.5, base = lh.y;
+    const white: Colour = [0.9, 0.89, 0.86], band: Colour = q.chance(0.5) ? [0.55, 0.08, 0.06] : [0.08, 0.08, 0.08], iron: Colour = [0.06, 0.06, 0.065];
+    const banded = q.chance(0.6), bands = q.int(1, 2);
+    const N = 32, radiusAt = (h: number) => r0 + (rT - r0) * Math.min(1, Math.max(0, h / top));
+    const ring = (a: number, r: number, h: number): P3 => [lh.x + Math.cos(a) * r, base + h, lh.z + Math.sin(a) * r];
+    const doorHalf = 0.62 / ((r0 + r0 - wallT) / 2), doorTop = 2.25;
+    const inDoor = (a: number) => Math.abs(((a - lh.door + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < doorHalf;
+    // The wall, in courses each a little narrower than the last, cut for the door and, up the stair, for small windows.
+    const course = 0.75, stepsPerTurn = 16, rise = 0.19, firstStep = lh.door + 1.25;
+    for (let h = -1.2; h < top - 1e-6; h += course) {
+      const h1 = Math.min(top, h + course);
+      for (let k = 0; k < N; k++) {
+        const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2, am = (a0 + a1) / 2;
+        if (h1 > 0.05 && h < doorTop - 0.01 && inDoor(am)) continue;
+        // A window where the stair passes, every turn, a little above the step there.
+        const turn = ((am - firstStep) / (Math.PI * 2) % 1 + 1) % 1, stepH = 0.15 + turn * stepsPerTurn * rise;
+        const isWindow = h > 3 && h < top - 2 && Math.abs(((h - stepH) % (stepsPerTurn * rise) + stepsPerTurn * rise) % (stepsPerTurn * rise) - 1.4) < course * 0.6 && k % 8 === 3;
+        if (isWindow) continue;
+        const ro0 = radiusAt(h), ro1 = radiusAt(h1), ri0 = ro0 - wallT, ri1 = ro1 - wallT;
+        const colour = banded && Array.from({ length: bands }, (_, j) => top * (0.35 + j * 0.3)).some((y) => h >= y - 0.01 && h < y + course * 2 - 0.01) ? band : white;
+        solid('plaster', [ring(a0, ri0, h), ring(a1, ri0, h), ring(a1, ro0, h), ring(a0, ro0, h), ring(a0, ri1, h1), ring(a1, ri1, h1), ring(a1, ro1, h1), ring(a0, ro1, h1)], colour);
+      }
+    }
+    // A lintel over the door, and a step before it.
+    {
+      const at = frame(lh.x, lh.z, base, lh.door);
+      box(at, 'stone', -0.75, 0.75, doorTop, doorTop + 0.3, r0 - wallT - 0.05, r0 + 0.08, shade(stone, 1.1));
+      box(at, 'stone', -0.8, 0.8, -0.3, 0.15, r0 - 0.05, r0 + 0.6, shade(stone, 1.0));
+    }
+    // The floor inside, and the stair: wedges of stone winding about a newel, from beside the door to the top.
+    for (let k = 0; k < N; k++) {
+      const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2;
+      solid('stone', [ring(a0, 0, -0.6), ring(a1, 0, -0.6), ring(a1, r0 - wallT + 0.05, -0.6), ring(a0, r0 - wallT + 0.05, -0.6), ring(a0, 0, 0.15), ring(a1, 0, 0.15), ring(a1, r0 - wallT + 0.05, 0.15), ring(a0, r0 - wallT + 0.05, 0.15)], shade(stone, 0.95));
+    }
+    const steps = Math.floor((top - 0.15) / rise), newel = 0.24;
+    for (let s = 0; s < steps; s++) {
+      const a0 = firstStep + (s / stepsPerTurn) * Math.PI * 2, a1 = firstStep + ((s + 1.08) / stepsPerTurn) * Math.PI * 2, y1 = 0.15 + (s + 1) * rise, y0 = y1 - 0.3;
+      const out0 = radiusAt(y1) - wallT + 0.04;
+      solid('stone', [ring(a0, newel, y0), ring(a1, newel, y0), ring(a1, out0, y0), ring(a0, out0, y0), ring(a0, newel, y1), ring(a1, newel, y1), ring(a1, out0, y1), ring(a0, out0, y1)], shade(stone, 0.9 + 0.1 * (s % 2)));
+    }
+    // The newel, up the middle to the lamp.
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2;
+      solid('stone', [ring(a0, 0, 0), ring(a1, 0, 0), ring(a1, newel, 0), ring(a0, newel, 0), ring(a0, 0, top + 0.9), ring(a1, 0, top + 0.9), ring(a1, newel, top + 0.9), ring(a0, newel, top + 0.9)], shade(stone, 1.05));
+    }
+    // The top: a floor across the tower with a hatch where the stair comes up, carried out beyond the wall as the gallery.
+    const lastA = firstStep + (steps / stepsPerTurn) * Math.PI * 2, gallery = rT + 1.0;
+    for (let k = 0; k < N; k++) {
+      const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2, am = (a0 + a1) / 2;
+      const back = ((lastA - am) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      const hatch = back < (5 / stepsPerTurn) * Math.PI * 2;
+      const from = hatch ? rT - wallT + 0.02 : newel;
+      solid('stone', [ring(a0, from, top - 0.05), ring(a1, from, top - 0.05), ring(a1, gallery, top - 0.05), ring(a0, gallery, top - 0.05), ring(a0, from, top + 0.15), ring(a1, from, top + 0.15), ring(a1, gallery, top + 0.15), ring(a0, gallery, top + 0.15)], shade(stone, 1.05));
+      // Corbels under the gallery.
+      if (k % 2 === 0) solid('stone', [ring(a0 + 0.03, rT - 0.05, top - 0.9), ring(a1 - 0.03, rT - 0.05, top - 0.9), ring(a1 - 0.03, rT + 0.1, top - 0.9), ring(a0 + 0.03, rT + 0.1, top - 0.9), ring(a0 + 0.03, rT - 0.05, top - 0.05), ring(a1 - 0.03, rT - 0.05, top - 0.05), ring(a1 - 0.03, gallery - 0.1, top - 0.05), ring(a0 + 0.03, gallery - 0.1, top - 0.05)], white);
+      // The railing: iron posts and two rails.
+      const p0 = ring(a0, gallery - 0.08, top + 0.15);
+      solid('metal', [[p0[0] - 0.03, p0[1], p0[2] - 0.03], [p0[0] + 0.03, p0[1], p0[2] - 0.03], [p0[0] + 0.03, p0[1], p0[2] + 0.03], [p0[0] - 0.03, p0[1], p0[2] + 0.03], [p0[0] - 0.03, p0[1] + 1.05, p0[2] - 0.03], [p0[0] + 0.03, p0[1] + 1.05, p0[2] - 0.03], [p0[0] + 0.03, p0[1] + 1.05, p0[2] + 0.03], [p0[0] - 0.03, p0[1] + 1.05, p0[2] + 0.03]], iron);
+      for (const rh of [0.5, 1.05]) solid('metal', [ring(a0, gallery - 0.11, top + 0.15 + rh - 0.04), ring(a1, gallery - 0.11, top + 0.15 + rh - 0.04), ring(a1, gallery - 0.05, top + 0.15 + rh - 0.04), ring(a0, gallery - 0.05, top + 0.15 + rh - 0.04), ring(a0, gallery - 0.11, top + 0.15 + rh), ring(a1, gallery - 0.11, top + 0.15 + rh), ring(a1, gallery - 0.05, top + 0.15 + rh), ring(a0, gallery - 0.05, top + 0.15 + rh)], iron);
+    }
+    // The lantern: a low wall, a ring of glass in iron glazing bars, a domed roof with a vent and a vane.
+    // A way out onto the gallery on the side away from the hatch.
+    const outA = lastA + Math.PI, rl = rT - 0.3, lw = 0.12;
+    for (let k = 0; k < 16; k++) {
+      const a0 = (k / 16) * Math.PI * 2, a1 = ((k + 1) / 16) * Math.PI * 2, am = (a0 + a1) / 2;
+      const isDoor = Math.abs(((am - outA + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22;
+      if (!isDoor) {
+        solid('metal', [ring(a0, rl - lw, top + 0.15), ring(a1, rl - lw, top + 0.15), ring(a1, rl, top + 0.15), ring(a0, rl, top + 0.15), ring(a0, rl - lw, top + 1.0), ring(a1, rl - lw, top + 1.0), ring(a1, rl, top + 1.0), ring(a0, rl, top + 1.0)], iron);
+        solid('glass', [ring(a0, rl - 0.06, top + 1.0), ring(a1, rl - 0.06, top + 1.0), ring(a1, rl - 0.03, top + 1.0), ring(a0, rl - 0.03, top + 1.0), ring(a0, rl - 0.06, top + 3.0), ring(a1, rl - 0.06, top + 3.0), ring(a1, rl - 0.03, top + 3.0), ring(a0, rl - 0.03, top + 3.0)], [0.1, 0.12, 0.13]);
+      }
+      const b0 = ring(a0, rl - 0.05, top + 0.15);
+      solid('metal', [[b0[0] - 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] + 0.04]], iron);
+      // The dome, in two tiers.
+      solid('metal', [ring(a0, 0, top + 3.0), ring(a1, 0, top + 3.0), ring(a1, rl + 0.2, top + 3.0), ring(a0, rl + 0.2, top + 3.0), ring(a0, 0, top + 3.95), ring(a1, 0, top + 3.95), ring(a1, rl * 0.55, top + 3.85), ring(a0, rl * 0.55, top + 3.85)], iron);
+      solid('metal', [ring(a0, 0, top + 3.85), ring(a1, 0, top + 3.85), ring(a1, rl * 0.55, top + 3.85), ring(a0, rl * 0.55, top + 3.85), ring(a0, 0, top + 4.5), ring(a1, 0, top + 4.5), ring(a1, 0.2, top + 4.5), ring(a0, 0.2, top + 4.5)], iron);
+    }
+    // The vent ball and the rod.
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2;
+      solid('metal', [ring(a0, 0, top + 4.45), ring(a1, 0, top + 4.45), ring(a1, 0.28, top + 4.62), ring(a0, 0.28, top + 4.62), ring(a0, 0, top + 4.95), ring(a1, 0, top + 4.95), ring(a1, 0.26, top + 4.8), ring(a0, 0.26, top + 4.8)], iron);
+    }
+    solid('metal', [ring(0, 0.03, top + 4.9), ring(Math.PI / 2, 0.03, top + 4.9), ring(Math.PI, 0.03, top + 4.9), ring(Math.PI * 1.5, 0.03, top + 4.9), ring(0, 0.03, top + 6.2), ring(Math.PI / 2, 0.03, top + 6.2), ring(Math.PI, 0.03, top + 6.2), ring(Math.PI * 1.5, 0.03, top + 6.2)], iron);
+    // The lamp on top of the newel: its lens a squat drum of glass rings, which shines by night.
+    for (let k = 0; k < 12; k++) {
+      const a0 = (k / 12) * Math.PI * 2, a1 = ((k + 1) / 12) * Math.PI * 2;
+      solid('lamp', [ring(a0, 0, top + 0.9), ring(a1, 0, top + 0.9), ring(a1, 0.5, top + 1.0), ring(a0, 0.5, top + 1.0), ring(a0, 0, top + 2.3), ring(a1, 0, top + 2.3), ring(a1, 0.48, top + 2.1), ring(a0, 0.48, top + 2.1)], [0.95, 0.88, 0.6]);
+    }
+    // Indoors the tower sees little sky: only what comes in at its door and windows.
+    for (const m of ['plaster', 'stone', 'metal', 'glass', 'lamp']) mesh(m).setOpenBy((x, y, z) => (Math.hypot(x - lh.x, z - lh.z) < radiusAt(y - base) - wallT + 0.06 && y > base - 0.65 && y < base + top + 0.1 ? 0.22 : 1));
+    // A low wall round the yard at its foot, whitewashed, open towards the door.
+    for (let k = 0; k < 40; k++) {
+      const a0 = (k / 40) * Math.PI * 2, a1 = ((k + 1) / 40) * Math.PI * 2, am = (a0 + a1) / 2, R = r0 + 5.2;
+      if (Math.abs(((am - lh.door + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.24) continue;
+      const g0 = c.ground(lh.x + Math.cos(a0) * R, lh.z + Math.sin(a0) * R), g1 = c.ground(lh.x + Math.cos(a1) * R, lh.z + Math.sin(a1) * R);
+      const lo = Math.min(g0, g1) - base - 0.4, hi = Math.max(g0, g1) - base + 0.95;
+      solid('plaster', [ring(a0, R - 0.25, lo), ring(a1, R - 0.25, lo), ring(a1, R + 0.25, lo), ring(a0, R + 0.25, lo), ring(a0, R - 0.25, hi), ring(a1, R - 0.25, hi), ring(a1, R + 0.25, hi), ring(a0, R + 0.25, hi)], white);
+    }
+    // Nobody goes over the rail: a ring of the boxes nobody sees, just outside it.
+    for (let k = 0; k < 28; k++) {
+      const a = (k / 28) * Math.PI * 2, p = ring(a, gallery + 0.35, top);
+      c.fences.push({ min: new Vector3(p[0] - 0.45, p[1] + 0.2, p[2] - 0.45), max: new Vector3(p[0] + 0.45, p[1] + 5, p[2] + 0.45) });
+    }
+    // Somebody left a spyglass on the gallery.
+    const sa = lastA + Math.PI * 0.5;
+    c.finds.push({ at: new Vector3(...ring(sa, (rl + gallery) / 2, top + 0.25)), what: 'a spyglass' });
+  }
+
+  // ---- the castle on its headland: curtain walls, towers and a keep, true to size, walked round and into its court
+  if (o.castle) {
+    const k = o.castle;
+    buildLandmark('castle', k.x, k.y, k.z, k.facing, mesh, rng.fork('castle'), [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]], 0.5);
+    c.finds.push({ at: new Vector3(k.x - Math.cos(k.facing) * 6, k.y + 0.2, k.z - Math.sin(k.facing) * 6), what: 'a rusted helm' });
+  }
+
+  // ---- in the sea cave, at its far end, something somebody hid
+  if (o.seaCave) {
+    const sc = o.seaCave, a = sc.length * 0.8;
+    c.finds.push({ at: new Vector3(sc.x + Math.cos(sc.heading) * a, c.caveFloor + a * 0.02 + 0.3, sc.z + Math.sin(sc.heading) * a), what: 'a smuggler\'s lantern' });
+  }
+  return { deck };
+}
+
+/** A point in a frame, on the ground plane: for asking how high the ground is under it. */
+function at2(at: ReturnType<typeof frame>, a: number, f: number): [number, number] {
+  const p = at(a, 0, f);
+  return [p[0], p[2]];
+}

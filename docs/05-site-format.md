@@ -220,6 +220,31 @@ A building with `sunk` stands in rising ground: the ground at its back is `sunk`
 
 What stands in each bay, which timbers brace which, how the bays of a wing are shared out among rooms, the colour of doors and shutters and of the roof and of each room: these are not in the document. They are worked out by whoever builds it; the tool works them out from the site's seed.
 
+### Islands
+
+A site may be an island in the sea instead of a valley. Then it has `island` and no `valley`; `grounds` is the box that holds the island's coast, `stands` is always `free` (the house stands on the island's high ground), and the track runs from the door down to the end of a jetty, where the player arrives.
+
+```json
+"island": {
+  "x": 13.2, "z": 90.5, "coast": [138.2, 140.1, "…96 in all"], "sea": -21.2,
+  "cove": { "x": 36.4, "z": 191.3, "r": 25.9, "out": 1.344, "mouth": 11.7, "beach": 0.748 },
+  "crown": { "x": -20.1, "z": 40.2, "r": 52, "height": 6.1 }, "combe": 57, "level": { "x0": -31.5, "x1": 33.1, "z0": -24.6, "z1": 36.2 },
+  "jetty": { "from": [25.7, 163.4], "to": [33.8, 184.5], "width": 3.3 },
+  "lighthouse": { "x": 110.8, "z": 24.1, "y": 2.1, "r": 3, "height": 17.6, "door": 2.544 },
+  "castle": { "x": -53, "z": 29.8, "y": -0.4, "facing": 3.883 },
+  "cottages": [ { "x": 22.1, "z": 140.3, "y": -12.2, "w": 7.9, "d": 5.1, "faces": 2.81, "roof": "thatch", "wash": [0.9, 0.89, 0.84] } ],
+  "boats": [ { "x": 30.2, "z": 166.8, "heading": 4.4, "length": 5.1, "afloat": false } ],
+  "stacks": [ { "x": 143.3, "z": 16.5, "r": 5.1, "height": 17.1 } ],
+  "seaCave": { "x": 14.3, "z": 177.2, "heading": 3.31, "length": 17.5 },
+  "mainland": { "bearing": 4.1, "spread": 0.9, "distance": 1380 },
+  "islets": [ { "x": 640, "z": -210, "r": 31, "height": 14 } ]
+}
+```
+
+Angles here are in radians, measured from the direction of +x turning towards +z. `coast` is how far the top of the cliffs lies from `x`, `z` in each of an even ring of directions, starting towards +x; between two of them the line is eased. `sea` is the level of the sea; the forecourt is at its own floor, some way above. The cove is a disc of water `r` across the half of it about its `x`, `z`, with a channel `mouth` wide leaving it at the bearing `out` for the open sea; the part of its rim facing back towards the island's middle, `beach` to either side of that bearing, is a beach, and everywhere else the coast is cliff. `crown` is a swell of high ground `height` metres over the forecourt. `combe` is how far the land comes down to the beach, as a hollow. `level` is the ground about the house, kept at the forecourt's floor. `castle.facing` is the bearing from the castle's middle away from its gate.
+
+The plain shape of the land follows from these by rule (`landAt` in `src/core/island.ts`), and what stands on it is placed on that shape; the builder then wears and carves the cliffs, which moves their edge by a stride or two. Cottages, the lighthouse and the castle stand on ground levelled at their own `y`. The lighthouse can be gone into and climbed; the cottages are shut; the castle is walked round and into its court. Things left to find are at the top of the lighthouse, in the castle's court and at the far end of the sea cave.
+
 ### The solution
 
 ```json

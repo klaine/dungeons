@@ -17,7 +17,8 @@ import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
 import { boxValley, edgeAt, insideOf, slantAt } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
-import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
+import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
+import { buildIsland } from './island';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -2809,12 +2810,30 @@ export function meshSite(site: Site): SceneDescription {
       return Math.min(air, t + Math.min(depthA, 1.5 - Math.min(0, rise0 - 0.3)), T + Math.min(depthB, 1.5 + Math.max(0, rise1 - T + 0.3)) - t);
     };
   };
+  // An island in place of a valley: the house front where it meets the forecourt is built here, as for a house standing
+  // free in a valley, and everything else out of doors by the island's own builder (see `island.ts`).
+  let islandSea: SeaDesc | undefined, spawnYaw = 0;
+  const buildIslandApproach = (p: Place) => {
+    kit.group = `p${p.id}`;
+    kit.field = outdoorFieldAt(p.floor, 1.2);
+    const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
+    kit.wallFace('stone', kit.frame(fx0, p.z0, fx1, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    wild.field = outdoorFieldAt(p.floor, 1.5);
+    const made = buildIsland({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    arrival.spawn = made.spawn;
+    arrival.track = made.track;
+    farCover = made.far;
+    islandSea = made.sea;
+    spawnYaw = made.yaw;
+    censuses.push(made.planted);
+    scenery.cards.push(...planting.sets);
+  };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
   // Where a cave's shaft comes up through the hill, the turf laid over the house is left open.
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
-    if (p.role === 'approach') { buildApproach(p); continue; }
+    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -3382,7 +3401,7 @@ export function meshSite(site: Site): SceneDescription {
     sunShafts,
     landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
-    spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
+    spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: spawnYaw },
     track: arrival.track,
     bounds: { min, max },
     blocks: kit.blocks,
@@ -3401,6 +3420,7 @@ export function meshSite(site: Site): SceneDescription {
     crossings,
     lookouts,
     far: farCover,
+    sea: islandSea,
     finds,
   };
 }
