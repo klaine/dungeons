@@ -141,8 +141,9 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
  */
 function timberHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, slope } = k;
-  const W = b.w, D = b.d, jetty = b.jetty ?? 0.35, T = 0.3, PLINTH = 0.3, H0 = 2.85, HS = 2.5;
-  const floorOf = (storey: number) => (storey === 0 ? PLINTH : PLINTH + H0 + (storey - 1) * HS), frontOf = (storey: number) => -jetty * storey;
+  const W = b.w, D = b.d, jetty = b.jetty ?? 0.35, T = 0.3, PLINTH = 0.3, H0 = b.heights[0];
+  // (Each storey is as high as the document says, so floors stand at different heights from house to house.)
+  const floorOf = (storey: number) => PLINTH + b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0), frontOf = (storey: number) => -jetty * storey;
   const top = floorOf(b.storeys), front = frontOf(b.storeys - 1);
   const paint: Colour = rng.pick([[0.16, 0.28, 0.2], [0.2, 0.26, 0.36], [0.36, 0.14, 0.11], [0.3, 0.24, 0.14]] as Colour[]);
   const frame: Colour = [0.8, 0.78, 0.7];
@@ -189,7 +190,7 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
 
   // The storeys of framing.
   for (let storey = 1; storey < b.storeys; storey++) {
-    const y0 = floorOf(storey), y1 = floorOf(storey + 1), sill = y0 + 0.98, head = sill + 0.14 + 1.08, fr = frontOf(storey);
+    const y0 = floorOf(storey), y1 = floorOf(storey + 1), sill = y0 + 0.98, head = Math.min(sill + 0.14 + 1.08, y1 - 0.36), fr = frontOf(storey);
     // What carries it out over the street: the ends of the floor joists, a board under them, and a bracket at each end.
     box('wood', -W / 2, W / 2, y0 - 0.2, y0 - 0.14, fr - 0.02, frontOf(storey - 1) + 0.06, shade(OAK, 0.9), true);
     for (let u = -W / 2 + 0.2; u < W / 2 - 0.1; u += 0.52) box('wood', u, u + 0.13, y0 - 0.34, y0 - 0.2, fr + 0.02, frontOf(storey - 1) + 0.1, OAK, true);
@@ -233,7 +234,7 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
           // A brace from the foot of one post to the head of the next, leaning the way of its neighbours on that side of the wall.
           const lean = n < bays / 2;
           stick(f.P(lean ? a : c, y0 + 0.2, 0.09), f.P(lean ? c : a, y1 - 0.2, 0.09), 0.16, 0.13, OAK);
-          on(f, 'wood', a, c, sill + 1.0, sill + 1.1, 0.012, 0.16, OAK, true);
+          if (y1 - sill > 1.45) on(f, 'wood', a, c, sill + 1.0, sill + 1.1, 0.012, 0.16, OAK, true);
         }
       }
     });
@@ -316,7 +317,8 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
  */
 function imperialHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, poly } = k;
-  const W = b.w, D = b.d, T = 0.3, PLINTH = 0.5, H0 = 3.5, H1 = 4.0, H2 = 3.0, wash = b.colour, granite = shade(stone, 0.62);
+  const W = b.w, D = b.d, T = 0.3, PLINTH = 0.5, H0 = b.heights[0], H1 = b.heights[1], H2 = b.heights[2] ?? 3, wash = b.colour, granite = shade(stone, 0.62);
+  // (Windows are as tall as their storeys allow: the room they light is as high as the document says.)
   const y1 = PLINTH + H0, y2 = y1 + H1, top = b.storeys > 2 ? y2 + H2 : y2;
   const frame: Colour = [0.86, 0.85, 0.8], leaf: Colour = rng.pick([[0.1, 0.17, 0.13], [0.2, 0.12, 0.07], [0.12, 0.13, 0.2]] as Colour[]);
   const roofTone: Colour = rng.pick([[0.36, 0.45, 0.4], [0.4, 0.2, 0.16], [0.3, 0.31, 0.33]] as Colour[]);
@@ -327,9 +329,9 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const low: Gap[] = [], mid: Gap[] = [], high: Gap[] = [];
     for (let n = 0; n < bays; n++) {
       const c = centre(n);
-      low.push(n === o.door ? { s0: c - 0.85, s1: c + 0.85, y0: PLINTH - 0.01, y1: PLINTH + 2.95 } : { s0: c - 0.58, s1: c + 0.58, y0: PLINTH + 0.85, y1: PLINTH + 2.6 });
-      mid.push({ s0: c - 0.6, s1: c + 0.6, y0: y1 + 0.62, y1: y1 + 2.95 });
-      if (b.storeys > 2) high.push({ s0: c - 0.6, s1: c + 0.6, y0: y2 + 0.6, y1: y2 + 1.95 });
+      low.push(n === o.door ? { s0: c - 0.85, s1: c + 0.85, y0: PLINTH - 0.01, y1: PLINTH + Math.min(3.3, H0 - 0.55) } : { s0: c - 0.58, s1: c + 0.58, y0: PLINTH + 0.85, y1: PLINTH + H0 - 0.9 });
+      mid.push({ s0: c - 0.6, s1: c + 0.6, y0: y1 + 0.62, y1: y1 + H1 - 1.05 });
+      if (b.storeys > 2) high.push({ s0: c - 0.6, s1: c + 0.6, y0: y2 + 0.6, y1: y2 + H2 - 1.05 });
     }
     on(f, 'stone', -0.07, f.L + 0.07, 0, PLINTH, -0.07, T, granite);
     pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, wash, low, 0.44);

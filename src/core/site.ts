@@ -218,7 +218,9 @@ export interface Grotto {
  * `x`, `z` is the middle of the ground it stands on; `w` is its breadth along its front and `d`
  * its depth from front to back, both outside its walls. `faces` is the way its front looks: `e`
  * towards greater x, `w` towards lesser. `storeys` counts the ground storey; the roof is above the
- * last. `bays` is how many windows stand in a row across the front. `colour` is the wash on its
+ * last. `heights` is how high each storey is, from its floor to the floor above, the ground storey
+ * first; they differ from building to building and from storey to storey, as they do in a real
+ * street. `bays` is how many windows stand in a row across the front. `colour` is the wash on its
  * walls, or what fills the spaces between its timbers.
  *
  * Of the style `timber`: a framed house of posts, rails and braces on a ground storey of plastered
@@ -239,6 +241,7 @@ export interface Building {
   d: number;
   faces: 'e' | 'w';
   storeys: number;
+  heights: number[];
   bays: number;
   colour: [number, number, number];
   jetty?: number;
