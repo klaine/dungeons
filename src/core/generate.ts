@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, Site, SKIES, Stone, Way, WHEN } from './site';
+import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -240,6 +240,138 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
     if (kind === 'ruin') place('ruin', [4.2, 5.2], 6, 22);
   }
   site.features = features;
+  layOutWater(site, meadow, fromTrack, rng.fork('water'));
+}
+
+/**
+ * Water in the valley. A pond is given a size, anything from a pool to a lake, and a shore that
+ * swells where there is room and draws in from the track and from whatever else stands near. A
+ * stream is led to it from a spring under the rock on its own side of the valley, and another
+ * out of it to a sink at the foot of the rim; a valley with no pond may still have a stream
+ * running down one side. Water keeps to one side of the track, so nothing has to be bridged.
+ * All this is drawn from a stream of chance of its own, so that what was already in a valley is
+ * where it was.
+ */
+function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const g = site.grounds!, features = site.features!, track = site.track!;
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const trackX = (z: number): number => {
+    for (let k = 0; k < track.length - 1; k++) {
+      if (z <= track[k + 1][1] || k === track.length - 2) {
+        const t = Math.min(1, Math.max(0, (z - track[k][1]) / (track[k + 1][1] - track[k][1])));
+        return track[k][0] + (track[k + 1][0] - track[k][0]) * t;
+      }
+    }
+    return track[0][0];
+  };
+  // Whether a point of ground is free for water: clear of the track, the meadow, the rim, and anything else out here.
+  const free = (x: number, z: number, margin: number, but?: Feature): boolean => {
+    if (fromTrack(x, z) < 3 + margin) return false;
+    if (x < g.x0 + 12 + margin || x > g.x1 - 12 - margin || z > g.z1 - 12 - margin || z < meadow.z1 + 4 + margin) return false;
+    return !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.1) + 1.5 + margin);
+  };
+
+  // A valley that was given no pond may have a pool of its own.
+  if (!features.some((f) => f.kind === 'pond') && rng.chance(0.45)) {
+    for (let tries = 0; tries < 40; tries++) {
+      const r = rng.range(4, 7), x = rng.range(g.x0 + 18, g.x1 - 18), z = rng.range(meadow.z1 + 10, g.z1 - 18);
+      if (!free(x, z, r) || fromTrack(x, z) > r + 22) continue;
+      features.push({ kind: 'pond', x: round(x), z: round(z), r: round(r) });
+      break;
+    }
+  }
+  const streams: Stream[] = [];
+  const pond = features.find((f) => f.kind === 'pond');
+  if (pond) {
+    // Pool, pond or lake; and a shore of its own.
+    const roll = rng.next();
+    const want = pond.r * (roll < 0.22 ? rng.range(0.42, 0.65) : roll < 0.6 ? rng.range(0.8, 1.25) : rng.range(1.6, 2.7));
+    const N = 20, long = rng.range(0, Math.PI), stretch = rng.range(0.08, 0.5), lobe = rng.range(0, Math.PI * 2), knots = rng.range(0, Math.PI * 2);
+    let shore: number[] = [];
+    for (let k = 0; k < N; k++) {
+      const a = (k / N) * Math.PI * 2, dx = Math.cos(a), dz = Math.sin(a);
+      const wish = want * Math.min(1.7, Math.max(0.6, 1 + stretch * Math.cos(2 * (a - long)) + 0.16 * Math.cos(3 * (a - lobe)) + 0.09 * Math.cos(5 * a + knots)));
+      // As far that way as the ground is free, and no further.
+      let reach = 2.5;
+      while (reach < wish && free(pond.x + dx * (reach + 0.5) * 1.12, pond.z + dz * (reach + 0.5) * 1.12, 0, pond)) reach += 0.5;
+      shore.push(reach);
+    }
+    for (let pass = 0; pass < 2; pass++) shore = shore.map((v, k) => Math.min(v, 0.25 * shore[(k + N - 1) % N] + 0.5 * v + 0.25 * shore[(k + 1) % N] + 0.4));
+    const r = shore.reduce((a, b) => a + b, 0) / N;
+    pond.r = round(r);
+    pond.shore = shore.map((v) => Math.round((v / pond.r) * 100) / 100);
+    // A lake of any size may have an island: off-centre, where there is most water.
+    if (pond.r >= 10.5 && rng.chance(0.65)) {
+      // (Away from the track, which is the side the landing stage is built on.)
+      const landward = Math.sign(trackX(pond.z) - pond.x) || 1;
+      let k = 0;
+      for (let q = 0; q < N; q++) if (Math.cos((q / N) * Math.PI * 2) * landward < 0.2 && (Math.cos((k / N) * Math.PI * 2) * landward >= 0.2 || shore[q] > shore[k])) k = q;
+      const a = (k / N) * Math.PI * 2 + rng.range(-0.3, 0.3), out = shoreOf(pond, Math.cos(a), Math.sin(a)) * rng.range(0.28, 0.4);
+      pond.isle = { x: round(pond.x + Math.cos(a) * out), z: round(pond.z + Math.sin(a) * out), r: round(rng.range(1.5, 2.8)) };
+    }
+  }
+  // Which side of the track the water keeps to.
+  const side = pond ? Math.sign(pond.x - trackX(pond.z)) || 1 : rng.chance(0.5) ? 1 : -1;
+  const rimX = side < 0 ? g.x0 + 6.5 : g.x1 - 6.5;
+  const clear = (x: number, z: number, but?: Feature): boolean =>
+    Math.sign(x - trackX(z)) === side && fromTrack(x, z) > 4 && x > g.x0 + 5.5 && x < g.x1 - 5.5 && z < g.z1 - 5.5 && z > meadow.z1 + 3
+    && !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 0.9) + 2);
+  // A wandering line from one point to another over free ground, or nothing if there is no way.
+  const route = (from: [number, number], to: [number, number], but?: Feature): [number, number][] | null => {
+    const length = Math.hypot(to[0] - from[0], to[1] - from[1]), n = Math.max(1, Math.round(length / 8));
+    const px = -(to[1] - from[1]) / length, pz = (to[0] - from[0]) / length;
+    const line: [number, number][] = [[round(from[0]), round(from[1])]];
+    let drift = 0;
+    for (let k = 1; k < n; k++) {
+      const t = k / n, bx = from[0] + (to[0] - from[0]) * t, bz = from[1] + (to[1] - from[1]) * t;
+      drift = Math.max(-5, Math.min(5, drift + rng.range(-3, 3))) * Math.sin(Math.PI * t);
+      let ok = false;
+      for (const d of [drift, drift * 0.4, 0, -drift * 0.5, 3, -3, 6, -6]) {
+        if (!clear(bx + px * d, bz + pz * d, but)) continue;
+        line.push([round(bx + px * d), round(bz + pz * d)]);
+        ok = true;
+        break;
+      }
+      if (!ok) return null;
+    }
+    line.push([round(to[0]), round(to[1])]);
+    return line;
+  };
+  const width = round(rng.chance(0.3) ? rng.range(2.4, 3.8) : rng.range(1.0, 1.9));
+  const south = (x: number): [number, number] => [Math.min(g.x1 - 14, Math.max(g.x0 + 14, x)), g.z1 - 6.5];
+  if (pond) {
+    const edge = (tx: number, tz: number): [number, number] => {
+      const d = Math.hypot(tx - pond.x, tz - pond.z), ux = (tx - pond.x) / d, uz = (tz - pond.z) / d, r = shoreOf(pond, ux, uz) * 0.72;
+      return [pond.x + ux * r, pond.z + uz * r];
+    };
+    // In: from a spring under the rim on this side, somewhere up the valley from the pond.
+    if (rng.chance(0.85)) {
+      for (let tries = 0; tries < 6; tries++) {
+        const spring: [number, number] = [rimX, Math.min(g.z1 - 16, Math.max(meadow.z1 + 5, pond.z + rng.range(-26, 4)))];
+        const line = route(spring, edge(spring[0], spring[1]), pond);
+        if (line && line.length >= 2) { streams.push({ course: line, width, from: 'spring', to: 'pond' }); break; }
+      }
+    }
+    // Out: down the valley to a sink under the southern rim, or under the side rim further down.
+    if (rng.chance(streams.length ? 0.9 : 0.5)) {
+      for (let tries = 0; tries < 6; tries++) {
+        const sink: [number, number] = rng.chance(0.6) || pond.z > g.z1 - 34 ? south(pond.x + side * rng.range(0, 12) + rng.range(-5, 5)) : [rimX, Math.min(g.z1 - 14, pond.z + rng.range(14, 30))];
+        if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
+        const line = route(edge(sink[0], sink[1]), sink, pond);
+        if (line && line.length >= 2) { streams.push({ course: line, width: round(width + 0.2), from: 'pond', to: 'sink' }); break; }
+      }
+    }
+  } else if (rng.chance(0.55)) {
+    // No pond: a stream down one side of the valley, from a spring to a sink.
+    for (let tries = 0; tries < 8; tries++) {
+      const spring: [number, number] = [rimX, rng.range(meadow.z1 + 6, (meadow.z1 + g.z1) / 2)];
+      const sink = south(rimX - side * rng.range(10, 26));
+      if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
+      const line = route(spring, sink);
+      if (line && line.length >= 3) { streams.push({ course: line, width, from: 'spring', to: 'sink' }); break; }
+    }
+  }
+  if (streams.length) site.streams = streams;
 }
 
 /** How much there is to a site: loops, gating, things to find, variety. Higher is better. */

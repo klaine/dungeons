@@ -121,6 +121,37 @@ export interface Feature {
   z: number;
   /** Radius: of the hollow the pond lies in, of the ring, or of the ground the ruin stands on. */
   r: number;
+  /**
+   * For a pond: its outline. How far the edge of its hollow lies from the middle in each of an
+   * even ring of directions, starting towards +x and turning towards +z, as a share of `r`.
+   * Left out, the pond is round. A pond may be a pool a few paces across or a lake that fills
+   * its side of the valley; its shore bends away from the track and from whatever else is there.
+   */
+  shore?: number[];
+  /** For a lake: a small island in it, as where its middle is and how far it is across its top. */
+  isle?: { x: number; z: number; r: number };
+}
+
+/**
+ * Running water. It rises at a spring under the rock, or runs out of a pond; it ends in a pond,
+ * or goes to ground in a sink at the foot of the rim. The builder cuts it a bed that falls all
+ * the way, so it never runs uphill, however the ground lies.
+ */
+export interface Stream {
+  /** The line it follows, in order from where it begins to where it ends. */
+  course: [number, number][];
+  /** How broad it is, in metres: a brook is one or two, a small river three or four. */
+  width: number;
+  from: 'spring' | 'pond';
+  to: 'pond' | 'sink';
+}
+
+/** How far the edge of a pond's hollow is from its middle in the direction of (dx, dz), in metres. */
+export function shoreOf(f: Feature, dx: number, dz: number): number {
+  if (!f.shore || !f.shore.length) return f.r;
+  const n = f.shore.length, a = ((Math.atan2(dz, dx) / (Math.PI * 2)) * n + n) % n;
+  const i = Math.floor(a), t = a - i, u = t * t * (3 - 2 * t);
+  return f.r * (f.shore[i % n] + (f.shore[(i + 1) % n] - f.shore[i % n]) * u);
 }
 
 export interface Site {
@@ -143,6 +174,8 @@ export interface Site {
   track?: [number, number][];
   /** Things in the valley worth walking to. */
   features?: Feature[];
+  /** Running water in the valley, if there is any. */
+  streams?: Stream[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

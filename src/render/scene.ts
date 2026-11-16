@@ -99,8 +99,13 @@ export interface SceneDescription {
   fences?: { min: Vector3; max: Vector3 }[];
   /** Points along the way from where the player arrives to the door, for anything that must walk it. */
   track?: [number, number][];
-  /** Still water: a level surface over a hollow in the ground. */
-  water?: { x: number; z: number; r: number; level: number }[];
+  /**
+   * Still water: a level surface over a hollow in the ground. `outline` is its edge as x and z in
+   * turn, going round; without one it is a disc of radius `r`.
+   */
+  water?: { x: number; z: number; r: number; level: number; outline?: number[] }[];
+  /** Running water: the middle of its surface as x, y and z in turn, from where it rises to where it ends, and its breadth. Optionally how far it reaches to the left and right of each point and how much of it shows there (0 to 1). */
+  streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
   /** Small things left lying about for whoever walks that far. */
   finds?: { at: Vector3; what: string }[];
 }

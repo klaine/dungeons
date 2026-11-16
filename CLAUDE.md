@@ -40,13 +40,16 @@ Keep these up to date in the same commit as the change they describe.
 ## What has been measured, and what has not
 
 Measured in November 2026 on a desktop with a Radeon RX 6800, in the app's embedded browser: a
-site builds in 4 to 5 seconds (it was 2 before the cliffs were carved; about 1.4 seconds of it is
-the valley rim) and its light bakes in 15 to 22 seconds. The frame rate sat at the browser's cap
-(144, later 60), so how much headroom is left there is not known. An iPad was reported to run the
-earlier, lighter scene well on high; it has not been tried since the cliffs, the trees with
-branches and the doubled leaf count went in, and that is the first thing to try. Sound has been
-measured for level but still never listened to.
+site builds in 5 to 6 seconds (it was 2 before the cliffs were carved; about 1.4 seconds of it is
+the valley rim, and the water and its stones added the last second) and its light bakes in 15 to 22
+seconds. With a lake in view, a frame at 1063 by 650 took about 15 milliseconds, of which some 6 are
+the second drawing of the scene that the water mirrors; away from water it took 8 to 10. Those are
+times for drawing frames back to back, not a frame rate seen in play, which sat at the browser's
+cap (144, later 60). An iPad was reported to run the earlier, lighter scene well on high; it has not
+been tried since the cliffs, the trees with branches, the doubled leaf count, the clouds and the
+mirroring water went in, and that is the first thing to try. Sound has been measured for level but
+still never listened to.
 
-The scene is now about a million triangles in the site, 400,000 in rock, and 250,000 to 300,000
-vegetation cards, of which some 200,000 are leaves (thinned to three quarters and to half at the
+The scene is now about a million triangles in the site, 450,000 to 600,000 in rock, and 280,000 to
+340,000 vegetation cards, of which some 200,000 are leaves (thinned to three quarters and to half at the
 medium and low levels of detail).

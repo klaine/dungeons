@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
-import { Place, Side, Site, SKIES, Way } from '../core/site';
+import { Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
@@ -213,7 +213,48 @@ export function meshSite(site: Site): SceneDescription {
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
     const openings = [...house.filter((q) => q.roof === 'sky').map((q) => ({ x0: q.x0, x1: q.x1, z0: q.z0, z1: q.z1 })), ...skylights];
-    const ponds = lies.filter((f) => f.kind === 'pond').map((f) => ({ ...f, level: f.base - 0.42 }));
+    const pondList = lies.filter((f) => f.kind === 'pond');
+    // How far out a point lies in a pond's hollow: 0 at its middle, 1 at its edge, whatever its shape.
+    const across = (f: (typeof lies)[number], x: number, z: number) => Math.hypot(x - f.x, z - f.z) / shoreOf(f, x - f.x, z - f.z);
+    // How deep the hollow is: a pool is a paddle, a lake is over your head.
+    const hollow = (f: (typeof lies)[number]) => Math.min(2.8, Math.max(1, 0.75 + 0.13 * f.r));
+    /**
+     * Running water, as the ground knows it: a line of points down which a bed has been cut. The
+     * height of the bed at each point is in `bed`, and falls all the way: see where they are made.
+     */
+    interface Channel { x: number[]; z: number[]; bed: number[]; half: number; depth: number; x0: number; x1: number; z0: number; z1: number }
+    const channels: Channel[] = [];
+    const nearest = { d: 0, bed: 0, half: 0, depth: 0, t: 0 };
+    /** The nearest point of a channel to a point of ground, written to `nearest`; false if the channel is nowhere near. */
+    const along = (c: Channel, x: number, z: number, reach: number): boolean => {
+      if (x < c.x0 - reach || x > c.x1 + reach || z < c.z0 - reach || z > c.z1 + reach) return false;
+      // Every sixth point first: if none of those is anywhere near, none of the rest is either.
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < c.x.length; i += 6) {
+        const d = (c.x[i] - x) * (c.x[i] - x) + (c.z[i] - z) * (c.z[i] - z);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD > (reach + 5) * (reach + 5)) return false;
+      for (let i = Math.max(0, best - 6); i < Math.min(c.x.length, best + 7); i++) {
+        const d = (c.x[i] - x) * (c.x[i] - x) + (c.z[i] - z) * (c.z[i] - z);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (bestD > reach * reach + 4) return false;
+      // Between that point and whichever neighbour is nearer, the true nearest point lies on the line joining them.
+      nearest.d = Math.sqrt(bestD); nearest.bed = c.bed[best]; nearest.t = best;
+      for (const o of [best - 1, best]) {
+        if (o < 0 || o >= c.x.length - 1) continue;
+        const ax = c.x[o], az = c.z[o], bx = c.x[o + 1] - ax, bz = c.z[o + 1] - az;
+        const t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz)));
+        const d = Math.hypot(x - ax - bx * t, z - az - bz * t);
+        if (d <= nearest.d) { nearest.d = d; nearest.bed = c.bed[o] + (c.bed[o + 1] - c.bed[o]) * t; nearest.t = o + t; }
+      }
+      // It is broader where it rises and where it ends: a spring has its pool, and so has a sink.
+      const end = Math.min(nearest.t, c.x.length - 1 - nearest.t);
+      nearest.half = c.half * (1 + 0.8 * (1 - smooth(end / 3)));
+      nearest.depth = c.depth;
+      return true;
+    };
     const rings = lies.filter((f) => f.kind === 'stones');
     const ruins = lies.filter((f) => f.kind === 'ruin');
     const groundBase = (x: number, z: number): number => {
@@ -224,10 +265,17 @@ export function meshSite(site: Site): SceneDescription {
       for (const f of lies) {
         const d = Math.hypot(x - f.x, z - f.z);
         if (f.kind === 'pond') {
-          if (d > f.r * 1.75) continue;
-          const k = 1 - smooth((d - f.r) / (f.r * 0.7));
+          if (d > f.r * 3.2) continue;
+          const rho = across(f, x, z);
+          if (rho > 1.75) continue;
+          const k = 1 - smooth((rho - 1) / 0.7);
           y += (f.base - y) * k;
-          y -= 1.9 * (1 - smooth((d - f.r * 0.22) / (f.r * 0.75)));
+          y -= hollow(f) * (1 - smooth((rho - 0.22) / 0.75));
+          // An island is a mound of the bed that comes up through the water to stand a little above it.
+          if (f.isle) {
+            const di = Math.hypot(x - f.isle.x, z - f.isle.z);
+            if (di < f.isle.r * 2.6) y += Math.max(0, f.base + 0.3 - y) * (1 - smooth((di - f.isle.r * 0.7) / (f.isle.r * 1.9)));
+          }
           even = Math.min(even, 1 - 0.8 * k);
         } else if (f.kind === 'stones') {
           if (d > f.r * 3.4) continue;
@@ -242,6 +290,15 @@ export function meshSite(site: Site): SceneDescription {
         }
       }
       y += ((fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough) * even;
+      // Running water has cut itself a bed: flat in the middle, with banks that lie back the
+      // further the deeper it has had to cut. Ground is only ever taken away, never built up.
+      for (const c of channels) {
+        if (!along(c, x, z, 9)) continue;
+        const cut = y - nearest.bed, bank = 0.7 + Math.max(0, cut) * 1.3;
+        if (cut <= 0 || nearest.d > nearest.half + bank) continue;
+        const floor = nearest.bed + 0.1 * Math.min(1, nearest.d / nearest.half) ** 2;
+        y = floor + (y - floor) * smooth((nearest.d - nearest.half) / bank);
+      }
       const wobble = wobbleAt(x, z);
       // The hillside is level with the roofline over the house and rises behind it; beside the
       // house it starts to rise at once.
@@ -266,6 +323,57 @@ export function meshSite(site: Site): SceneDescription {
       return y + smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
     };
     const slopeOf = (f: (x: number, z: number) => number, x: number, z: number, e: number) => Math.hypot(f(x + e, z) - f(x - e, z), f(x, z + e) - f(x, z - e)) / (2 * e);
+
+    /**
+     * Water. The site says where the streams run; here each is cut a bed. Its line is smoothed
+     * and walked from its beginning to its end, and the bed is kept a hand below the ground as
+     * it lies, but never allowed to rise: where the ground comes up in the way, the bed cuts
+     * through it, and the stream runs in a gully. A stream that feeds a pond sets the pond's
+     * level, if it arrives lower than the pond would otherwise lie; a stream that leaves a pond
+     * starts from that level. So water runs downhill everywhere, whatever the ground was.
+     */
+    const cutBed = (stream: NonNullable<Site['streams']>[number]): void => {
+      // A smooth curve through the points of the course, sampled about every metre.
+      const pts = stream.course, xs: number[] = [], zs: number[] = [];
+      for (let k = 0; k < pts.length - 1; k++) {
+        const a = pts[Math.max(0, k - 1)], b = pts[k], c = pts[k + 1], d = pts[Math.min(pts.length - 1, k + 2)];
+        const n = Math.max(2, Math.round(Math.hypot(c[0] - b[0], c[1] - b[1]) / 1.1));
+        for (let i = 0; i < n + (k === pts.length - 2 ? 1 : 0); i++) {
+          const t = i / n, t2 = t * t, t3 = t2 * t;
+          xs.push(0.5 * (2 * b[0] + (c[0] - a[0]) * t + (2 * a[0] - 5 * b[0] + 4 * c[0] - d[0]) * t2 + (3 * b[0] - a[0] - 3 * c[0] + d[0]) * t3));
+          zs.push(0.5 * (2 * b[1] + (c[1] - a[1]) * t + (2 * a[1] - 5 * b[1] + 4 * c[1] - d[1]) * t2 + (3 * b[1] - a[1] - 3 * c[1] + d[1]) * t3));
+        }
+      }
+      const lake = (k: number) => pondList.reduce((best, f) => (Math.hypot(f.x - xs[k], f.z - zs[k]) < Math.hypot(best.x - xs[k], best.z - zs[k]) ? f : best), pondList[0]);
+      const from = stream.from === 'pond' && pondList.length ? lake(0) : null, to = stream.to === 'pond' && pondList.length ? lake(xs.length - 1) : null;
+      // How deep the water stands over its bed, and how far the bed is cut below the ground: a
+      // river lies lower between its banks than a brook does. The water is always well under
+      // the grass on either side, so that what is seen of it is seen between banks.
+      const depth = 0.14 + 0.035 * stream.width, sunk = 0.3 + 0.06 * stream.width;
+      const bed: number[] = [];
+      for (let k = 0; k < xs.length; k++) {
+        const natural = groundBase(xs[k], zs[k]) - sunk;
+        const step = k ? Math.hypot(xs[k] - xs[k - 1], zs[k] - zs[k - 1]) * 0.005 : 0;
+        // Water leaving a pond leaves at the pond's own level, not a hand above it.
+        bed.push(k === 0 ? (from ? from.base - 0.42 - depth - 0.02 : natural) : Math.min(bed[k - 1] - step, natural));
+      }
+      if (to) {
+        // Where the stream comes to the edge of the pond's hollow. The pond can lie no higher
+        // than the stream arrives there; if it would, the pond is set lower.
+        let rim = 0;
+        for (let k = 0; k < xs.length; k++) if (across(to, xs[k], zs[k]) >= 1) rim = k;
+        const level = to.base - 0.42;
+        if (bed[rim] < level + 0.05) to.base -= Math.min(1.6, level + 0.05 - bed[rim]);
+        // From there it runs down the bank and in under the pond's surface.
+        const surface = to.base - 0.42, last = xs.length - 1;
+        for (let k = rim + 1; k <= last; k++) bed[k] = Math.min(bed[rim], bed[rim] + (surface - depth - bed[rim]) * ((k - rim) / Math.max(1, last - rim)));
+      }
+      channels.push({ x: xs, z: zs, bed, half: stream.width / 2, depth, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) });
+    };
+    // Streams into ponds first, since they settle how the ponds lie; then the rest.
+    for (const st of (site.streams ?? []).filter((q) => q.to === 'pond')) cutBed(st);
+    for (const st of (site.streams ?? []).filter((q) => q.to !== 'pond')) cutBed(st);
+    const ponds = pondList.map((f) => Object.assign(f, { level: f.base - 0.42 }));
 
     /**
      * The rock of the valley. The plain shape above gives a smooth wall round the valley and a
@@ -478,9 +586,17 @@ export function meshSite(site: Site): SceneDescription {
     const turfAt = (x: number, z: number): Colour => {
       const c = turfColour(x, z, s1);
       // Bare earth shows where feet have worn the grass away, and where stones have come down on it.
-      const fallen = walled && loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0;
+      let fallen = walled && loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0;
+      // The bed of a stream is gravel and mud, not turf.
+      for (const c of channels) if (along(c, x, z, 2)) fallen = Math.max(fallen, 0.75 * (1 - smooth((nearest.d - nearest.half) / 0.5)));
+      // So is the bed of a pond, from a little above the water line down.
+      for (const f of pondList) if (Math.abs(x - f.x) < f.r * 2 && Math.abs(z - f.z) < f.r * 2) fallen = Math.max(fallen, 0.8 * (1 - smooth((across(f, x, z) - 0.7) / 0.1)));
       const w = Math.max(fallen, worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2)));
-      return [c[0] + (3.1 - c[0]) * w, c[1] + (0.92 - c[1]) * w, c[2] + (2.6 - c[2]) * w];
+      // Under running water it is wet, and dark with it: so a stream's bed is not taken for a path.
+      let wet = 0;
+      for (const c of channels) if (along(c, x, z, 2)) wet = Math.max(wet, 1 - smooth((nearest.d - nearest.half - 0.1) / 0.5));
+      const dark = 1 - 0.55 * wet;
+      return [(c[0] + (3.1 - c[0]) * w) * dark, (c[1] + (0.92 - c[1]) * w) * dark, (c[2] + (2.6 - c[2]) * w) * dark];
     };
     const cliff = site.top - p.floor + 0.5;
     /** Carves one patch of the land: rock where it is steep, turf where it is level, scree where debris lies. */
@@ -547,6 +663,8 @@ export function meshSite(site: Site): SceneDescription {
     // Roots, twigs, bushes and the low boughs of firs: wood that is drawn but stops nobody.
     wild.group = 'soft';
     const softBark = wild.mesh('bark');
+    // And stones too small to stop anybody: the cobbles of a stream's bed.
+    const softRock = wild.mesh('rock');
     wild.group = 'wild';
     // The scarp at the head of the valley, either side of the meadow, is near enough the door to
     // be baked with the house; the rest of the rim takes its light from the open sky.
@@ -698,8 +816,21 @@ export function meshSite(site: Site): SceneDescription {
     const inGrounds = (x: number, z: number, m: number) => x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m;
     const offTrack = (x: number, z: number) => Math.abs(x - pathAt(z)) - pathHalf;
     // How far a point is outside whatever lies in the valley: negative inside a pond's hollow or a ring.
-    const clearOfFeatures = (x: number, z: number) => Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - f.r * (f.kind === 'pond' ? 1.0 : f.kind === 'stones' ? 1.5 : 1.15)));
-    const waterOver = (x: number, z: number, y: number) => Math.max(-Infinity, ...ponds.map((f) => (Math.hypot(x - f.x, z - f.z) < f.r * 1.2 ? f.level - y : -Infinity)));
+    const clearOfFeatures = (x: number, z: number) => {
+      let clear = Math.min(Infinity, ...lies.map((f) => Math.hypot(x - f.x, z - f.z) - (f.kind === 'pond' ? shoreOf(f, x - f.x, z - f.z) : f.r * (f.kind === 'stones' ? 1.5 : 1.15))));
+      for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
+      return clear;
+    };
+    // How deep the water stands over a point of ground at height `y`: less than nothing if it is dry.
+    // Whether that water is running is left in `running`.
+    let running = false;
+    const waterOver = (x: number, z: number, y: number) => {
+      let deep = Math.max(-Infinity, ...ponds.map((f) => (across(f, x, z) < 1.2 ? f.level - y : -Infinity)));
+      running = false;
+      // A stream is as wide as its banks let it be, which is wider than its bed where they lie back.
+      for (const c of channels) if (along(c, x, z, 5) && nearest.d < nearest.half + 2.5 && nearest.bed + nearest.depth - y > deep) { deep = nearest.bed + nearest.depth - y; running = true; }
+      return deep;
+    };
     // More boulders, some of them large, away from the track.
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
@@ -707,9 +838,33 @@ export function meshSite(site: Site): SceneDescription {
       if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
+    // Small stones are a dozen shapes carved once and set down again and again, each turned,
+    // sized and tinted differently. They are carved only when the first is wanted.
+    // The smallest, a stream's cobbles, are carved more coarsely: there are hundreds of them and each is a hand across.
+    const stoneShapes: (MeshBuilder[] | null)[] = [null, null];
+    const layStone = (into: MeshBuilder, x: number, y: number, z: number, size: number, tone: number, q: Rng, coarse = false) => {
+      const shapes = (stoneShapes[coarse ? 1 : 0] ??= Array.from({ length: 12 }, (_, k) => {
+        const form = boulderForm(rng.fork(`scree${k}`), 0.3, rockKind), m = new MeshBuilder();
+        carveRock(m, form.density, {
+          min: V(-form.reach, -form.sink, -form.reach), max: V(form.reach, form.rise, form.reach), cell: coarse ? 0.17 : 0.1, uvScale: 0.5, fromSamples: true, occlusion: [0.1, 0.2], sharp: true,
+          shade: (_c, _n, _f, _o, open) => [open, open, open],
+        });
+        return m;
+      }));
+      const shape = q.pick(shapes), k = size / 0.3, turn = q.range(0, Math.PI * 2), cos = Math.cos(turn), sin = Math.sin(turn);
+      into.append(shape, (v) => {
+        const px = v.p[0] * k, pz = v.p[2] * k, nx = v.n[0], nz = v.n[2];
+        v.p[0] = x + px * cos - pz * sin; v.p[1] = y + v.p[1] * k; v.p[2] = z + px * sin + pz * cos;
+        v.n[0] = nx * cos - nz * sin; v.n[2] = nx * sin + nz * cos;
+        const open = v.colour[0] * Math.min(1, 0.55 + (v.p[1] - y) / size + 0.5);
+        const c = rockColour(tone * (0.55 + 0.45 * open));
+        v.colour[0] = c[0]; v.colour[1] = c[1]; v.colour[2] = c[2];
+        v.field[0] = Math.max(0, v.n[1]) * 0.6; v.field[3] = 0.2;
+        v.open = open;
+      });
+    };
     // What has come down off the cliffs: blocks lying on the scree and out from its foot, and
-    // the scree itself, which is small stones by the hundred. The small ones are a dozen shapes
-    // carved once and set down again and again, each turned, sized and tinted differently.
+    // the scree itself, which is small stones by the hundred.
     let screeLaid = 0;
     if (walled) {
       const fall = rng.fork('rockfall');
@@ -722,30 +877,71 @@ export function meshSite(site: Site): SceneDescription {
         if (fall.chance(0.012 * Math.min(1, depth / 0.4)) && clearOfStones(x, z, 1.2)) boulder(sceneryMesh('rock'), x, z, fall.chance(0.25) ? fall.range(1.1, 1.9) : fall.range(0.45, 1), fall);
         else if (fall.chance(0.5 * Math.min(1, depth / 0.5))) lying.push([x, z, fall.range(0.1, 0.24) + 0.25 * fall.next() * fall.next()]);
       }
-      const shapes = Array.from({ length: 12 }, (_, k) => {
-        const form = boulderForm(rng.fork(`scree${k}`), 0.3, rockKind), m = new MeshBuilder();
-        carveRock(m, form.density, {
-          min: V(-form.reach, -form.sink, -form.reach), max: V(form.reach, form.rise, form.reach), cell: 0.1, uvScale: 0.5, fromSamples: true, occlusion: [0.1, 0.2], sharp: true,
-          shade: (_c, _n, _f, _o, open) => [open, open, open],
-        });
-        return m;
-      });
       const into = sceneryMesh('rock');
-      for (const [x, z, size] of lying) {
-        const shape = fall.pick(shapes), k = size / 0.3, turn = fall.range(0, Math.PI * 2), cos = Math.cos(turn), sin = Math.sin(turn);
-        const y = ground(x, z) + size * fall.range(0.05, 0.3), tone = fall.range(0.6, 1.1);
-        into.append(shape, (v) => {
-          const px = v.p[0] * k, pz = v.p[2] * k, nx = v.n[0], nz = v.n[2];
-          v.p[0] = x + px * cos - pz * sin; v.p[1] = y + v.p[1] * k; v.p[2] = z + px * sin + pz * cos;
-          v.n[0] = nx * cos - nz * sin; v.n[2] = nx * sin + nz * cos;
-          const open = v.colour[0] * Math.min(1, 0.55 + (v.p[1] - y) / size + 0.5);
-          const c = rockColour(tone * (0.55 + 0.45 * open));
-          v.colour[0] = c[0]; v.colour[1] = c[1]; v.colour[2] = c[2];
-          v.field[0] = Math.max(0, v.n[1]) * 0.6; v.field[3] = 0.2;
-          v.open = open;
-        });
-      }
+      for (const [x, z, size] of lying) layStone(into, x, ground(x, z) + size * fall.range(0.05, 0.3), z, size, fall.range(0.6, 1.1), fall);
       screeLaid = lying.length;
+    }
+    // The bed of a stream is cobbles: the current has carried off everything smaller. Most lie
+    // under the water and show through it; along the edges, and here and there in the middle,
+    // they stand out of it, and it is these that make running water look as if it runs.
+    {
+      const bedded = rng.fork('cobbles');
+      for (const c of channels) {
+        for (let k = 1; k < c.x.length - 1; k++) {
+          const ax = c.x[k], az = c.z[k], bx = c.x[k + 1] - ax, bz = c.z[k + 1] - az, l = Math.hypot(bx, bz) || 1;
+          // Not where it runs out into still water: a pond's bed is mud.
+          if (ponds.some((f) => across(f, ax, az) < 1.05)) continue;
+          for (let j = 0, n = Math.round(l * (4.5 + 2.5 * c.half)); j < n; j++) {
+            const t = bedded.next(), edge = bedded.chance(0.55);
+            // Either along one edge of the bed, or anywhere across it.
+            const off = edge ? (bedded.chance(0.5) ? 1 : -1) * c.half * bedded.range(0.8, 1.25) : c.half * bedded.range(-0.85, 0.85);
+            const x = ax + bx * t - (bz / l) * off, z = az + bz * t + (bx / l) * off;
+            const size = edge ? bedded.range(0.1, 0.22) + 0.22 * bedded.next() * bedded.next() : bedded.range(0.07, 0.17) + (bedded.chance(0.06) ? bedded.range(0.1, 0.25) : 0);
+            // Wet stone is dark stone.
+            layStone(softRock, x, ground(x, z) + size * bedded.range(-0.1, 0.25), z, size, bedded.range(0.34, 0.7), bedded, size < 0.3);
+          }
+        }
+      }
+    }
+    // Rocks in the shallows of every pond but the smallest, half in the water and half out, and
+    // on its island if it has one.
+    {
+      const stony = rng.fork('shallows');
+      for (const f of ponds) {
+        if (f.r < 4.5) continue;
+        // (The side the landing stage is built on is kept clear, as it is of reeds.)
+        let near = 0, nearD = Infinity;
+        for (let z = f.z - 30; z <= f.z + 30; z += 1) {
+          const d = Math.hypot(pathAt(z) - f.x, z - f.z);
+          if (d < nearD) { nearD = d; near = z; }
+        }
+        const jx = (pathAt(near) - f.x) / nearD, jz = (near - f.z) / nearD;
+        for (let k = 0, n = Math.round(f.r * 0.9); k < n; k++) {
+          const a = stony.range(0, Math.PI * 2), out = shoreOf(f, Math.cos(a), Math.sin(a)) * stony.range(0.6, 0.86), size = stony.range(0.3, 0.75) + (stony.chance(0.2) ? stony.range(0.3, 0.7) : 0);
+          if (Math.cos(a) * jx + Math.sin(a) * jz > 0.8) continue;
+          boulder(sceneryMesh('rock'), f.x + Math.cos(a) * out, f.z + Math.sin(a) * out, size, stony.fork(`s${k}`));
+        }
+        if (f.isle) for (let k = 0; k < 3; k++) {
+          const a = stony.range(0, Math.PI * 2), out = f.isle.r * stony.range(0.5, 1.1);
+          boulder(sceneryMesh('rock'), f.isle.x + Math.cos(a) * out, f.isle.z + Math.sin(a) * out, stony.range(0.4, 0.9), stony.fork(`i${k}`));
+        }
+      }
+    }
+    // Where a stream rises and where it goes to ground there are boulders: the spring comes
+    // out from among them, and the sink takes the water down between them.
+    {
+      const wet = rng.fork('springs');
+      (site.streams ?? []).forEach((st, k) => {
+        for (const [end, towards] of [[st.course[0], st.course[1]], [st.course[st.course.length - 1], st.course[st.course.length - 2]]] as const) {
+          if ((end === st.course[0] ? st.from : st.to) === 'pond') continue;
+          // Behind the end of the stream, away from the way it runs, and to either side of it.
+          const l = Math.hypot(end[0] - towards[0], end[1] - towards[1]) || 1, ux = (end[0] - towards[0]) / l, uz = (end[1] - towards[1]) / l;
+          for (const [back, sideways, size] of [[1.3, 0, 1.0], [0.5, 1.5, 0.75], [0.4, -1.4, 0.65], [1.9, 1.0, 0.55], [1.7, -1.1, 0.5]]) {
+            const x = end[0] + ux * back * (1 + 0.4 * st.width) - uz * sideways * (1 + 0.25 * st.width), z = end[1] + uz * back * (1 + 0.4 * st.width) + ux * sideways * (1 + 0.25 * st.width);
+            boulder(sceneryMesh('rock'), x + wet.range(-0.3, 0.3), z + wet.range(-0.3, 0.3), size * wet.range(0.85, 1.3) * (0.8 + 0.12 * st.width), wet.fork(`b${k}`));
+          }
+        }
+      });
     }
     // Woods first, because what grows under and between trees depends on where they stand.
     // Trees thin out into glades, firs take the higher ground, and here and there a stand is in
@@ -805,6 +1001,13 @@ export function meshSite(site: Site): SceneDescription {
       }
     };
     const inFine = (x: number, z: number) => x > fine.x0 && x < fine.x1 && z > fine.z0 && z < fine.z1;
+    // An island carries a tree of its own: a pine or a spruce, small, as trees are on a rock in the water.
+    for (const f of ponds) {
+      if (!f.isle) continue;
+      const own = rng.fork(`isletree${f.x}`), y = ground(f.isle.x, f.isle.z), pine = own.chance(0.5);
+      growConifer(planting, barkMesh, f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: leafOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: softBark }, own);
+      canopies.push([f.isle.x, f.isle.z, 1.6, 1]);
+    }
     woods(fine, 6.2, eased, () => false);
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
 
@@ -836,7 +1039,9 @@ export function meshSite(site: Site): SceneDescription {
     };
     const wetAt = (x: number, z: number): number => {
       let w = 0.38 - (swells(x, z) - p.floor) * 0.2 + (fbm2(x * 0.05 + s1 * 2, z * 0.05 - s2, 3) - 0.5) * 0.5;
-      for (const f of ponds) w = Math.max(w, 1 - smooth((Math.hypot(x - f.x, z - f.z) - f.r * 0.75) / 9));
+      for (const f of ponds) w = Math.max(w, 1 - smooth((Math.hypot(x - f.x, z - f.z) - shoreOf(f, x - f.x, z - f.z) * 0.75) / 9));
+      // A stream waters its banks for a few paces either side.
+      for (const c of channels) if (along(c, x, z, 8)) w = Math.max(w, 1 - smooth((nearest.d - nearest.half) / 6));
       w += 0.3 * (1 - smooth((g.z1 - z - 3) / 9));
       return Math.min(1, Math.max(0, w - parched * 0.3));
     };
@@ -882,8 +1087,9 @@ export function meshSite(site: Site): SceneDescription {
         if (slopeOf(ground, x, z, 0.3) > 0.55 || !clearOfStones(x, z, -0.15)) continue;
         const y = ground(x, z);
         // Nothing grows under water; at its edge, reeds: tall, close and pale.
+        // Still water has them standing in it to the knee; a current keeps its bed clear.
         const depth = waterOver(x, z, y);
-        if (depth > 0.3) continue;
+        if (depth > (running ? 0.04 : 0.3)) continue;
         if (depth > -0.22) {
           for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5), plant.range(0, Math.PI), [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
           continue;
@@ -916,8 +1122,10 @@ export function meshSite(site: Site): SceneDescription {
       if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
       // Not inside the ring of stones or the walls of the hut.
       if (lies.some((f) => f.kind !== 'pond' && Math.hypot(x - f.x, z - f.z) < f.r * (f.kind === 'stones' ? 1.4 : 1.1))) continue;
+      // Nor on rock: the cliffs are carved out from where the heights put them, and grass set by the heights would hang in the air.
+      if (walled && rocky.holds(x, z) && (rocky.at(x, z) > 0.1 || loose.at(x, z) > 0.25)) continue;
       const y = ground(x, z);
-      if (waterOver(x, z, y) > -0.2 || t > want * (1 - 0.7 * thinAt(x, z))) continue;
+      if (waterOver(x, z, y) > -0.2 || t > want * (1 - 0.7 * thinAt(x, z)) || slopeOf(ground, x, z, 0.3) > 0.5) continue;
       const tall = (0.42 + 0.75 * wet) * (0.7 + 0.6 * fbm2(x * 0.21 + s1, z * 0.21 - s2, 2));
       const c = turfColour(x, z, s1), dry = Math.min(1, parched + Math.max(0, (0.4 - wet) * 2));
       planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, [(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
@@ -931,8 +1139,8 @@ export function meshSite(site: Site): SceneDescription {
         if (d < nearD) { nearD = d; near = z; }
       }
       const jx = (pathAt(near) - f.x) / nearD, jz = (near - f.z) / nearD;
-      for (let k = 0; k < f.r * f.r * 16; k++) {
-        const a = lush.range(0, Math.PI * 2), d = f.r * lush.range(0.5, 1.3), x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d;
+      for (let k = 0; k < Math.min(2600, f.r * f.r * 16); k++) {
+        const a = lush.range(0, Math.PI * 2), d = shoreOf(f, Math.cos(a), Math.sin(a)) * lush.range(0.5, 1.3), x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d;
         const h = lush.range(1.25, 2.2), w = lush.range(0.5, 0.9), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.15), patch = fbm2(x * 0.35 + s2, z * 0.35 + s1, 2);
         if (Math.cos(a) * jx + Math.sin(a) * jz > 0.86 || patch < 0.4) continue;
         const y = ground(x, z), depth = f.level - y;
@@ -1076,8 +1284,49 @@ export function meshSite(site: Site): SceneDescription {
     const beams = sceneryMesh('wood');
     let grain = 0;
     const beam = (ax: number, ay: number, az: number, bx: number, by: number, bz: number, w: number, d: number) => layBeam(beams, V(ax, ay, az), V(bx, by, bz), w, d, timber, (grain += 0.173));
+    // Running water, for whatever draws it: the line of its surface, how far the water reaches
+    // to either side at each point, and how much of it is to be shown there.
+    for (const c of channels) {
+      const n = c.x.length, line: number[] = [], reach: number[] = [], fade: number[] = [];
+      for (let k = 0; k < n; k++) {
+        const x = c.x[k], z = c.z[k];
+        let y = c.bed[k] + c.depth;
+        // At a spring and at a sink the water comes out of the ground and goes into it: it is not cut off square.
+        let shown = smooth(Math.min(k, n - 1 - k) / 2.5);
+        // Where it meets still water it comes to that water's level and is lost in it, so that
+        // there is one surface there and not one lying on another.
+        for (const f of ponds) {
+          const rho = across(f, x, z);
+          if (rho > 1.3) continue;
+          y = f.level + 0.004 + (y - f.level) * smooth((rho - 0.85) / 0.3);
+          shown = Math.min(shown, smooth((rho - 0.72) / 0.3));
+        }
+        line.push(x, y, z);
+        fade.push(shown);
+        // The water reaches as far as the ground stands above it, on each side: so its edge is
+        // the bank's, with the bank's bays and points, and not a ruled line.
+        const a = Math.max(0, k - 1), b = Math.min(n - 1, k + 1), l = Math.hypot(c.x[b] - c.x[a], c.z[b] - c.z[a]) || 1;
+        const sx = -(c.z[b] - c.z[a]) / l, sz = (c.x[b] - c.x[a]) / l;
+        for (const side of [1, -1]) {
+          // Where no bank is found (the ground falls away on that side) it is kept narrow.
+          let far = c.half + 0.3;
+          for (let d = 0.15; d < c.half * 1.8 + 1.6; d += 0.15) {
+            if (ground(x + sx * side * d, z + sz * side * d) > y + 0.01) { far = d + 0.3; break; }
+          }
+          reach.push(far);
+        }
+      }
+      // No narrower anywhere than its neighbours allow, or a bank that juts in would leave a gap behind it.
+      const banks = reach.map((_, i) => Math.max(reach[Math.max(i % 2, i - 2)], reach[i], reach[Math.min(reach.length - 2 + (i % 2), i + 2)]));
+      flows.push({ line, width: c.half * 2 + 0.5, banks, fade });
+    }
     for (const f of ponds) {
-      waters.push({ x: f.x, z: f.z, r: f.r * 1.15, level: f.level });
+      const outline: number[] = [];
+      for (let k = 0; k < 48; k++) {
+        const a = (k / 48) * Math.PI * 2, r = shoreOf(f, Math.cos(a), Math.sin(a)) * 1.12;
+        outline.push(f.x + Math.cos(a) * r, f.z + Math.sin(a) * r);
+      }
+      waters.push({ x: f.x, z: f.z, r: f.r * 1.15, level: f.level, outline });
       // A landing stage, built out from the bank nearest the track: a deck of planks on two
       // bearers, carried on posts that stand on the bed.
       let near = 0, nearD = Infinity;
@@ -1086,11 +1335,18 @@ export function meshSite(site: Site): SceneDescription {
         if (d < nearD) { nearD = d; near = z; }
       }
       const ux = (pathAt(near) - f.x) / nearD, uz = (near - f.z) / nearD;
-      const deck = f.level + 0.42;
-      let from = f.r * 1.3;
-      while (from > f.r * 0.5 && ground(f.x + ux * from, f.z + uz * from) > deck - 0.1) from -= 0.2;
+      const deck = f.level + 0.42, shore = shoreOf(f, ux, uz);
+      // A pool is too small to want a landing stage; what was lost there lies at the water's edge.
+      if (shore < 6) {
+        let d = shore;
+        while (d > shore * 0.4 && ground(f.x + ux * d, f.z + uz * d) > f.level + 0.1) d -= 0.2;
+        finds.push({ at: V(f.x + ux * (d + 0.3), ground(f.x + ux * (d + 0.3), f.z + uz * (d + 0.3)) + 0.35, f.z + uz * (d + 0.3)), what: 'a silver ring, lost at the edge of the pool' });
+        continue;
+      }
+      let from = shore * 1.3;
+      while (from > shore * 0.5 && ground(f.x + ux * from, f.z + uz * from) > deck - 0.1) from -= 0.2;
       from += 0.5;
-      const to = f.r * 0.2, half = 0.62;
+      const to = Math.max(shore * 0.2, from - 9), half = 0.62;
       const at = (d: number, side: number): [number, number] => [f.x + ux * d - uz * side, f.z + uz * d + ux * side];
       for (const side of [-half + 0.1, half - 0.1]) {
         const [ax, az] = at(from, side), [bx, bz] = at(to, side);
@@ -1203,7 +1459,8 @@ export function meshSite(site: Site): SceneDescription {
   const planting = new Planting();
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
-  const waters: { x: number; z: number; r: number; level: number }[] = [];
+  const waters: { x: number; z: number; r: number; level: number; outline?: number[] }[] = [];
+  const flows: { line: number[]; width: number; banks?: number[]; fade?: number[] }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
   const wild = new Kit(`${site.seed}/wild`);
@@ -1626,6 +1883,7 @@ export function meshSite(site: Site): SceneDescription {
     planted: censuses[0],
     fences,
     water: waters,
+    streams: flows,
     finds,
   };
 }

@@ -1,4 +1,4 @@
-import { Item, Lever, Place, Site, Way } from '../core/site';
+import { Item, Lever, Place, shoreOf, Site, Way } from '../core/site';
 
 /**
  * The plan map: a clean drawing of a site from above, north up. Drawn from the site document, so
@@ -84,12 +84,34 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     ctx.globalAlpha = 1;
     ctx.fillStyle = COURT;
     rect(g.x0, g.z0, g.x1, g.z1);
+    // Streams, drawn before the ponds they run into and out of.
+    ctx.strokeStyle = WATER;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const st of site.streams ?? []) {
+      ctx.lineWidth = Math.max(1.2 * ratio, st.width * scale);
+      ctx.beginPath();
+      st.course.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z))));
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+    ctx.lineJoin = 'miter';
     for (const f of site.features ?? []) {
       if (f.kind === 'pond') {
+        // The water covers about the inner three quarters of its hollow, whatever shape that is.
         ctx.fillStyle = WATER;
         ctx.beginPath();
-        ctx.arc(X(f.x), Z(f.z), f.r * 0.75 * scale, 0, Math.PI * 2);
+        for (let k = 0; k <= 40; k++) {
+          const a = (k / 40) * Math.PI * 2, r = shoreOf(f, Math.cos(a), Math.sin(a)) * 0.75;
+          if (k) ctx.lineTo(X(f.x + Math.cos(a) * r), Z(f.z + Math.sin(a) * r)); else ctx.moveTo(X(f.x + r), Z(f.z));
+        }
         ctx.fill();
+        if (f.isle) {
+          ctx.fillStyle = COURT;
+          ctx.beginPath();
+          ctx.arc(X(f.isle.x), Z(f.isle.z), f.isle.r * scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
       } else if (f.kind === 'ruin') {
         ctx.strokeStyle = INK;
         ctx.lineWidth = Math.max(1.2 * ratio, 0.6 * scale);

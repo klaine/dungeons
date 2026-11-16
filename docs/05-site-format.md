@@ -64,6 +64,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `grounds` | The open country that can be walked, as `x0`, `x1`, `z0`, `z1`: a valley with the house front along its north side (`z0`). It contains the approach. The player arrives near its south end. Absent if the site has no more than its approach. |
 | `track` | The way from the door down the valley, as `[x, z]` points from the door outwards. It is flagged as far as the edge of the approach and a worn track after that. The player arrives at the last point. |
 | `features` | Things out in the valley; see below. |
+| `streams` | Running water in the valley, if there is any; see below. May be absent. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -139,7 +140,13 @@ An item says which place it is in, not where in the place. The tool puts keys on
 "features": [ { "kind": "pond", "x": 41.2, "z": 88.5, "r": 9.1 }, { "kind": "stones", "x": 12.4, "z": 71.0, "r": 3.8 } ]
 ```
 
-A `pond` lies in a hollow of radius `r`, the water covering about the inner three quarters of it, with a landing stage built out from the bank nearest the track. `stones` is a ring of standing stones of radius `r` on a low rise, with a flat stone in the middle. A `ruin` is the broken walls of a small hut, about `1.2 r` by `r`, with its doorway on the side of the track. A valley holds two of the three, sometimes all. The tool leaves something small to be found at each. Heights are not in the document: the ground is made when the world is built.
+A `pond` lies in a hollow whose edge is `r` from its middle, or, if it has a `shore`, `r` times each number of `shore` in turn in an even ring of directions starting towards +x and turning towards +z (so a pond can be any rounded shape, from a pool of three metres to a lake of twenty). The water covers about the inner three quarters of the hollow. A pond of any size has a landing stage built out from the bank nearest the track; a pool has none. A lake may have an `isle`: a small island at `x`, `z`, about `r` across its top, standing a little above the water with a tree on it. `stones` is a ring of standing stones of radius `r` on a low rise, with a flat stone in the middle. A `ruin` is the broken walls of a small hut, about `1.2 r` by `r`, with its doorway on the side of the track. A valley holds two of the three, sometimes all. The tool leaves something small to be found at each. Heights are not in the document: the ground is made when the world is built.
+
+```json
+"streams": [ { "course": [[77.2, 74.6], [69.4, 75.6], [53.9, 77.3], [46.3, 73.9]], "width": 1.6, "from": "spring", "to": "pond" } ]
+```
+
+A stream follows `course`, a line of `[x, z]` points in the order the water runs, and is `width` metres broad. It begins at a `spring` under the rock of the rim or runs out of the `pond`, and ends in the `pond` or at a `sink` at the foot of the rim. Water keeps to one side of the track. The builder cuts each stream a bed that falls all the way along it, through any rise in the ground, and sets the pond's level by the stream that feeds it, so the document need not know the heights.
 
 ### The solution
 

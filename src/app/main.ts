@@ -43,9 +43,9 @@ const num = (key: string, fallback: number) => (params.has(key) ? Number(params.
  * their graphics modest.
  */
 const QUALITY = {
-  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0 },
-  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16 },
-  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28 },
+  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0 },
+  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 512 },
+  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
 };
 const coarse = window.matchMedia('(pointer: coarse)').matches;
 const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
@@ -113,6 +113,7 @@ async function start(): Promise<void> {
 
   const scene = new Scene();
   const camera = new PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.08, 900);
+  camera.layers.enable(1);
 
   // ------------------------------------------------------------------ materials
   hud.status.textContent = 'Generating materials';
@@ -180,7 +181,7 @@ async function start(): Promise<void> {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
       const next = new URLSearchParams(location.search);
       next.delete('quality');
-      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds');
+      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror');
       location.search = next.toString();
     });
     document.getElementById('begin')!.addEventListener('click', () => {
@@ -268,14 +269,28 @@ async function start(): Promise<void> {
       }
     }
     for (const cards of makeCards(set, paintCards(set.kind))) {
+      // What grows low on the ground is left out of the picture still water mirrors: there it is
+      // a fringe a few pixels high, and drawing it twice cost a tenth of the frame. The eye sees
+      // the second layer and the mirror does not. Reeds stand in the water and are kept.
+      if (cards.userData.ground && set.kind !== 'reed') cards.layers.set(1);
       scene.add(cards);
       scenic.push(cards);
       cardMeshes.push(cards);
     }
     cardTotal += set.matrices.length / 16;
   }
-  const water = new Water(desc.water ?? []);
+  // Deep water takes its colour from the sky over it: a dark green by day, nearly black by night.
+  const water = new Water(desc.water ?? [], desc.streams ?? [], {
+    mirror: Math.round(num('mirror', quality.mirror)),
+    zenith: SKY.zenith, horizon: SKY.horizon,
+    // Banks and trees with the light behind them; and foam, which is white, in the light there is.
+    land: SKY.ground.map((v) => v * 0.45),
+    foam: [0, 1, 2].map((c) => 0.6 * SKY.horizon[c] + 0.12 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
+    deep: [(0.55 * SKY.zenith[0] + 0.45 * SKY.horizon[0]) * 0.06 + 0.002, (0.55 * SKY.zenith[1] + 0.45 * SKY.horizon[1]) * 0.17 + 0.003, (0.55 * SKY.zenith[2] + 0.45 * SKY.horizon[2]) * 0.11 + 0.003],
+  });
   for (const m of water.meshes) { scene.add(m); scenic.push(m); }
+  // Each time the scene is drawn for the eye, the picture standing in the water is to be made again.
+  scene.onBeforeRender = (_renderer, _scene, viewer) => { if (viewer === camera) water.begin(); };
   const buildMs = performance.now() - t0;
 
   // One merged copy of everything, for collision and for the bake.
@@ -400,6 +415,9 @@ async function start(): Promise<void> {
     if (u.cloudCoverage) u.cloudCoverage.value = cloudSteps > 0 ? 0 : 0.32;
     if (u.cloudDensity) u.cloudDensity.value = 0.5;
     if (u.showSunDisc) u.showSunDisc.value = disc ? 1 : 0;
+    // Open sky is marked in the picture, by leaving its fourth channel empty, so that water
+    // mirroring the picture can tell sky from land and put the clouds where the sky is.
+    sky.material.fragmentShader = sky.material.fragmentShader.replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( texColor, 0.0 );');
     return sky;
   };
   const sky = makeSky(true);
@@ -437,6 +455,7 @@ async function start(): Promise<void> {
   atmosphere.uniforms.uSkyColor.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.75);
   // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
+  water.mirrorSky(atmosphere.uniforms);
   const night = desc.sun?.night ?? 0;
   {
     const u = atmosphere.uniforms;
