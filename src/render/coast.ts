@@ -143,6 +143,17 @@ export function buildCoast(c: CoastBuild): { deck: number } {
     box(at, 'stone', end * (W - 0.85), end * (W + 0.05), ridge + 1.0, ridge + 1.12, -D / 2 - 0.5, -D / 2 + 0.5, shade(stone, 0.7));
     // Things about the door: lobster pots, a fish box, a barrel.
     const side = doorAt > 0 ? -1 : 1;
+    // And now and then a net hung to dry between two poles beyond the gable: brown, sagging between them.
+    if (q.chance(0.55)) {
+      const a0 = -side * (W + 1.4), a1 = -side * (W + 1.4 + q.range(2.2, 3)), f = q.range(0.6, 1.8), top = q.range(1.7, 2.1), net: Colour = [0.2, 0.15, 0.09];
+      for (const a of [a0, a1]) box(at, 'wood', a - 0.05, a + 0.05, -0.3, top + 0.1, f - 0.05, f + 0.05, [0.3, 0.26, 0.2], 0.9);
+      const S = 6;
+      for (let k = 0; k < S; k++) {
+        const t0 = k / S, t1 = (k + 1) / S, sag = (t: number) => Math.sin(t * Math.PI) * 0.35;
+        const u0 = a0 + (a1 - a0) * t0, u1 = a0 + (a1 - a0) * t1;
+        solid('wood', [at(u0, top - sag(t0) - 1.1, f), at(u1, top - sag(t1) - 1.1, f), at(u1, top - sag(t1) - 1.1, f + 0.025), at(u0, top - sag(t0) - 1.1, f + 0.025), at(u0, top - sag(t0), f), at(u1, top - sag(t1), f), at(u1, top - sag(t1), f + 0.025), at(u0, top - sag(t0), f + 0.025)], net, 2.5);
+      }
+    }
     for (let k = 0; k < q.int(1, 4); k++) {
       const a = doorAt + side * (1.2 + k * 0.65), f = q.range(0.6, 1.4), y = 0, s = 0.28;
       if (Math.abs(a) > W + 1) break;
@@ -282,9 +293,9 @@ export function buildCoast(c: CoastBuild): { deck: number } {
     // Indoors the tower sees little sky: only what comes in at its door and windows.
     for (const m of ['plaster', 'stone', 'metal', 'glass', 'lamp']) mesh(m).setOpenBy((x, y, z) => (Math.hypot(x - lh.x, z - lh.z) < radiusAt(y - base) - wallT + 0.06 && y > base - 0.65 && y < base + top + 0.1 ? 0.22 : 1));
     // A low wall round the yard at its foot, whitewashed, open towards the door.
-    for (let k = 0; k < 40; k++) {
-      const a0 = (k / 40) * Math.PI * 2, a1 = ((k + 1) / 40) * Math.PI * 2, am = (a0 + a1) / 2, R = r0 + 5.2;
-      if (Math.abs(((am - lh.door + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.24) continue;
+    for (let k = 0; k < 56; k++) {
+      const a0 = (k / 56) * Math.PI * 2, a1 = ((k + 1) / 56) * Math.PI * 2, am = (a0 + a1) / 2, R = r0 + 9;
+      if (Math.abs(((am - lh.door + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.16) continue;
       const g0 = c.ground(lh.x + Math.cos(a0) * R, lh.z + Math.sin(a0) * R), g1 = c.ground(lh.x + Math.cos(a1) * R, lh.z + Math.sin(a1) * R);
       const lo = Math.min(g0, g1) - base - 0.4, hi = Math.max(g0, g1) - base + 0.95;
       solid('plaster', [ring(a0, R - 0.25, lo), ring(a1, R - 0.25, lo), ring(a1, R + 0.25, lo), ring(a0, R + 0.25, lo), ring(a0, R - 0.25, hi), ring(a1, R - 0.25, hi), ring(a1, R + 0.25, hi), ring(a0, R + 0.25, hi)], white);

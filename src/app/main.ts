@@ -88,6 +88,18 @@ const newPlace = () => {
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
+// The other kind of place: an island, from a valley, or a valley from an island; a new one, since the same seed is the same house.
+{
+  const button = document.getElementById('kind')!;
+  button.textContent = place === 'island' ? 'A valley' : 'An island';
+  button.addEventListener('click', () => {
+    const next = new URLSearchParams(location.search);
+    next.set('seed', randomSeed());
+    if (place === 'island') next.delete('place'); else next.set('place', 'island');
+    next.delete('at');
+    location.search = next.toString();
+  });
+}
 
 let toastTimer = 0;
 function toast(message: string): void {

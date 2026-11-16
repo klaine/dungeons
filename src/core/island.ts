@@ -94,7 +94,7 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     // What stands on the land has level ground made for it.
     const flat = (x0: number, z0: number, y: number, r: number) => { const w = 1 - smooth((Math.hypot(x - x0, z - z0) - r) / 4); top += (y - top) * w; };
     for (const q of o.cottages) flat(q.x, q.z, q.y, Math.max(q.w, q.d) * 0.62 + 1.2);
-    if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 6.5);
+    if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
     if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
   }
   // Below the top of the cliff the land goes down to the sea bed: steeply where it is cliff, which
@@ -129,22 +129,31 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const level = { x0: round(Math.min(house.x0, meadow.x0) - 6), x1: round(Math.max(house.x1, meadow.x1) + 6), z0: round(house.z0 - 6), z1: round(meadow.z1 + 2) };
   const hx = (level.x0 + level.x1) / 2, hz = (level.z0 + level.z1) / 2;
 
-  // The coast: an oval turned any way, uneven, with two or three headlands standing out of it.
+  // How big the cove is, decided first, since a large one wants a large island round it: from a
+  // pool twenty metres across the half of it to a bay three or four times that.
+  const coveR = 19 * Math.pow(3.7, Math.pow(rng.fork('cove size').next(), 1.25));
+  // The coast. Islands come in kinds: an oval turned any way; a long ridge; two masses joined at a
+  // waist; an egg, broad at one end; or a ragged one, all points and inlets. On any of them, two
+  // to four headlands stand out, and now and then the sea has worked a narrow inlet into a weakness of the rock.
   const N = 96, shape = rng.fork('coast');
-  const R = shape.range(118, 150), squash = shape.range(0.74, 0.98), turn = shape.range(0, Math.PI), seed = shape.range(0, 500);
-  const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(12, 28), wide: shape.range(0.1, 0.24) }));
-  // And between them, now and then, a narrow inlet where the sea has worked into a weakness of the rock.
-  const inlets = Array.from({ length: shape.int(0, 3) }, () => ({ at: shape.range(0, TAU), into: shape.range(8, 20), wide: shape.range(0.04, 0.08) }));
+  const kind = rng.fork('island kind').pick(['oval', 'oval', 'long', 'waist', 'egg', 'ragged'] as const);
+  const R = Math.max(shape.range(105, 160), coveR * 1.45 + 70), turn = shape.range(0, Math.PI), seed = shape.range(0, 500);
+  const squash = kind === 'long' ? shape.range(0.42, 0.6) : kind === 'waist' ? shape.range(0.62, 0.8) : shape.range(0.72, 0.98);
+  const pinch = kind === 'waist' ? shape.range(0.22, 0.34) : 0, swell = kind === 'egg' ? shape.range(0.18, 0.3) : 0, ragged = kind === 'ragged' ? 1 : 0;
+  const heads = Array.from({ length: shape.int(2, 4) + ragged * shape.int(1, 3) }, () => ({ at: shape.range(0, TAU), out: shape.range(12, 28) * (R / 135), wide: shape.range(0.1, 0.24) * (ragged ? 0.6 : 1) }));
+  const inlets = Array.from({ length: shape.int(0, 3) + ragged * shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(8, 20) * (R / 135), wide: shape.range(0.04, 0.08) }));
   const coastOf = (scale: number) => Array.from({ length: N }, (_, k) => {
     const a = (k / N) * TAU, c = Math.cos(a - turn), s = Math.sin(a - turn);
     let r = R / Math.sqrt(c * c + (s * s) / (squash * squash)) * scale;
-    r *= 1 + 0.2 * (fbm2(Math.cos(a) * 1.6 + seed, Math.sin(a) * 1.6, 3) - 0.5) + 0.09 * (fbm2(Math.cos(a) * 7 + seed, Math.sin(a) * 7 - seed, 2) - 0.5);
+    // (A waist draws the sides in across the long way's middle; an egg is broader towards one end.)
+    r *= 1 - pinch * s * s + swell * c;
+    r *= 1 + (0.2 + 0.1 * ragged) * (fbm2(Math.cos(a) * 1.6 + seed, Math.sin(a) * 1.6, 3) - 0.5) + (0.09 + 0.08 * ragged) * (fbm2(Math.cos(a) * 7 + seed, Math.sin(a) * 7 - seed, 2) - 0.5);
     for (const h of heads) r += h.out * Math.exp(-((turnBetween(h.at, a) / h.wide) ** 2));
     for (const h of inlets) r -= h.into * Math.exp(-((turnBetween(h.at, a) / h.wide) ** 2));
-    return round(r);
+    return round(Math.max(40, r));
   });
-  // The house stands near the island's northern side: the middle lies south of it by more than half the island's breadth.
-  const middle = { x: round(hx + shape.range(-18, 18)), z: round(hz + R * squash * shape.range(0.42, 0.55)) };
+  // The house stands near the island's northern side: the middle lies south of it by about half the island's breadth.
+  const middle = { x: round(hx + shape.range(-18, 18)), z: round(hz + R * Math.max(squash, 0.7) * shape.range(0.42, 0.55)) };
   const sea = round(F - shape.range(17, 26));
   const island: Island = {
     x: middle.x, z: middle.z, coast: coastOf(1), sea,
@@ -156,18 +165,23 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const margin = () => Math.min(...corners.map(([x, z]) => coastAt(island, Math.atan2(z - island.z, x - island.x)) - Math.hypot(x - island.x, z - island.z)));
   for (let grow = 1; grow < 1.8 && margin() < 18; grow += 0.05) island.coast = coastOf(grow);
 
-  // The cove: on the island's south side, away from the house, its head facing back towards the middle.
+  // The cove: on the island's south side, away from the house, its head facing back towards the
+  // middle. A small one is a bowl inside the cliffs with a narrow way in; a large one lies further
+  // out and opens wider, a bay. If none of the size wanted will fit, a smaller is tried.
   const coving = rng.fork('cove');
-  for (let tries = 0; tries < 60; tries++) {
-    const out = Math.PI / 2 + coving.range(-1.05, 1.05), r = coving.range(19, 28);
-    const edge = coastAt(island, out), back = edge - r - coving.range(5, 12);
-    const c = { x: round(island.x + Math.cos(out) * back), z: round(island.z + Math.sin(out) * back), r: round(r), out, mouth: round(coving.range(11, 18)), beach: coving.range(0.55, 0.85) };
-    const headX = c.x + (island.x - c.x) / Math.hypot(island.x - c.x, island.z - c.z) * r, headZ = c.z + (island.z - c.z) / Math.hypot(island.x - c.x, island.z - c.z) * r;
-    const room = outside(level, headX, headZ);
-    if (room < 52 || back < r + 25) continue;
-    island.cove = c;
-    island.combe = round(Math.min(coving.range(55, 80), room - 10));
-    break;
+  for (let r = coveR; !island.cove.r && r > 15; r *= 0.88) {
+    for (let tries = 0; tries < 50; tries++) {
+      const out = Math.PI / 2 + coving.range(-1.05, 1.05), big = Math.min(1, (r - 19) / 50);
+      const edge = coastAt(island, out), back = edge - r * coving.range(1 - 0.45 * big, 1.05 - 0.2 * big) - coving.range(4, 11);
+      const c = { x: round(island.x + Math.cos(out) * back), z: round(island.z + Math.sin(out) * back), r: round(r), out, mouth: round(Math.max(11, r * coving.range(0.45, 0.6 + 0.7 * big))), beach: coving.range(0.55, 0.85) };
+      const toMiddle = Math.hypot(island.x - c.x, island.z - c.z) || 1;
+      const headX = c.x + ((island.x - c.x) / toMiddle) * r, headZ = c.z + ((island.z - c.z) / toMiddle) * r;
+      const room = outside(level, headX, headZ);
+      if (room < 52 || back < r * 0.5 + 20 || coastAt(island, Math.atan2(headZ - island.z, headX - island.x)) - Math.hypot(headX - island.x, headZ - island.z) < 10) continue;
+      island.cove = c;
+      island.combe = round(Math.min(coving.range(55, 80), room - 10));
+      break;
+    }
   }
   if (!island.cove.r) throw new Error(`no cove would fit the island (seed ${site.seed})`);
   const cove = island.cove;
@@ -221,13 +235,19 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
 
   // The fishermen's cottages: on the slope above the beach, either side of the track, fronts to it or to the sea.
   {
-    const q = rng.fork('cottages'), want = q.int(3, 6);
+    const q = rng.fork('cottages'), want = q.int(3, 7);
     const washes: [number, number, number][] = [[0.9, 0.89, 0.84], [0.88, 0.86, 0.8], [0.86, 0.87, 0.86], [0.92, 0.88, 0.78], [0.78, 0.82, 0.84], [0.9, 0.84, 0.76]];
-    for (let tries = 0; tries < 700 && island.cottages.length < want; tries++) {
+    for (let tries = 0; tries < 900 && island.cottages.length < want; tries++) {
       const along = q.range(0.4, 0.98), k = Math.min(track.length - 3, Math.floor(along * (track.length - 3)) + 1);
       const [ax, az] = track[k], [bx, bz] = track[k + 1], l = Math.hypot(bx - ax, bz - az) || 1, side = q.chance(0.5) ? 1 : -1;
       const w = round(q.range(6.4, 9.5)), d = round(q.range(4.6, 5.6)), off = d / 2 + q.range(3.2, tries > 300 ? 14 : 6.5);
-      const t = q.next(), x = ax + (bx - ax) * t + (-(bz - az) / l) * side * off, z = az + (bz - az) * t + ((bx - ax) / l) * side * off;
+      const t = q.next();
+      let x = ax + (bx - ax) * t + (-(bz - az) / l) * side * off, z = az + (bz - az) * t + ((bx - ax) / l) * side * off;
+      // Half the tries, after the first, are along the rim of the cove above the beach, in a row looking out over the water.
+      if (tries % 2 === 1) {
+        const a = Math.atan2(island.z - cove.z, island.x - cove.x) + q.range(-1, 1) * (cove.beach + 0.35), at = cove.r + q.range(7, 16);
+        x = cove.x + Math.cos(a) * at; z = cove.z + Math.sin(a) * at;
+      }
       const r = Math.max(w, d) * 0.62 + 1.6;
       if (fromTrack(x, z) < d / 2 + 2.6 || inland(island, x, z) < r + 4 || !clear(x, z, r + 1.5)) continue;
       // Not on ground too steep to level: no more than a man's height between the corners.
@@ -236,7 +256,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       if (hi - lo > 3.4 || lo < sea + 1.4) continue;
       // Front to the track, or, now and then, gable to it and front to the sea.
       const toTrack = Math.atan2(-((bx - ax) / l) * side, (bz - az) / l * side);
-      const faces = q.chance(0.7) ? toTrack : Math.atan2(cove.z - z, cove.x - x);
+      const faces = tries % 2 === 0 && q.chance(0.7) ? toTrack : Math.atan2(cove.z - z, cove.x - x);
       island.cottages.push({ x: round(x), z: round(z), y: round(plain(x, z)), w, d, faces: Math.round(faces * 1000) / 1000, roof: q.chance(0.55) ? 'thatch' : 'slate', wash: q.pick(washes) });
       taken.push({ x, z, r });
     }
@@ -256,10 +276,16 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       if (stand > best) { best = stand; at = a; }
     }
     for (let tries = 0; tries < 30; tries++) {
-      const a = at + q.range(-0.08, 0.08), back = coastAt(island, a) - q.range(12, 16), x = island.x + Math.cos(a) * back, z = island.z + Math.sin(a) * back;
-      if (inland(island, x, z) < 10 || !clear(x, z, 9)) continue;
-      island.lighthouse = { x: round(x), z: round(z), y: round(plain(x, z)), r: round(q.range(2.9, 3.4)), height: round(q.range(15, 22)), door: Math.round(Math.atan2(island.z - z, island.x - x) * 1000) / 1000 };
-      taken.push({ x, z, r: 11 });
+      const a = at + q.range(-0.08, 0.08), back = coastAt(island, a) - q.range(15, 19), x = island.x + Math.cos(a) * back, z = island.z + Math.sin(a) * back;
+      if (inland(island, x, z) < 13 || !clear(x, z, 13)) continue;
+      const lh = { x: round(x), z: round(z), y: round(plain(x, z)), r: round(q.range(2.9, 3.4)), height: round(q.range(15, 22)), door: Math.round(Math.atan2(island.z - z, island.x - x) * 1000) / 1000 };
+      // The keeper's cottage, in the yard beside the tower, its front the way the tower's door looks.
+      const side = q.chance(0.5) ? 1 : -1, ka = lh.door + side * 1.75, kr = lh.r + 5.2;
+      const keeper = { x: round(x + Math.cos(ka) * kr), z: round(z + Math.sin(ka) * kr), y: lh.y, w: 6.2, d: 4.6, faces: lh.door, roof: 'slate' as const, wash: [0.92, 0.91, 0.88] as [number, number, number] };
+      if (inland(island, keeper.x, keeper.z) < 9) continue;
+      island.lighthouse = lh;
+      island.cottages.push(keeper);
+      taken.push({ x, z, r: 14 });
       break;
     }
   }
@@ -284,7 +310,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
     const q = rng.fork('stacks'), want = q.int(3, 7);
     for (let tries = 0; tries < 120 && island.stacks.length < want; tries++) {
       const h = q.pick(heads), a = q.chance(0.7) ? h.at + q.range(-h.wide, h.wide) * 1.5 : q.range(0, TAU);
-      if (Math.abs(turnBetween(a, cove.out)) < 0.45) continue;
+      if (Math.abs(turnBetween(a, cove.out)) < 0.45 + cove.mouth / coastAt(island, cove.out)) continue;
       const r = q.range(2.6, 5.5), at = coastAt(island, a) + q.range(9, 24) + r, x = island.x + Math.cos(a) * at, z = island.z + Math.sin(a) * at;
       if (island.stacks.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + r + 5)) continue;
       const cliff = F - sea + 3;
