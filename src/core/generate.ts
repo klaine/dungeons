@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { allReachable, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
+import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -255,6 +255,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutWater(site, meadow, fromTrack, rng.fork('water'));
   layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
   layOutTower(site, meadow, fromTrack, rng.fork('tower'));
+  layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'));
 }
 
 /**
@@ -280,6 +281,79 @@ function layOutTower(site: Site, meadow: Place, fromTrack: (x: number, z: number
     site.towers = [{ x, z, half: 3.1, storeys: 3, door: fromTrack(x + 2, z) < fromTrack(x - 2, z) ? 'e' : 'w' }];
     return;
   }
+}
+
+/** Whether there is room at a point: nothing lying in the valley, no water and no tower within `r` metres of it. */
+function roomAt(site: Site, x: number, z: number, r: number): boolean {
+  for (const f of site.features ?? []) if (Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 1.15) + r) return false;
+  for (const st of site.streams ?? []) for (let k = 0; k < st.course.length - 1; k++) {
+    const [ax, az] = st.course[k], [bx, bz] = st.course[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+    const t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+    if (Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t) < st.width / 2 + r) return false;
+  }
+  for (const t of site.towers ?? []) if (Math.max(Math.abs(t.x - x), Math.abs(t.z - z)) < t.half + 2 + r) return false;
+  return true;
+}
+
+/**
+ * Buildings by the track, in about three valleys in five: either a few timber-framed houses in a
+ * row with their fronts to the track, as a hamlet has them, or one stuccoed building of the
+ * classical kind standing back from it. They go where there is room, and face the track.
+ */
+function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const g = site.grounds!, track = site.track ?? [];
+  if (track.length < 2 || !rng.chance(0.6)) return;
+  const round = (v: number) => Math.round(v * 10) / 10;
+  // Where the track is, across the valley, at a place along it.
+  const trackX = (z: number): number => {
+    let k = 0;
+    while (k < track.length - 2 && z > track[k + 1][1]) k++;
+    const t = Math.min(1, Math.max(0, (z - track[k][1]) / ((track[k + 1][1] - track[k][1]) || 1)));
+    return track[k][0] + (track[k + 1][0] - track[k][0]) * t;
+  };
+  // A building fits if its ground is inside the valley, clear of what lies there, and off the track.
+  const fits = (b: { x: number; z: number; w: number; d: number }): boolean => {
+    if (b.x - b.d / 2 < g.x0 + 15 || b.x + b.d / 2 > g.x1 - 15 || b.z - b.w / 2 < meadow.z1 + 10 || b.z + b.w / 2 > g.z1 - 16) return false;
+    for (const [du, dv] of [[0, 0], [-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1]]) {
+      const x = b.x + (du * b.d) / 2, z = b.z + (dv * b.w) / 2;
+      if (!roomAt(site, x, z, 4) || fromTrack(x, z) < 3.2) return false;
+    }
+    return true;
+  };
+  const side = rng.chance(0.5) ? 1 : -1;
+  const out: Building[] = [];
+  if (rng.chance(0.5)) {
+    // A hamlet: two to four houses, no two alike, a step or two apart.
+    const washes: [number, number, number][] = [[0.86, 0.8, 0.66], [0.82, 0.62, 0.3], [0.78, 0.5, 0.44], [0.55, 0.66, 0.74], [0.6, 0.68, 0.5], [0.88, 0.87, 0.82], [0.74, 0.36, 0.26]];
+    // (A row is tried in several places, and each house at several distances from the track; the fullest row found is kept.)
+    for (let tries = 0; tries < 24 && out.length < 2; tries++) {
+      let z = rng.range(meadow.z1 + 12, g.z1 - 44);
+      const row: Building[] = [], wanted = rng.int(2, 4), from = rng.int(0, washes.length - 1), near = tries % 2 ? side : -side;
+      for (let k = 0; k < wanted; k++) {
+        const w = round(rng.range(6, 8.6)), d = round(rng.range(6.2, 7.8)), storeys = rng.chance(0.4) ? 3 : 2, jetty = round(rng.range(0.3, 0.45)), gable = rng.chance(0.6);
+        for (let step = 0; step < 5; step++) {
+          const b: Building = {
+            style: 'timber', x: round(trackX(z + w / 2) + near * (4.6 + step * 1.3 + d / 2)), z: round(z + w / 2), w, d, faces: near > 0 ? 'w' : 'e', storeys, bays: w > 7.4 ? 3 : 2,
+            colour: washes[(from + k * 2) % washes.length], jetty, gable,
+          };
+          if (fits(b)) { row.push(b); break; }
+        }
+        z += w + rng.range(1.2, 3.6);
+      }
+      if (row.length > out.length) out.splice(0, out.length, ...row);
+    }
+  } else {
+    const washes: [number, number, number][] = [[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78], [0.88, 0.84, 0.72]];
+    const storeys = rng.chance(0.5) ? 3 : 2, colour = rng.pick(washes);
+    for (let tries = 0; tries < 150 && !out.length; tries++) {
+      // (The broadest are tried first, and narrower ones as room proves hard to find.)
+      const bays = tries < 40 ? rng.pick([7, 7, 9]) : tries < 90 ? rng.pick([5, 7]) : 5, w = round(bays * 2.55 + 1.6), d = round(rng.range(9, 11)), z = rng.range(meadow.z1 + 11 + w / 2, g.z1 - 17 - w / 2), off = rng.range(7.5, tries < 60 ? 14 : 22);
+      const near = tries % 2 ? side : -side;
+      const b: Building = { style: 'imperial', x: round(trackX(z) + near * (off + d / 2)), z: round(z), w, d, faces: near > 0 ? 'w' : 'e', storeys, bays, colour, portico: bays >= 7 || tries % 3 === 0 };
+      if (fits(b)) out.push(b);
+    }
+  }
+  if (out.length) site.buildings = out;
 }
 
 /** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */

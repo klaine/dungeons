@@ -70,7 +70,8 @@ The document is the source. The model and the maps are made from it, so they alw
 | `streams` | Running water in the valley, if there is any; see below. May be absent. |
 | `terraces` | Ground in the valley that stands above its floor and can be climbed to; see below. May be absent. |
 | `grottoes` | Caves in the valley's own walls; see below. May be absent. |
-| `towers` | Buildings that stand by themselves in the valley; see below. May be absent. |
+| `towers` | Towers that stand by themselves in the valley; see below. May be absent. |
+| `buildings` | Other buildings standing in the valley, each in one of two styles; see below. May be absent. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -182,6 +183,18 @@ If a hall has `great`, it is a great hall, and is laid out differently. The stai
 ```
 
 A tower is square, centred on `x`, `z`, and `half` is half its breadth inside; its walls are 0.9 metres thick outside that. It has `storeys` storeys, each 3.06 metres from floor to floor (eighteen steps), and a flat roof above the last with a parapet. Its door is in the middle of the wall named by `door`, `e` for the wall of greater x and `w` for the other. The stairs are inside: the first against the wall of lesser z, rising towards greater x, the next against the opposite wall rising the other way, and so on, each a metre wide. A tower is not one of the `places` and no `way` leads into it: it is not part of the house.
+
+```json
+"buildings": [ { "style": "timber", "x": 2.9, "z": 73.2, "w": 7.5, "d": 7.1, "faces": "e", "storeys": 3, "bays": 3, "colour": [0.78, 0.5, 0.44], "jetty": 0.4, "gable": true } ]
+```
+
+A building stands with the middle of its ground at `x`, `z`. `w` is its breadth along its front and `d` its depth from front to back, both outside its walls at the ground; `faces` is the way its front looks, `e` towards greater x or `w` towards lesser, so its breadth lies along z. `storeys` counts the ground storey, and the roof is above the last. `bays` is the number of windows in a row across the front. `colour` is the wash on its walls, in linear red, green and blue. Its doors are shut: it is not one of the `places`.
+
+Of the style `timber` (a timber-framed house): the ground storey is 2.85 metres high on a plinth of 0.3 and each storey over it 2.5; each upper storey stands `jetty` metres further out over the street than the one below, on the front only; the roof rises at 56 degrees with a gable to the street if `gable` is true, and at 52 degrees with its eaves to the street and dormers in it if not.
+
+Of the style `imperial` (a stuccoed classical building): a plinth of 0.5 metres, a ground storey of 3.5, a principal storey of 4, and with three storeys a third of 3; a cornice and a low wall above it, and a hipped roof at 21 degrees. If `portico` is true the three middle bays stand 0.4 metres forward under pilasters and a pediment. The door is in the middle bay.
+
+What stands in each bay, which timbers brace which, the colour of doors and shutters and of the roof: these are not in the document. They are worked out by whoever builds it; the tool works them out from the site's seed.
 
 ### The solution
 

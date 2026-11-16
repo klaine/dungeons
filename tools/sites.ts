@@ -25,6 +25,7 @@ for (let n = 0; n < count; n++) {
     bump(`secret=${site.secret >= 0}`);
     bump(`storeys=${site.places.filter((p) => p.level).map((p) => (p.level! > 0 ? 'up' : 'down')).sort().join('+') || 'none'}`);
     bump(`tower=${(site.towers ?? []).length > 0}`);
+    bump(`buildings=${site.buildings ? `${site.buildings[0].style} x${site.buildings.length}` : 'none'}`);
     bump(`hall=${(site.grottoes ?? []).map((q) => (q.hall?.great ? 'great' : q.hall ? 'plain' : 'grotto')).join('+') || 'none'}`);
     bump(`moves/direct=${(solution.moves.length / solution.direct).toFixed(0)}x`);
     if (n < 4) console.log('    ', solution.moves.map((m) => [...m.events, `to ${site.places[m.to].name}`].join(', ')).join(' > '));

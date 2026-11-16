@@ -347,6 +347,50 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   },
   // The ground under grass: a fine, fibrous mat with earth showing in the low places. No pattern
   // large enough to be seen repeating; the grass standing on it carries the look.
+  // Lime plaster: laid on by hand, so never quite flat; fine grit in it; a hairline crack here and
+  // there. Nearly white, so the wash on a wall comes from the colour given to each point of it.
+  plaster: {
+    normalStrength: 2.2,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  float trowel = fbm(uv + 1.7, vec2(6.), 4, .55);
+  float grit = fbm(uv + 5.1, vec2(90.), 2, .5);
+  vec3 c = worleyId(uv * 5. + fbm(uv, vec2(4.), 2, .5) * .6, vec2(5.));
+  float crack = (1. - smoothstep(.0, .012, c.y - c.x)) * step(.62, c.z);
+  return clamp(.55 + (trowel - .5) * .35 + (grit - .5) * .12 - crack * .25, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float stain = fbm(uv + 9.3, vec2(3.), 4, .55), speck = hash21(floor(uv * 512.));
+  albedo = vec3(.9, .89, .86) * (.88 + .14 * stain) * (1. - cavity * .4) * (.97 + .06 * speck);
+  rough = .88;
+}`,
+  },
+  // Clay roof tiles of the flat round-ended kind, hung in rows, each row lapping the one below
+  // and set half a tile along from it. No two are quite the same red, and some have gone dark.
+  tile: {
+    normalStrength: 6.5,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  float row = floor(uv.y * 8.), fy = fract(uv.y * 8.);
+  float x = uv.x * 6. + mod(row, 2.) * .5, fx = fract(x) - .5;
+  // The lower end of each tile is round, and shows the tile under it at its corners.
+  float body = smoothstep(.0, .07, fy - (.5 - sqrt(max(.25 - fx * fx, 0.))) * .5) * smoothstep(.0, .05, .5 - abs(fx));
+  float id = hash21(vec2(floor(x), row) + 3.);
+  return clamp((.3 + .5 * (1. - fy) + (id - .5) * .08) * body + .08 + fbm(uv, vec2(48.), 2, .5) * .06, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float row = floor(uv.y * 8.);
+  float x = uv.x * 6. + mod(row, 2.) * .5;
+  float id = hash21(vec2(floor(x), row) + 3.), worn = fbm(uv + 4.2, vec2(5.), 4, .55);
+  vec3 clay = mix(vec3(.5, .2, .12), vec3(.74, .37, .22), id);
+  clay = mix(clay, vec3(.3, .2, .16), step(.82, fract(id * 7.3)) * .7);
+  clay = mix(clay, vec3(.36, .34, .26), smoothstep(.55, .8, worn) * .45);
+  albedo = clay * (1. - cavity * .6) * (.94 + .1 * hash21(floor(uv * 512.)));
+  rough = .82;
+}`,
+  },
   ground: {
     normalStrength: 3.5,
     height: /* glsl */ `

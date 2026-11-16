@@ -130,6 +130,8 @@ async function start(): Promise<void> {
   const bark = generateTextureSet('bark', texSize, 29);
   const soil = generateTextureSet('soil', texSize, 31);
   const litter = generateTextureSet('litter', texSize, 37);
+  const plaster = generateTextureSet('plaster', texSize, 41);
+  const tile = generateTextureSet('tile', texSize, 43);
   doneGenerating();
   const materials: Record<string, Material> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
@@ -143,6 +145,12 @@ async function start(): Promise<void> {
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
     turf: makeGroundMaterial(ground, soil, scree, litter),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
+    // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
+    // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
+    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8 }),
+    tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
+    metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
+    glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -574,7 +582,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, wood, turf: ground, leaf: moss },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, wood, turf: ground, leaf: moss, plaster, tile, metal: plaster, glass: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
@@ -1037,6 +1045,9 @@ async function start(): Promise<void> {
   // For automated checks: draw a frame and hand back the pixels.
   // (The brightness of a picture cannot be read back at once, so the picture is drawn, measured, and drawn again as the eye would then see it.)
   (window as any).__capture = async (pose?: number[]) => {
+    // (The renderer draws the scene once to a frame of the browser's, however often it is asked; a capture is a frame of its own.)
+    const fresh = () => (renderer as any)._nodes?.nodeFrame?.update();
+    fresh();
     if (pose) {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
       // Let the torch lights finish moving to the new position before the picture is taken.
@@ -1047,6 +1058,7 @@ async function start(): Promise<void> {
       (window as any).__lum = exposure;
       renderer.toneMappingExposure = exposure;
     }
+    fresh();
     atmosphere.update();
     pipeline.render();
     return canvas.toDataURL('image/png');

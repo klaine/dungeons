@@ -210,6 +210,43 @@ export interface Grotto {
 }
 
 /**
+ * A building that stands by itself in the valley and is seen from outside: a house, an inn, a
+ * lodge. It has a style, which decides how it is made and of what, and a few measures; the rest
+ * (where each timber goes, what stands in each window) is worked out by whoever builds it, from
+ * these and from the site's seed. Its doors are shut: nothing in it is part of the house's mission.
+ *
+ * `x`, `z` is the middle of the ground it stands on; `w` is its breadth along its front and `d`
+ * its depth from front to back, both outside its walls. `faces` is the way its front looks: `e`
+ * towards greater x, `w` towards lesser. `storeys` counts the ground storey; the roof is above the
+ * last. `bays` is how many windows stand in a row across the front. `colour` is the wash on its
+ * walls, or what fills the spaces between its timbers.
+ *
+ * Of the style `timber`: a framed house of posts, rails and braces on a ground storey of plastered
+ * stone, as in the old towns of Alsace and the Moselle. Each upper storey stands `jetty` metres
+ * further out over the street than the one below; `gable` says whether a gable of the steep tiled
+ * roof faces the street (true) or its eaves do, with dormers in the roof (false).
+ *
+ * Of the style `imperial`: a stuccoed classical building of the early nineteenth century, as on
+ * the market squares of the northern capitals. A rusticated ground storey, tall windows in even
+ * rows above it, a heavy cornice and a low metal roof; with `portico`, the middle bays stand
+ * forward under pilasters and a pediment.
+ */
+export interface Building {
+  style: 'timber' | 'imperial';
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  faces: 'e' | 'w';
+  storeys: number;
+  bays: number;
+  colour: [number, number, number];
+  jetty?: number;
+  gable?: boolean;
+  portico?: boolean;
+}
+
+/**
  * A tower: a square building of stone standing by itself in the valley, not far from the track.
  * Inside it is one room to a storey, `half` metres from its middle to each wall, and a stair
  * from each storey to the next, the flights against the north and south walls by turns. The
@@ -273,6 +310,8 @@ export interface Site {
   grottoes?: Grotto[];
   /** Buildings that stand by themselves in the valley. */
   towers?: Tower[];
+  /** Buildings standing in the valley, apart from the house: see `Building`. */
+  buildings?: Building[];
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

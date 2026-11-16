@@ -233,6 +233,16 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         }
       }
     }
+    // Buildings by the track: shut, so drawn solid, with a paler line for the ridge of a steep roof.
+    for (const b of site.buildings ?? []) {
+      ctx.fillStyle = INK;
+      rect(b.x - b.d / 2, b.z - b.w / 2, b.x + b.d / 2, b.z + b.w / 2);
+      ctx.fillStyle = DARK;
+      rect(b.x - b.d / 2 + 0.35, b.z - b.w / 2 + 0.35, b.x + b.d / 2 - 0.35, b.z + b.w / 2 - 0.35);
+      ctx.fillStyle = INK;
+      if (b.style === 'timber' && b.gable) rect(b.x - b.d / 2, b.z - 0.12, b.x + b.d / 2, b.z + 0.12);
+      else rect(b.x - 0.12, b.z - b.w / 2 + (b.style === 'imperial' ? b.d / 2 : 0), b.x + 0.12, b.z + b.w / 2 - (b.style === 'imperial' ? b.d / 2 : 0));
+    }
     // A tower: its walls in ink as a house's are, its floor within, and its door a gap in one wall.
     for (const t of site.towers ?? []) {
       const wall = 0.9, door = t.door === 'e' ? 1 : -1;
