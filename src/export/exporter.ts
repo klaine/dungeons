@@ -49,7 +49,9 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
   const perColumn = Math.ceil(rows.length / columns);
   const out = document.createElement('canvas');
   out.width = size;
-  out.height = Math.round(size + line * (perColumn + 6.5));
+  // A second, smaller sheet below the key shows the house in its valley.
+  const valley = site.grounds ? Math.round(size * 0.62) : 0;
+  out.height = Math.round(size + line * (perColumn + 6.5)) + (valley ? valley + line * 3 : 0);
   const ctx = out.getContext('2d')!;
   ctx.fillStyle = '#e9dfc8';
   ctx.fillRect(0, 0, out.width, out.height);
@@ -65,6 +67,16 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
     const y = size + line * (3.6 + (k % perColumn));
     ctx.fillText(placeLine(site, p), x, y, size / columns - line * 2);
   });
+  if (valley) {
+    const sheet = document.createElement('canvas');
+    drawPlan(sheet, site, { pixels: valley, valley: true, showSecrets: true });
+    const top = size + line * (perColumn + 6.5);
+    ctx.font = `600 ${line * 0.95}px ui-serif, Georgia, serif`;
+    ctx.fillText('The valley', line * 1.5, top);
+    ctx.font = `${line * 0.82}px ui-serif, Georgia, serif`;
+    ctx.fillText('The track from where you arrive to the door, the pond, and the standing stones. Rock shuts the valley in.', line * 1.5, top + line * 1.4, size - valley - line * 4);
+    ctx.drawImage(sheet, size - valley - line * 1.5, top);
+  }
   return out;
 }
 

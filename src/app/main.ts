@@ -544,6 +544,8 @@ async function start(): Promise<void> {
         showSecrets: revealAll,
         items: game?.things.filter((k) => !k.taken).map((k) => k.item),
         levers: game?.levers.filter((l) => !l.thrown).map((l) => l.lever),
+        // Out of doors the plan takes in the whole valley; indoors, the house alone.
+        valley: (placeAt(site, player.position.x, player.position.z)?.role ?? 'approach') === 'approach',
       });
       const here = placeAt(site, player.position.x, player.position.z);
       if (here && here.id !== lastPlace) {

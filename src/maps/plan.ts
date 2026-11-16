@@ -23,6 +23,8 @@ export interface PlanOptions {
   levers?: Lever[];
   /** Draw at exactly this many pixels square, ignoring the canvas's size on the page. */
   pixels?: number;
+  /** Take in the whole valley, with its track and what lies in it, not just the house and the ground before its door. */
+  valley?: boolean;
 }
 
 const INK = '#2b241c';
@@ -33,6 +35,8 @@ const DARK = '#b7ab96';
 const ACCENT = '#a5432a';
 const GLIMPSED = '#ddd2ba';
 const KEY_COLOUR: Record<string, string> = { iron: '#6f7781', gold: '#c9961f' };
+const WATER = '#8fb4c4';
+const TRACK = '#b9a67c';
 
 export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOptions = {}): void {
   const ratio = opts.pixels ? opts.pixels / 420 : Math.min(window.devicePixelRatio || 1, 2);
@@ -50,6 +54,10 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     x0 = Math.min(x0, p.x0 - T); x1 = Math.max(x1, p.x1 + T);
     z0 = Math.min(z0, p.z0 - T); z1 = Math.max(z1, p.z1 + T);
   }
+  const g = opts.valley ? site.grounds : undefined;
+  if (g) {
+    x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
+  }
   const pad = 10 * ratio;
   const scale = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (z1 - z0));
   const ox = (canvas.width - (x1 - x0) * scale) / 2 - x0 * scale;
@@ -64,6 +72,41 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   ctx.globalAlpha = opts.pixels ? 1 : 0.9;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.globalAlpha = 1;
+
+  // The valley: its floor, the rock that shuts it in, the track, and what lies off the track.
+  if (g) {
+    ctx.fillStyle = INK;
+    ctx.globalAlpha = 0.55;
+    rect(g.x0 - 3, g.z0, g.x1 + 3, g.z1 + 3);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = COURT;
+    rect(g.x0, g.z0, g.x1, g.z1);
+    for (const f of site.features ?? []) {
+      if (f.kind === 'pond') {
+        ctx.fillStyle = WATER;
+        ctx.beginPath();
+        ctx.arc(X(f.x), Z(f.z), f.r * 0.75 * scale, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = INK;
+        for (let k = 0; k < 7; k++) {
+          ctx.beginPath();
+          ctx.arc(X(f.x + Math.cos(k * 0.9) * f.r), Z(f.z + Math.sin(k * 0.9) * f.r), Math.max(1.2 * ratio, 0.45 * scale), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+    const track = site.track ?? [];
+    if (track.length > 1) {
+      ctx.strokeStyle = TRACK;
+      ctx.lineWidth = Math.max(1.5 * ratio, 2.2 * scale);
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      track.forEach(([tx, tz], k) => (k ? ctx.lineTo(X(tx), Z(tz)) : ctx.moveTo(X(tx), Z(tz))));
+      ctx.stroke();
+    }
+  }
 
   // Fog of war: places that have been entered are drawn in full; places seen through an open
   // doorway, arch or window are sketched; everything else is left off the page.
@@ -86,8 +129,10 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     if (!drawn(p)) continue;
     ctx.fillStyle = INK;
     ctx.globalAlpha = known(p) ? 1 : 0.35;
-    const g = p.role === 'approach' ? half * 0.6 : half;
-    rect(p.x0 - g, p.z0 - g, p.x1 + g, p.z1 + g);
+    // The ground before the door has no wall round it where it opens onto a valley.
+    if (p.role === 'approach' && site.grounds) continue;
+    const grow = p.role === 'approach' ? half * 0.6 : half;
+    rect(p.x0 - grow, p.z0 - grow, p.x1 + grow, p.z1 + grow);
   }
   ctx.globalAlpha = 1;
   // Floors: open ground tinted green, unlit rooms shaded.
@@ -114,6 +159,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       }
       continue;
     }
+    if (g && p.role === 'approach') continue;
     ctx.fillStyle = floorOf(p);
     rect(p.x0, p.z0, p.x1, p.z1);
   }
