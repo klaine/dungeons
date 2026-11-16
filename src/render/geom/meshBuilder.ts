@@ -100,8 +100,8 @@ export class MeshBuilder {
    * stone becomes many, each turned and tinted differently.
    */
   /** Says, for every point already laid, how much of the sky it sees, from where the point is: for what is underground and sees none. */
-  setOpenBy(value: (x: number, y: number, z: number) => number): void {
-    for (let i = 0; i < this.vertexCount; i++) this.setOpen(i, value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]));
+  setOpenBy(value: (x: number, y: number, z: number) => number, from = 0): void {
+    for (let i = from; i < this.vertexCount; i++) this.setOpen(i, value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]));
   }
 
   /**

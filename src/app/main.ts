@@ -270,7 +270,8 @@ async function start(): Promise<void> {
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.name = `scenery:${material}`;
     mesh.receiveShadow = true;
-    mesh.castShadow = true;
+    // (Glass throws no shadow: the sun comes in at windows.)
+    mesh.castShadow = material !== 'glass';
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     scenic.push(mesh);

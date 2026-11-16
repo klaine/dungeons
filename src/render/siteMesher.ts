@@ -435,7 +435,7 @@ export function meshSite(site: Site): SceneDescription {
     // A tower stands on ground that was levelled for it.
     const towers = (site.grounds ? site.towers ?? [] : []).map((t) => ({ ...t, base: swells(t.x, t.z) }));
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + 0.6, hz: b.w / 2 + 0.5 }));
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5 }));
     // How far a point is outside a building's ground (less than nothing inside it).
     const outside = (b: (typeof houses)[number], x: number, z: number) => Math.max(Math.abs(x - b.x) - b.hx, Math.abs(z - b.z) - b.hz);
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
@@ -1386,7 +1386,8 @@ export function meshSite(site: Site): SceneDescription {
       for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
       // A tower has clear ground about it.
       for (const t of towers) clear = Math.min(clear, Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) - t.half - 2.6);
-      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - 1.8);
+      // (More of it about a large building than a cottage: it is meant to be seen.)
+      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' ? 4 : 1.8));
       // Nor before the mouth of a grotto.
       for (const q of grottoes) { const inside = (x - q.edge) * q.inw; if (inside > 2 && inside < 9.5 && Math.abs(z - q.z) < 2.2) clear = Math.min(clear, -1); }
       // Nothing stands in the way up to a terrace.

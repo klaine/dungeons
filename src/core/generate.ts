@@ -347,14 +347,17 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
     }
   } else {
     const washes: [number, number, number][] = [[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78], [0.88, 0.84, 0.72]];
-    const storeys = rng.chance(0.5) ? 3 : 2, colour = rng.pick(washes);
-    // (Its storeys: the ground storey, the tall principal one, and perhaps a lower one over that.)
-    const tall = rng.fork('heights'), heights = [round(tall.range(3.4, 4.2)), round(tall.range(3.8, 4.8)), round(tall.range(2.8, 3.4))].slice(0, storeys);
-    for (let tries = 0; tries < 150 && !out.length; tries++) {
-      // (The broadest are tried first, and narrower ones as room proves hard to find.)
-      const bays = tries < 40 ? rng.pick([7, 7, 9]) : tries < 90 ? rng.pick([5, 7]) : 5, w = round(bays * 2.55 + 1.6), d = round(rng.range(9, 11)), z = rng.range(meadow.z1 + 11 + w / 2, g.z1 - 17 - w / 2), off = rng.range(7.5, tries < 60 ? 14 : 22);
+    // From a pavilion of one storey to a block of five; most have two or three.
+    const storeys = rng.pick([1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5]), colour = rng.pick(washes);
+    // (Its storeys: the ground storey, the tall principal one, and lower ones over that. One storey alone is a tall one.)
+    const tall = rng.fork('heights');
+    const heights = storeys === 1 ? [round(tall.range(3.9, 4.6))] : [round(tall.range(3.4, 4.2)), round(tall.range(3.8, 4.8)), ...Array.from({ length: storeys - 2 }, (_, n) => round(tall.range(2.9, 3.4) - n * 0.1))];
+    // From three windows across to thirteen. The broadest are tried first, and narrower ones as room proves hard to find.
+    const widest = rng.pick([5, 7, 7, 9, 9, 11, 13]);
+    for (let tries = 0; tries < 280 && !out.length; tries++) {
+      const bays = Math.max(3, widest - 2 * Math.floor(tries / 50)), w = round(bays * 2.55 + 1.6), d = round(rng.range(9.4, 11.5)), z = rng.range(meadow.z1 + 11 + w / 2, g.z1 - 17 - w / 2), off = rng.range(7.5, tries % 50 < 25 ? 14 : 22);
       const near = tries % 2 ? side : -side;
-      const b: Building = { style: 'imperial', x: round(trackX(z) + near * (off + d / 2)), z: round(z), w, d, faces: near > 0 ? 'w' : 'e', storeys, heights, bays, colour, portico: bays >= 7 || tries % 3 === 0 };
+      const b: Building = { style: 'imperial', x: round(trackX(z) + near * (off + d / 2)), z: round(z), w, d, faces: near > 0 ? 'w' : 'e', storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && tries % 3 === 0) };
       if (fits(b)) out.push(b);
     }
   }

@@ -127,7 +127,9 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
       poly('wood', [corners[i], corners[j], low[j], low[i]], under, corners[i].clone().add(corners[j]).multiplyScalar(0.5).sub(mid), true, 0.9);
     }
   };
-  return { at, poly, block, box, on, stick, walls, pierced, glazed, wedge, slope };
+  /** From a place in the world back to the building's own measures. */
+  const local = (p: Vector3) => ({ u: turn * (p.z - b.z), y: p.y - base, v: turn * (p.x - b.x) + b.d / 2 });
+  return { at, local, poly, block, box, on, stick, walls, pierced, glazed, wedge, slope };
 }
 
 /**
@@ -309,54 +311,69 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
  * A stuccoed classical building. A plinth of grey stone; a ground storey of rusticated work, in
  * courses with the joints struck deep; a moulded band; then the tall windows of the principal
  * storey, each in a moulded surround with a cornice over it on brackets, or a small pediment in
- * every other bay; a lower storey of square windows over that, if it has three; pilaster strips
+ * every other bay; lower storeys of plainer windows over that, as many as it has; pilaster strips
  * at the corners; a deep cornice on blocks, a low wall above it, and a low hipped roof of sheet
  * metal laid in seams. With a portico, the middle three bays stand forward under four pilasters
  * and a pediment, and the door, up three steps, is in the middle of them. Walls are washed with
  * the building's colour and everything moulded is white.
+ *
+ * Inside, it is planned as such houses were, from its bays. The middle is the way in and the way
+ * up: where the middle is three bays broad, an entrance hall to the front and behind it a hall
+ * with the stair, two flights and a landing along its back wall; where it is one bay, a passage
+ * through the house with the stair at its far end. Either side is a wing of rooms in two rows, a
+ * front row and a back, each room one to three bays broad, the two wings alike. Doors stand in a
+ * line from room to room along the front, a stride in from the windows, so that from one end of
+ * the house the other is seen through every door between; each front room opens into the room
+ * behind it; and every storey is planned the same. Each room has its own colour, a skirting, a
+ * rail at the height of a chair's back and a cornice; the front rooms have a stove of glazed
+ * tiles in the corner.
  */
 function imperialHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
-  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, poly } = k;
-  const W = b.w, D = b.d, T = 0.3, PLINTH = 0.5, H0 = b.heights[0], H1 = b.heights[1], H2 = b.heights[2] ?? 3, wash = b.colour, granite = shade(stone, 0.62);
-  // (Windows are as tall as their storeys allow: the room they light is as high as the document says.)
-  const y1 = PLINTH + H0, y2 = y1 + H1, top = b.storeys > 2 ? y2 + H2 : y2;
+  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
+  const W = b.w, D = b.d, T = 0.3, PLINTH = 0.5, N = b.storeys, H0 = b.heights[0], wash = b.colour, granite = shade(stone, 0.62);
+  const floorY = (storey: number) => PLINTH + b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0);
+  const y1 = floorY(1), top = floorY(N);
   const frame: Colour = [0.86, 0.85, 0.8], leaf: Colour = rng.pick([[0.1, 0.17, 0.13], [0.2, 0.12, 0.07], [0.12, 0.13, 0.2]] as Colour[]);
   const roofTone: Colour = rng.pick([[0.36, 0.45, 0.4], [0.4, 0.2, 0.16], [0.3, 0.31, 0.33]] as Colour[]);
+  /** Every opening in the outer walls, as the rooms inside need to know them: which wall (front, right, back, left), where along it in the building's measures, and how high. */
+  const holes: { side: number; c: number; half: number; y0: number; y1: number; storey: number }[] = [];
 
   // One wall: its storeys, their windows, and what is moulded about them. `door` is the bay the door stands in, if any; `plain` leaves off the cornices over the windows.
-  const wall = (f: Face, bays: number, o: { door?: number; plain?: boolean; margin?: number } = {}) => {
+  const wall = (f: Face, bays: number, side: number, o: { door?: number; plain?: boolean; margin?: number } = {}) => {
     const margin = o.margin ?? 0.8, pitch = (f.L - margin * 2) / bays, centre = (n: number) => margin + (n + 0.5) * pitch;
-    const low: Gap[] = [], mid: Gap[] = [], high: Gap[] = [];
-    for (let n = 0; n < bays; n++) {
-      const c = centre(n);
-      low.push(n === o.door ? { s0: c - 0.85, s1: c + 0.85, y0: PLINTH - 0.01, y1: PLINTH + Math.min(3.3, H0 - 0.55) } : { s0: c - 0.58, s1: c + 0.58, y0: PLINTH + 0.85, y1: PLINTH + H0 - 0.9 });
-      mid.push({ s0: c - 0.6, s1: c + 0.6, y0: y1 + 0.62, y1: y1 + H1 - 1.05 });
-      if (b.storeys > 2) high.push({ s0: c - 0.6, s1: c + 0.6, y0: y2 + 0.6, y1: y2 + H2 - 1.05 });
-    }
+    // (Windows are as tall as their storeys allow: the room each lights is as high as the document says.)
+    const rows: Gap[][] = Array.from({ length: N }, (_, storey) => Array.from({ length: bays }, (_, n): Gap => {
+      const c = centre(n), fy = floorY(storey), h = b.heights[storey];
+      if (storey === 0) return n === o.door ? { s0: c - 0.85, s1: c + 0.85, y0: PLINTH - 0.01, y1: PLINTH + Math.min(3.3, H0 - 0.55) } : { s0: c - 0.58, s1: c + 0.58, y0: PLINTH + 0.85, y1: PLINTH + H0 - 0.9 };
+      return { s0: c - 0.6, s1: c + 0.6, y0: fy + (storey === 1 ? 0.62 : 0.6), y1: fy + h - 1.05 };
+    }));
+    rows.forEach((row, storey) => row.forEach((g) => {
+      const p = k.local(f.P((g.s0 + g.s1) / 2, 0, 0));
+      holes.push({ side, c: side % 2 === 0 ? p.u : p.v, half: (g.s1 - g.s0) / 2, y0: g.y0, y1: g.y1, storey });
+    }));
     on(f, 'stone', -0.07, f.L + 0.07, 0, PLINTH, -0.07, T, granite);
-    pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, wash, low, 0.44);
-    pierced(f, 'plaster', 0, f.L, y1, y2, 0.02, T, wash, mid);
-    if (b.storeys > 2) pierced(f, 'plaster', 0, f.L, y2, top, 0.02, T, wash, high);
-    // The band between the ground storey and the one above, and a thin one under its windows.
-    on(f, 'plaster', -0.1, f.L + 0.1, y1 - 0.05, y1 + 0.2, -0.1, 0.05, WHITE);
-    on(f, 'plaster', -0.06, f.L + 0.06, y1 + 0.2, y1 + 0.27, -0.06, 0.05, WHITE);
-    on(f, 'plaster', -0.04, f.L + 0.04, y1 + 0.52, y1 + 0.62, -0.035, 0.05, WHITE);
-    low.forEach((g, n) => {
+    pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, wash, rows[0], 0.44);
+    for (let storey = 1; storey < N; storey++) pierced(f, 'plaster', 0, f.L, floorY(storey), floorY(storey + 1), 0.02, T, wash, rows[storey]);
+    if (N > 1) {
+      // The band between the ground storey and the one above, and a thin one under its windows.
+      on(f, 'plaster', -0.1, f.L + 0.1, y1 - 0.05, y1 + 0.2, -0.1, 0.05, WHITE);
+      on(f, 'plaster', -0.06, f.L + 0.06, y1 + 0.2, y1 + 0.27, -0.06, 0.05, WHITE);
+      on(f, 'plaster', -0.04, f.L + 0.04, y1 + 0.52, y1 + 0.62, -0.035, 0.05, WHITE);
+    }
+    rows[0].forEach((g, n) => {
       if (n === o.door) {
-        // The door: two leaves, each of two panels, under a light of its own.
-        const c = (g.s0 + g.s1) / 2, lintel = g.y1 - 0.62;
-        for (const [a, e] of [[g.s0 + 0.08, c - 0.012], [c + 0.012, g.s1 - 0.08]]) {
-          on(f, 'wood', a, e, g.y0 + 0.02, lintel, 0.12, 0.18, leaf, true);
-          for (const [p, q] of [[g.y0 + 0.22, g.y0 + 1.0], [g.y0 + 1.16, lintel - 0.16]]) on(f, 'wood', a + 0.12, e - 0.12, p, q, 0.1, 0.13, shade(leaf, 1.25), true);
-        }
-        on(f, 'metal', c - 0.07, c - 0.03, g.y0 + 1.02, g.y0 + 1.16, 0.06, 0.12, [0.55, 0.45, 0.2]);
+        // The door: two leaves standing open into the hall, under a light of its own.
+        const lintel = g.y1 - 0.62;
+        for (const [a, e] of [[g.s0 + 0.03, g.s0 + 0.09], [g.s1 - 0.09, g.s1 - 0.03]]) on(f, 'wood', a, e, g.y0 + 0.03, lintel, T - 0.02, T + 0.8, leaf, true);
         on(f, 'wood', g.s0, g.s1, lintel, lintel + 0.09, 0.08, 0.18, frame, true);
         glazed(f, { s0: g.s0 + 0.02, s1: g.s1 - 0.02, y0: lintel + 0.09, y1: g.y1 - 0.02 }, 4, 1, frame);
         for (const [a, e] of [[g.s0 - 0.2, g.s0], [g.s1, g.s1 + 0.2]]) on(f, 'plaster', a, e, PLINTH, g.y1 + 0.02, -0.07, 0.05, WHITE);
         on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.02, g.y1 + 0.3, -0.1, 0.05, WHITE);
         on(f, 'plaster', g.s0 - 0.4, g.s1 + 0.4, g.y1 + 0.3, g.y1 + 0.42, -0.24, 0.05, WHITE);
-        // Three steps of stone, each broader than the one above it.
-        for (let step = 0; step < 3; step++) on(f, 'stone', g.s0 - 0.5 - step * 0.3, g.s1 + 0.5 + step * 0.3, 0, PLINTH - step * (PLINTH / 3), -0.4 - step * 0.34, 0.01, shade(stone, 0.78));
+        // The threshold, and steps of stone, each broader than the one above it.
+        on(f, 'stone', g.s0, g.s1, PLINTH - 0.25, PLINTH, -0.02, T + 0.12, shade(stone, 0.85));
+        // (Four low ones: the ground before a door is never quite the height it was levelled to, and a step and a bit stops a walker dead.)
+        for (let step = 0; step < 4; step++) on(f, 'stone', g.s0 - 0.5 - step * 0.3, g.s1 + 0.5 + step * 0.3, -0.3, PLINTH - step * (PLINTH / 4), -0.4 - step * 0.32, 0.01, shade(stone, 0.78));
       } else {
         glazed(f, g, 2, 3, frame);
         // Over a window of the ground storey, the stones of a flat arch with its key standing proud.
@@ -365,7 +382,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
         on(f, 'stone', g.s0 - 0.06, g.s1 + 0.06, g.y0 - 0.1, g.y0, -0.06, 0.1, granite);
       }
     });
-    mid.forEach((g, n) => {
+    (rows[1] ?? []).forEach((g, n) => {
       glazed(f, g, 2, 4, frame);
       // The surround; the sill on its two blocks; and over it a frieze and a cornice on brackets, with a pediment in every other bay.
       for (const [a, e] of [[g.s0 - 0.17, g.s0], [g.s1, g.s1 + 0.17]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.17, -0.045, 0.06, WHITE);
@@ -381,7 +398,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
         wedge(f.P(g.s0 - 0.3, g.y1 + 0.47, -0.17), f.P(g.s1 + 0.3, g.y1 + 0.47, -0.17), f.P((g.s0 + g.s1) / 2, g.y1 + 0.82, -0.17), into, ['plaster', WHITE], ['plaster', WHITE]);
       }
     });
-    for (const g of high) {
+    for (const row of rows.slice(2)) for (const g of row) {
       glazed(f, g, 2, 2, frame);
       for (const [a, e] of [[g.s0 - 0.15, g.s0], [g.s1, g.s1 + 0.15]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.15, -0.04, 0.06, WHITE);
       on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.15, -0.04, 0.06, WHITE);
@@ -400,7 +417,8 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   };
 
   const [front, right, back, left] = k.walls(0);
-  const sideBays = Math.max(2, Math.round((D - 1.4) / 2.7)), middle = b.bays >> 1;
+  // (An even number of windows to each end, so that the wall between the front rooms and the back meets the end walls between two of them.)
+  const sideBays = D >= 10.4 ? 4 : 2, middle = b.bays >> 1, order = N > 1 ? y1 + 0.27 : PLINTH;
   let centreLeft = 0, centreRight = 0;
   const out = 0.4;
   if (b.portico) {
@@ -409,24 +427,24 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     centreLeft = a - W / 2; centreRight = c - W / 2;
     const wing = (from: number, to: number): Face => ({ L: to - from, P: (s, y, t) => front.P(from + s, y, t) });
     const stand: Face = { L: c - a, P: (s, y, t) => front.P(a + s, y, t - out) };
-    wall(wing(0, a), middle - 1, { margin: 0.5 });
-    wall(wing(c, W), middle - 1, { margin: 0.5 });
-    const { centre } = wall(stand, 3, { door: 1, margin: 0.3 });
+    wall(wing(0, a), middle - 1, 0, { margin: 0.5 });
+    wall(wing(c, W), middle - 1, 0, { margin: 0.5 });
+    const { centre } = wall(stand, 3, 0, { door: 1, margin: 0.3 });
     // (And the sides of what stands forward.)
     box('plaster', centreLeft, centreLeft + 0.3, PLINTH, top, -out, 0.02, wash);
     box('plaster', centreRight - 0.3, centreRight, PLINTH, top, -out, 0.02, wash);
-    for (const s of [0.36, (centre(0) + centre(1)) / 2, (centre(1) + centre(2)) / 2, stand.L - 0.36]) pilaster(stand, s, y1 + 0.27, top, 0.13);
-  } else wall(front, b.bays, { door: middle });
-  wall(right, sideBays, { plain: true });
-  wall(back, b.bays, { plain: true });
-  wall(left, sideBays, { plain: true });
+    for (const s of [0.36, (centre(0) + centre(1)) / 2, (centre(1) + centre(2)) / 2, stand.L - 0.36]) pilaster(stand, s, order, top, 0.13);
+  } else wall(front, b.bays, 0, { door: middle });
+  wall(right, sideBays, 1, { plain: true });
+  wall(back, b.bays, 2, { plain: true });
+  wall(left, sideBays, 3, { plain: true });
   // Strips at the corners, the height of the upper storeys.
-  for (const f of [front, right, back, left]) for (const s of [0.3, f.L - 0.3]) on(f, 'plaster', s - 0.3, s + 0.3, y1 + 0.27, top, -0.05, 0.03, WHITE);
+  for (const f of [front, right, back, left]) for (const s of [0.3, f.L - 0.3]) on(f, 'plaster', s - 0.3, s + 0.3, order, top, -0.05, 0.03, WHITE);
 
   // The cornice, all round: a frieze, three mouldings each standing further out than the one under it, and blocks along the front.
-  const round = (y0: number, y3: number, reach: number, colour: Colour, material = 'plaster') => {
-    box(material, -W / 2 - reach, W / 2 + reach, y0, y3, -reach, D + reach, colour);
-    if (b.portico) box(material, centreLeft - reach, centreRight + reach, y0, y3, -out - reach, 0, colour);
+  const round = (y0: number, y3: number, reach: number, colour: Colour) => {
+    for (const f of [front, right, back, left]) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, colour);
+    if (b.portico) box('plaster', centreLeft - reach, centreRight + reach, y0, y3, -out - reach, 0, colour);
   };
   round(top, top + 0.42, 0.04, WHITE);
   round(top + 0.42, top + 0.52, 0.14, WHITE);
@@ -465,10 +483,169 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     // Chimneys, plastered, each with a white cap.
     const stacks = b.bays >= 7 ? 4 : 2;
     for (let n = 0; n < stacks; n++) {
-      const u = (-0.5 + (n + 0.5) / stacks) * (W - D * 0.9), v = D / 2 + (n % 2 ? 1.5 : -1.5);
+      const u = (-0.5 + (n + 0.5) / stacks) * Math.max(1.5, W - D * 0.9), v = D / 2 + (n % 2 ? 1.5 : -1.5);
       box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, shade(wash, 0.92));
       box('plaster', u - 0.52, u + 0.52, y + rise + 0.95, y + rise + 1.07, v - 0.37, v + 0.37, WHITE);
     }
+  }
+  // ------------------------------------------------------------------ inside
+  interface Rect { u0: number; u1: number; v0: number; v1: number }
+  interface Room extends Rect { kind: 'hall' | 'stair' | 'through' | 'front' | 'back' }
+  interface Door { line: 'u' | 'v'; at: number; c: number; half: number; tall?: boolean }
+  // Where one bay ends and the next begins, across the front: midway between windows, and at the cheeks of what stands forward.
+  const windows = holes.filter((h) => h.side === 0 && h.storey === 0).map((h) => h.c).sort((p, q) => p - q);
+  const bays = b.bays, broad = b.portico || bays >= 7 ? 3 : 1, flank = (broad - 1) / 2;
+  const edge: number[] = [-W / 2 + T];
+  for (let i = 1; i < bays; i++) edge.push((windows[i - 1] + windows[i]) / 2);
+  edge.push(W / 2 - T);
+  if (b.portico) { edge[middle - 1] = centreLeft + 0.15; edge[middle + 2] = centreRight - 0.15; }
+  const uL = edge[middle - flank], uR = edge[middle + flank + 1], vF = b.portico ? -out + T : T, spine = D / 2, vB = D - T;
+  const plan: Room[] = [], doors: Door[] = [];
+  if (broad === 1) plan.push({ u0: uL, u1: uR, v0: vF, v1: vB, kind: 'through' });
+  else {
+    plan.push({ u0: uL, u1: uR, v0: vF, v1: spine, kind: 'hall' }, { u0: uL, u1: uR, v0: spine, v1: vB, kind: 'stair' });
+    doors.push({ line: 'v', at: spine, c: (uL + uR) / 2, half: 1.1, tall: true });
+  }
+  {
+    // A wing: rooms of one, two or three bays; and the other wing its mirror.
+    const sizes: number[] = [];
+    for (let leftOver = middle - flank; leftOver > 0;) {
+      const take = leftOver <= 3 && rng.chance(0.45) ? leftOver : Math.min(leftOver, rng.pick([1, 2, 2, 3]));
+      sizes.push(take);
+      leftOver -= take;
+    }
+    for (const side of [-1, 1]) {
+      let bay = side < 0 ? middle - flank : middle + flank + 1;
+      for (const size of sizes) {
+        const a = side < 0 ? edge[bay - size] : edge[bay], c = side < 0 ? edge[bay] : edge[bay + size], inner = side < 0 ? c : a;
+        plan.push({ u0: a, u1: c, v0: T, v1: spine, kind: 'front' }, { u0: a, u1: c, v0: spine, v1: vB, kind: 'back' });
+        // Doors: in a line along the front; along the back; and from each front room to the room behind it.
+        const atMiddle = Math.abs(inner - (side < 0 ? uL : uR)) < 0.01;
+        doors.push({ line: 'u', at: inner, c: T + 1.25, half: 0.55 });
+        if (!atMiddle || broad === 3) doors.push({ line: 'u', at: inner, c: atMiddle ? spine + 1.0 : vB - 1.25, half: 0.5 });
+        doors.push({ line: 'v', at: spine, c: (a + c) / 2, half: 0.5 });
+        bay += side * size;
+      }
+    }
+  }
+  // The stair: two flights side by side and a landing between them, the same on every storey. It is laid out in measures of
+  // its own: `a` along its flights from where the first begins to rise, `e` across them. In a hall three bays broad it lies along
+  // the back wall; in a passage it lies at the far end, the passage's whole breadth.
+  const TREAD = 0.24, LANDING = 1.05, START = broad === 3 ? 1.2 : 0.3;
+  const flights = Array.from({ length: N - 1 }, (_, storey) => {
+    const h = b.heights[storey], steps = Math.ceil(h / 0.17), first = Math.ceil(steps / 2);
+    return { steps, first, rise: h / steps, turn: START + first * TREAD };
+  });
+  const longest = START + Math.max(0, ...flights.map((f) => f.first)) * TREAD + LANDING;
+  const across = broad === 3 ? 2.2 : uR - uL - 0.2, strip = Math.min(1.1, (across - 0.12) / 2);
+  const stairAt = broad === 3
+    ? (a: number, e: number, y: number) => at(uL + 0.1 + a, y, vB - 0.05 - across + e)
+    : (a: number, e: number, y: number) => at(uL + 0.1 + e, y, vB - 0.05 - longest + a);
+  const stairRect = (a0: number, a1: number, e0: number, e1: number): Rect => {
+    const p = k.local(stairAt(a0, e0, 0)), q = k.local(stairAt(a1, e1, 0));
+    return { u0: Math.min(p.u, q.u), u1: Math.max(p.u, q.u), v0: Math.min(p.v, q.v), v1: Math.max(p.v, q.v) };
+  };
+  const stone2: Colour = [0.8, 0.77, 0.7], rail: Colour = [0.16, 0.1, 0.07];
+  flights.forEach((f, storey) => {
+    const fy = floorY(storey), mid = fy + f.first * f.rise, second = f.steps - f.first, end = f.turn - second * TREAD, upper = floorY(storey + 1);
+    const piece = (a0: number, a1: number, e0: number, e1: number, lo: number, hi: number, colour: Colour, material = 'stone') => block(material, stairAt(a0, e0, lo), stairAt(a1, e1, hi), colour);
+    for (let i = 1; i <= f.first; i++) piece(START + (i - 1) * TREAD, START + i * TREAD + 0.01, 0, strip, fy + i * f.rise - 0.22, fy + i * f.rise, stone2);
+    piece(f.turn, f.turn + LANDING, 0, across, mid - 0.22, mid, stone2);
+    for (let j = 1; j <= second; j++) piece(f.turn - j * TREAD - 0.01, f.turn - (j - 1) * TREAD, across - strip, across, mid + j * f.rise - 0.22, mid + j * f.rise, stone2);
+    // What carries the landing, and the rails: one up each flight, on posts.
+    for (const e of [0.06, across - 0.18]) piece(f.turn + LANDING - 0.2, f.turn + LANDING - 0.08, e, e + 0.12, fy, mid - 0.22, stone2);
+    const post = (a: number, e: number, y: number) => piece(a - 0.04, a + 0.04, e - 0.04, e + 0.04, y, y + 1.0, rail, 'wood');
+    for (const e of broad === 3 ? [0.05, strip + 0.02] : [strip + 0.02]) {
+      stick(stairAt(START, e, fy + 0.95), stairAt(f.turn, e, mid + 0.95), 0.06, 0.06, rail);
+      post(START, e, fy); post(f.turn, e, mid);
+    }
+    stick(stairAt(f.turn, across - strip - 0.02, mid + 0.95), stairAt(end, across - strip - 0.02, upper + 0.95), 0.06, 0.06, rail);
+    post(f.turn, across - strip - 0.02, mid); post(end, across - strip - 0.02, upper);
+    // Round the well in the floor above: a rail along its open side and across its far end; and at the top of the house across its near end too.
+    const level = (a0: number, e0: number, a1: number, e1: number) => {
+      stick(stairAt(a0, e0, upper + 0.95), stairAt(a1, e1, upper + 0.95), 0.06, 0.06, rail);
+      const n = Math.max(1, Math.round(Math.hypot(a1 - a0, e1 - e0) / 1.1));
+      for (let i = 0; i <= n; i++) post(a0 + ((a1 - a0) * i) / n, e0 + ((e1 - e0) * i) / n, upper);
+    };
+    if (broad === 3) level(START + 0.06, -0.05, f.turn + LANDING + 0.05, -0.05);
+    if (broad === 3) level(f.turn + LANDING + 0.05, -0.05, f.turn + LANDING + 0.05, across);
+    if (storey === N - 2) level(START - 0.05, 0, START - 0.05, strip + 0.1);
+    // (Where the second flight comes up a step short of the floor's edge, a strip of floor to step onto.)
+    if (end > START + 0.01) piece(START, end, across - strip, across, upper - 0.3, upper, stone2);
+  });
+  // The well in the floor of a storey, for the flights that come up to it.
+  const wellOf = (storey: number): Rect | null => (storey === 0 || !flights[storey - 1] ? null : stairRect(START, flights[storey - 1].turn + LANDING, 0, across));
+  const without = (r: Rect, hole: Rect | null): Rect[] => {
+    if (!hole || hole.u1 <= r.u0 || hole.u0 >= r.u1 || hole.v1 <= r.v0 || hole.v0 >= r.v1) return [r];
+    const parts: Rect[] = [{ u0: r.u0, u1: r.u1, v0: r.v0, v1: Math.max(r.v0, hole.v0) }, { u0: r.u0, u1: r.u1, v0: Math.min(r.v1, hole.v1), v1: r.v1 }];
+    parts.push({ u0: r.u0, u1: Math.max(r.u0, hole.u0), v0: Math.max(r.v0, hole.v0), v1: Math.min(r.v1, hole.v1) }, { u0: Math.min(r.u1, hole.u1), u1: r.u1, v0: Math.max(r.v0, hole.v0), v1: Math.min(r.v1, hole.v1) });
+    return parts.filter((q) => q.u1 - q.u0 > 0.02 && q.v1 - q.v0 > 0.02);
+  };
+
+  const paints: Colour[] = [[0.62, 0.72, 0.6], [0.58, 0.66, 0.74], [0.82, 0.7, 0.45], [0.8, 0.6, 0.56], [0.5, 0.2, 0.17], [0.86, 0.83, 0.74], [0.66, 0.62, 0.7], [0.45, 0.56, 0.5]];
+  const boards: Colour = [0.42, 0.29, 0.17];
+  // Under the ground floor, and over the top one.
+  box('stone', -W / 2 + 0.2, W / 2 - 0.2, 0.1, PLINTH - 0.04, vF - 0.1, D - 0.2, shade(stone, 0.6));
+  box('plaster', -W / 2 + 0.2, W / 2 - 0.2, top - 0.3, top, b.portico ? -out + 0.2 : 0.2, D - 0.2, WHITE);
+  for (let storey = 0; storey < N; storey++) {
+    const fy = floorY(storey), h = b.heights[storey], clear = fy + h - 0.3, doorTop = fy + Math.min(storey === 1 ? 2.7 : 2.35, h - 0.75);
+    plan.forEach((room, index) => {
+      const lived = room.kind === 'front' || room.kind === 'back', colour: Colour = lived ? rng.pick(paints) : [0.84, 0.81, 0.72];
+      // The floor: boards, or in the halls squares of two stones; and under it what is the ceiling of the room below.
+      for (const part of without({ u0: room.u0 - 0.1, u1: room.u1 + 0.1, v0: room.v0 - 0.1, v1: room.v1 + 0.1 }, wellOf(storey))) {
+        if (storey > 0) box('plaster', part.u0, part.u1, fy - 0.3, fy - 0.04, part.v0, part.v1, WHITE);
+        if (lived) box('wood', part.u0, part.u1, fy - 0.04, fy, part.v0, part.v1, boards, true);
+        else for (let u = part.u0, i = 0; u < part.u1 - 0.01; u += 0.62, i++) for (let v = part.v0, j = 0; v < part.v1 - 0.01; v += 0.62, j++) {
+          box('stone', u, Math.min(part.u1, u + 0.62), fy - 0.04, fy, v, Math.min(part.v1, v + 0.62), (i + j) % 2 ? [0.78, 0.75, 0.68] : [0.36, 0.35, 0.34]);
+        }
+      }
+      // The four walls: lined with the room's colour, cut for its doors and windows; a skirting, a rail and a cornice; and a frame to each door.
+      const sides: { f: Face; L: number; lo: number; outer: number; line: 'u' | 'v'; at: number }[] = [
+        { f: { L: 0, P: (s, y, t) => at(room.u0 + s, y, room.v0 + 0.1 - t) }, L: room.u1 - room.u0, lo: room.u0, outer: room.v0 <= vF + 0.01 ? 0 : -1, line: 'v', at: room.v0 },
+        { f: { L: 0, P: (s, y, t) => at(room.u0 + s, y, room.v1 - 0.1 + t) }, L: room.u1 - room.u0, lo: room.u0, outer: room.v1 >= vB - 0.01 ? 2 : -1, line: 'v', at: room.v1 },
+        { f: { L: 0, P: (s, y, t) => at(room.u0 + 0.1 - t, y, room.v0 + s) }, L: room.v1 - room.v0, lo: room.v0, outer: room.u0 <= -W / 2 + T + 0.01 ? 3 : -1, line: 'u', at: room.u0 },
+        { f: { L: 0, P: (s, y, t) => at(room.u1 - 0.1 + t, y, room.v0 + s) }, L: room.v1 - room.v0, lo: room.v0, outer: room.u1 >= W / 2 - T - 0.01 ? 1 : -1, line: 'u', at: room.u1 },
+      ];
+      for (const side of sides) {
+        const f = side.f, gaps: Gap[] = [], ways: Gap[] = [];
+        if (side.outer >= 0) for (const hole of holes) if (hole.side === side.outer && hole.storey === storey && hole.c > side.lo && hole.c < side.lo + side.L) gaps.push({ s0: hole.c - hole.half - side.lo, s1: hole.c + hole.half - side.lo, y0: hole.y0, y1: hole.y1 });
+        for (const door of doors) if (door.line === side.line && Math.abs(door.at - side.at) < 0.01 && door.c > side.lo && door.c < side.lo + side.L) ways.push({ s0: door.c - door.half - side.lo, s1: door.c + door.half - side.lo, y0: fy - 0.05, y1: door.tall ? Math.min(clear - 0.35, fy + 3.0) : doorTop });
+        const open = [...gaps, ...ways];
+        pierced(f, 'plaster', 0, side.L, fy, clear, 0, 0.1, colour, open);
+        pierced(f, 'plaster', 0, side.L, fy, fy + 0.16, -0.02, 0, WHITE, open);
+        pierced(f, 'plaster', 0, side.L, fy + 0.9, fy + 0.96, -0.025, 0, WHITE, open);
+        on(f, 'plaster', 0, side.L, clear - 0.14, clear, -0.1, 0, WHITE);
+        for (const g of ways) {
+          for (const [a, e] of [[g.s0 - 0.12, g.s0], [g.s1, g.s1 + 0.12]]) on(f, 'plaster', a, e, fy, g.y1 + 0.12, -0.035, 0, WHITE);
+          on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.12, -0.035, 0, WHITE);
+        }
+      }
+      // A stove of glazed tiles in the corner of each front room, away from the windows: a foot, a tall body, a cornice, and its small iron door.
+      if (room.kind === 'front') {
+        const near = Math.abs(room.u0) < Math.abs(room.u1) ? room.u0 + 0.12 : room.u1 - 0.12 - 0.58, v = room.v1 - 0.12 - 0.8, tiles: Colour = index % 3 ? [0.88, 0.88, 0.84] : [0.3, 0.42, 0.34];
+        const body = Math.min(clear - 0.5, fy + 2.3);
+        box('stone', near - 0.03, near + 0.61, fy, fy + 0.24, v - 0.03, v + 0.8, [0.2, 0.2, 0.2]);
+        box('metal', near, near + 0.58, fy + 0.24, body, v, v + 0.78, tiles);
+        box('metal', near - 0.04, near + 0.62, body, body + 0.12, v - 0.04, v + 0.8, tiles);
+        box('metal', near + 0.06, near + 0.52, body + 0.12, body + 0.3, v + 0.06, v + 0.72, tiles);
+        box('metal', near + 0.16, near + 0.42, fy + 0.45, fy + 0.8, v - 0.025, v, [0.05, 0.05, 0.055]);
+      }
+      // In the room over the entrance hall, a table and two benches; in the entrance hall itself a bench by the wall.
+      if (room.kind === 'hall') {
+        const u = (room.u0 + room.u1) / 2, v = (room.v0 + room.v1) / 2 - 0.4, oak: Colour = [0.3, 0.2, 0.12];
+        if (storey > 0) {
+          box('wood', u - 1.0, u + 1.0, fy + 0.72, fy + 0.78, v - 0.5, v + 0.5, oak, true);
+          for (const [du, dv] of [[-0.9, -0.42], [0.84, -0.42], [-0.9, 0.36], [0.84, 0.36]]) box('wood', u + du, u + du + 0.07, fy, fy + 0.72, v + dv, v + dv + 0.07, oak, true);
+          for (const dv of [-1.0, 0.72]) {
+            box('wood', u - 0.8, u + 0.8, fy + 0.42, fy + 0.46, v + dv, v + dv + 0.3, oak, true);
+            for (const du of [-0.74, 0.68]) box('wood', u + du, u + du + 0.06, fy, fy + 0.42, v + dv + 0.04, v + dv + 0.26, oak, true);
+          }
+        } else {
+          box('wood', room.u0 + 0.6, room.u0 + 2.2, fy + 0.44, fy + 0.49, room.v1 - 0.55, room.v1 - 0.15, oak, true);
+          for (const du of [0.66, 2.08]) box('wood', room.u0 + du, room.u0 + du + 0.06, fy, fy + 0.44, room.v1 - 0.5, room.v1 - 0.2, oak, true);
+        }
+      }
+    });
   }
 }
 
@@ -480,6 +657,15 @@ export function solids(mesh: (material: string) => MeshBuilder) {
 
 /** Builds one building where the site document says it stands, on ground at the height `base`. `stone` is the tint of the country's stone. */
 export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
-  if (b.style === 'timber') timberHouse(b, base, mesh, rng, stone, first);
-  else imperialHouse(b, base, mesh, rng, stone);
+  if (b.style === 'timber') { timberHouse(b, base, mesh, rng, stone, first); return; }
+  // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
+  const begun = new Map<MeshBuilder, number>();
+  const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
+  imperialHouse(b, base, noting, rng, stone);
+  // Indoors, only a share of the sky is seen, through the windows: so a room is dimmer than the street, and the sun lies on its floor where it comes in.
+  const turn = b.faces === 'w' ? 1 : -1, height = 0.5 + b.heights.reduce((sum, h) => sum + h, 0);
+  for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
+    const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+    return Math.abs(u) < b.w / 2 - 0.24 && v > (b.portico && Math.abs(u) < 4.2 ? -0.16 : 0.24) && v < b.d - 0.24 && y > base + 0.3 && y < base + height - 0.02 ? 0.24 : 1;
+  }, from);
 }

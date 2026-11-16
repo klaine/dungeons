@@ -356,8 +356,8 @@ float heightFn(vec2 uv) {
   float trowel = fbm(uv + 1.7, vec2(6.), 4, .55);
   float grit = fbm(uv + 5.1, vec2(90.), 2, .5);
   vec3 c = worleyId(uv * 5. + fbm(uv, vec2(4.), 2, .5) * .6, vec2(5.));
-  float crack = (1. - smoothstep(.0, .012, c.y - c.x)) * step(.62, c.z);
-  return clamp(.55 + (trowel - .5) * .35 + (grit - .5) * .12 - crack * .25, 0., 1.);
+  float crack = (1. - smoothstep(.0, .006, c.y - c.x)) * step(.86, c.z);
+  return clamp(.55 + (trowel - .5) * .3 + (grit - .5) * .1 - crack * .1, 0., 1.);
 }`,
     surface: /* glsl */ `
 void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {

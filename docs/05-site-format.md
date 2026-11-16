@@ -192,9 +192,11 @@ A building stands with the middle of its ground at `x`, `z`. `w` is its breadth 
 
 Of the style `timber` (a timber-framed house): it stands on a plinth of 0.3 metres, and its storeys are 2.3 to 3.3 metres high; each upper storey stands `jetty` metres further out over the street than the one below, on the front only; the roof rises at 56 degrees with a gable to the street if `gable` is true, and at 52 degrees with its eaves to the street and dormers in it if not.
 
-Of the style `imperial` (a stuccoed classical building): a plinth of 0.5 metres, a ground storey of 3.4 to 4.2, a principal storey of 3.8 to 4.8, and with three storeys a third of 2.8 to 3.4; a cornice and a low wall above it, and a hipped roof at 21 degrees. If `portico` is true the three middle bays stand 0.4 metres forward under pilasters and a pediment. The door is in the middle bay.
+Of the style `imperial` (a stuccoed classical building): one to five storeys and three to thirteen bays, always an odd number. A plinth of 0.5 metres, a ground storey of 3.4 to 4.2, a principal storey of 3.8 to 4.8, and further storeys of about 3 each; a cornice and a low wall above it, and a hipped roof at 21 degrees. If `portico` is true the three middle bays stand 0.4 metres forward under pilasters and a pediment. The door is in the middle bay.
 
-What stands in each bay, which timbers brace which, the colour of doors and shutters and of the roof: these are not in the document. They are worked out by whoever builds it; the tool works them out from the site's seed.
+A classical building can be entered, by the door in its middle bay. Its rooms are not in the document yet. They follow from it by rule: the middle bay (or the middle three, with a portico or with seven bays or more) is the entrance and the stair; the bays either side are rooms one to three bays broad, alike on both sides; a wall along the middle of the depth divides front rooms from back; and every storey is the same.
+
+What stands in each bay, which timbers brace which, how the bays of a wing are shared out among rooms, the colour of doors and shutters and of the roof and of each room: these are not in the document. They are worked out by whoever builds it; the tool works them out from the site's seed.
 
 ### The solution
 
