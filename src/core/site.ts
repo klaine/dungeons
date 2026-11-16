@@ -233,6 +233,19 @@ export interface Grotto {
  * rows above it, a heavy cornice and a low metal roof; with `portico`, the middle bays stand
  * forward under pilasters and a pediment.
  */
+/**
+ * The plan of a building's rooms, alike on every storey. Everything is in the building's own
+ * measures: `u` across the front from its middle, to the right as seen from outside; `v` back
+ * from the face of the front wall. A room is its clear floor, inside its walls.
+ */
+export interface BuildingPlan {
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back'; u0: number; u1: number; v0: number; v1: number }[];
+  /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
+  doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean }[];
+  /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
+  walls: { outer: number; spine: number; cross: number };
+}
+
 export interface Building {
   style: 'timber' | 'imperial';
   x: number;
@@ -247,6 +260,15 @@ export interface Building {
   jetty?: number;
   gable?: boolean;
   portico?: boolean;
+  /**
+   * For a building set into rising ground: how much higher the ground stands at its back than
+   * before its door. Its lowest storey is then half a basement, open to the front and buried at
+   * the back, and it has a second door in the back wall, at `backDoor` across it, onto the ground there.
+   */
+  sunk?: number;
+  backDoor?: number;
+  /** Its rooms, if it has any that can be gone into. */
+  plan?: BuildingPlan;
 }
 
 /**

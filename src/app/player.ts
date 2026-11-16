@@ -10,6 +10,8 @@ const RADIUS = 0.28;
 const HEIGHT = 1.8;
 const EYE = 1.68;
 const GRAVITY = 22;
+/** The highest step taken in a stride. Steps up to about 0.17 are ridden up by the round foot alone; this is for the rest. */
+const STEP_UP = 0.34;
 
 export class Player {
   readonly position = new Vector3();
@@ -151,13 +153,15 @@ export class Player {
     this.syncCamera();
   }
 
-  private step(dt: number): void {
-    this.velocity.y += (this.onGround ? -2 : -GRAVITY) * dt;
-    this.position.addScaledVector(this.velocity, dt);
-
+  /**
+   * Pushes a body standing at `at` out of whatever it is in: the site, and shut doors. Returns
+   * how far it had to go. `from` is where it stood before, which says which way to leave a door
+   * that it has got inside.
+   */
+  private pushOut(at: Vector3, from: Vector3): Vector3 {
     const seg = this.segment;
-    seg.start.set(this.position.x, this.position.y + RADIUS, this.position.z);
-    seg.end.set(this.position.x, this.position.y + HEIGHT - RADIUS, this.position.z);
+    seg.start.set(at.x, at.y + RADIUS, at.z);
+    seg.end.set(at.x, at.y + HEIGHT - RADIUS, at.z);
     const before = seg.start.clone();
     this.box.makeEmpty();
     this.box.expandByPoint(seg.start);
@@ -190,7 +194,7 @@ export class Player {
         // Inside the box: leave by the nearer face across its thin dimension.
         const thinX = b.max.x - b.min.x < b.max.z - b.min.z;
         const mid = thinX ? (b.min.x + b.max.x) / 2 : (b.min.z + b.max.z) / 2;
-        const out = (thinX ? before.x : before.z) >= mid ? 1 : -1;
+        const out = (thinX ? from.x : from.z) >= mid ? 1 : -1;
         const half = (thinX ? b.max.x - b.min.x : b.max.z - b.min.z) / 2 + RADIUS;
         if (thinX) { dx = mid + out * half - seg.start.x; dz = 0; } else { dz = mid + out * half - seg.start.z; dx = 0; }
         seg.start.x += dx; seg.end.x += dx; seg.start.z += dz; seg.end.z += dz;
@@ -199,8 +203,15 @@ export class Player {
         seg.start.x += dx * push; seg.end.x += dx * push; seg.start.z += dz * push; seg.end.z += dz * push;
       }
     }
+    return seg.start.clone().sub(before);
+  }
 
-    const delta = seg.start.clone().sub(before);
+  private step(dt: number): void {
+    const start = this.position.clone(), wasGround = this.onGround, wantX = this.velocity.x, wantZ = this.velocity.z;
+    this.velocity.y += (this.onGround ? -2 : -GRAVITY) * dt;
+    this.position.addScaledVector(this.velocity, dt);
+
+    const delta = this.pushOut(this.position, start);
     // Standing needs something reasonably level underfoot; a face steeper than about sixty
     // degrees pushes sideways more than up, and is a wall to slide off, not ground to climb.
     this.onGround = delta.y > Math.abs(dt * this.velocity.y * 0.25) && delta.y > delta.length() * 0.45;
@@ -212,6 +223,33 @@ export class Player {
       delta.normalize();
       this.velocity.addScaledVector(delta, -Math.min(0, delta.dot(this.velocity)));
     }
+    if (wasGround) this.stepUp(start, wantX * dt, wantZ * dt);
+  }
+
+  /**
+   * Stepping up. The round foot of the body rides up a step of a hand and a half by itself; a
+   * higher one stops it dead, though anyone would step onto it without thinking. So when a body
+   * on its feet is stopped going forward, it tries the move again from a step higher, and if it
+   * gets on that way, and there is ground under it there, it stands on that ground.
+   */
+  private stepUp(start: Vector3, wx: number, wz: number): void {
+    const want = Math.hypot(wx, wz);
+    if (want < 1e-4) return;
+    const along = (p: Vector3) => ((p.x - start.x) * wx + (p.z - start.z) * wz) / want;
+    if (along(this.position) > want * 0.6) return;
+    const up = start.clone().add(new Vector3(wx, STEP_UP, wz));
+    up.add(this.pushOut(up, start));
+    if (along(up) < want * 0.8) return;
+    const down = up.clone();
+    down.y -= STEP_UP + 0.02;
+    const lift = this.pushOut(down, up);
+    // (Pushed up out of something, and onto something that can be stood on: a step, not the edge of a wall.)
+    if (lift.y < 0.004 || lift.y < Math.hypot(lift.x, lift.z) * 1.5) return;
+    down.add(lift);
+    if (down.y < start.y + 0.02 || along(down) < want * 0.5) return;
+    this.position.copy(down);
+    this.onGround = true;
+    this.velocity.y = 0;
   }
 
   private syncCamera(): void {

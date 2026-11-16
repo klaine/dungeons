@@ -1,5 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
+import { classicalFront, floorOf, planClassical } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
 /**
@@ -359,6 +360,15 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       const near = tries % 2 ? side : -side;
       const b: Building = { style: 'imperial', x: round(trackX(z) + near * (off + d / 2)), z: round(z), w, d, faces: near > 0 ? 'w' : 'e', storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && tries % 3 === 0) };
       if (fits(b)) out.push(b);
+    }
+    for (const b of out) {
+      // About two in five of the taller ones are set into rising ground: the lowest storey open to the front and buried at the back.
+      const cut = rng.fork('sunk');
+      if (b.storeys >= 3 && cut.chance(0.45)) {
+        b.sunk = round(floorOf(b, 1) - 0.2);
+        b.backDoor = round(classicalFront(b).windows[(b.bays >> 1) + (b.portico || b.bays >= 7 ? 2 : 1)]);
+      }
+      b.plan = planClassical(b, rng.fork('plan'));
     }
   }
   if (out.length) site.buildings = out;

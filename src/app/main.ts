@@ -11,6 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { Atmosphere } from '../render/post';
+import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
@@ -1033,6 +1034,9 @@ async function start(): Promise<void> {
     }
     return out;
   };
+  // Floor plans of the buildings in the valley, as pictures: for looking at, and for checks.
+  (window as any).__dbg.buildingPlans = () => (site?.buildings ?? []).filter((b) => b.plan).map((b) => buildingPlans(b).toDataURL('image/png'));
+  (window as any).__dbg.buildingPlansAt = (b: Parameters<typeof buildingPlans>[0], scale?: number) => buildingPlans(b, scale).toDataURL('image/png');
   (window as any).__dbg.sunProbe = (nx: number, ny: number) => {
     camera.updateMatrixWorld(true);
     const dir = new Vector3(nx, ny, 0.5).unproject(camera).sub(camera.position).normalize();

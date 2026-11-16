@@ -1,3 +1,4 @@
+import { drawStorey } from './buildingPlan';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
@@ -235,6 +236,12 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     }
     // Buildings by the track: shut, so drawn solid, with a paler line for the ridge of a steep roof.
     for (const b of site.buildings ?? []) {
+      if (b.plan) {
+        // A building that can be gone into is drawn with its rooms, as they are at the level of the ground before its door.
+        const turn = b.faces === 'w' ? 1 : -1;
+        drawStorey(ctx, b, 0, (u, v) => [X(b.x - (turn * b.d) / 2 + turn * v), Z(b.z + turn * u)], scale);
+        continue;
+      }
       ctx.fillStyle = INK;
       rect(b.x - b.d / 2, b.z - b.w / 2, b.x + b.d / 2, b.z + b.w / 2);
       ctx.fillStyle = DARK;

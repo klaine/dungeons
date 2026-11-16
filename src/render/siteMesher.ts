@@ -13,6 +13,7 @@ import { layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
+import { groundOf } from '../core/building';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -436,6 +437,11 @@ export function meshSite(site: Site): SceneDescription {
     const towers = (site.grounds ? site.towers ?? [] : []).map((t) => ({ ...t, base: swells(t.x, t.z) }));
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
     const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5 }));
+    // Whether a point is under a building, within its outer walls.
+    const footprint = (b: { x: number; z: number; w: number; d: number; faces: 'e' | 'w' }, x: number, z: number) => {
+      const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+      return Math.abs(u) < b.w / 2 && v > 0 && v < b.d;
+    };
     // How far a point is outside a building's ground (less than nothing inside it).
     const outside = (b: (typeof houses)[number], x: number, z: number) => Math.max(Math.abs(x - b.x) - b.hx, Math.abs(z - b.z) - b.hz);
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
@@ -747,10 +753,21 @@ export function meshSite(site: Site): SceneDescription {
         }
       }
       for (const b of houses) {
-        const d = outside(b, x, z);
-        if (d > 4.5) continue;
-        const k = 1 - smooth((d - 0.9) / 3.2);
-        y += (b.base - y) * k;
+        // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
+        // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
+        const d = outside(b, x, z), sunk = b.sunk ?? 0, v = (b.faces === 'w' ? 1 : -1) * (x - b.x) + b.d / 2;
+        let k: number;
+        if (!sunk) {
+          if (d > 4.5) continue;
+          k = 1 - smooth((d - 0.9) / 3.2);
+        } else {
+          // (Behind it the risen ground runs on back towards the valley's side, as a hillside does, and gives way to the land only at its sides and far back.)
+          const aside = Math.abs((b.faces === 'w' ? 1 : -1) * (z - b.z)) - b.hz;
+          // (Before it the ground is level for the depth of its steps and more, as before any building.)
+          if (v < -9 || aside > 14 || v > b.d + 38) continue;
+          k = v < 0 ? 1 - smooth((Math.max(aside, -v - 2.4) - 0.9) / 3.2) : (1 - smooth((aside - 1.2) / 11)) * (1 - smooth((v - b.d - 22) / 16));
+        }
+        y += (b.base + groundOf(b, v) - y) * k;
         even = Math.min(even, 1 - k);
       }
       for (const t of towers) {
@@ -1331,12 +1348,23 @@ export function meshSite(site: Site): SceneDescription {
         // it gives way to what is carved.
         const behindWall = mx > p.x0 - 0.2 && mx < p.x1 + 0.2 && mz < frontZ - 0.05;
         if (!behindWall && (carved(mx, mz) || (c.z0 < p.z0 + 0.1 && c.z1 > frontZ - 0.05 && c.x1 > p.x0 - 0.3 && c.x0 < p.x1 + 0.3))) return true;
+        // Nor under a building: where the ground rises against its walls, it would come up through its floors.
+        if (houses.some((b) => footprint(b, mx, mz))) return true;
         return openings.some((o) => mx > o.x0 && mx < o.x1 && mz > o.z0 && mz < o.z1);
       },
       // Its corners are drawn back to the line of the wall top and out of every opening, so that
       // the turf ends exactly where masonry begins and no gap is left to look down.
       warp: (x, z) => {
         if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = frontZ - 0.05;
+        // (And to the faces of a building, so that the ground meets its walls and goes no further.)
+        for (const b of houses) {
+          if (!footprint(b, x, z)) continue;
+          const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2, front = b.style === 'imperial' && b.portico && Math.abs(u) < b.w * 0.2 ? -0.42 : -0.02;
+          const ways: [number, number, number][] = [[u + b.w / 2 + 0.02, -b.w / 2 - 0.02, v], [b.w / 2 + 0.02 - u, b.w / 2 + 0.02, v], [v - front, u, front], [b.d + 0.02 - v, u, b.d + 0.02]];
+          const [, nu, nv] = ways.reduce((m, q) => (q[0] < m[0] ? q : m));
+          x = b.x + turn * (nv - b.d / 2);
+          z = b.z + turn * nu;
+        }
         for (const o of openings) {
           if (x <= o.x0 || x >= o.x1 || z <= o.z0 || z >= o.z1) continue;
           const w = x - o.x0, e = o.x1 - x, n = z - o.z0, so = o.z1 - z, least = Math.min(w, e, n, so);

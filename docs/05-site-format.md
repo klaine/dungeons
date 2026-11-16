@@ -194,7 +194,19 @@ Of the style `timber` (a timber-framed house): it stands on a plinth of 0.3 metr
 
 Of the style `imperial` (a stuccoed classical building): one to five storeys and three to thirteen bays, always an odd number. A plinth of 0.5 metres, a ground storey of 3.4 to 4.2, a principal storey of 3.8 to 4.8, and further storeys of about 3 each; a cornice and a low wall above it, and a hipped roof at 21 degrees. If `portico` is true the three middle bays stand 0.4 metres forward under pilasters and a pediment. The door is in the middle bay.
 
-A classical building can be entered, by the door in its middle bay. Its rooms are not in the document yet. They follow from it by rule: the middle bay (or the middle three, with a portico or with seven bays or more) is the entrance and the stair; the bays either side are rooms one to three bays broad, alike on both sides; a wall along the middle of the depth divides front rooms from back; and every storey is the same.
+A classical building can be entered, by the door in its middle bay, and its `plan` gives its rooms. They follow from the rest by rule, and are written down so that whatever reads the document need not know the rule: the middle bay (or the middle three, with a portico or with seven bays or more) is the entrance and the stair; the bays either side are rooms one to three bays broad, alike on both sides; a wall along the middle of the depth divides front rooms from back; and every storey is the same.
+
+```json
+"plan": {
+  "rooms": [ { "kind": "hall", "u0": -3.68, "u1": 3.68, "v0": 0.35, "v1": 4.6 }, { "kind": "front", "u0": -11.55, "u1": -4.13, "v0": 0.75, "v1": 4.6 } ],
+  "doors": [ { "line": "v", "at": 4.85, "c": 0, "w": 2.2, "tall": true }, { "line": "u", "at": -3.98, "c": 2.0, "w": 1.1 } ],
+  "walls": { "outer": 0.75, "spine": 0.5, "cross": 0.3 }
+}
+```
+
+The plan is in the building's own measures: `u` across the front from its middle, to the right as one stands before it, and `v` back from the face of its front wall. A room is its clear floor, inside its walls; its `kind` is `hall` (the entrance hall), `stair` (the stair hall behind it), `passage` (a passage through the house with the stair at its far end), `front` or `back`. A door stands in the wall whose middle line is at `at`, which is a `u` if `line` is `u` and a `v` if it is `v`, centred at `c` along that wall and `w` wide; a `tall` one is an arch. `walls` gives the thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. The stair is not written down: it is always two flights and a landing in the `stair` room along its back wall, or at the far end of the `passage`, with steps no higher than 0.17.
+
+A building with `sunk` stands in rising ground: the ground at its back is `sunk` metres higher than before its door, rising along its sides, and its lowest storey has no windows where the ground stands against it. `backDoor` is where across the back wall (as a `u`) a second door opens onto that ground, at the height of the next floor up.
 
 What stands in each bay, which timbers brace which, how the bays of a wing are shared out among rooms, the colour of doors and shutters and of the roof and of each room: these are not in the document. They are worked out by whoever builds it; the tool works them out from the site's seed.
 
