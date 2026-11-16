@@ -275,6 +275,8 @@ export interface Building {
    * axle runs through the back wall, square to it.
    */
   wheel?: { x: number; z: number; y: number; r: number };
+  /** Of a timber house: burnt out. Its roof and glass are gone, its timbers charred and its walls smoke-blackened; its stone chimney stands. */
+  burnt?: boolean;
   portico?: boolean;
   /**
    * For a building set into rising ground: how much higher the ground stands at its back than
