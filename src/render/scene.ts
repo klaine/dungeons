@@ -136,6 +136,8 @@ export interface SceneDescription {
   far?: { wood: [number, number, number]; grass: [number, number, number] };
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
+  /** Where gulls wheel, off the cliffs. */
+  birds?: { x: number; y: number; z: number }[];
   /** Small things left lying about for whoever walks that far. */
   finds?: { at: Vector3; what: string }[];
 }

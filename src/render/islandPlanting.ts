@@ -26,6 +26,7 @@ export interface IslandPlanting {
   cards: CardSet[];
   ground: (x: number, z: number) => number;
   turfAt: (x: number, z: number, y: number) => Colour;
+  heathAt: (x: number, z: number) => number;
   rockyAt: (x: number, z: number) => number;
   trackOff: (x: number, z: number) => number;
   offFoot: (x: number, z: number) => number;
@@ -55,16 +56,17 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
   /** How sheltered a point is: in the hollow above the cove, or in the lee of the house. */
   const shelterAt = (x: number, z: number) => Math.max(smooth((o.combe * 0.9 - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 25), smooth(1 - (Math.max(hx0 - x, 0, x - hx1) + Math.max(hz0 - z, 0, z - approach.z1)) / 10) * 0.6);
   const green = (base: Colour, k = 1): Colour => [base[0] * k, base[1] * k, base[2] * k];
-  const grassTint: Colour = season === 'autumn' ? [0.62, 0.6, 0.32] : season === 'summer' ? [0.5, 0.6, 0.3] : [0.45, 0.62, 0.3];
-  const heather: Colour = season === 'autumn' ? [0.36, 0.2, 0.3] : season === 'summer' ? [0.48, 0.24, 0.42] : [0.26, 0.24, 0.16];
-  const gorseGreen: Colour = [0.11, 0.17, 0.07], bloom: Colour = [0.95, 0.72, 0.05];
+  // (Tints as the valley's are, which the card's paint and the light then brighten: a grass card tinted a third green is a full green on the screen.)
+  const dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : 0;
+  const heather: Colour = season === 'autumn' ? [0.26, 0.12, 0.16] : season === 'summer' ? [0.32, 0.14, 0.26] : [0.17, 0.13, 0.09];
+  const gorseGreen: Colour = [0.05, 0.09, 0.025], bloom: Colour = [0.62, 0.42, 0.02];
   const counts: Record<string, number> = {};
   const count = (k: string) => { counts[k] = (counts[k] ?? 0) + 1; };
 
   // ---- the low plants, on a jittered lattice over the whole island
-  const g = site.grounds!, STEP = 0.95, q = rng.fork('low');
+  const g = site.grounds!, STEP = 0.72, q = rng.fork('low');
   for (let z = g.z0; z < g.z1; z += STEP) for (let x = g.x0; x < g.x1; x += STEP) {
-    const px = x + q.range(-0.45, 0.45), pz = z + q.range(-0.45, 0.45);
+    const px = x + q.range(-0.36, 0.36), pz = z + q.range(-0.36, 0.36);
     const d = inland(o, px, pz);
     if (d < 0.6 || built(px, pz, 0.4)) continue;
     const y = c.ground(px, pz), above = y - sea;
@@ -77,40 +79,42 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     const yaw = q.range(0, Math.PI * 2);
     // Behind the beach, on the sand: marram, in clumps, and little else.
     if (beach > 0.35 && above < 4.5) {
-      if (fine > 0.42) { planting.tuft(marram, px, y - 0.05, pz, q.range(0.7, 1.1), q.range(0.6, 0.95), yaw, [0.62, 0.62, 0.42]); count('marram'); }
+      if (fine > 0.42) { planting.tuft(marram, px, y - 0.05, pz, q.range(0.7, 1.1), q.range(0.6, 0.95), yaw, [0.33, 0.33, 0.2]); count('marram'); }
       continue;
     }
     // Heath: in from the edge, out of the hollow, where the patches say: heather, and gorse in thick bushes.
-    const heath = smooth((patch - 0.5) / 0.08) * (1 - edge) * (1 - shelter);
+    const heath = c.heathAt(px, pz);
     if (heath > 0.5 && fine > 0.3) {
       if (fbm2(px * 0.23 + 7, pz * 0.23, 2) > 0.6) {
         const big = q.range(0.9, 1.6);
         planting.tuft(gorse, px, y - 0.1, pz, big * 1.3, big, yaw, green(gorseGreen, q.range(0.8, 1.2)));
-        if (season !== 'autumn' || q.chance(0.3)) planting.tuft(planting.flowers, px, y - 0.05, pz, big * 1.15, big * 0.98, yaw + 1, green(bloom, q.range(0.85, 1.05)));
+        // Its flowers are among the spines, not on top of them: a smaller card, inside the bush.
+        if (q.chance(season === 'autumn' ? 0.15 : 0.6)) planting.tuft(planting.flowers, px, y - 0.15, pz, big * 0.95, big * 0.9, yaw + 1, green(bloom, q.range(0.7, 1.05)));
         count('gorse');
       } else {
-        planting.tuft(planting.herbs, px, y - 0.05, pz, q.range(0.5, 0.75), q.range(0.3, 0.45), yaw, green(heather, q.range(0.75, 1.15)));
+        planting.tuft(planting.grass, px, y - 0.05, pz, q.range(0.6, 0.85), q.range(0.28, 0.42), yaw, green(heather, q.range(0.75, 1.2)));
         count('heather');
       }
       continue;
     }
     // In the hollow: bracken, deep in places, and here and there foxgloves.
     if (shelter > 0.45 && patch > 0.46) {
-      if (q.chance(0.55)) { planting.tuft(planting.ferns, px, y - 0.05, pz, q.range(0.8, 1.3), q.range(0.7, 1.15), yaw, season === 'autumn' ? [0.5, 0.3, 0.12] : [0.2, 0.36, 0.1]); count('bracken'); }
-      if (q.chance(0.06)) { planting.tuft(planting.herbs, px, y - 0.05, pz, 0.35, q.range(0.9, 1.3), yaw, [0.62, 0.24, 0.5]); count('foxglove'); }
+      if (q.chance(0.55)) { planting.tuft(planting.ferns, px, y - 0.05, pz, q.range(0.8, 1.3), q.range(0.7, 1.15), yaw, season === 'autumn' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('bracken'); }
+      if (q.chance(0.06)) { planting.tuft(planting.herbs, px, y - 0.05, pz, 0.35, q.range(0.9, 1.3), yaw, [0.42, 0.13, 0.3]); count('foxglove'); }
       continue;
     }
     // Everywhere else, short turf; at the edge, thrift and sea campion in it.
-    if (fine > 0.32 || edge > 0.5) {
-      const tall = (0.22 + 0.25 * shelter + 0.12 * (1 - edge)) * q.range(0.75, 1.25);
-      planting.tuft(planting.grass, px, y - 0.03, pz, q.range(0.45, 0.65), tall, yaw, [grassTint[0] * turf[0] * 1.1, grassTint[1] * turf[1] * 1.1, grassTint[2] * turf[2] * 1.1]);
+    {
+      // Short where the wind has it, longer in shelter; straw-coloured at the burnt edge and in a dry season.
+      const tall = (0.2 + 0.32 * shelter + 0.14 * (1 - edge) + 0.12 * fine) * q.range(0.75, 1.25), dry = Math.min(1, edge * 0.6 + dried), tone = q.range(0.85, 1.15);
+      planting.tuft(planting.grass, px, y - 0.04, pz, q.range(0.45, 0.7), tall, yaw, [(0.17 + 0.18 * dry) * turf[0] * tone, (0.3 + 0.02 * dry) * turf[1] * tone, (0.05 + 0.05 * dry) * turf[2] * tone]);
       count('grass');
     }
     if (edge > 0.25 && fine > 0.55 - edge * 0.2 && q.chance(0.7)) {
-      planting.tuft(thrift, px + 0.2, y - 0.03, pz, q.range(0.3, 0.45), q.range(0.18, 0.3), yaw, season === 'autumn' ? [0.5, 0.42, 0.35] : [0.92, 0.45, 0.62]);
+      planting.tuft(thrift, px + 0.2, y - 0.03, pz, q.range(0.3, 0.45), q.range(0.18, 0.3), yaw, season === 'autumn' ? [0.3, 0.25, 0.2] : [0.62, 0.24, 0.4]);
       count('thrift');
     } else if (edge > 0.15 && fine < 0.3 && q.chance(0.25) && season !== 'autumn') {
-      planting.tuft(planting.flowers, px, y - 0.03, pz, 0.32, q.range(0.18, 0.3), yaw, [0.9, 0.9, 0.86]);
+      planting.tuft(planting.flowers, px, y - 0.03, pz, 0.32, q.range(0.18, 0.3), yaw, [0.62, 0.62, 0.58]);
       count('campion');
     }
   }

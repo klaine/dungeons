@@ -21,9 +21,16 @@ import { SeaDesc } from './scene';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Fn, abs, attribute, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize, positionWorld, pow, reflect, sin, smoothstep, texture, uniform, vec2, vec3, vec4,
+  Fn, abs, attribute, cos, positionLocal, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize, positionWorld, pow, reflect, sin, smoothstep, texture, uniform, vec2, vec3, vec4,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
+/**
+ * The swell: three long trains of waves from the open sea, each as how many waves to the metre
+ * across x and z, how fast it goes (as deep water has it, the root of g times the waves to the
+ * metre), and how high (half its height, crest to trough). Its height lifts the surface and its
+ * slope tilts it.
+ */
+const SWELL: [number, number, number, number][] = [[0.11, 0.05, 1.08, 0.42], [-0.04, 0.13, 1.13, 0.3], [0.21, -0.12, 1.55, 0.1]];
 
 export class Sea {
   readonly mesh: Mesh;
@@ -78,16 +85,17 @@ export class Sea {
     const sky = skyParts(u, 8);
     const deep = vec3(...look.deep), shallow = vec3(...look.shallow), foamColour = vec3(...look.foam);
     const rip = (at: N): N => texture(this.ripples, at).xy.mul(2).sub(1);
+    // The swell lifts the surface itself, so the water rises and falls against the cliffs and runs up the sand and back. Less where it is shallow.
+    this.material.positionNode = Fn(() => {
+      const p: N = positionLocal, d: N = max(attribute('aDepth', 'float'), 0);
+      const h: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(p.x.mul(kx).add(p.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0));
+      return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4))), p.z);
+    })();
     this.material.fragmentNode = Fn(() => {
       const P: N = positionWorld, d: N = max(attribute('aDepth', 'float'), 0).toVar();
       const far: N = length(cameraPosition.xz.sub(P.xz)).toVar();
-      // The swell: three long trains of waves from the open sea, as slopes. Calmer in the shallows and in the shelter of the cove.
-      const swellOf = (kx: number, kz: number, speed: number, amp: number): N => {
-        const phase = P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(speed));
-        return vec2(kx, kz).mul(sin(phase).mul(amp));
-      };
       const calm: N = smoothstep(0.5, 8, d).mul(0.75).add(0.25);
-      const swell: N = swellOf(0.11, 0.05, 0.9, 0.09).add(swellOf(-0.04, 0.13, 0.8, 0.07)).add(swellOf(0.21, -0.12, 1.3, 0.035)).mul(calm).toVar();
+      const swell: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.add(vec2(kx, kz).mul(sin(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a))), vec2(0, 0)).mul(calm).toVar();
       // Waves and wavelets on the swell, finer and fainter with distance, so that far off the sea is smooth and only glints.
       const fade: N = exp(far.div(-260)).toVar();
       const w1: N = rip(P.xz.mul(0.045).add(vec2(0.011, 0.007).mul(t)));

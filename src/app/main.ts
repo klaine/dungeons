@@ -27,6 +27,7 @@ import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
 import { Sea } from '../render/sea';
+import { Birds } from '../render/birds';
 import { inland } from '../core/island';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
@@ -351,6 +352,9 @@ async function start(): Promise<void> {
     foam: [0, 1, 2].map((c) => 0.55 * SKY.horizon[c] + 0.1 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
   }) : null;
   if (sea) { scene.add(sea.mesh); scenic.push(sea.mesh); }
+  // Gulls over the cliffs, white in the light of the hour.
+  const birds = desc.birds?.length ? new Birds(desc.birds, seed, SUN_INTENSITY * 0.55 + 0.4) : null;
+  if (birds) scene.add(birds.mesh);
   if (site && (site.setting.hour === 'night' || site.setting.hour === 'dusk')) (materials.lamp as MeshStandardMaterial).emissiveIntensity = site.setting.hour === 'night' ? 60 : 25;
   const buildMs = performance.now() - t0;
 
@@ -443,6 +447,8 @@ async function start(): Promise<void> {
   under.rotation.x = -Math.PI / 2;
   // (Below the lowest floor there is, which in a cave may be some way down.)
   under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5));
+  // (Round an island it is below the sea bed, out of sight under deep water.)
+  if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -894,6 +900,7 @@ async function start(): Promise<void> {
     cullCards(cardMeshes, camera.position);
     water.update(time, camera);
     sea?.update(time);
+    birds?.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
     atmosphere.update();

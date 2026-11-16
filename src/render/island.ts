@@ -52,6 +52,9 @@ export interface IslandResult {
   far: { wood: [number, number, number]; grass: [number, number, number] };
   sea: SeaDesc;
   planted: Record<string, number>;
+  /** Space under the cliff, out of doors: the sea cave, where no mist lies. */
+  unders: { min: Vector3; max: Vector3 }[];
+  birds: { x: number; y: number; z: number }[];
 }
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
@@ -304,6 +307,15 @@ export function buildIsland(b: IslandBuild): IslandResult {
     return d;
   };
   const offFoot = (x: number, z: number) => (foot.holds(x, z) ? foot.at(x, z) : 8);
+  /**
+   * Heath: in from the cliff edge and out of the shelter of the hollow, in patches some tens of
+   * metres across, the turf gives way to heather and gorse. One rule for the ground's colour and
+   * for what grows on it, so the two agree.
+   */
+  const heathAt = (x: number, z: number): number => {
+    const edge = 1 - smooth((inland(o, x, z) - 1) / 14), shelter = smooth((o.combe * 0.9 - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 25);
+    return smooth((fbm2(x * 0.045 + s2, z * 0.045 - s2, 3) - 0.5) / 0.08) * (1 - edge) * (1 - shelter);
+  };
   const lay = { track: 0, wet: 0, bare: 0 };
   /**
    * Turf, and what the ground is at a point besides: bare sand or shingle on the beach and under
@@ -320,8 +332,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const off = trackOff(x, z), f = offFoot(x, z);
     lay.track = Math.abs(off) < 6 ? 100 + off : f < 3 ? 200 + f : 0;
     const c = turfColour(x, z, s1), edge = 1 - smooth((inland(o, x, z) - 2) / 10), shelter = smooth((o.combe - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 30);
-    // (Burnt yellow-grey at the edge; a deeper green in the hollow.)
-    return [c[0] * (1 + 0.18 * edge) * (1 - 0.06 * shelter), c[1] * (1 - 0.08 * edge + 0.06 * shelter), c[2] * (1 - 0.25 * edge)];
+    // (Burnt yellow-grey at the edge; a deeper green in the hollow; brown under heather.)
+    const heath = heathAt(x, z) * 0.7;
+    return [c[0] * (1 + 0.18 * edge) * (1 - 0.06 * shelter) * (1 - 0.15 * heath), c[1] * (1 - 0.08 * edge + 0.06 * shelter) * (1 - 0.42 * heath), c[2] * (1 - 0.25 * edge) * (1 - 0.3 * heath)];
   };
   const earth = (x: number, z: number): Colour => {
     const t = 0.62 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);
@@ -382,7 +395,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
   // ---- what stands on the island, and what grows on it
   wild.group = 'wild';
   const coast = buildCoast({ site, wild, rng: rng.fork('coast'), ground, stoneTint: tint, finds: b.finds, fences: b.fences, caveFloor });
-  const planted = plantIsland({ site, wild, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), trackOff, offFoot, looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0) });
+  const planted = plantIsland({ site, wild, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, heathAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), trackOff, offFoot, looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0) });
 
   // ---- the edge of the world: nobody walks off a cliff or swims away
   {
@@ -449,6 +462,17 @@ export function buildIsland(b: IslandBuild): IslandResult {
     far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
     sea: { level: sea, x: o.x, z: o.z, bed },
     planted,
+    // Gulls: off the cliffs at the height of their tops, off the stacks, and over the cove.
+    birds: [
+      ...Array.from({ length: 4 }, (_, k) => { const a = (k / 4) * Math.PI * 2 + s1, r = coastAt(o, a) + 14; return { x: o.x + Math.cos(a) * r, y: F + 4, z: o.z + Math.sin(a) * r }; }),
+      ...o.stacks.slice(0, 2).map((q) => ({ x: q.x, y: sea + q.height + 6, z: q.z })),
+      { x: o.cove.x, y: sea + 14, z: o.cove.z },
+    ],
+    unders: cave ? [(() => {
+      const ux = Math.cos(cave.heading), uz = Math.sin(cave.heading), a0 = 3, a1 = cave.length + 2, w = 6;
+      const xs = [cave.x + ux * a0 - uz * w, cave.x + ux * a0 + uz * w, cave.x + ux * a1 - uz * w, cave.x + ux * a1 + uz * w], zs = [cave.z + uz * a0 + ux * w, cave.z + uz * a0 - ux * w, cave.z + uz * a1 + ux * w, cave.z + uz * a1 - ux * w];
+      return { min: V(Math.min(...xs), caveFloor - 1, Math.min(...zs)), max: V(Math.max(...xs), caveFloor + 8, Math.max(...zs)) };
+    })()] : [],
   };
 }
 
