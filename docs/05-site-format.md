@@ -59,6 +59,7 @@ The document is the source. The model and the maps are made from it, so they alw
 | `sun` | Unit vector pointing towards the sun. |
 | `wallThickness` | Thickness of the wall between two neighbouring places. |
 | `top` | Height of the roofline. Courts are open wells down from it. |
+| `grounds` | The open country that can be walked, as `x0`, `x1`, `z0`, `z1`: a valley with the house front along its north side (`z0`). It contains the approach. The player arrives near its south end. Absent if the site has no more than its approach. |
 | `start` | The place the player starts in. |
 | `entrance` | The first room of the house. |
 | `goal` | The place to reach. |
@@ -81,7 +82,7 @@ A place is a rectangle of open floor. Walls lie outside it.
 | `roof` | `barrel` (a stone vault), `timber` (boards on beams), `sky` (open), or `cave` (not built: natural rock all round, and the open floor is an irregular hollow inside the rectangle). |
 | `axis` | The direction a barrel vault runs, `x` or `z`. |
 | `light` | `day`, `torch` or `dark`. A dark place has no light of its own. |
-| `role` | `approach` (the open ground in front of the house), `entrance`, `passage` (an ordinary room on the way through), `court`, `reward` (a dead end worth reaching), or `goal`. |
+| `role` | `approach` (the meadow in front of the door), `entrance`, `passage` (an ordinary room on the way through), `court`, `reward` (a dead end worth reaching), or `goal`. |
 | `name` | What the place is in the fiction: refectory, dormitory, store. Furnishing follows from it. |
 | `depth` | How many places in from the entrance. |
 | `fallen` | Present and `true` if the roof has come down. Such a place has `roof: "sky"`. |

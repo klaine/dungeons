@@ -108,6 +108,11 @@ export interface Site {
   levers: Lever[];
   /** A place hidden behind a secret door, with something in it worth finding; -1 if there is none. */
   secret: number;
+  /**
+   * The open country that can be walked, the approach included: a valley shut in by rock, with
+   * the house front along its north side. Absent in a site that has no more than its approach.
+   */
+  grounds?: { x0: number; x1: number; z0: number; z1: number };
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

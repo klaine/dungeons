@@ -148,6 +148,7 @@ async function start(): Promise<void> {
   // What lies beyond the site is drawn but not baked or collided with. Its share of sky is the
   // whole sky, written into the same attributes the bake fills for everything else.
   const scenic: Mesh[] = [];
+  const solidScenery: Mesh[] = [];
   for (const [material, builder] of desc.scenery?.meshes ?? []) {
     const geometry = builder.build();
     const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
@@ -164,6 +165,7 @@ async function start(): Promise<void> {
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     scenic.push(mesh);
+    solidScenery.push(mesh);
   }
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
@@ -196,9 +198,23 @@ async function start(): Promise<void> {
     const src = g.getIndex()!.array;
     for (let i = 0; i < src.length; i++) index[io++] = src[i] + p.offset;
   }
+  // Collision takes in the ground and trunks of the country round the site as well, which the bake does not.
+  let extraVertices = 0, extraIndices = 0;
+  for (const m of solidScenery) { extraVertices += m.geometry.getAttribute('position').count; extraIndices += m.geometry.getIndex()!.count; }
+  const solidPositions = new Float32Array((vertexTotal + extraVertices) * 3);
+  const solidIndex = new Uint32Array(triTotal * 3 + extraIndices);
+  solidPositions.set(positions);
+  solidIndex.set(index);
+  let vo = vertexTotal, so = triTotal * 3;
+  for (const m of solidScenery) {
+    const pos = m.geometry.getAttribute('position').array as Float32Array, src = m.geometry.getIndex()!.array;
+    solidPositions.set(pos, vo * 3);
+    for (let i = 0; i < src.length; i++) solidIndex[so++] = src[i] + vo;
+    vo += pos.length / 3;
+  }
   const merged = new BufferGeometry();
-  merged.setAttribute('position', new BufferAttribute(positions, 3));
-  merged.setIndex(new BufferAttribute(index, 1));
+  merged.setAttribute('position', new BufferAttribute(solidPositions, 3));
+  merged.setIndex(new BufferAttribute(solidIndex, 1));
   const bvh = new MeshBVH(merged);
 
   const occluders: Mesh[] = [];
@@ -523,6 +539,9 @@ async function start(): Promise<void> {
       if (here && here.id !== lastPlace) {
         lastPlace = here.id;
         hud.seed.textContent = `${seed} · ${here.name}`;
+      } else if (!here && lastPlace !== -2) {
+        lastPlace = -2;
+        hud.seed.textContent = `${seed} · valley`;
       }
     }
 
@@ -542,7 +561,12 @@ async function start(): Promise<void> {
   };
   requestAnimationFrame(loop);
 
-  (window as any).__dbg = { renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  // The height of whatever is underfoot at a point, for placing a camera or a test.
+  const groundAt = (x: number, z: number): number => {
+    const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
+    return hit ? hit.point.y : 0;
+  };
+  (window as any).__dbg = { groundAt, renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {
@@ -608,6 +632,10 @@ async function start(): Promise<void> {
       return false;
     };
     player.place(desc.spawn.position, desc.spawn.yaw);
+    // Up the track from where the player arrives to the meadow.
+    for (const [tx, tz] of desc.track ?? []) {
+      if (!walkTo(tx, tz, 1.2)) { log.push(`stuck on the track at (${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)})`); return { won: false, log }; }
+    }
     let at = site.start;
     for (const m of solve(site).moves) {
       const w = site.ways[m.way];

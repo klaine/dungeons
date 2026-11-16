@@ -86,4 +86,6 @@ export interface SceneDescription {
   scenery?: Scenery;
   /** Boxes the player cannot enter: the edge of the world, where no rock happens to stand in the way. */
   fences?: { min: Vector3; max: Vector3 }[];
+  /** Points along the way from where the player arrives to the door, for anything that must walk it. */
+  track?: [number, number][];
 }

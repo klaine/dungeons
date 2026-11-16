@@ -24,7 +24,9 @@ Or as a battle map: the built world itself from straight above, roofs cut away, 
 
 <img src="docs/images/battle-map.jpg" alt="A battle map of the same place rendered from the 3D world: stone floors, furniture, trees and their shadows" width="640">
 
-You arrive outdoors, in a meadow below the house, with wooded hills and mountains beyond:
+You arrive outdoors at the far end of a valley, and walk up through woods to the meadow below the house. The whole valley can be walked, out to a rim of rock; hills and mountains lie beyond:
+
+![The valley: a track through long grass and woods to the house wall, set into its hillside, with mountains beyond](docs/images/valley.jpg)
 
 ![The approach: a flagged path through grass and flowers to the house front, under trees](docs/images/approach.jpg)
 

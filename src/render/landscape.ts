@@ -21,6 +21,9 @@ export interface TerrainOptions {
   seed: number;
   /** Tint of bare rock. */
   stone: [number, number, number];
+  /** The colour of turf at a point, and of rock given a tone; defaults are plain grass and the tinted stone. */
+  colour?: (x: number, z: number) => [number, number, number];
+  rock?: (tone: number) => [number, number, number];
   /** Texture repeats per metre, for turf and for rock. */
   turfScale: number;
   rockScale: number;
@@ -66,10 +69,10 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
           const bed = fbm2((q.y + q.x * 0.2) * 0.9, q.z * 0.12 + o.seed, 3);
           const tone = 0.6 + 0.45 * bed;
           const alongX = Math.abs(fx) > Math.abs(fz);
-          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, (alongX ? q.z : q.x) * o.rockScale, q.y * o.rockScale,
-            0.8 * tone * o.stone[0], 0.74 * tone * o.stone[1], 0.65 * tone * o.stone[2], Math.max(0, q.ny) * 0.9, 0, 0, 0));
+          const c = o.rock ? o.rock(tone) : [0.8 * tone * o.stone[0], 0.74 * tone * o.stone[1], 0.65 * tone * o.stone[2]];
+          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, (alongX ? q.z : q.x) * o.rockScale, q.y * o.rockScale, c[0], c[1], c[2], Math.max(0, q.ny) * 0.9, 0, 0, 0));
         } else {
-          const [r, g, b] = turfColour(q.x, q.z, o.seed);
+          const [r, g, b] = o.colour ? o.colour(q.x, q.z) : turfColour(q.x, q.z, o.seed);
           ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, q.x * o.turfScale, q.z * o.turfScale, r, g, b));
         }
       }

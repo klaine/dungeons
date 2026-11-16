@@ -367,7 +367,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   // ---- the forecourt, outside the south wall
   const ecx = round((entrance.x0 + entrance.x1) / 2);
   const forecourt: Place = {
-    id: places.length, role: 'approach', name: 'hollow', roof: 'sky', light: 'day',
+    id: places.length, role: 'approach', name: 'meadow', roof: 'sky', light: 'day',
     x0: Math.min(ecx - 7, Math.min(...places.map((p) => p.x0)) - 3), x1: Math.max(ecx + 7, Math.max(...places.map((p) => p.x1)) + 3),
     z0: zs[NZ] + T / 2, z1: zs[NZ] + T / 2 + 17,
     floor: 0, wall: 3.9, axis: 'x', depth: 0,
@@ -473,6 +473,8 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   const site: Site = {
     seed, places, ways, items: [], levers: [], secret: secretId, start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
+    // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
+    grounds: { x0: round(forecourt.x0 - 40), x1: round(forecourt.x1 + 40), z0: forecourt.z0, z1: round(forecourt.z1 + 64) },
   };
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);

@@ -170,113 +170,142 @@ export function meshSite(site: Site): SceneDescription {
     kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - (p.x0 - 0.2) })) });
 
     const r = rng.fork('approach');
+    const plant = rng.fork('planting');
     const s1 = r.range(0, 60), s2 = r.range(0, 60);
     const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
-    // The banks: as high as the house where they meet it, down to a little over head height.
-    const cliff = site.top - p.floor + 0.5;
-    const sideHeight = (z: number) => 2.3 + (cliff - 2.3) * (1 - smooth((z - p.z0 - 1.5) / 9));
-    // The south bank is uneven: outcrops with lower saddles between them, none low enough to climb.
-    const southHeight = (x: number) => 1.5 + 2.6 * fbm2(x * 0.16 + s2, s1, 2);
+    // The open country that can be walked: the meadow before the door and the valley round it.
+    const g = site.grounds ?? { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 };
+    const cxA = (p.x0 + p.x1) / 2, czA = (p.z0 + p.z1) / 2;
+    const houseZ0 = Math.min(...house.map((q) => q.z0)) - T;
+    const frontZ = p.z0 - 0.35;
     const pathHalf = 1.15;
-    const ground = (x: number, z: number): number => {
-      // Level and smooth by the path and the door; rougher away from them.
-      const fromPath = Math.max(0, Math.abs(x - doorX - Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, (z - p.z0) / 5)) - pathHalf);
-      const rough = Math.min(1, fromPath / 2.5) * Math.min(1, (z - p.z0) / 2.5);
-      let y = p.floor - 0.03 + (fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough;
-      // The sides of the hollow: rock rising to shut the place in, with a broken edge.
-      const wobble = (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
-      const rise = (edge: number, height: number) => {
-        const t = Math.min(1, Math.max(0, (2.4 + wobble - edge) / 1.3));
-        return t * t * (3 - 2 * t) * height;
-      };
-      y += Math.max(rise(x - p.x0, sideHeight(z)), rise(p.x1 - x, sideHeight(z)), rise(p.z1 - z, southHeight(x)));
-      return y;
+    // The way in: flags from the door across the meadow, then a worn track that wanders off down the valley.
+    const pathAt = (z: number) => doorX + Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, Math.max(0, z - p.z0) / 5) + Math.sin(z * 0.06 + s2) * 5 * smooth((z - p.z1 + 4) / 26);
+    /**
+     * The height of the ground anywhere. One function serves the carved meadow and the sheets laid
+     * beyond it, so they meet. It is made of: gentle swells, level by the path and the door; the
+     * escarpment the house is built into, a cliff beside the house and a hillside behind; a rim
+     * of rock round the valley, too steep to climb; and beyond that, hills.
+     */
+    const escarpment = (x: number, z: number, wobble: number): number => {
+      if (z < frontZ) return 1;
+      const beside = Math.max(smooth((p.x0 + 2 + wobble * 0.5 - x) / 1.3), smooth((x - (p.x1 - 2 - wobble * 0.5)) / 1.3));
+      return beside * (1 - smooth((z - p.z0 - 0.3 - Math.max(0, wobble)) / 3.4));
     };
+    const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
+    const ground = (x: number, z: number): number => {
+      const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
+      const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
+      let y = p.floor - 0.03
+        + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14)
+        + (fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough;
+      const wobble = wobbleAt(x, z);
+      // The hillside is level with the roofline over the house and rises behind it; beside the
+      // house it starts to rise at once.
+      const clearOfHouse = smooth(Math.max(0, houseX0 - x, x - houseX1) / 8);
+      const riseFrom = houseZ0 + (frontZ - houseZ0) * clearOfHouse;
+      const crest = site.top - 0.15 + Math.min(18, Math.max(0, riseFrom - z) * 0.55);
+      if (crest > y) y += (crest - y) * escarpment(x, z, wobble);
+      const inside = Math.min(x - g.x0, g.x1 - x, g.z1 - z);
+      y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2 + wobble) / 3.6));
+      const beyond = Math.max(0, -inside);
+      return y + smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+    };
+    const slopeOf = (f: (x: number, z: number) => number, x: number, z: number, e: number) => Math.hypot(f(x + e, z) - f(x - e, z), f(x, z + e) - f(x, z - e)) / (2 * e);
     // Weathered rock in the open is greyer than the same stone freshly cut for the house.
     const outcrop: Colour = [0.5 + 0.5 * stoneTint[0], 0.52 + 0.5 * stoneTint[1], 0.56 + 0.5 * stoneTint[2]];
     const rockColour = (tone: number): Colour => [0.4 * tone * outcrop[0], 0.4 * tone * outcrop[1], 0.4 * tone * outcrop[2]];
+    // Earth shows through along the track, where feet have worn the grass away.
+    const worn = (x: number, z: number) => (z < p.z1 - 6 ? 0 : 1 - smooth((Math.abs(x - pathAt(z)) - 0.5) / 1.1)) * smooth((z - p.z1 + 6) / 3);
+    const turfAt = (x: number, z: number): Colour => {
+      const c = turfColour(x, z, s1), w = worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2));
+      return [c[0] + (2.5 - c[0]) * w, c[1] + (0.95 - c[1]) * w, c[2] + (0.5 - c[2]) * w];
+    };
+    const cliff = site.top - p.floor + 0.5;
     const turf = kit.mesh('turf');
     carveRock(kit.mesh('rock'), (x, y, z) => {
-      // Above the turf the rock is broken: beds that step back as they rise, and clefts down them.
-      const up = Math.min(1, Math.max(0, (y - p.floor - 0.4) / 1.2));
+      // The cliff is broken: beds that step back as they rise, and clefts down them. The breaking
+      // dies away at the edge of what is carved, where this surface must meet the sheet beyond.
+      const rocky = escarpment(x, z, wobbleAt(x, z)) * Math.min(1, Math.max(0, (y - p.floor - 0.4) / 1.2)) * smooth(Math.min(x - p.x0, p.x1 - x) / 1.4 + 0.15);
+      if (rocky <= 0) return y - ground(x, z);
       const bed = Math.abs(((y * 0.95 + fbm2(x * 0.12 + s1, z * 0.12 + s2, 2) * 2.2) % 1) - 0.5) - 0.25;
       const cleft = Math.abs(fbm2(x * 0.75 + s2, z * 0.75 + y * 0.25 + s1, 3) - 0.5) - 0.12;
       const lump = (fbm2(x * 0.45 + y * 0.5 + s2, z * 0.45 - y * 0.4 + s1, 3) - 0.5) * 1.5;
-      return y - ground(x, z) + ((fbm2(x * 1.4 + y * 0.9 + s1, z * 1.4 - y * 0.7 + s2, 2) - 0.5) * 0.5 + lump + bed * 1.5 + Math.min(0.2, cleft) * 2.6) * up;
+      return y - ground(x, z) + ((fbm2(x * 1.4 + y * 0.9 + s1, z * 1.4 - y * 0.7 + s2, 2) - 0.5) * 0.5 + lump + bed * 1.5 + Math.min(0.2, cleft) * 2.6) * rocky;
     }, {
-      min: V(p.x0 - 0.3, p.floor - 0.9, p.z0 - 0.14), max: V(p.x1 + 0.3, p.floor + cliff + 1.4, p.z1 + 0.3),
+      min: V(p.x0 - 0.3, p.floor - 3.4, p.z0 - 0.14), max: V(p.x1 + 0.3, p.floor + cliff + 1.4, p.z1 + 0.3),
       cell: 0.42, uvScale: 0.4, otherUvScale: 2.3,
-      meshFor: (n) => (n.y > 0.82 ? turf : null),
+      meshFor: (n) => (n.y > 0.74 ? turf : null),
       shade: (q, n, field, face) => {
         // Asked of the triangle, not the corner: a rock face with one level corner is still rock.
-        if (face.y > 0.82) {
-          // Turf: worn thin along the path, patchy elsewhere.
-          const patch = fbm2(q.x * 0.5 + s1, q.z * 0.5 + s2, 3);
-          const t = 0.75 + 0.6 * patch;
-          return [0.95 * t, 1.05 * t, 0.7 * t];
-        }
+        if (face.y > 0.74) return turfAt(q.x, q.z);
         const bed = fbm2((q.y + q.x * 0.2) * 1.8, q.z * 0.2 + s1, 3);
         const tone = 0.62 + 0.4 * bed + 0.2 * fbm2(q.x * 0.8 + s2, q.z * 0.8 + q.y, 3);
         field[0] = Math.max(0, n.y) * 0.9;
         return rockColour(tone);
       },
     });
-    // Broken rock may leave a way up somewhere; the player still cannot leave by it.
+    // The rim of the valley is too steep to climb, but nobody is to leave by it whatever they find.
     fences.push(
-      { min: V(p.x0 - 1.4, p.floor - 3, p.z0), max: V(p.x0 - 0.2, p.floor + 60, p.z1 + 1.4) },
-      { min: V(p.x1 + 0.2, p.floor - 3, p.z0), max: V(p.x1 + 1.4, p.floor + 60, p.z1 + 1.4) },
-      { min: V(p.x0 - 1.4, p.floor - 3, p.z1 + 0.2), max: V(p.x1 + 1.4, p.floor + 60, p.z1 + 1.4) },
+      { min: V(g.x0 - 3, p.floor - 6, g.z0 - 3), max: V(g.x0 - 1.2, p.floor + 80, g.z1 + 3) },
+      { min: V(g.x1 + 1.2, p.floor - 6, g.z0 - 3), max: V(g.x1 + 3, p.floor + 80, g.z1 + 3) },
+      { min: V(g.x0 - 3, p.floor - 6, g.z1 + 1.2), max: V(g.x1 + 3, p.floor + 80, g.z1 + 3) },
+      { min: V(g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
+      { min: V(p.x1 + 0.2, p.floor - 6, p.z0 - 2.6), max: V(g.x1 + 3, p.floor + 80, p.z0 - 1.2) },
     );
-    // Solid behind the rock on the three open sides, and under the ground.
-    const lengths = 6;
-    for (let k = 0; k < lengths; k++) {
-      const za = p.z0 + ((p.z1 + 3 - p.z0) * k) / lengths, zb = p.z0 + ((p.z1 + 3 - p.z0) * (k + 1)) / lengths;
-      const h = Math.min(sideHeight(za), sideHeight(zb)) - 0.5;
-      kit.mass(V(p.x0 - 3, p.floor - 2, za), V(p.x0 - 0.3, p.floor + h, zb));
-      kit.mass(V(p.x1 + 0.3, p.floor - 2, za), V(p.x1 + 3, p.floor + h, zb));
-    }
-    kit.mass(V(p.x0 - 3, p.floor - 2, p.z1 + 0.3), V(p.x1 + 3, p.floor + 1.0, p.z1 + 3));
-    kit.mass(V(p.x0 - 3, p.floor - 2.4, p.z0), V(p.x1 + 3, p.floor - 1.0, p.z1 + 3));
+    // Solid rock beside the house, and under the meadow.
+    kit.mass(V(p.x0 - 30, p.floor - 2, houseZ0), V(p.x0 - 0.3, p.floor + cliff - 1.2, p.z0 + 0.8));
+    kit.mass(V(p.x1 + 0.3, p.floor - 2, houseZ0), V(p.x1 + 30, p.floor + cliff - 1.2, p.z0 + 0.8));
+    kit.mass(V(p.x0 - 3, p.floor - 5, p.z0), V(p.x1 + 3, p.floor - 3.2, p.z1 + 3));
 
     // The path: flags laid in a strip from the door, following the same gentle wander.
     for (let z = p.z0 + 0.05; z < p.z1 - 5.5; z += 1.5) {
-      const mid = doorX + Math.sin((z + 0.75) * 0.23 + s1) * 0.6 * Math.min(1, (z + 0.75 - p.z0) / 5);
+      const mid = pathAt(z + 0.75);
       kit.slab('floor', mid - pathHalf, z, mid + pathHalf, z + 1.5, p.floor + 0.012, { ...flag, course: [0.6, 0.8], length: [0.7, 1.2] });
     }
 
-    // Boulders: lumps of the same rock, lying where they came to rest. Mossed on top.
+    // Boulders: lumps of the same rock, lying where they came to rest. Mossed on top. Those in
+    // the meadow are baked with it; those out in the valley are part of the scenery.
+    const sceneryMesh = (material: string) => {
+      let m = scenery.meshes.get(material);
+      if (!m) scenery.meshes.set(material, (m = new MeshBuilder()));
+      return m;
+    };
     const stones: [number, number, number][] = [];
-    for (let tries = 0; tries < 80 && stones.length < 11; tries++) {
-      const x = r.range(p.x0 + 2.5, p.x1 - 2.5), z = r.range(p.z0 + 5, p.z1 - 2.5);
-      const size = r.range(0.45, 1.25);
-      if (Math.abs(x - doorX) < 3 + size || stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + size + 1.6)) continue;
-      const base = ground(x, z), ts = r.range(0, 60), sx = r.range(0.8, 1.3), sz = r.range(0.8, 1.3), sy = r.range(0.55, 0.8);
-      carveRock(kit.mesh('rock'), (qx, qy, qz) => {
+    const boulder = (mesh: MeshBuilder, x: number, z: number, size: number, q: Rng) => {
+      const base = ground(x, z), ts = q.range(0, 60), sx = q.range(0.8, 1.3), sz = q.range(0.8, 1.3), sy = q.range(0.55, 0.8);
+      carveRock(mesh, (qx, qy, qz) => {
         const d = Math.hypot((qx - x) / sx, (qy - base - size * 0.2) / sy, (qz - z) / sz);
         return d - size + (fbm2(qx * 1.6 + qy * 1.1 + ts, qz * 1.6 - qy * 0.9 + ts, 3) - 0.5) * size * 0.75;
       }, {
-        min: V(x - size * 1.9, base - 0.35, z - size * 1.9), max: V(x + size * 1.9, base + size * 1.6, z + size * 1.9),
+        min: V(x - size * 1.9, base - 0.6, z - size * 1.9), max: V(x + size * 1.9, base + size * 1.6, z + size * 1.9),
         cell: Math.max(0.16, size * 0.2), uvScale: 0.5,
-        shade: (q, n, field) => {
+        shade: (c, n, field) => {
           field[0] = Math.max(0, n.y) * 1.0;
-          return rockColour(0.6 + 0.5 * fbm2(q.x * 1.3 + ts, q.z * 1.3 + q.y, 3));
+          return rockColour(0.6 + 0.5 * fbm2(c.x * 1.3 + ts, c.z * 1.3 + c.y, 3));
         },
       });
-      kit.mass(V(x - size * 0.45, base - 0.3, z - size * 0.45), V(x + size * 0.45, base + size * 0.5, z + size * 0.45));
       stones.push([x, z, size]);
+    };
+    const clearOfStones = (x: number, z: number, room: number) => !stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + room);
+    for (let tries = 0; tries < 80 && stones.length < 9; tries++) {
+      const x = r.range(p.x0 + 2.5, p.x1 - 2.5), z = r.range(p.z0 + 5, p.z1 - 2.5);
+      const size = r.range(0.45, 1.25);
+      if (Math.abs(x - pathAt(z)) < 3 + size || !clearOfStones(x, z, size + 1.6)) continue;
+      boulder(kit.mesh('rock'), x, z, size, r);
+      kit.mass(V(x - size * 0.45, ground(x, z) - 0.3, z - size * 0.45), V(x + size * 0.45, ground(x, z) + size * 0.5, z + size * 0.45));
     }
 
-    // Trees: a trunk of staves, and a crown of leaf cards.
-    const plant = rng.fork('planting');
+    // Trees in the meadow: a trunk of staves, and a crown of leaf cards.
     const greens: Colour[] = [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
     const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
     const blossom: Colour = [0.85, 0.2, 0.38];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
     let planted = 0;
-    for (let tries = 0; tries < 60 && planted < 6; tries++) {
-      const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 4.5);
-      if (Math.abs(x - doorX) < 3.6) continue;
-      if (trees.some((t) => Math.hypot(t[0] - x, t[1] - z) < 5.5) || stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + 1.2)) continue;
+    for (let tries = 0; tries < 60 && planted < 5; tries++) {
+      const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 3);
+      if (Math.abs(x - pathAt(z)) < 3.6) continue;
+      if (trees.some((t) => Math.hypot(t[0] - x, t[1] - z) < 5.5) || !clearOfStones(x, z, 1.2)) continue;
       const base = ground(x, z);
       const height = r.range(5.2, 7.6), girth = r.range(0.19, 0.28);
       kit.roundWall('wood', x, z, girth, base - 0.3, base + height, { ...plank, course: [6, 6], length: [0.07, 0.13], tint: [0.34, 0.3, 0.27], tintVar: 0.3, proud: 0.012, bevel: 0.012 }, false, { open: { v0: true, v1: true } });
@@ -286,50 +315,28 @@ export function meshSite(site: Site): SceneDescription {
       planted++;
     }
 
-    // ---- the country beyond: ground running out into hills, and mountains behind them
-    const cxA = (p.x0 + p.x1) / 2, czA = (p.z0 + p.z1) / 2;
-    const houseZ0 = Math.min(...house.map((q) => q.z0)) - T;
-    const frontZ = p.z0 - 0.35;
-    const hills = (x: number, z: number): number => {
-      const far = Math.hypot(x - cxA, z - czA);
-      return p.floor + 1.5 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * Math.min(1, far / 60)
-        + (fbm2(x * 0.06 + s2, z * 0.06 + s1, 3) - 0.5) * 2.6 + smooth((far - 30) / 200) * 34;
-    };
-    const land = (x: number, z: number): number => {
-      const qx = Math.min(p.x1, Math.max(p.x0, x)), qz = Math.min(p.z1, Math.max(p.z0, z));
-      const edge = ground(qx, qz) - 0.3;
-      let y = edge + (hills(x, z) - edge) * smooth(Math.hypot(x - qx, z - qz) / 16);
-      // The hillside the house is set into: level with the roofline at the front, rising behind,
-      // and dying away to either side and southwards.
-      const beside = Math.max(0, houseX0 - x, x - houseX1);
-      const hillside = site.top - 0.15 + Math.min(18, Math.max(0, frontZ - z) * 0.55);
-      const share = (1 - smooth((z - frontZ) / 12)) * (1 - smooth((beside - 25) / 40));
-      if (hillside > y) y += (hillside - y) * share;
-      return y;
-    };
+    // ---- the ground beyond the meadow: a fine sheet over the valley and its rim, a coarse one
+    // out to the hills, and mountains behind them
     const snap = (v: number, up: boolean) => (up ? Math.ceil(v / 6) : Math.floor(v / 6)) * 6;
-    const fine = { x0: snap(p.x0 - 66, false), x1: snap(p.x1 + 66, true), z0: snap(houseZ0 - 40, false), z1: snap(p.z1 + 72, true) };
+    const fine = { x0: snap(g.x0 - 34, false), x1: snap(g.x1 + 34, true), z0: snap(houseZ0 - 40, false), z1: snap(g.z1 + 34, true) };
     // Near its edge the fine sheet is eased onto the coarse one's corners, so the two meet exactly.
     const eased = (x: number, z: number): number => {
       const inside = Math.min(x - fine.x0, fine.x1 - x, z - fine.z0, fine.z1 - z);
-      const y = land(x, z);
+      const y = ground(x, z);
       if (inside >= 6) return y;
       const gx = Math.floor(x / 6) * 6, gz = Math.floor(z / 6) * 6, fx = (x - gx) / 6, fz = (z - gz) / 6;
-      const coarse = land(gx, gz) * (1 - fx) * (1 - fz) + land(gx + 6, gz) * fx * (1 - fz) + land(gx, gz + 6) * (1 - fx) * fz + land(gx + 6, gz + 6) * fx * fz;
+      const coarse = ground(gx, gz) * (1 - fx) * (1 - fz) + ground(gx + 6, gz) * fx * (1 - fz) + ground(gx, gz + 6) * (1 - fx) * fz + ground(gx + 6, gz + 6) * fx * fz;
       return coarse + (y - coarse) * smooth(inside / 6);
     };
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
-    const sceneryMesh = (material: string) => {
-      let m = scenery.meshes.get(material);
-      if (!m) scenery.meshes.set(material, (m = new MeshBuilder()));
-      return m;
-    };
-    const terrain = { seed: s1, stone: stoneTint, turfScale: 1.1, rockScale: 0.4 };
+    const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: turfAt, rock: rockColour };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
-      ...terrain, area: fine, cell: 1.5,
-      // Not where the player walks, and not over the house. Corners that fall just inside the
-      // banks are drawn back to their outer edge, so the sheet meets the rock without lapping into it.
-      skip: (c) => overlaps(c, p.x0 + 1.6, p.x1 - 1.6, frontZ, p.z1 - 1.6) || overlaps(c, houseX0 - 0.3, houseX1 + 0.3, houseZ0, frontZ),
+      ...terrain, area: fine, cell: 1.2,
+      // Not over the meadow, which is carved, and not over the house. Corners that fall just
+      // inside the meadow are drawn back to its edge, so the sheet meets it without lapping in.
+      // Over the house it is the turf of the hill above the vaults, left open over every court.
+      skip: (c) => overlaps(c, p.x0 + 1.3, p.x1 - 1.3, frontZ, p.z1 - 1.3) || (c.z0 < frontZ && c.z1 > frontZ && c.x1 > p.x0 - 0.3 && c.x0 < p.x1 + 0.3)
+        || house.some((q) => q.roof === 'sky' && overlaps(c, q.x0 - T / 2 - 0.2, q.x1 + T / 2 + 0.2, q.z0 - T / 2 - 0.2, q.z1 + T / 2 + 0.2)),
       warp: (x, z) => {
         const w = x - (p.x0 - 0.25), e = p.x1 + 0.25 - x, s = p.z1 + 0.25 - z;
         if (w <= 0 || e <= 0 || s <= 0 || z < frontZ) return [x, z];
@@ -338,15 +345,24 @@ export function meshSite(site: Site): SceneDescription {
       },
     });
     const reach = 246;
-    layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), land, {
+    layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), ground, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 6,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
     layMountains(sceneryMesh('rock'), cxA, czA, p.floor + 30, s2);
 
-    // ---- what grows
-    const pathAt = (z: number) => doorX + Math.sin(z * 0.23 + s1) * 0.6 * Math.min(1, (z - p.z0) / 5);
-    const slopeOf = (f: (x: number, z: number) => number, x: number, z: number, e: number) => Math.hypot(f(x + e, z) - f(x - e, z), f(x, z + e) - f(x, z - e)) / (2 * e);
+    // ---- what lies and grows in the valley
+    const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
+    const inMeadow = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
+    const inGrounds = (x: number, z: number, m: number) => x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m;
+    const offTrack = (x: number, z: number) => Math.abs(x - pathAt(z)) - pathHalf;
+    // More boulders, some of them large, away from the track.
+    for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
+      const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
+      const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
+      if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5) continue;
+      boulder(sceneryMesh('rock'), x, z, size, plant);
+    }
     const grassColour = (x: number, z: number): Colour => {
       const c = turfColour(x, z, s1), t = plant.range(0.75, 1.2);
       // Mostly green; straw-coloured where the ground is dry, and in the odd tuft anywhere.
@@ -359,37 +375,36 @@ export function meshSite(site: Site): SceneDescription {
       const hue = flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
       planting.tuft(planting.flowers, x, y - 0.02, z, size, size * plant.range(0.9, 1.3), plant.range(0, Math.PI), hue);
     };
-    // Grass where the player walks: thick, thin by the path, long in patches.
-    for (let gz = p.z0 + 0.25; gz < p.z1 - 0.2; gz += 0.36) for (let gx = p.x0 + 0.2; gx < p.x1 - 0.2; gx += 0.36) {
-      const x = gx + plant.range(0, 0.36), z = gz + plant.range(0, 0.36);
-      const off = Math.abs(x - pathAt(z)) - pathHalf;
-      if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
-      if (slopeOf(ground, x, z, 0.3) > 0.5) continue;
-      const long = Math.max(0, fbm2(x * 0.3 + s2, z * 0.3 + s1, 2) - 0.5) * 2.4;
-      const w = plant.range(0.4, 0.7) * (1 + long * 0.5), h = plant.range(0.22, 0.42) * (1 + long * 1.7);
-      const y = ground(x, z);
-      planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z));
-      if (plant.chance(0.12)) flowerAt(x, z, y, plant.range(0.3, 0.45));
-    }
-    // Bushes under the banks.
-    for (let k = 0; k < 40; k++) {
-      const x = plant.range(p.x0 + 2.2, p.x1 - 2.2), z = plant.range(p.z0 + 3, p.z1 - 2.2);
-      if (Math.min(x - p.x0, p.x1 - x, p.z1 - z) > 4.6 || Math.abs(x - pathAt(z)) < 3) continue;
-      if (slopeOf(ground, x, z, 0.4) > 0.6) continue;
+    // Grass: thick in the meadow, a little coarser across the valley, thin by the path, long in
+    // patches, and rough on the rim and just beyond it.
+    const grass = (x0: number, x1: number, z0: number, z1: number, step: number, scale: number, keep: (x: number, z: number) => boolean) => {
+      for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
+        const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
+        if (!keep(x, z)) continue;
+        const off = offTrack(x, z);
+        if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
+        if (slopeOf(ground, x, z, 0.3) > 0.55 || !clearOfStones(x, z, -0.15)) continue;
+        const long = Math.max(0, fbm2(x * 0.3 + s2, z * 0.3 + s1, 2) - 0.5) * 2.4;
+        const w = plant.range(0.4, 0.7) * (1 + long * 0.5) * scale, h = plant.range(0.22, 0.42) * (1 + long * 1.7) * Math.sqrt(scale);
+        const y = ground(x, z);
+        planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z));
+        if (plant.chance(0.12 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
+      }
+    };
+    grass(p.x0 + 0.2, p.x1 - 0.2, p.z0 + 0.25, p.z1 - 0.2, 0.36, 1, () => true);
+    grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
+    grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
+    // Bushes: by boulders and trees, and along the foot of the rock.
+    for (let k = 0; k < 150; k++) {
+      const x = plant.range(g.x0 + 3, g.x1 - 3), z = plant.range(g.z0 + 3, g.z1 - 3);
+      if (offTrack(x, z) < 2.4 || slopeOf(ground, x, z, 0.4) > 0.6 || !clearOfStones(x, z, 0.1)) continue;
+      const byRock = stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + 2.2) || Math.min(x - g.x0, g.x1 - x, g.z1 - z) < 8 || z - g.z0 < 6;
+      if (!byRock && !plant.chance(0.25)) continue;
       const size = plant.range(0.6, 1.1);
       planting.crown(x, ground(x, z) + size * 0.5, z, size, size * 0.7, 46, size * 0.75, leafOf(plant.pick(greens)), plant);
     }
-    // Beyond the banks: rougher grass close by, then woods on the hills. Trees thin out into
-    // glades, firs take the higher ground, and here and there a stand is in blossom.
-    const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
-    const inApproach = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
-    for (let gz = p.z0 - 12; gz < p.z1 + 38; gz += 0.8) for (let gx = p.x0 - 38; gx < p.x1 + 38; gx += 0.8) {
-      const x = gx + plant.range(0, 0.8), z = gz + plant.range(0, 0.8);
-      if (inApproach(x, z, -0.6) || inHouse(x, z, 0.5) || slopeOf(eased, x, z, 0.5) > 0.6) continue;
-      const y = eased(x, z);
-      planting.tuft(planting.grass, x, y - 0.08, z, plant.range(0.8, 1.3), plant.range(0.4, 0.95), plant.range(0, Math.PI), grassColour(x, z));
-      if (plant.chance(0.1)) flowerAt(x, z, y, plant.range(0.45, 0.7));
-    }
+    // Woods. Trees thin out into glades, firs take the higher ground, and here and there a stand
+    // is in blossom. In the valley the trunks are solid; the track and the meadow are kept clear.
     const wood = sceneryMesh('wood');
     const bark: Colour = [0.3, 0.26, 0.22];
     const tree = (x: number, z: number, y: number, detail: number) => {
@@ -399,8 +414,7 @@ export function meshSite(site: Site): SceneDescription {
       if (kind > 0.56) {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
         layTrunk(wood, x, y, z, height * 0.9, plant.range(0.16, 0.26), bark);
-        const c = plant.pick(firs);
-        planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), leafOf(c), plant);
+        planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), leafOf(plant.pick(firs)), plant);
       } else {
         const height = plant.range(5.5, 9.5), spread = plant.range(2.2, 3.4);
         layTrunk(wood, x, y, z, height * 0.8, plant.range(0.17, 0.3), bark, [plant.range(-0.4, 0.4), plant.range(-0.4, 0.4)]);
@@ -410,18 +424,29 @@ export function meshSite(site: Site): SceneDescription {
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x = gx + plant.range(0.1, 0.9) * step, z = gz + plant.range(0.1, 0.9) * step;
-        if (skip(x, z) || inHouse(x, z, 3) || inApproach(x, z, 2.5)) continue;
-        if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.44 || slopeOf(f, x, z, 1.5) > 0.75) continue;
-        const near = Math.hypot(x - Math.min(p.x1, Math.max(p.x0, x)), z - Math.min(p.z1, Math.max(p.z0, z)));
-        tree(x, z, f(x, z), Math.max(0, 1 - near / 60));
+        if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
+        if (offTrack(x, z) < 3.2 || !clearOfStones(x, z, 0.8)) continue;
+        if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
+        // Full detail anywhere the player can stand; less with distance beyond the rim.
+        const out = Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
+        tree(x, z, f(x, z), Math.max(0, 1 - out / 50));
       }
     };
     const inFine = (x: number, z: number) => x > fine.x0 && x < fine.x1 && z > fine.z0 && z < fine.z1;
-    woods(fine, 5.5, eased, () => false);
-    woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, land, inFine);
+    woods(fine, 6.2, eased, () => false);
+    woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+
+    // Where the player comes in: at the far end of the track, facing up the valley to the house.
+    if (site.grounds) {
+      const z = g.z1 - 11;
+      arrival.spawn = V(pathAt(z), ground(pathAt(z), z) + 1.75, z);
+      for (let w = z - 6; w > p.z1 - 2; w -= 6) arrival.track.push([pathAt(w), w]);
+      arrival.track.push([pathAt(p.z1 - 4), p.z1 - 4]);
+    }
     scenery.cards.push(...planting.sets);
   };
   const planting = new Planting();
+  const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
   const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: new Map(), cards: [] };
   const trees: [number, number][] = [];
@@ -717,13 +742,17 @@ export function meshSite(site: Site): SceneDescription {
     min.x = Math.min(min.x, p.x0 - 3); min.z = Math.min(min.z, p.z0 - 3);
     max.x = Math.max(max.x, p.x1 + 3); max.z = Math.max(max.z, p.z1 + 3);
   }
+  if (site.grounds) {
+    min.x = Math.min(min.x, site.grounds.x0 - 2); max.x = Math.max(max.x, site.grounds.x1 + 2); max.z = Math.max(max.z, site.grounds.z1 + 2);
+  }
   const approach = places.find((p) => p.role === 'approach') ?? places[site.entrance];
   return {
     meshes: kit.meshes,
     masses: kit.masses,
     torches: [...torchesByPlace.values()].flat(),
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
-    spawn: { position: V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
+    spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
+    track: arrival.track,
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,

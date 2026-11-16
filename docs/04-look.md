@@ -152,10 +152,10 @@ What that takes, and what is in place:
 |---|---|
 | Ground cover: grass, flowers, low bushes | In place, as instanced cards with wind. Thin at the foot of the banks. |
 | Trees with leafy crowns, several kinds, one in blossom | In place. Crowns are clouds of leaf cards shaded about a common centre; firs are tiers of bough cards. Trunks are plain, without branches. |
-| Land running to the horizon | In place: a fine sheet near the site, a coarse one out to 250 metres, and a ring of mountains to 750. |
+| Land running to the horizon | In place: a fine sheet over the valley and its rim, which can be walked, a coarse one out to 250 metres, and a ring of mountains to 750. |
 | Rock: banks, outcrops, boulders | Shaped and placed, but too smooth close to: it needs a rock material of its own and finer relief. |
 | Leaves lit from behind | Not done. Leaves are matt and opaque to light. |
-| A worn earth path, and ground that is more than one texture | Not done. The path is flags on turf. |
+| A worn earth path, and ground that is more than one texture | Partly. The track down the valley is turf tinted to earth, with no grass on it; there is still only one ground texture. |
 | Water | Not done. |
 | Things built outdoors: fences, steps, bridges, jetties | Not done. |
 | Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |
