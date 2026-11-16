@@ -36,6 +36,23 @@
     #won { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; padding: 22px 34px 24px;
       border: 1px solid rgba(232, 226, 214, .35); border-radius: 6px; background: rgba(11, 10, 9, .78); max-width: min(84vw, 30em); }
     #won[hidden] { display: none; }
+    #intro { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; padding: 22px 30px 22px; z-index: 5;
+      border: 1px solid rgba(232, 226, 214, .35); border-radius: 6px; background: rgba(11, 10, 9, .86); width: min(86vw, 32em); box-sizing: border-box; }
+    #intro[hidden] { display: none; }
+    /* While the opening card is up, nothing else is on the screen but the place itself. */
+    body.intro #hud, body.intro #map, body.intro #jump, body.intro #light, body.intro #stick { visibility: hidden; }
+    #intro h2 { margin: 0 0 8px; font: 600 20px/1.2 ui-serif, Georgia, serif; letter-spacing: .12em; text-transform: uppercase; }
+    #intro p { margin: 0 0 12px; font: 15px/1.5 ui-serif, Georgia, serif; }
+    #intro .how { font: 13px/1.5 ui-sans-serif, system-ui, sans-serif; opacity: .82; }
+    #intro label { display: block; margin: 0 0 14px; font-size: 13px; opacity: .9; }
+    #intro select { font: inherit; color: inherit; background: rgba(11, 10, 9, .6); border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 3px 6px; }
+    #intro select option { color: #111; }
+    #begin { font: 600 15px/1 ui-sans-serif, system-ui, sans-serif; color: inherit; background: rgba(224, 176, 112, .3); cursor: pointer;
+      border: 1px solid rgba(232, 226, 214, .5); border-radius: 3px; padding: 10px 26px; letter-spacing: .06em; }
+    #begin:hover { background: rgba(224, 176, 112, .5); }
+    #intro .touch { display: none; }
+    body.touch #intro .touch { display: block; }
+    body.touch #intro .keys { display: none; }
     #won h2 { margin: 0 0 6px; font: 600 22px/1.2 ui-serif, Georgia, serif; letter-spacing: .12em; text-transform: uppercase; }
     #won p { margin: 0 0 16px; font: 15px/1.5 ui-serif, Georgia, serif; }
     #again { font: inherit; color: inherit; background: rgba(224, 176, 112, .25); cursor: pointer;
@@ -94,6 +111,18 @@
     <h2>The sanctum</h2>
     <p id="wonText"></p>
     <button id="again" type="button">Another place</button>
+  </div>
+  <div id="intro" hidden>
+    <h2 id="introName"></h2>
+    <p id="introText"></p>
+    <p class="how keys">Click to look around, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> to walk, <kbd>Shift</kbd> to run, <kbd>Space</kbd> to jump. <kbd>L</kbd> raises or lowers your light and <kbd>M</kbd> enlarges the map. Doors and keys need no button: walk up to them.</p>
+    <p class="how touch">Drag on the left of the screen to walk, and push further to run. Drag on the right to look. Doors and keys need no button: walk up to them.</p>
+    <label>Detail <select id="quality">
+      <option value="low">Low: for older phones and laptops</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+    </select></label>
+    <button id="begin" type="button">Begin</button>
   </div>
   <div id="progress"><div id="bar"></div><div id="status">Starting</div></div>
   <div id="hud">

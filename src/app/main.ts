@@ -31,6 +31,22 @@ import { TouchControls } from './touch';
 const params = new URLSearchParams(location.search);
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
 
+/**
+ * How much detail to draw. Chosen on the opening card and remembered; a parameter in the address
+ * overrides any one setting. Touch devices start a step lower, since their screens are dense and
+ * their graphics modest.
+ */
+const QUALITY = {
+  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0 },
+  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1 },
+  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1 },
+};
+const coarse = window.matchMedia('(pointer: coarse)').matches;
+const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
+const wanted = params.get('quality') ?? remembered ?? (coarse ? 'medium' : 'high');
+const qualityName = (wanted in QUALITY ? wanted : 'high') as keyof typeof QUALITY;
+const quality = QUALITY[qualityName];
+
 /** A fresh, readable seed such as "amber-vault-41". */
 function randomSeed(): string {
   const a = ['amber', 'ashen', 'bright', 'cold', 'deep', 'elder', 'fallow', 'gilded', 'hollow', 'iron', 'last', 'mossy', 'north', 'old', 'pale', 'quiet', 'red', 'salt', 'tall', 'west'];
@@ -82,7 +98,7 @@ const TORCH_INTENSITY = 3.2;
 async function start(): Promise<void> {
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   const renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', 1.5)));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -94,7 +110,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ materials
   hud.status.textContent = 'Generating materials';
-  const texSize = num('tex', 1024);
+  const texSize = num('tex', quality.tex);
   const stone = generateTextureSet(renderer, 'stone', texSize, 3);
   const wood = generateTextureSet(renderer, 'wood', texSize, 5);
   const moss = generateTextureSet(renderer, 'moss', texSize / 2, 9);
@@ -119,6 +135,28 @@ async function start(): Promise<void> {
   const site = params.get('scene') === 'test' ? null : generateSite(seed);
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
+  // The opening card: what this place is, how to move, and how much detail to draw.
+  const intro = document.getElementById('intro')!;
+  if (site && !params.has('nointro')) {
+    document.getElementById('introName')!.textContent = `The ${site.setting.kind}`;
+    document.getElementById('introText')!.textContent = site.title;
+    const select = document.getElementById('quality') as HTMLSelectElement;
+    select.value = qualityName;
+    select.addEventListener('change', () => {
+      try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
+      const next = new URLSearchParams(location.search);
+      next.delete('quality');
+      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom');
+      location.search = next.toString();
+    });
+    document.getElementById('begin')!.addEventListener('click', () => {
+      intro.hidden = true;
+      document.body.classList.remove('intro');
+      if (!coarse) canvas.requestPointerLock?.();
+    });
+    intro.hidden = false;
+    document.body.classList.add('intro');
+  }
   if (desc.sun) {
     SUN_COLOR = new Color(desc.sun.colour[0], desc.sun.colour[1], desc.sun.colour[2]);
     SUN_INTENSITY = desc.sun.intensity;
@@ -173,8 +211,8 @@ async function start(): Promise<void> {
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
   const cardMeshes: InstancedMesh[] = [];
-  // Grass is drawn out to this distance; less far on phones and tablets unless asked otherwise.
-  vegetationRange.value = num('grass', window.matchMedia('(pointer: coarse)').matches ? 55 : 75);
+  // Grass is drawn out to this distance, by the level of detail chosen.
+  vegetationRange.value = num('grass', quality.grass);
   for (const set of desc.scenery?.cards ?? []) {
     for (const cards of makeCards(set, paintCards(set.kind))) {
       scene.add(cards);
@@ -318,7 +356,7 @@ async function start(): Promise<void> {
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
   const bloom = new UnrealBloomPass(new Vector2(size.x, size.y), 0.14, 0.5, 1.8);
   composer.addPass(atmosphere);
-  if (num('bloom', 1)) composer.addPass(bloom);
+  if (num('bloom', quality.bloom)) composer.addPass(bloom);
   composer.addPass(new OutputPass());
   composer.setSize(window.innerWidth, window.innerHeight);
 
@@ -361,7 +399,7 @@ async function start(): Promise<void> {
   // The battle map is a picture of the scene itself, so it is taken here, where the scene is.
   const battleMap = (maxPixels = 4096) => {
     const map = renderMap(renderer, scene, site!, { indoorExposure: 1.6, outdoorExposure: 0.42, mute: [lantern, ...torchLights.lights], outdoorOnly: scenic, maxPixels });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', 1.5)));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
     window.dispatchEvent(new Event('resize'));
     return map.canvas;
   };
@@ -459,7 +497,7 @@ async function start(): Promise<void> {
         positions, normals, albedo, index, source: bakeSource, scale: bakeScale, lights,
         masses: new Float32Array(desc.masses.flatMap((m) => [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z])),
         // Phones and tablets have fewer and slower cores; halve the work unless asked otherwise.
-        rays: num('rays', window.matchMedia('(pointer: coarse)').matches ? 16 : 32),
+        rays: num('rays', quality.rays),
         bounces: num('bounces', 2),
         workers: num('workers', Math.max(1, Math.min(12, (navigator.hardwareConcurrency || 4) - 1))),
       },

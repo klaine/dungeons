@@ -82,7 +82,9 @@ Doors and keys need no button: walk up to a door to try it, walk up to a key to 
 
 Each place has its seed in the address, so a link reproduces it; **New place** rolls another, and **Gallery** shows a dozen candidates at a time as plans to choose from. Some rooms are dark on purpose; they are shaded on the map.
 
-Useful URL parameters: `grass` (how far off grass is drawn, in metres; 75 by default and 55 on touch devices), `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
+An opening card names the place, shows the controls for your device, and offers three levels of detail; the choice is remembered. Touch devices start on Medium.
+
+Useful URL parameters: `quality` (`low`, `medium` or `high`), `grass` (how far off grass is drawn, in metres), `nointro` (skip the opening card), `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
 **Export** saves the current place: its plan and an ink map as images with a key to the rooms, a battle map rendered from above, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
 
