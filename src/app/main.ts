@@ -13,7 +13,7 @@ import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { AtmospherePass } from '../render/post';
 import { makeSiteMaterial, siteUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
-import { exportJson, exportModel, exportPlan, modelGlb, planCanvas, siteJson } from '../export/exporter';
+import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite } from '../core/generate';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
@@ -286,20 +286,22 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ export
   const exportSource = () => ({
     statics,
-    doors: game ? game.doors.map((d) => d.group) : [],
+    doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
     textures: { stone, floor: stone, slate: stone, rock: stone, wood, turf: moss, leaf: moss },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
   (document.getElementById('exportPlan') as HTMLButtonElement).hidden = !site;
   (document.getElementById('exportJson') as HTMLButtonElement).hidden = !site;
+  (document.getElementById('exportInk') as HTMLButtonElement).hidden = !site;
+  document.getElementById('exportInk')!.addEventListener('click', () => site && exportInk(site));
   document.getElementById('exportPlan')!.addEventListener('click', () => site && exportPlan(site));
   document.getElementById('exportJson')!.addEventListener('click', () => site && exportJson(site));
   document.getElementById('exportModel')!.addEventListener('click', () => {
     toast('Preparing the model. This can take a little while for a large place.');
     exportModel(renderer, exportSource(), seed).then(() => toast('Model saved.'), (err) => toast(`The model could not be made: ${err.message}`));
   });
-  (window as any).__exports = { siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), model: () => modelGlb(renderer, exportSource()) };
+  (window as any).__exports = { siteJson: () => site && siteJson(site), plan: () => site && planCanvas(site).toDataURL('image/png'), ink: () => site && inkCanvas(site).toDataURL('image/png'), model: () => modelGlb(renderer, exportSource()) };
 
   let revealAll = params.has('reveal');
   window.addEventListener('keydown', (e) => {

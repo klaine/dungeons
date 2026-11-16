@@ -2,8 +2,10 @@ import {
   BufferGeometry, CanvasTexture, Group, Mesh, MeshStandardMaterial, Object3D, RepeatWrapping, SRGBColorSpace, Texture, WebGLRenderer,
 } from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { solve } from '../core/mission';
-import { Site } from '../core/site';
+import { Place, Site } from '../core/site';
+import { drawInk, wrap } from '../maps/ink';
 import { drawPlan } from '../maps/plan';
 import { TextureSet } from '../render/textures';
 
@@ -29,7 +31,8 @@ export function siteJson(site: Site): string {
     format: 'dungeons-site', version: 1,
     ...site,
     solution: solution.moves.map((m) => ({ way: m.way, to: m.to, events: m.events })),
-  }, null, 1);
+    // Numbers are written to a tenth of a millimetre, which drops the noise of binary fractions.
+  }, (_key, value) => (typeof value === 'number' ? Math.round(value * 1e4) / 1e4 : value), 1);
 }
 
 export function exportJson(site: Site): void {
@@ -60,18 +63,53 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
   rows.forEach((p, k) => {
     const x = line * 1.5 + Math.floor(k / perColumn) * (size / columns);
     const y = size + line * (3.6 + (k % perColumn));
-    const notes: string[] = [];
-    if (p.roof === 'sky') notes.push('open to the sky');
-    else if (p.roof === 'cave') notes.push('natural cave');
-    else notes.push(p.roof === 'timber' ? 'timber ceiling' : 'stone vault');
-    if (p.light === 'dark') notes.push('unlit');
-    for (const it of site.items) if (it.place === p.id) notes.push(`${it.key} key`);
-    if (site.levers.some((l) => l.place === p.id)) notes.push('lever');
-    if (p.id === site.secret) notes.push('behind a secret door, with a relic');
-    if (p.id === site.goal) notes.push('the goal');
-    ctx.fillText(`${p.id + 1}. ${p.name[0].toUpperCase()}${p.name.slice(1)}: ${notes.join(', ')}`, x, y, size / columns - line * 2);
+    ctx.fillText(placeLine(site, p), x, y, size / columns - line * 2);
   });
   return out;
+}
+
+/** One line of the key to a map: a place's number, its name and what is to be found there. */
+export function placeLine(site: Site, p: Place): string {
+  const notes: string[] = [];
+  if (p.fallen) notes.push('the roof has fallen');
+  else if (p.roof === 'sky') notes.push('open to the sky');
+  else if (p.roof === 'cave') notes.push('natural cave');
+  else notes.push(p.roof === 'timber' ? 'timber ceiling' : 'stone vault');
+  if (p.light === 'dark') notes.push('unlit');
+  for (const it of site.items) if (it.place === p.id) notes.push(`${it.key} key`);
+  if (site.levers.some((l) => l.place === p.id)) notes.push('lever');
+  if (p.id === site.secret) notes.push('behind a secret door, with a relic');
+  if (p.id === site.goal) notes.push('the goal');
+  return `${p.id + 1}. ${p.name[0].toUpperCase()}${p.name.slice(1)}: ${notes.join(', ')}`;
+}
+
+/** The ink map above a key to its rooms and its signs. */
+export function inkCanvas(site: Site, size = 2000): HTMLCanvasElement {
+  const rows = site.places.filter((p) => p.role !== 'approach');
+  const u = size / 2000;
+  const line = 38 * u, edge = 50 * u;
+  const perColumn = Math.ceil(rows.length / 2);
+  const signs = 'Signs: a door is a bar across its opening, in the colour of its key if it is locked; a heavy stroke beside it is the side it is barred from; a row of dots is a portcullis, raised by the lever marked with a red stroke; S is a secret door; slanting lines are an unlit room; the large star is the goal.';
+  const out = document.createElement('canvas');
+  const measure = out.getContext('2d')!;
+  measure.font = `italic ${24 * u}px Georgia, 'Times New Roman', serif`;
+  const signLines = wrap(measure, signs, size - 2 * edge);
+  const top = drawInk(out, site, { pixels: size, labels: true, secrets: true, below: line * (perColumn + 1.2) + signLines.length * 32 * u + edge });
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = '#1d1a17';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.font = `${27 * u}px Georgia, 'Times New Roman', serif`;
+  rows.forEach((p, k) => {
+    ctx.fillText(placeLine(site, p), edge + Math.floor(k / perColumn) * (size / 2), top + line * (k % perColumn), size / 2 - edge * 1.5);
+  });
+  ctx.font = `italic ${24 * u}px Georgia, 'Times New Roman', serif`;
+  signLines.forEach((text, k) => ctx.fillText(text, edge, top + line * (perColumn + 0.6) + k * 32 * u));
+  return out;
+}
+
+export function exportInk(site: Site): void {
+  inkCanvas(site).toBlob((blob) => blob && download(blob, `${site.seed}-map.png`), 'image/png');
 }
 
 export function exportPlan(site: Site): void {
@@ -106,8 +144,8 @@ function toCanvasTexture(renderer: WebGLRenderer, set: TextureSet, which: 0 | 1 
 export interface ModelSource {
   /** Static meshes, named "place|material". */
   statics: Mesh[];
-  /** Door leaves in their current positions. */
-  doors: Object3D[];
+  /** Doors and gates in their current positions, with the way each hangs in and what its leaf is made of. */
+  doors: { node: Object3D; way: number; material: string }[];
   /** The texture set behind each material name. */
   textures: Record<string, TextureSet>;
 }
@@ -144,20 +182,51 @@ export function buildExportScene(renderer: WebGLRenderer, source: ModelSource): 
     return out;
   };
   for (const mesh of source.statics) root.add(plain(mesh));
-  source.doors.forEach((door, k) => {
+  // Ironwork, lock plates and bars: plain coloured metal, one mesh per colour on each door.
+  const plainMetal = new Map<string, MeshStandardMaterial>();
+  const metalFor = (m: MeshStandardMaterial): MeshStandardMaterial => {
+    const key = `${m.color.getHexString()}/${m.roughness}/${m.metalness}`;
+    let out = plainMetal.get(key);
+    if (!out) {
+      out = new MeshStandardMaterial({ name: `metal_${m.color.getHexString()}`, color: m.color, roughness: m.roughness, metalness: m.metalness });
+      plainMetal.set(key, out);
+    }
+    return out;
+  };
+  for (const { node: door, way, material } of source.doors) {
+    // The node sits on the hinge line at floor level: turning it about its upright axis swings
+    // the door, and lifting it raises a gate.
     const node = new Group();
-    node.name = `door_${k}`;
+    node.name = `door_${way}`;
     node.position.copy(door.position);
     node.quaternion.copy(door.quaternion);
-    const leaf = door.children.find((c) => (c as Mesh).isMesh && (c as Mesh).geometry.getAttribute('aField')) as Mesh | undefined;
-    if (leaf) {
-      const copy = plain(leaf);
-      copy.name = `door_${k}_leaf`;
-      copy.material = materialFor('wood');
-      node.add(copy);
+    const fittings = new Map<MeshStandardMaterial, BufferGeometry[]>();
+    for (const child of door.children as Mesh[]) {
+      if (!child.isMesh) continue;
+      if (child.geometry.getAttribute('aField')) {
+        const copy = plain(child);
+        copy.name = `door_${way}_leaf`;
+        copy.material = materialFor(material);
+        node.add(copy);
+        continue;
+      }
+      child.updateMatrix();
+      const g = new BufferGeometry();
+      for (const name of ['position', 'normal', 'uv']) g.setAttribute(name, child.geometry.getAttribute(name).clone());
+      g.setIndex(child.geometry.getIndex()!.clone());
+      g.applyMatrix4(child.matrix);
+      const m = metalFor(child.material as MeshStandardMaterial);
+      if (!fittings.has(m)) fittings.set(m, []);
+      fittings.get(m)!.push(g);
+    }
+    let k = 0;
+    for (const [m, parts] of fittings) {
+      const mesh = new Mesh(mergeGeometries(parts), m);
+      mesh.name = `door_${way}_fittings_${k++}`;
+      node.add(mesh);
     }
     root.add(node);
-  });
+  }
   return root;
 }
 

@@ -174,7 +174,7 @@ A first scene exists: a walled courtyard with an arcade and a well, and a doorwa
 | Fog with visible shafts of light | Working, by marching view rays against a sun depth map |
 | Target frame rate | Not measured: development so far has been on a software renderer without a graphics card |
 | Site to mesh, built and natural | Working for rectangular rooms, courts and caves; the span grid itself is not built yet |
-| Plan and rendered maps | Not started |
+| Maps | Plan, ink and the automap are working, each drawn from the site document. Illustrated and rendered styles, layers and vector output are not started. |
 
 Also in place: eye adaptation measured from the image, and first-person walking with collision.
 

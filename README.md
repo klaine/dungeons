@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+The same place can be exported as a map drawn in ink, with everything a referee needs marked on it:
+
+<img src="docs/images/ink-map.jpg" alt="An ink map of a generated place: hatched walls, numbered rooms, a cave, a secret door and a key" width="640">
+
 You arrive outdoors, across open ground in a hollow of the rock:
 
 ![The approach: turf, a flagged path, trees and the house front](docs/images/approach.jpg)
@@ -64,7 +68,7 @@ Each place has its seed in the address, so a link reproduces it; **New place** r
 
 Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard and hall used to develop the look), `rays` and `bounces` (bake quality; defaults 32 and 2), `nobake`, `tex` (texture size), `dpr` (pixel ratio cap).
 
-**Export** saves the current place: its plan as an image with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 45 MB for a ten-room place; baked light is not included).
+**Export** saves the current place: its plan and an ink map as images with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 50 MB for a ten-room place; baked light is not included). [The site format](docs/05-site-format.md) describes all of them. `examples/viewer/` is a small page, published beside the tool, that loads an exported model and its document and shows the building cut open with its rooms named.
 
 To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished. `npm run range` measures 2,000 sites and writes [a report of what the generator makes](public/range.html), which is published beside the tool as `range.html`.
 
@@ -90,3 +94,4 @@ A fantastic site is a place with a past, a shape you can learn and a rhythm you 
 - [2. How to generate it](docs/02-generation.md) — the pipeline, site grammars, the data model and the quality model
 - [3. The tool and the plan](docs/03-plan.md) — what gets built, technology, milestones, risks and decisions
 - [4. The look](docs/04-look.md) — geometry, materials, lighting, performance and 2D map styles
+- [5. The site format](docs/05-site-format.md) — what the tool exports and how to use it elsewhere
