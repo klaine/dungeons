@@ -528,8 +528,8 @@ async function start(): Promise<void> {
     const log: string[] = [];
     let clock = 0;
     const walkTo = (tx: number, tz: number, reach: number): boolean => {
-      let lastX = player.position.x, lastZ = player.position.z, sidestep = 0, turn = 1;
-      for (let i = 0; i < 1500; i++) {
+      let lastX = player.position.x, lastZ = player.position.z, sidestep = 0, turn = 1, tries = 0;
+      for (let i = 0; i < 2600; i++) {
         if (Math.hypot(tx - player.position.x, tz - player.position.z) < reach) { player.analog.set(0, 0); return true; }
         player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
         player.analog.set(sidestep > 0 ? turn : 0, sidestep > 0 ? -0.3 : -1);
@@ -538,7 +538,11 @@ async function start(): Promise<void> {
         game.update(1 / 60, (clock += 1 / 60));
         if (i % 45 === 44) {
           // Not getting anywhere: something is in the way, so step round it.
-          if (Math.hypot(player.position.x - lastX, player.position.z - lastZ) < 0.25) { sidestep = 40; turn = -turn; }
+          if (Math.hypot(player.position.x - lastX, player.position.z - lastZ) < 0.25) {
+            tries++;
+            if (tries % 3 === 0) turn = -turn;
+            sidestep = 30 + 25 * (tries % 3);
+          }
           lastX = player.position.x; lastZ = player.position.z;
         }
       }

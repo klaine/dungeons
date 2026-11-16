@@ -46,8 +46,10 @@ export interface Place {
   axis: 'x' | 'z';
   /** Steps from the entrance, counted in places. */
   depth: number;
-  /** What the place is in the fiction. */
+  /** What the place is in the fiction. Furnishing follows from it. */
   name: string;
+  /** The roof has come down: open to the sky, with what fell still lying there. */
+  fallen?: boolean;
 }
 
 /** Keys are told apart by their metal. */
@@ -127,6 +129,8 @@ export interface Setting {
   hour: Hour;
   /** What kind of house it is, for its name. */
   kind: string;
+  /** How it has fared: looked after, left to the wet, or abandoned long enough for a roof to fall. */
+  condition: 'kept' | 'damp' | 'forsaken';
 }
 
 /** The sun and sky at each time of day, in the renderer's light units. */

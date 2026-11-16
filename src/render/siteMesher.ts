@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { fbm2, Rng } from '../core/rng';
+import { Furnisher, Rect } from './furnish';
 import { Place, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
@@ -142,6 +143,7 @@ export function meshSite(site: Site): SceneDescription {
     torchesByPlace.set(p.id, list);
   }
 
+  const furnishing: Record<string, unknown>[] = [];
   const doors: DoorDesc[] = [];
   const anchors = new Map<number, Vector3>();
 
@@ -152,7 +154,8 @@ export function meshSite(site: Site): SceneDescription {
   for (const p of places) {
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
-    kit.field = open ? outdoorFieldAt(p.floor) : indoorField(torchesByPlace.get(p.id)!, p.floor);
+    const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
+    kit.field = open ? outdoorFieldAt(p.floor, p.fallen ? 1.8 : site.setting.condition === 'kept' ? 0.7 : 1.2) : indoorField(torchesByPlace.get(p.id)!, p.floor, damp);
     const dx = p.x1 - p.x0, dz = p.z1 - p.z0;
     const cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
     const roofY = p.floor + p.wall;
@@ -301,7 +304,7 @@ export function meshSite(site: Site): SceneDescription {
     }
 
     // Furnishings by role.
-    if (p.role === 'court') {
+    if (p.role === 'court' && !p.fallen) {
       const wx = cx + (dx > 6 ? rng.range(-0.8, 0.8) : 0), wz = cz + (dz > 6 ? rng.range(-0.8, 0.8) : 0);
       const y = p.floor;
       kit.roundWall('stone', wx, wz, 0.95, y - 0.1, y + 0.85, { ...ashlar, length: [0.45, 0.6] }, false, { open: { v1: true } });
@@ -336,6 +339,47 @@ export function meshSite(site: Site): SceneDescription {
       kit.box('stone', V(cx - 0.22, p.floor + 0.14, cz - 0.22), V(cx + 0.22, p.floor + 0.92, cz + 0.22), { ...dressed, length: [0.44, 0.44] }, coping, 'shaft');
       kit.box('stone', V(cx - 0.3, p.floor + 0.92, cz - 0.3), V(cx + 0.3, p.floor + 1.04, cz + 0.3), coping, coping, 'cap');
       anchors.set(p.id, V(cx, p.floor + 1.04, cz));
+    }
+
+    // Floor that must stay clear: in front of every doorway, and round whatever stands in the middle.
+    const keepClear: Rect[] = [];
+    const doorPoints: [number, number][] = [];
+    for (const side of SIDES) {
+      for (const h of holesOn(p, side, 0)) {
+        if (h.way.kind === 'window') continue;
+        doorPoints.push(side === 'n' ? [h.at, p.z0 + 0.7] : side === 's' ? [h.at, p.z1 - 0.7] : side === 'w' ? [p.x0 + 0.7, h.at] : [p.x1 - 0.7, h.at]);
+        const reach = 1.5, half = h.w + 0.3;
+        keepClear.push(side === 'n' ? { x0: h.at - half, x1: h.at + half, z0: p.z0, z1: p.z0 + reach }
+          : side === 's' ? { x0: h.at - half, x1: h.at + half, z0: p.z1 - reach, z1: p.z1 }
+          : side === 'w' ? { x0: p.x0, x1: p.x0 + reach, z0: h.at - half, z1: h.at + half }
+          : { x0: p.x1 - reach, x1: p.x1, z0: h.at - half, z1: h.at + half });
+      }
+    }
+    const anchor = anchors.get(p.id);
+    const solids: Rect[] = [];
+    if (anchor) {
+      // The chest or pedestal: solid itself, with room kept round it to walk up to it.
+      solids.push({ x0: anchor.x - 1.2, x1: anchor.x + 1.2, z0: anchor.z - 0.6, z1: anchor.z + 0.6 });
+      keepClear.push({ x0: anchor.x - 1.5, x1: anchor.x + 1.5, z0: anchor.z - 1.5, z1: anchor.z + 1.5 });
+    }
+    for (const l of site.levers) if (l.place === p.id) keepClear.push({ x0: l.x - 0.9, x1: l.x + 0.9, z0: l.z - 0.9, z1: l.z + 0.9 });
+    if (!open && !cave) {
+      const furnisher = new Furnisher(kit, p, rng.fork(`furnish${p.id}`), keepClear, site.setting.condition === 'forsaken' ? 0.4 : 0, doorPoints, solids);
+      furnisher.furnish();
+      furnishing.push({ place: p.name, ...furnisher.tally });
+    }
+    if (p.fallen) {
+      // What came down is still here: blocks of the vault, large and small, mostly towards the middle.
+      const rubble = rng.fork(`rubble${p.id}`);
+      for (let k = 0; k < 16; k++) {
+        const sx = rubble.range(0.3, 0.75), sz = rubble.range(0.3, 0.6), sy = rubble.range(0.18, 0.42);
+        const x = cx + (rubble.next() + rubble.next() - 1) * (dx / 2 - 0.8), z = cz + (rubble.next() + rubble.next() - 1) * (dz / 2 - 0.8);
+        const r = { x0: x - sx / 2, x1: x + sx / 2, z0: z - sz / 2, z1: z + sz / 2 };
+        if (keepClear.some((t) => r.x0 < t.x1 && r.x1 > t.x0 && r.z0 < t.z1 && r.z1 > t.z0)) continue;
+        kit.box('stone', V(r.x0, p.floor - 0.06, r.z0), V(r.x1, p.floor + sy, r.z1), { ...ashlar, length: [1, 1], course: [1, 1], chip: 0.6 }, undefined, `rubble${k}`);
+        if (rubble.chance(0.35)) kit.box('stone', V(r.x0 + 0.08, p.floor + sy, r.z0 + 0.05), V(r.x1 - 0.12, p.floor + sy + sy * 0.8, r.z1 - 0.08), { ...ashlar, length: [1, 1], course: [1, 1], chip: 0.6 }, undefined, `rubble${k}b`);
+        keepClear.push(r);
+      }
     }
 
     // Ways are built once, from the side of their first place.
@@ -413,5 +457,6 @@ export function meshSite(site: Site): SceneDescription {
     sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground } },
     doors,
     anchors,
+    furnishing,
   };
 }

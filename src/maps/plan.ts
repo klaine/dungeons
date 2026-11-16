@@ -174,7 +174,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
   for (const p of site.places) {
     if (!known(p)) continue;
     const cx = (p.x0 + p.x1) / 2, cz = (p.z0 + p.z1) / 2;
-    if (p.role === 'court') {
+    if (p.role === 'court' && !p.fallen) {
       ctx.strokeStyle = INK;
       ctx.lineWidth = Math.max(1, 0.8 * ratio);
       ctx.beginPath();

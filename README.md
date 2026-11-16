@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+Rooms have uses and are furnished for them, and a forsaken house has lost a roof:
+
+![A refectory, a dormitory, and a hall whose roof has fallen in](docs/images/rooms-in-use.jpg)
+
 Some ways are shut by a portcullis, raised by a lever on the far side. You can see through it to where you cannot yet go:
 
 ![A portcullis down, and raised](docs/images/portcullis.jpg)
@@ -54,7 +58,7 @@ Useful URL parameters: `seed` (any text), `scene=test` (the hand-built courtyard
 
 **Export** saves the current place: its plan as an image with a key to the rooms, its site document as JSON, and its 3D model as a glTF file (`.glb`, about 45 MB for a ten-room place; baked light is not included).
 
-To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them.
+To check the generator without a browser: `npx tsx tools/sites.ts 300` generates 300 sites and reports on them, and `npx tsx tools/furnish.ts <seed>` reports how each room was furnished.
 
 ## Publishing
 

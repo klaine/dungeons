@@ -50,6 +50,8 @@ export interface SceneDescription {
   sun?: { colour: [number, number, number]; intensity: number; sky: { zenith: number[]; horizon: number[]; ground: number[] } };
   /** A one-line description to show the player. */
   title?: string;
+  /** Per room, how many pieces of furniture were placed and why others were refused; for tuning. */
+  furnishing?: Record<string, unknown>[];
   /** Doors to hang in the doorways. */
   doors?: DoorDesc[];
   /** Per place, the spot where a thing can be set down: the top of its chest or pedestal. */

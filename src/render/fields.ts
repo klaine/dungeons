@@ -15,8 +15,12 @@ const SEED = 7;
  * Under the sky: moss potential on the ground and at wall bases, rain streaks down walls.
  * `floor` is the height of the ground.
  */
-export function outdoorFieldAt(floor: number): FieldFn {
-  return (p: Vector3, n: Vector3, out: Float32Array): number => outdoor(p, n, out, floor);
+export function outdoorFieldAt(floor: number, lush = 1): FieldFn {
+  return (p: Vector3, n: Vector3, out: Float32Array): number => {
+    const tone = outdoor(p, n, out, floor);
+    out[0] = Math.min(1, out[0] * lush);
+    return tone;
+  };
 }
 
 export const outdoorField: FieldFn = outdoorFieldAt(0);
@@ -42,13 +46,13 @@ function outdoor(p: Vector3, n: Vector3, out: Float32Array, floor: number): numb
  * Under a roof: damp low on the walls, soot above each flame. `floor` is the height of the floor
  * the damp rises from.
  */
-export function indoorField(torches: readonly TorchSpec[], floor = 0): FieldFn {
+export function indoorField(torches: readonly TorchSpec[], floor = 0, damp = 1): FieldFn {
   return (p: Vector3, n: Vector3, out: Float32Array): number => {
     const patch = fbm2(p.x * 0.5 + p.z * 0.5, p.y * 0.6 + 4, 4, SEED + 21);
     const up = Math.max(0, n.y);
-    const low = 1 - Math.min(1, Math.max(0, (p.y - floor) / 1.1));
+    const low = 1 - Math.min(1, Math.max(0, (p.y - floor) / (0.8 + 0.5 * damp)));
     out[0] = 0;
-    out[1] = Math.min(1, (1 - up) * low * low * patch * 1.3 + up * Math.max(0, patch - 0.62) * 1.5);
+    out[1] = Math.min(1, ((1 - up) * low * low * patch * 1.3 + up * Math.max(0, patch - 0.72 + 0.1 * damp) * 1.5) * damp);
     let soot = 0;
     for (const t of torches) {
       const dx = p.x - t.position.x, dz = p.z - t.position.z, dy = p.y - t.position.y;
@@ -58,6 +62,6 @@ export function indoorField(torches: readonly TorchSpec[], floor = 0): FieldFn {
       soot = Math.max(soot, Math.max(0, 1 - r / spread) * Math.max(0, 1 - dy / 3.2) * (0.6 + patch * 0.8));
     }
     out[2] = Math.min(1, soot);
-    return 0.9 + 0.14 * patch;
+    return 0.92 - 0.06 * damp + (0.1 + 0.06 * damp) * patch;
   };
 }

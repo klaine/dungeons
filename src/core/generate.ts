@@ -162,6 +162,7 @@ export function generateSite(seed: string): Site {
     stone: pickFrom.pick<Stone>(['limestone', 'limestone', 'sandstone', 'greystone', 'basalt']),
     hour: pickFrom.pick<Hour>(['morning', 'midday', 'evening', 'evening']),
     kind: pickFrom.pick(['priory', 'abbey', 'charterhouse', 'hospice', 'preceptory']),
+    condition: pickFrom.pick<Setting['condition']>(['kept', 'kept', 'damp', 'forsaken', 'forsaken']),
   };
   let best: Site | null = null;
   let bestScore = -Infinity;
@@ -375,6 +376,27 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
     if (Math.min(dx, dz) < 4 && p.name === 'gallery') p.name = 'passage';
   }
 
+  // ---- what each room was for. The big ones get the communal uses, one of each at most.
+  const communal = shuffle(['refectory', 'dormitory', 'chapter house'], rng);
+  const working = shuffle(['kitchen', 'store', 'workshop', 'scriptorium', 'dormitory'], rng);
+  for (const p of places) {
+    if (p.name !== 'gallery') continue;
+    const area = (p.x1 - p.x0) * (p.z1 - p.z0);
+    if (area >= 44 && communal.length) p.name = communal.pop()!;
+    else if (area >= 26 && working.length) p.name = working.pop()!;
+  }
+
+  // ---- a forsaken house has lost a roof: one room lies open, with what fell still in it
+  if (setting.condition === 'forsaken') {
+    const options = places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && p.role !== 'goal' && p.role !== 'entrance' && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 5);
+    if (options.length) {
+      const p = rng.pick(options);
+      p.roof = 'sky';
+      p.fallen = true;
+      p.name = `roofless ${p.name}`;
+    }
+  }
+
   // ---- light. Daylight where a court reaches in; torches at the entrance and the sanctum; and some
   // rooms left dark on purpose, never two in a row, so there is always light ahead to walk towards.
   for (const p of places) {
@@ -458,7 +480,9 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   const dark = places.filter((p) => p.light === 'dark').length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
   const when = { morning: 'in the morning', midday: 'at midday', evening: 'at evening' }[setting.hour];
-  site.title = `A ${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  if (places.some((p) => p.fallen)) parts.push('one with its roof fallen in');
+  const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
+  site.title = `A ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 
