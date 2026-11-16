@@ -13,7 +13,7 @@ import { layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
-import { groundOf } from '../core/building';
+import { footprintOf, groundOf } from '../core/building';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -436,14 +436,18 @@ export function meshSite(site: Site): SceneDescription {
     // A tower stands on ground that was levelled for it.
     const towers = (site.grounds ? site.towers ?? [] : []).map((t) => ({ ...t, base: swells(t.x, t.z) }));
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5 }));
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
     // Whether a point is under a building, within its outer walls.
-    const footprint = (b: { x: number; z: number; w: number; d: number; faces: 'e' | 'w' }, x: number, z: number) => {
+    // Whether a point is under a building, within its outer walls (wings and all).
+    const footprint = (b: (typeof houses)[number], x: number, z: number) => {
       const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
-      return Math.abs(u) < b.w / 2 && v > 0 && v < b.d;
+      return b.rects.some((r) => u > r.u0 && u < r.u1 && v > r.v0 && v < r.v1);
     };
-    // How far a point is outside a building's ground (less than nothing inside it).
-    const outside = (b: (typeof houses)[number], x: number, z: number) => Math.max(Math.abs(x - b.x) - b.hx, Math.abs(z - b.z) - b.hz);
+    // (With room about it: half a metre, and before a classical building's door the depth of its steps.)
+    const outside = (b: (typeof houses)[number], x: number, z: number) => {
+      const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+      return Math.min(...b.rects.map((r, i) => Math.max(r.u0 - u, u - r.u1, (i === 0 && b.style === 'imperial' ? r.v0 - 1.45 : r.v0) - v, v - r.v1))) - 0.55;
+    };
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
     const openings = [...house.filter((q) => q.roof === 'sky').map((q) => ({ x0: q.x0, x1: q.x1, z0: q.z0, z1: q.z1 })), ...skylights];
     const pondList = lies.filter((f) => f.kind === 'pond');
@@ -1356,14 +1360,22 @@ export function meshSite(site: Site): SceneDescription {
       // the turf ends exactly where masonry begins and no gap is left to look down.
       warp: (x, z) => {
         if (x > p.x0 - 0.2 && x < p.x1 + 0.2 && z > frontZ - 0.05 && z < p.z0 + 1.3) z = frontZ - 0.05;
-        // (And to the faces of a building, so that the ground meets its walls and goes no further.)
+        // (And to the faces of a building, so that the ground meets its walls and goes no further: to the nearest
+        // point of its outline, which is the edge of one of its rectangles not inside another.)
         for (const b of houses) {
           if (!footprint(b, x, z)) continue;
-          const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2, front = b.style === 'imperial' && b.portico && Math.abs(u) < b.w * 0.2 ? -0.42 : -0.02;
-          const ways: [number, number, number][] = [[u + b.w / 2 + 0.02, -b.w / 2 - 0.02, v], [b.w / 2 + 0.02 - u, b.w / 2 + 0.02, v], [v - front, u, front], [b.d + 0.02 - v, u, b.d + 0.02]];
-          const [, nu, nv] = ways.reduce((m, q) => (q[0] < m[0] ? q : m));
-          x = b.x + turn * (nv - b.d / 2);
-          z = b.z + turn * nu;
+          const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+          const within = (pu: number, pv: number) => b.rects.some((r) => pu > r.u0 + 0.01 && pu < r.u1 - 0.01 && pv > r.v0 + 0.01 && pv < r.v1 - 0.01);
+          let best: [number, number] = [u, v], least = Infinity;
+          for (const r of b.rects) {
+            const cu = Math.min(r.u1, Math.max(r.u0, u)), cv = Math.min(r.v1, Math.max(r.v0, v));
+            for (const [pu, pv] of [[r.u0 - 0.02, cv], [r.u1 + 0.02, cv], [cu, r.v0 - 0.02], [cu, r.v1 + 0.02]] as [number, number][]) {
+              const d = Math.hypot(pu - u, pv - v);
+              if (d < least && !within(pu, pv)) { least = d; best = [pu, pv]; }
+            }
+          }
+          x = b.x + turn * (best[1] - b.d / 2);
+          z = b.z + turn * best[0];
         }
         for (const o of openings) {
           if (x <= o.x0 || x >= o.x1 || z <= o.z0 || z >= o.z1) continue;

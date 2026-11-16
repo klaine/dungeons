@@ -48,6 +48,24 @@ export function classicalEnds(b: Building): number[] {
   return Array.from({ length: n }, (_, i) => 0.8 + (i + 0.5) * pitch);
 }
 
+/** The windows of a wing: along its two long walls (as `v`), and across its far end (as `u`). */
+export function wingWindows(b: Building, wing: NonNullable<Building['wings']>[number]): { along: number[]; across: number[] } {
+  const n = Math.max(1, Math.round((wing.length - 1.2) / 2.6)), pitch = (wing.length - 1.2) / n;
+  const mid = wing.side * (b.w / 2 - wing.width / 2);
+  return {
+    along: Array.from({ length: n }, (_, i) => b.d + 0.6 + (i + 0.5) * pitch),
+    across: wing.width >= 7.8 ? [mid - wing.width / 4, mid + wing.width / 4] : [mid],
+  };
+}
+
+/** Where a building stands on the ground, as rectangles in its own measures: the main block, what stands forward of it, and its wings. */
+export function footprintOf(b: Building): { u0: number; u1: number; v0: number; v1: number }[] {
+  const out = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
+  if (b.style === 'imperial' && b.portico) { const f = classicalFront(b); out.push({ u0: f.standL, u1: f.standR, v0: -CLASSICAL.out, v1: 0 }); }
+  for (const g of b.wings ?? []) out.push({ u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d - 0.01, v1: b.d + g.length });
+  return out;
+}
+
 /** Whether an opening whose foot is at `y0` would be under the ground, at a place `v` back from the front. */
 export const buried = (b: Building, v: number, y0: number): boolean => y0 < groundOf(b, v) + 0.25;
 
@@ -75,9 +93,12 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
   const spine = D / 2, sF = spine - SPINE / 2, sB = spine + SPINE / 2, front = T, back = D - T;
   const uL = lo(middle - flank), uR = hi(middle + flank + 1);
   const plan: BuildingPlan = { rooms: [], doors: [], walls: { outer: T, spine: SPINE, cross: CROSS } };
-  if (broad === 1) plan.rooms.push({ kind: 'passage', u0: uL, u1: uR, v0: front, v1: back });
+  // How far each wall of a room reaches out from it: all of an outer wall within its skin, half of any other.
+  const IN = T - CLASSICAL.skin, side = (u: number) => (Math.abs(Math.abs(u) - (W / 2 - T)) < 0.02 ? IN : CROSS / 2);
+  const lined = (v0: number, v1: number, u0: number, u1: number): [number, number, number, number] => [v0 < T + 0.02 ? IN : SPINE / 2, v1 > back - 0.02 ? IN : SPINE / 2, side(u0), side(u1)];
+  if (broad === 1) plan.rooms.push({ kind: 'passage', u0: uL, u1: uR, v0: front, v1: back, linings: lined(front, back, uL, uR) });
   else {
-    plan.rooms.push({ kind: 'hall', u0: uL, u1: uR, v0: b.portico ? -OUT + T : T, v1: sF }, { kind: 'stair', u0: uL, u1: uR, v0: sB, v1: back });
+    plan.rooms.push({ kind: 'hall', u0: uL, u1: uR, v0: b.portico ? -OUT + T : T, v1: sF, linings: lined(T, sF, uL, uR) }, { kind: 'stair', u0: uL, u1: uR, v0: sB, v1: back, linings: lined(sB, back, uL, uR) });
     plan.doors.push({ line: 'v', at: spine, c: (uL + uR) / 2, w: 2.2, tall: true });
   }
   // A wing: rooms of one, two or three bays; and the other wing its mirror.
@@ -92,13 +113,29 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
     for (const size of sizes) {
       const first = side < 0 ? bay - size : bay, last = side < 0 ? bay : bay + size;
       const u0 = lo(first), u1 = hi(last), inner = side < 0 ? last : first, atMiddle = side < 0 ? last === middle - flank : first === middle + flank + 1;
-      plan.rooms.push({ kind: 'front', u0, u1, v0: front, v1: sF }, { kind: 'back', u0, u1, v0: sB, v1: back });
+      plan.rooms.push({ kind: 'front', u0, u1, v0: front, v1: sF, linings: lined(front, sF, u0, u1) }, { kind: 'back', u0, u1, v0: sB, v1: back, linings: lined(sB, back, u0, u1) });
       plan.doors.push({ line: 'u', at: edge[inner], c: front + 1.25, w: 1.1 });
       // (Beside a passage the back rooms are reached from the front rooms: the passage's far end is its stair.)
       if (!atMiddle || broad === 3) plan.doors.push({ line: 'u', at: edge[inner], c: atMiddle ? sB + 0.9 : back - 1.25, w: 1.0 });
       plan.doors.push({ line: 'v', at: spine, c: (u0 + u1) / 2, w: 1.0 });
       bay += side * size;
     }
+  }
+  // The wings: a row of rooms each, one or two windows long, one opening into the next down the
+  // wing's length, and the first into the main block through what was its back wall. That wall
+  // stays as thick as it was, so the door through it is deep.
+  for (const wing of b.wings ?? []) {
+    const { along } = wingWindows(b, wing), outer = wing.side * (W / 2 - T), inner = wing.side * (W / 2 - wing.width + T);
+    const u0 = Math.min(outer, inner), u1 = Math.max(outer, inner), end = D + wing.length - T, door = (u0 + u1) / 2 + wing.side * -0.2;
+    const cuts: number[] = [];
+    for (let i = 1; i < along.length;) { const take = Math.min(along.length - i, rng.pick([1, 2, 2])); i += take; if (i < along.length) cuts.push((along[i - 1] + along[i]) / 2); }
+    const walls = [D + CLASSICAL.skin, ...cuts, end];
+    for (let i = 0; i < walls.length - 1; i++) {
+      const v0 = i ? walls[i] + CROSS / 2 : walls[0], v1 = i === walls.length - 2 ? walls[i + 1] : walls[i + 1] - CROSS / 2;
+      plan.rooms.push({ kind: 'wing', u0, u1, v0, v1, linings: [i ? CROSS / 2 : CLASSICAL.skin, i === walls.length - 2 ? IN : CROSS / 2, IN, IN] });
+      if (i) plan.doors.push({ line: 'v', at: walls[i], c: door, w: 1.1 });
+    }
+    plan.doors.push({ line: 'v', at: D - (T - CLASSICAL.skin) / 2, c: door, w: 1.1, through: T + CLASSICAL.skin });
   }
   return plan;
 }

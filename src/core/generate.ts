@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { classicalFront, floorOf, planClassical } from './building';
+import { classicalFront, floorOf, footprintOf, planClassical } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Way, WHEN } from './site';
 
 /**
@@ -361,7 +361,28 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       const b: Building = { style: 'imperial', x: round(trackX(z) + near * (off + d / 2)), z: round(z), w, d, faces: near > 0 ? 'w' : 'e', storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && tries % 3 === 0) };
       if (fits(b)) out.push(b);
     }
+    // Whether all of a building's ground, wings and all, is clear of the track and of whatever lies in the valley.
+    const clearAll = (b: Building): boolean => {
+      const turn = b.faces === 'w' ? 1 : -1;
+      for (const r of footprintOf(b)) for (const [u, v] of [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1], [(r.u0 + r.u1) / 2, (r.v0 + r.v1) / 2]]) {
+        const x = b.x - (turn * b.d) / 2 + turn * v, z = b.z + turn * u;
+        if (x < g.x0 + 12 || x > g.x1 - 12 || z < meadow.z1 + 8 || z > g.z1 - 12 || !roomAt(site, x, z, 3.5) || fromTrack(x, z) < 3.2) return false;
+      }
+      return true;
+    };
     for (const b of out) {
+      // A broad one now and then has wings reaching back from its ends about a court: one, making an L, or two, making a U.
+      const winged = rng.fork('wings');
+      if (b.bays >= 7 && winged.chance(0.7)) {
+        // (Narrower than the part of the front beside its middle, so that the wing's rooms open off the main block's end rooms.)
+        const width = round(winged.range(5.4, Math.min(8.8, b.w / 2 - 4))), both = winged.chance(0.5), one: -1 | 1 = winged.chance(0.5) ? -1 : 1;
+        // (If there is no room for it as wished, it is tried shorter, and then as an L.)
+        for (const [length, sides] of [[round(winged.range(8, 14)), both ? [-1, 1] : [one]], [7, both ? [-1, 1] : [one]], [7, [one]], [7, [-one]]] as [number, (-1 | 1)[]][]) {
+          b.wings = sides.map((side) => ({ side, width, length }));
+          if (clearAll(b)) break;
+          delete b.wings;
+        }
+      }
       // About two in five of the taller ones are set into rising ground: the lowest storey open to the front and buried at the back.
       const cut = rng.fork('sunk');
       if (b.storeys >= 3 && cut.chance(0.45)) {

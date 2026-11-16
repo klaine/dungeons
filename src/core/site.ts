@@ -239,9 +239,14 @@ export interface Grotto {
  * from the face of the front wall. A room is its clear floor, inside its walls.
  */
 export interface BuildingPlan {
-  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back'; u0: number; u1: number; v0: number; v1: number }[];
+  /**
+   * `linings` is how far each of the room's walls reaches out from its floor before it meets the
+   * next room's or the rendered skin outside, in the order front, back, left, right (as `v0`,
+   * `v1`, `u0`, `u1`): half a wall between rooms, all of an outer wall within its skin.
+   */
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number] }[];
   /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
-  doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean }[];
+  doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number }[];
   /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
   walls: { outer: number; spine: number; cross: number };
 }
@@ -267,6 +272,13 @@ export interface Building {
    */
   sunk?: number;
   backDoor?: number;
+  /**
+   * Wings reaching back from the ends of the main block, making the building an L (one) or a U
+   * (two) about a court behind it. `side` is -1 for the left end as one stands before it and 1
+   * for the right; `width` is how much of the main block's breadth the wing takes, from its end
+   * inward; `length` is how far it reaches back beyond the main block. It has the main block's storeys.
+   */
+  wings?: { side: -1 | 1; width: number; length: number }[];
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
 }
