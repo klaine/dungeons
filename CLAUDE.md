@@ -45,7 +45,7 @@ Keep these up to date in the same commit as the change they describe.
 
 Measured again after the move to WebGPU (November 2026, same desktop, in the app's embedded browser,
 at 1252 by 737, drawing frames back to back): about 10 milliseconds with a lake in view and about
-13 looking down the track; a site builds in 6 to 8 seconds. (Since then valleys have taken a shape of their own and grown: in December's terms, building the valley's land and rock alone, without a browser (`tools/land.ts`), took 9 to 11 seconds at the old size and takes 12.5 to 15 at the new, about half as large again in area. Drawing from the arrival point, timed in a pane that was not shown, cost the same at both sizes within the noise of the measure; there are about a sixth more vegetation cards.) The WebGL 2 fallback draws the same
+13 looking down the track; a site builds in 6 to 8 seconds. (Since then valleys have taken a shape of their own and grown. Measured on 16 November 2026: building the valley's land and rock alone, without a browser (`tools/land.ts`), took 9 to 11 seconds at the old size and takes 12.5 to 15 at the new, about half as large again in area. Drawing from the arrival point, timed in a pane that was not shown, cost the same at both sizes within the noise of the measure; there are about a sixth more vegetation cards.) The WebGL 2 fallback draws the same
 picture but has not been timed. The paragraph below is the earlier WebGL renderer, kept for comparison.
 
 Measured in November 2026 on a desktop with a Radeon RX 6800, in the app's embedded browser: a
