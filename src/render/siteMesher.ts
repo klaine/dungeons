@@ -995,10 +995,11 @@ export function meshSite(site: Site): SceneDescription {
           for (let z = za + 0.6; z < zb && !any; z += 1.2) any = inBand(x + 0.6, z) || inBand(x + 1.8, z);
           if (any) { if (run) run.x1 = x + COL; else { run = { x0: x, x1: x + COL, z0: za, z1: zb }; row.of.push(run); } } else run = null;
         }
-        // (Less the meadow, which is a piece of its own.)
-        row.of = row.of.flatMap((c): Patch[] => (c.x1 <= MX0 || c.x0 >= MX1 || c.z1 <= MZ0 || c.z0 >= MZ1 ? [c] : [
+        // (Less the meadow, which is a piece of its own, and everything behind it: between the ends of the house front there is
+        // nothing to carve, and were it carved, the ground before the door would be laid through the rooms behind it.)
+        row.of = row.of.flatMap((c): Patch[] => (c.x1 <= MX0 || c.x0 >= MX1 || c.z0 >= MZ1 ? [c] : [
           { x0: c.x0, x1: Math.min(c.x1, MX0), z0: c.z0, z1: c.z1 }, { x0: Math.max(c.x0, MX1), x1: c.x1, z0: c.z0, z1: c.z1 },
-          { x0: Math.max(c.x0, MX0), x1: Math.min(c.x1, MX1), z0: c.z0, z1: Math.min(c.z1, MZ0) }, { x0: Math.max(c.x0, MX0), x1: Math.min(c.x1, MX1), z0: Math.max(c.z0, MZ1), z1: c.z1 },
+          { x0: Math.max(c.x0, MX0), x1: Math.min(c.x1, MX1), z0: Math.max(c.z0, MZ1), z1: c.z1 },
         ].filter((q) => q.x1 - q.x0 > 0.01 && q.z1 - q.z0 > 0.01)));
         (za === ZNo ? headPatches : rimPatches).push(...row.of);
         rows.push(row);

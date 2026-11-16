@@ -1015,6 +1015,10 @@ async function start(): Promise<void> {
       if (w.kind === 'stair') {
         const { foot, head } = stairEnds(site, w), [near, far] = at === w.a ? [foot, head] : [head, foot];
         if (!(walkTo(near[0], near[1], 0.3) && walkTo(far[0], far[1], 0.3))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
+        // Off the end of the stair and onto the floor beside it, as anyone would, before going on: otherwise whoever
+        // has just come up makes for the next door across the well and goes straight back down it.
+        const off = { n: [0, 1.5], s: [0, -1.5], e: [-1.5, 0], w: [1.5, 0] }[w.side];
+        walkTo(far[0] + off[0], far[1] + off[1], 0.4);
         at = m.to;
         const kept = desc.anchors?.get(at);
         if (kept && game.things.some((k) => !k.taken && k.item.place === at) && !walkTo(kept.x, kept.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
