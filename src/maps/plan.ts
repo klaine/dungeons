@@ -137,6 +137,44 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       track.forEach(([tx, tz], k) => (k ? ctx.lineTo(X(tx), Z(tz)) : ctx.moveTo(X(tx), Z(tz))));
       ctx.stroke();
     }
+    // Where the track crosses water, and where water comes over the rim.
+    for (const st of site.streams ?? []) {
+      const c = st.crossing;
+      if (c) {
+        // Which way the track runs there.
+        let ux = 0, uz = 1;
+        for (let k = 0; k < track.length - 1; k++) {
+          const [ax, az] = track[k], [bx, bz] = track[k + 1];
+          if (c.z >= Math.min(az, bz) && c.z <= Math.max(az, bz)) { const l = Math.hypot(bx - ax, bz - az) || 1; ux = (bx - ax) / l; uz = (bz - az) / l; }
+        }
+        const half = st.width / 2 + 1.2;
+        if (c.by === 'ford') {
+          // A ford: the water shows over the track, with stones in it.
+          ctx.strokeStyle = WATER;
+          ctx.lineWidth = Math.max(1.2 * ratio, st.width * scale);
+          ctx.beginPath(); ctx.moveTo(X(c.x - uz * 2), Z(c.z + ux * 2)); ctx.lineTo(X(c.x + uz * 2), Z(c.z - ux * 2)); ctx.stroke();
+          ctx.fillStyle = INK;
+          for (const at of [-0.6, 0, 0.6]) { ctx.beginPath(); ctx.arc(X(c.x + ux * at * half), Z(c.z + uz * at * half), Math.max(0.8 * ratio, 0.28 * scale), 0, Math.PI * 2); ctx.fill(); }
+        } else {
+          // A bridge: its two sides, drawn either side of the track.
+          ctx.strokeStyle = INK;
+          ctx.lineWidth = Math.max(0.8 * ratio, 0.22 * scale);
+          for (const side of [-1.2, 1.2]) {
+            ctx.beginPath();
+            ctx.moveTo(X(c.x - ux * half - uz * side), Z(c.z - uz * half + ux * side));
+            ctx.lineTo(X(c.x + ux * half - uz * side), Z(c.z + uz * half + ux * side));
+            ctx.stroke();
+          }
+        }
+      }
+      if (st.from === 'fall' && st.course.length > 1) {
+        // A fall: a bar across the head of the stream.
+        const [ax, az] = st.course[0], [bx, bz] = st.course[1], l = Math.hypot(bx - ax, bz - az) || 1, px = -(bz - az) / l, pz = (bx - ax) / l, w = st.width / 2 + 1;
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(1 * ratio, 0.3 * scale);
+        ctx.beginPath(); ctx.moveTo(X(ax - px * w), Z(az - pz * w)); ctx.lineTo(X(ax + px * w), Z(az + pz * w)); ctx.stroke();
+      }
+    }
   }
 
   // Fog of war: places that have been entered are drawn in full; places seen through an open

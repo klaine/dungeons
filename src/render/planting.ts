@@ -40,7 +40,15 @@ export class Planting {
     this.push(set, colour, cx, cy, cz);
   }
 
+  /**
+   * While this is set, nothing that is planted is kept. It is for leaving a place bare without
+   * disturbing what is drawn for it: whatever would have grown there is worked out as before,
+   * so everything planted afterwards comes out as it did.
+   */
+  muted = false;
+
   private push(set: CardSet, colour: Colour, cx: number, cy: number, cz: number): void {
+    if (this.muted) return;
     for (let k = 0; k < 16; k++) set.matrices.push(M.elements[k]);
     set.colours.push(colour[0], colour[1], colour[2]);
     set.centres.push(cx, cy, cz);

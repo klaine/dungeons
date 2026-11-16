@@ -21,8 +21,8 @@ export interface TerrainOptions {
   seed: number;
   /** Tint of bare rock. */
   stone: [number, number, number];
-  /** The colour of turf at a point, and of rock given a tone; defaults are plain grass and the tinted stone. */
-  colour?: (x: number, z: number) => [number, number, number];
+  /** The colour of turf at a point, and of rock given a tone; defaults are plain grass and the tinted stone. The turf's may be followed by the point's four fields. */
+  colour?: (x: number, z: number) => number[];
   rock?: (tone: number) => [number, number, number];
   /** How level a triangle must be to hold turf, as the upward part of its normal; steeper is rock. */
   bare?: number;
@@ -75,8 +75,8 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
           const c = o.rock ? o.rock(tone) : [0.8 * tone * o.stone[0], 0.74 * tone * o.stone[1], 0.65 * tone * o.stone[2]];
           ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, (alongX ? q.z : q.x) * o.rockScale, q.y * o.rockScale, c[0], c[1], c[2], Math.max(0, q.ny) * 0.9, 0, 0, 1));
         } else {
-          const [r, g, b] = o.colour ? o.colour(q.x, q.z) : turfColour(q.x, q.z, o.seed);
-          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, q.x * o.turfScale, q.z * o.turfScale, r, g, b));
+          const c = o.colour ? o.colour(q.x, q.z) : turfColour(q.x, q.z, o.seed);
+          ids.push(mesh.addVertex(q.x, q.y, q.z, q.nx, q.ny, q.nz, q.x * o.turfScale, q.z * o.turfScale, c[0], c[1], c[2], c[3] ?? 0, c[4] ?? 0, c[5] ?? 0, c[6] ?? 0));
         }
       }
       mesh.addTriangle(ids[0], ids[1], ids[2]);

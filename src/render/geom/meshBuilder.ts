@@ -99,6 +99,14 @@ export class MeshBuilder {
    * a colour, a field and its share of sky, any of which it may change: this is how one carved
    * stone becomes many, each turned and tinted differently.
    */
+  /** Sets one of the four fields of every point already laid, from where the point is. Where the function gives nothing, the field is left. */
+  setField(channel: number, value: (x: number, y: number, z: number) => number | undefined): void {
+    for (let i = 0; i < this.vertexCount; i++) {
+      const v = value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]);
+      if (v !== undefined) this.fld.data[i * 4 + channel] = v;
+    }
+  }
+
   append(src: MeshBuilder, place: (v: { p: number[]; n: number[]; colour: number[]; field: number[]; open: number }) => void): void {
     const base = this.vertexCount;
     const v = { p: [0, 0, 0], n: [0, 0, 0], colour: [0, 0, 0], field: [0, 0, 0, 0], open: 1 };

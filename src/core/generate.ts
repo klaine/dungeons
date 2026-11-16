@@ -325,21 +325,21 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   // Which side of the track the water keeps to.
   const side = pond ? Math.sign(pond.x - trackX(pond.z)) || 1 : rng.chance(0.5) ? 1 : -1;
   const rimX = side < 0 ? g.x0 + 6.5 : g.x1 - 6.5;
-  const clear = (x: number, z: number, but?: Feature): boolean =>
-    Math.sign(x - trackX(z)) === side && fromTrack(x, z) > 4 && x > g.x0 + 5.5 && x < g.x1 - 5.5 && z < g.z1 - 5.5 && z > meadow.z1 + 3
+  const clear = (x: number, z: number, but?: Feature, on = side): boolean =>
+    Math.sign(x - trackX(z)) === on && fromTrack(x, z) > 4 && x > g.x0 + 5.5 && x < g.x1 - 5.5 && z < g.z1 - 5.5 && z > meadow.z1 + 3
     && !features.some((f) => f !== but && Math.hypot(f.x - x, f.z - z) < (f.kind === 'stones' ? f.r * 3.5 : f.kind === 'ruin' ? f.r * 2.3 : shoreOf(f, x - f.x, z - f.z) * 0.9) + 2);
   // A wandering line from one point to another over free ground, or nothing if there is no way.
-  const route = (from: [number, number], to: [number, number], but?: Feature): [number, number][] | null => {
+  const route = (from: [number, number], to: [number, number], but?: Feature, on = side, q = rng): [number, number][] | null => {
     const length = Math.hypot(to[0] - from[0], to[1] - from[1]), n = Math.max(1, Math.round(length / 8));
     const px = -(to[1] - from[1]) / length, pz = (to[0] - from[0]) / length;
     const line: [number, number][] = [[round(from[0]), round(from[1])]];
     let drift = 0;
     for (let k = 1; k < n; k++) {
       const t = k / n, bx = from[0] + (to[0] - from[0]) * t, bz = from[1] + (to[1] - from[1]) * t;
-      drift = Math.max(-5, Math.min(5, drift + rng.range(-3, 3))) * Math.sin(Math.PI * t);
+      drift = Math.max(-5, Math.min(5, drift + q.range(-3, 3))) * Math.sin(Math.PI * t);
       let ok = false;
       for (const d of [drift, drift * 0.4, 0, -drift * 0.5, 3, -3, 6, -6]) {
-        if (!clear(bx + px * d, bz + pz * d, but)) continue;
+        if (!clear(bx + px * d, bz + pz * d, but, on)) continue;
         line.push([round(bx + px * d), round(bz + pz * d)]);
         ok = true;
         break;
@@ -351,6 +351,28 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   };
   const width = round(rng.chance(0.3) ? rng.range(2.4, 3.8) : rng.range(1.0, 1.9));
   const south = (x: number): [number, number] => [Math.min(g.x1 - 14, Math.max(g.x0 + 14, x)), g.z1 - 6.5];
+  /**
+   * Water that crosses the track. Most keeps to its own side; some runs down to the track, over
+   * it, and away to a sink on the far side, and then the track has to get across: by stepping
+   * stones if it is a brook, by a bridge if it is a river. All of this is drawn from a stream
+   * of its own, so that a valley whose water does not cross is laid out as it always was.
+   */
+  const crossing = rng.fork('crossing'), crosses = crossing.chance(0.4);
+  const over = (start: (towards: [number, number]) => [number, number], wide: number, but?: Feature): Stream | null => {
+    for (let tries = 0; tries < 6; tries++) {
+      const zc = crossing.range(meadow.z1 + 12, g.z1 - 18), xc = trackX(zc);
+      // It comes to the track a little upstream of where it leaves it, so it crosses at a slant, as water does.
+      const near: [number, number] = [xc + side * 7, zc - 1.5], far: [number, number] = [xc - side * 7, zc + 1.5];
+      const from = start(near);
+      if (from[1] > zc - 5) continue;
+      const sink: [number, number] = crossing.chance(0.55) ? south(xc - side * crossing.range(8, 24)) : [side < 0 ? g.x1 - 6.5 : g.x0 + 6.5, Math.min(g.z1 - 14, zc + crossing.range(8, 22))];
+      if (Math.sign(sink[0] - trackX(sink[1])) !== -side) continue;
+      const down = route(from, near, but, side, crossing), away = down && route(far, sink, but, -side, crossing);
+      if (!down || !away) continue;
+      return { course: [...down, [round(xc), round(zc)], ...away], width: wide, from: 'spring', to: 'sink', crossing: { x: round(xc), z: round(zc), by: wide >= 2.2 ? 'bridge' : 'ford' } };
+    }
+    return null;
+  };
   if (pond) {
     const edge = (tx: number, tz: number): [number, number] => {
       const d = Math.hypot(tx - pond.x, tz - pond.z), ux = (tx - pond.x) / d, uz = (tz - pond.z) / d, r = shoreOf(pond, ux, uz) * 0.72;
@@ -366,7 +388,9 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     }
     // Out: down the valley to a sink under the southern rim, or under the side rim further down.
     if (rng.chance(streams.length ? 0.9 : 0.5)) {
-      for (let tries = 0; tries < 6; tries++) {
+      const across = crosses ? over((towards) => edge(towards[0], towards[1]), round(width + 0.2), pond) : null;
+      if (across) streams.push({ ...across, from: 'pond' });
+      else for (let tries = 0; tries < 6; tries++) {
         const sink: [number, number] = rng.chance(0.6) || pond.z > g.z1 - 34 ? south(pond.x + side * rng.range(0, 12) + rng.range(-5, 5)) : [rimX, Math.min(g.z1 - 14, pond.z + rng.range(14, 30))];
         if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
         const line = route(edge(sink[0], sink[1]), sink, pond);
@@ -375,7 +399,9 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     }
   } else if (rng.chance(0.55)) {
     // No pond: a stream down one side of the valley, from a spring to a sink.
-    for (let tries = 0; tries < 8; tries++) {
+    const across = crosses ? over(() => [rimX, crossing.range(meadow.z1 + 6, (meadow.z1 + g.z1) / 2)], width) : null;
+    if (across) streams.push(across);
+    else for (let tries = 0; tries < 8; tries++) {
       const spring: [number, number] = [rimX, rng.range(meadow.z1 + 6, (meadow.z1 + g.z1) / 2)];
       const sink = south(rimX - side * rng.range(10, 26));
       if (Math.sign(sink[0] - trackX(sink[1])) !== side) continue;
@@ -383,6 +409,9 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
       if (line && line.length >= 3) { streams.push({ course: line, width, from: 'spring', to: 'sink' }); break; }
     }
   }
+  // Some of the water that rises under the rim comes over it instead, as a fall: the bigger the stream the likelier.
+  const falls = rng.fork('falls');
+  for (const st of streams) if (st.from === 'spring' && falls.chance(st.width >= 2.2 ? 0.55 : 0.4)) st.from = 'fall';
   if (streams.length) site.streams = streams;
 }
 

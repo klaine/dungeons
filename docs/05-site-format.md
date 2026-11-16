@@ -149,7 +149,7 @@ A `pond` lies in a hollow whose edge is `r` from its middle, or, if it has a `sh
 "streams": [ { "course": [[77.2, 74.6], [69.4, 75.6], [53.9, 77.3], [46.3, 73.9]], "width": 1.6, "from": "spring", "to": "pond" } ]
 ```
 
-A stream follows `course`, a line of `[x, z]` points in the order the water runs, and is `width` metres broad. It begins at a `spring` under the rock of the rim or runs out of the `pond`, and ends in the `pond` or at a `sink` at the foot of the rim. Water keeps to one side of the track. The builder cuts each stream a bed that falls all the way along it, through any rise in the ground, and sets the pond's level by the stream that feeds it, so the document need not know the heights.
+A stream follows `course`, a line of `[x, z]` points in the order the water runs, and is `width` metres broad. It begins at a `spring` under the rock of the rim, comes over the rim as a `fall`, or runs out of the `pond`, and ends in the `pond` or at a `sink` at the foot of the rim. Most water keeps to one side of the track. A stream that crosses it has a `crossing`: `x` and `z`, where, and `by`, which is `ford` for a brook (stepping stones) or `bridge` for a river. The builder cuts each stream a bed that falls all the way along it, through any rise in the ground, and sets the pond's level by the stream that feeds it, so the document need not know the heights.
 
 ### The solution
 

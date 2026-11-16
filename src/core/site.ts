@@ -142,8 +142,11 @@ export interface Stream {
   course: [number, number][];
   /** How broad it is, in metres: a brook is one or two, a small river three or four. */
   width: number;
-  from: 'spring' | 'pond';
+  /** Where it begins: at a spring under the rim, over the rim as a waterfall, or out of the pond. */
+  from: 'spring' | 'fall' | 'pond';
   to: 'pond' | 'sink';
+  /** Where it crosses the track, if it does, and how the track gets over: stepping stones through a brook, a timber bridge over a river. */
+  crossing?: { x: number; z: number; by: 'ford' | 'bridge' };
 }
 
 /** How far the edge of a pond's hollow is from its middle in the direction of (dx, dz), in metres. */

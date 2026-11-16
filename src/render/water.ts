@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DepthTexture, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, Scene, ShaderMaterial, Texture, Vector2, Vector3, WebGLRenderer } from 'three';
+import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DepthTexture, DoubleSide, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, Scene, ShaderMaterial, Texture, Vector2, Vector3, WebGLRenderer } from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { AIR, CLOUDS } from './post';
 import { Rng } from '../core/rng';
@@ -184,7 +184,7 @@ varying vec2 vFlow;
 varying vec2 vDir;
 varying vec4 vWater;
 void main() {
-  float shallow = vWater.x, fall = vWater.z, calm = vWater.w;
+  float shallow = vWater.x, fall = min( vWater.z, 1.0 ), sheer = max( vWater.z - 1.0, 0.0 ), calm = vWater.w;
   // Two sets of ripples, both longer down the current than across it, travelling down it at
   // different speeds: so the pattern is never the same twice, as a current's is not.
   vec2 a = texture2D( tRipples, vec2( vFlow.x * 0.43, vFlow.y * 0.25 - uTime * 0.16 ) ).xy * 2.0 - 1.0;
@@ -199,7 +199,8 @@ void main() {
   vec3 dir = reflect( -view, normal );
   // With no picture to go by: sky above, and below a ragged line the dark of banks and trees.
   vec3 seen = mix( uLand, mix( uHorizon, uZenith, pow( max( dir.y, 0.0 ), 0.6 ) ), smoothstep( 0.1, 0.42, dir.y + ( a.x + b.y ) * 0.25 ) );
-  if ( uPictured > 0.001 ) {
+  // (Water above the eye, as a fall is seen from its foot, has no place on the sheet to read.)
+  if ( uPictured > 0.001 && cameraPosition.y - vWorld.y > 0.05 && sheer < 0.5 ) {
     vec3 ray = vWorld - cameraPosition;
     vec3 onSheet = cameraPosition + ray * ( ( cameraPosition.y - uLevel ) / max( cameraPosition.y - vWorld.y, 0.01 ) );
     vec4 at = uPicture * vec4( onSheet, 1.0 );
@@ -223,11 +224,48 @@ void main() {
   float foam = smoothstep( 0.3, 0.85, fall ) * smoothstep( 0.1, 0.55, ( a.x + a.y ) * 1.4 + ( b.x - b.y ) * 1.1 + fall * 0.35 );
   // Broken up small, as froth is, and never a solid sheet of white.
   foam *= 0.35 + 0.65 * smoothstep( -0.25, 0.3, texture2D( tRipples, vec2( vFlow.x * 1.7, vFlow.y * 0.8 - uTime * 0.62 ) ).x * 2.0 - 1.0 );
-  colour = mix( colour, uFoam, foam * 0.7 );
+  // A sheer fall is all white: water in strings and veils, drawn out long and coming down fast,
+  // thinner in some strings than others so that the rock shows dark between them.
+  if ( sheer > 0.0 ) {
+    vec2 veil = texture2D( tRipples, vec2( vFlow.x * 0.7, vFlow.y * 0.26 - uTime * 1.7 ) ).xy + texture2D( tRipples, vec2( vFlow.x * 1.9 + 0.3, vFlow.y * 0.47 - uTime * 2.6 ) ).xy - 1.0;
+    foam = mix( foam, 0.62 + 0.38 * smoothstep( -0.4, 0.2, veil.x + veil.y * 0.6 ), sheer );
+  }
+  // And where it has just come down it is still mostly white.
+  foam = max( foam, 0.6 * smoothstep( 0.7, 1.0, fall ) * ( 1.0 - calm ) * ( 0.55 + 0.45 * smoothstep( -0.2, 0.3, a.x + b.y ) ) );
+  colour = mix( colour, uFoam, foam * mix( 0.7, 0.96, sheer ) );
   // It is nowhere deep, so the bed shows all the way across, and plainest at the edges. At the
   // very edge it thins to nothing, so that where there is no bank to end it, it has no rim.
   float clear = max( shallow, 0.34 + 0.66 * calm ) * ( 1.0 - mirror ) * 0.85 * ( 1.0 - foam );
   gl_FragColor = vec4( colour, ( 1.0 - clear ) * vWater.y * smoothstep( 1.0, 0.8, shallow ) );
+}`,
+};
+
+/**
+ * Spray at the foot of a fall: a few upright sheets through the place the water lands, each a
+ * soft cloud that rises and thins. It is the cheapest thing that keeps a waterfall from ending
+ * in a clean line where it meets the pool.
+ */
+const SPRAY = {
+  vertexShader: /* glsl */ `
+varying vec2 vAt;
+varying vec3 vWorld;
+void main() {
+  vAt = uv;
+  vWorld = ( modelMatrix * vec4( position, 1.0 ) ).xyz;
+  gl_Position = projectionMatrix * viewMatrix * vec4( vWorld, 1.0 );
+}`,
+  fragmentShader: /* glsl */ `
+uniform sampler2D tRipples;
+uniform float uTime;
+uniform vec3 uFoam;
+varying vec2 vAt;
+varying vec3 vWorld;
+void main() {
+  // Thickest low in the middle, nothing at the edges or the top; and never still.
+  float across = 1.0 - abs( vAt.x * 2.0 - 1.0 );
+  float body = smoothstep( 0.0, 0.7, across ) * smoothstep( 1.0, 0.15, vAt.y ) * smoothstep( 0.0, 0.08, vAt.y );
+  float drift = texture2D( tRipples, vec2( vWorld.x + vWorld.z, vWorld.y ) * 0.06 + vec2( 0.02, -0.07 ) * uTime ).x + texture2D( tRipples, vec2( vWorld.x - vWorld.z, vWorld.y ) * 0.13 + vec2( -0.03, -0.12 ) * uTime ).y;
+  gl_FragColor = vec4( uFoam * 0.9, body * smoothstep( 0.35, 1.7, drift ) * 0.42 );
 }`,
 };
 
@@ -244,6 +282,7 @@ export class Water {
   /** Whether the picture has been made for the view now being drawn; see `begin`. */
   private fresh = false;
   private mirroring = false;
+  private spray: ShaderMaterial | null = null;
 
   /**
    * Still water is a level sheet with the outline of its pond; running water is a ribbon laid
@@ -257,7 +296,7 @@ export class Water {
      * `deep` is the colour of deep water in this light. The rest is for running water where it has no picture to
      * mirror: the sky overhead and at the horizon, land in shade, and something white in this light.
      */
-    o: { mirror?: number; deep?: [number, number, number]; zenith?: number[]; horizon?: number[]; land?: number[]; foam?: number[] } = {},
+    o: { mirror?: number; deep?: [number, number, number]; zenith?: number[]; horizon?: number[]; land?: number[]; foam?: number[]; falls?: { x: number; y: number; z: number; height: number; width: number }[] } = {},
   ) {
     this.ripples.repeat.set(1, 1);
     this.material = new MeshStandardMaterial({
@@ -369,16 +408,21 @@ export class Water {
         far = k === n - 1 || (stream.fade && stream.fade[k] < 0.99) ? 0 : far + Math.hypot(stream.line[k * 3] - stream.line[k * 3 + 3], stream.line[k * 3 + 2] - stream.line[k * 3 + 5]);
         rest[k] = Math.min(rest[k], far);
       }
-      let run = 0;
+      let run = 0, churn = 0;
       for (let k = 0; k < n; k++) {
         const x = stream.line[k * 3], y = stream.line[k * 3 + 1], z = stream.line[k * 3 + 2];
         const a = Math.max(0, k - 1) * 3, b = Math.min(n - 1, k + 1) * 3;
         let dx = stream.line[b] - stream.line[a], dz = stream.line[b + 2] - stream.line[a + 2];
         const l = Math.hypot(dx, dz) || 1;
-        // How steeply it falls here: nothing on the level, all of it at one in six.
-        const fall = Math.min(1, Math.max(0, ((stream.line[a + 1] - stream.line[b + 1]) / l) * 6));
+        // How steeply it falls here: nothing on the level, all of it at one in six; and past
+        // that, up to 2, how nearly it is a sheer fall. Below a fall the water is white for
+        // some way after it has stopped falling.
+        const slope = Math.max(0, (stream.line[a + 1] - stream.line[b + 1]) / l), sheer = Math.min(1, Math.max(0, (slope - 0.6) / 1.6));
+        churn = Math.max(sheer, churn * 0.72);
+        const fall = Math.max(Math.min(1, slope * 6), Math.min(1, churn * 1.6)) + sheer * sheer * (3 - 2 * sheer);
         dx /= l; dz /= l;
-        if (k) run += Math.hypot(x - stream.line[k * 3 - 3], z - stream.line[k * 3 - 1]);
+        // (Measured down the water, not over the ground: a fall is as long as it is high.)
+        if (k) run += Math.hypot(x - stream.line[k * 3 - 3], y - stream.line[k * 3 - 2], z - stream.line[k * 3 - 1]);
         const left = stream.banks ? stream.banks[k * 2] : stream.width / 2, right = stream.banks ? stream.banks[k * 2 + 1] : stream.width / 2;
         const shown = stream.fade ? stream.fade[k] : 1;
         ACROSS.forEach(([side, shallow], j) => {
@@ -405,6 +449,28 @@ export class Water {
       mesh.layers.set(1);
       mesh.onBeforeRender = (renderer, scene, camera) => this.picture(renderer, scene, camera);
       this.meshes.push(mesh);
+    }
+    this.mist(o.falls ?? [], o.foam);
+  }
+
+  /** The spray at the foot of each fall. */
+  private mist(falls: { x: number; y: number; z: number; height: number; width: number }[], foam: number[] | undefined): void {
+    if (!falls.length) return;
+    this.spray = new ShaderMaterial({
+      name: 'Spray', uniforms: { tRipples: { value: this.ripples }, uTime: { value: 0 }, uFoam: { value: new Vector3(foam?.[0] ?? 0.8, foam?.[1] ?? 0.8, foam?.[2] ?? 0.8) } },
+      vertexShader: SPRAY.vertexShader, fragmentShader: SPRAY.fragmentShader, transparent: true, depthWrite: false, side: DoubleSide,
+    });
+    for (const f of falls) {
+      const wide = f.width * 1.6 + 2.2, tall = Math.min(4.5, 1.6 + f.height * 0.3);
+      for (let k = 0; k < 3; k++) {
+        const sheet = new Mesh(new PlaneGeometry(wide, tall), this.spray);
+        sheet.position.set(f.x, f.y + tall / 2 - 0.15, f.z);
+        sheet.rotation.y = (k * Math.PI) / 3 + 0.4;
+        sheet.renderOrder = 3;
+        sheet.name = 'water';
+        sheet.layers.set(1);
+        this.meshes.push(sheet);
+      }
     }
   }
 
@@ -460,6 +526,7 @@ export class Water {
   update(time: number): void {
     for (const m of this.mirrors) m.uniforms.uTime.value = time;
     if (this.flowing) this.flowing.uniforms.uTime.value = time;
+    if (this.spray) this.spray.uniforms.uTime.value = time;
     this.ripples.offset.set(time * 0.013, time * 0.008);
   }
 }

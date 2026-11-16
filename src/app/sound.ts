@@ -8,7 +8,7 @@
  * peaking near -25 dB) and the character of each sound is untested. Expect to adjust by ear.
  */
 
-export type Surface = 'grass' | 'earth' | 'stone' | 'wood';
+export type Surface = 'grass' | 'earth' | 'stone' | 'wood' | 'water';
 export type SoundEvent = 'door' | 'locked' | 'key' | 'find' | 'lever' | 'won';
 
 export class Sound {
@@ -18,6 +18,9 @@ export class Sound {
   private wind: { gain: GainNode; filter: BiquadFilterNode } | null = null;
   private leaves: GainNode | null = null;
   private room: GainNode | null = null;
+  private brook: GainNode | null = null;
+  private fall: { gain: GainNode; filter: BiquadFilterNode } | null = null;
+  private plink = 0;
   private stride = 0;
   private outdoors = 1;
   muted = false;
@@ -76,6 +79,19 @@ export class Sound {
     this.room = ctx.createGain();
     this.room.gain.value = 0;
     loop().connect(low).connect(this.room).connect(this.master);
+    // Running water: the upper middle of the noise, steady, under the small sounds made as it goes (see `update`).
+    const run = ctx.createBiquadFilter();
+    run.type = 'bandpass'; run.frequency.value = 1700; run.Q.value = 0.7;
+    this.brook = ctx.createGain();
+    this.brook.gain.value = 0;
+    loop().connect(run).connect(this.brook).connect(this.master);
+    // Falling water: all of the noise below the hiss, which is a roar; it opens up as you come nearer.
+    const roar = ctx.createBiquadFilter();
+    roar.type = 'lowpass'; roar.frequency.value = 700; roar.Q.value = 0.3;
+    const pour = ctx.createGain();
+    pour.gain.value = 0;
+    loop().connect(roar).connect(pour).connect(this.master);
+    this.fall = { gain: pour, filter: roar };
   }
 
   toggleMute(): boolean {
@@ -87,9 +103,10 @@ export class Sound {
 
   /**
    * Called every frame. `outdoors` is 1 under the sky and 0 under a roof; `moved` is how far the
-   * player went along the ground this frame.
+   * player went along the ground this frame. `water` is how near running water is and how near a
+   * fall, each from 0 for out of hearing to 1 for standing at it.
    */
-  update(dt: number, time: number, outdoors: number, moved: number, grounded: boolean, running: boolean, surface: Surface): void {
+  update(dt: number, time: number, outdoors: number, moved: number, grounded: boolean, running: boolean, surface: Surface, water = { brook: 0, fall: 0 }): void {
     const ctx = this.ctx;
     if (!ctx || !this.wind || !this.leaves || !this.room) return;
     this.outdoors += (outdoors - this.outdoors) * (1 - Math.exp(-dt * 1.5));
@@ -99,6 +116,21 @@ export class Sound {
     this.wind.filter.frequency.setTargetAtTime(320 + 260 * gust, now, 0.5);
     this.leaves.gain.setTargetAtTime(0.022 * gust * gust * this.outdoors, now, 0.3);
     this.room.gain.setTargetAtTime(0.09 * (1 - this.outdoors), now, 0.4);
+    if (this.brook && this.fall) {
+      // Water is heard a little way indoors too, through a door, but not much.
+      const heard = 0.12 + 0.88 * this.outdoors, brook = water.brook * heard, fall = water.fall * heard;
+      this.brook.gain.setTargetAtTime(0.03 * brook * brook, now, 0.25);
+      this.fall.gain.gain.setTargetAtTime(0.2 * fall * fall, now, 0.3);
+      this.fall.filter.frequency.setTargetAtTime(500 + 2600 * fall * fall, now, 0.3);
+      // A brook is not a hiss: it is a great many small notes, each a bubble or a lap of water
+      // on a stone, at no regular time. More of them, and louder, the nearer you stand.
+      this.plink -= dt;
+      if (brook > 0.03 && this.plink <= 0) {
+        this.plink = (0.02 + Math.random() * 0.11) / (0.3 + brook);
+        const note = 500 + 2300 * Math.random() * Math.random();
+        this.burst(note, 9 + 14 * Math.random(), 0.035 + 0.06 * Math.random(), 0.05 * brook * (0.4 + 0.6 * Math.random()));
+      }
+    }
     if (grounded && moved > 0) {
       this.stride += moved;
       const pace = running ? 1.15 : 0.78;
@@ -129,6 +161,7 @@ export class Sound {
     const vary = 0.85 + Math.random() * 0.3, loud = running ? 2.1 : 1.6;
     if (surface === 'grass') this.burst(1500 * vary, 0.6, 0.11, 0.045 * loud);
     else if (surface === 'earth') this.burst(700 * vary, 0.8, 0.09, 0.06 * loud);
+    else if (surface === 'water') { this.burst(900 * vary, 0.5, 0.2, 0.07 * loud); this.burst(2600 * vary, 0.8, 0.09, 0.03 * loud); this.burst(300 * vary, 1.2, 0.1, 0.05 * loud); }
     else if (surface === 'wood') { this.burst(260 * vary, 1.4, 0.12, 0.11 * loud); this.burst(1100 * vary, 1, 0.04, 0.03 * loud); }
     else { this.burst(520 * vary, 1.1, 0.07, 0.07 * loud); this.burst(2400 * vary, 1.2, 0.03, 0.035 * loud); }
   }

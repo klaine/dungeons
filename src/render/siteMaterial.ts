@@ -96,6 +96,149 @@ ${o.matt ? 'reflectedLight.directSpecular *= 0.12; reflectedLight.indirectSpecul
 }
 
 /**
+ * The material for ground: everything nearly level out of doors. It was grass texture with a
+ * brown tint smeared along the track from one point of the sheet to the next, which looked
+ * like what it was. Now the sheet says, at each of its points, how bare the ground is, how wet
+ * and how much under trees (in the fields that masonry uses for damp, soot and so on), and
+ * what is drawn is worked out for each point of the picture from those and from the textures
+ * themselves:
+ *  - turf, with broad slow changes of tone and dry patches, so that a hillside is not one green;
+ *  - beaten earth where the ground is bare, pale and gritty with small stones in it; where it
+ *    is wet as well, the shingle of a stream's bed;
+ *  - last year's leaves under trees;
+ *  - and the edges between them where the textures put them, not where the sheet's points
+ *    happen to fall: grass holds on where its mat stands high and gives way where the earth
+ *    does, so the edge of a track is ragged, with tufts out in the bare ground and bare ground
+ *    in among the grass.
+ * How much trouble is taken depends on how far off the ground is. Within a few strides bare
+ * ground is drawn with depth: its stones stand up out of it and hide what is behind them as
+ * the eye moves (the texture is slid along the line of sight by its own heights, a few steps
+ * of it). Further off there is texture and its light and shade only. Further still the
+ * textures are read more and more blurred, until a far field is its colour and its broad
+ * variation and nothing that could be seen repeating.
+ */
+export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, scale = 2.3): MeshStandardMaterial {
+  const m = new MeshStandardMaterial({
+    // (Six textures and no more: with the shadow maps, a graphics card will take sixteen at once.)
+    map: turf.map, normalMap: turf.normalMap, normalScale: new Vector2(1, 1),
+    roughness: 0.96, metalness: 0, vertexColors: true, color: new Color(1, 1, 1),
+  });
+  m.onBeforeCompile = (shader) => {
+    shader.uniforms.uBake = siteUniforms.uBake;
+    shader.uniforms.uFallback = siteUniforms.uFallback;
+    shader.uniforms.uSoilMap = { value: soil.map }; shader.uniforms.uSoilNormal = { value: soil.normalMap };
+    shader.uniforms.uShingleMap = { value: shingle.map };
+    shader.uniforms.uLitterMap = { value: litter.map };
+    shader.uniforms.uGroundScale = { value: scale };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', /* glsl */ `#include <common>
+attribute vec4 aSHr; attribute vec4 aSHg; attribute vec4 aSHb;
+attribute vec4 aField; attribute vec2 aBake;
+varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
+varying vec4 vField; varying vec2 vBake; varying vec3 vGroundPos;`)
+      .replace('#include <begin_vertex>', /* glsl */ `#include <begin_vertex>
+vSHr = aSHr; vSHg = aSHg; vSHb = aSHb; vField = aField; vBake = aBake;
+vGroundPos = ( modelMatrix * vec4( position, 1.0 ) ).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', /* glsl */ `#include <common>
+uniform float uBake; uniform vec3 uFallback; uniform float uGroundScale;
+uniform sampler2D uSoilMap; uniform sampler2D uSoilNormal; uniform sampler2D uShingleMap; uniform sampler2D uLitterMap;
+varying vec4 vSHr; varying vec4 vSHg; varying vec4 vSHb;
+varying vec4 vField; varying vec2 vBake; varying vec3 vGroundPos;`)
+      .replace('#include <map_fragment>', /* glsl */ `
+// Where on the ground this point of the picture is, in metres; every texture is laid by that.
+vec2 gAt = vGroundPos.xz;
+float gFar = length( vViewPosition );
+float gBlur = 5.0 * smoothstep( 70.0, 260.0, gFar );
+float gWetV = vField.y, gBareV = vField.z, gLitV = vField.w;
+// The same turf read very large: slow changes of tone that no repeat can be seen in.
+float gMacro = texture2D( map, gAt / 41.0 + 0.37 ).a, gMid = texture2D( map, gAt / 9.7 + 0.11 ).a;
+// The track: two ruts, a stride apart, and between them bare earth wherever grass is not
+// standing in a clump. (The sheet gives how far this point is to one side of the track's
+// middle, plus a hundred; nothing where there is no track.)
+if ( vField.x > 50.0 ) {
+  // (Neither the ruts nor the edges of the track run straight: they wander, and widen and narrow.)
+  float gWander = texture2D( map, gAt / 5.3 + 0.61 ).a - 0.5;
+  float gOff = abs( vField.x - 100.0 + gWander * 0.34 ) + ( gMid - 0.5 ) * 0.3;
+  float gRut = 1.0 - smoothstep( 0.0, 0.34, abs( gOff - 0.58 ) - 0.2 - gWander * 0.14 );
+  float gClump = sin( gAt.y * 0.9 + 2.2 * sin( gAt.y * 0.31 ) );
+  gBareV = max( gBareV, max( gRut, smoothstep( -0.15, -0.35, gClump ) * ( 1.0 - smoothstep( 0.25, 0.5, gOff ) ) ) );
+}
+float gStony = smoothstep( 0.2, 0.55, gWetV + ( gMid - 0.5 ) * 0.3 );
+// Near the eye, bare ground has depth: the texture is slid along the line of sight until the
+// line meets the height the texture has there, so stones stand up and hide what is behind them.
+float gNear = 1.0 - smoothstep( 6.0, 14.0, gFar );
+if ( gNear > 0.0 && gBareV > 0.04 ) {
+  vec3 eye = normalize( cameraPosition - vGroundPos );
+  vec2 slide = eye.xz / max( eye.y, 0.3 ) * mix( 0.022, 0.05, gStony ) * gNear * smoothstep( 0.04, 0.4, gBareV );
+  float sunk = 0.0;
+  for ( int i = 0; i < 6; i++ ) {
+    vec2 at = gAt - slide * sunk;
+    float h = mix( texture2D( uSoilMap, at * 1.5 ).a, texture2D( uShingleMap, at * 0.62 ).a, gStony );
+    if ( 1.0 - h <= sunk ) break;
+    sunk += 1.0 / 6.0;
+  }
+  gAt -= slide * sunk;
+}
+vec2 gUv = gAt * uGroundScale;
+// The turf is read twice, the second time larger and turned, and the two mixed: neither one's repeat survives the other.
+vec4 gTurf = mix( texture2D( map, gUv, gBlur ), texture2D( map, gAt.yx * 0.83 + 0.29, gBlur ), 0.45 );
+vec4 gSoil = texture2D( uSoilMap, gAt * 1.5, gBlur ), gShingle = texture2D( uShingleMap, gAt * 0.62, gBlur ), gLitter = texture2D( uLitterMap, gAt * 0.9, gBlur );
+float gEarthH = mix( gSoil.a, gShingle.a, gStony );
+// Grass gives way to earth where its mat is thin and the earth stands high: not along a line.
+float gBare = smoothstep( 0.4, 0.6, gBareV * 1.12 + ( gMid - 0.5 ) * 0.55 + ( gEarthH - gTurf.a ) * 0.35 );
+float gLit = smoothstep( 0.4, 0.62, gLitV + ( gMacro - 0.5 ) * 0.5 + ( gLitter.a - gTurf.a ) * 0.3 ) * ( 1.0 - gBare );
+diffuseColor.rgb *= gTurf.rgb * mix( 0.74, 1.3, gMacro );`)
+      .replace('#include <color_fragment>', /* glsl */ `#include <color_fragment>
+float siteWet = gWetV;
+{
+  // Turf that has dried out in patches.
+  // Turf is not one green. It is yellower where it has dried, darker and bluer where clover and
+  // moss have got into it, and thin enough in places for the earth to show.
+  float gPatch = texture2D( map, gAt / 3.7 + 0.83 ).a;
+  vec3 turfed = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 1.5, 1.22, 0.7 ), smoothstep( 0.55, 0.8, gMid ) * 0.34 );
+  turfed = mix( turfed, turfed * vec3( 0.62, 0.8, 0.86 ), smoothstep( 0.5, 0.72, gPatch ) * 0.5 );
+  turfed = mix( turfed, gSoil.rgb * vec3( 0.5, 0.46, 0.4 ), smoothstep( 0.4, 0.2, gTurf.a + ( gPatch - 0.5 ) * 0.4 ) * 0.55 );
+  vec3 earthy = mix( gSoil.rgb * vec3( 0.6, 0.57, 0.52 ), gShingle.rgb * 0.62, gStony ) * mix( 0.84, 1.14, gMacro );
+  vec3 ground = mix( turfed, gLitter.rgb * mix( 0.6, 0.85, gMid ), gLit );
+  // Along the edge of bare ground, a fringe of short green that is neither one nor the other.
+  ground = mix( ground, turfed * 1.25, gBare * ( 1.0 - gBare ) * 1.4 );
+  ground = mix( ground, earthy, gBare );
+  diffuseColor.rgb = ground * mix( 1.0, 0.52, siteWet );
+}`)
+      .replace('#include <roughnessmap_fragment>', /* glsl */ `#include <roughnessmap_fragment>
+roughnessFactor = mix( roughnessFactor, 0.94, gBare );
+roughnessFactor *= mix( 1.0, 0.4, siteWet * gBare );`)
+      .replace('#include <normal_fragment_maps>', /* glsl */ `
+#ifdef USE_NORMALMAP_TANGENTSPACE
+{
+  vec3 gN = texture2D( normalMap, gUv, gBlur ).xyz * 2.0 - 1.0;
+  // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
+  vec3 gE = texture2D( uSoilNormal, gAt * mix( 1.5, 0.31, gStony ), gBlur ).xyz * 2.0 - 1.0;
+  gN = mix( gN * vec3( 1.0 - 0.6 * gLit, 1.0 - 0.6 * gLit, 1.0 ), gE, gBare );
+  gN.xy *= normalScale * mix( 1.0, 1.15 + 1.2 * gStony, gBare );
+  normal = normalize( tbn * gN );
+}
+#endif`)
+      .replace('#include <lights_fragment_end>', /* glsl */ `
+{
+  vec3 wn = inverseTransformDirection( geometryNormal, viewMatrix );
+  vec3 baked = max( vec3( dot( vSHr, vec4( 1.0, wn ) ), dot( vSHg, vec4( 1.0, wn ) ), dot( vSHb, vec4( 1.0, wn ) ) ), 0.0 );
+  vec3 fallback = uFallback * ( 0.55 + 0.45 * wn.y );
+  irradiance = mix( fallback, baked, uBake );
+  iblIrradiance = vec3( 0.0 );
+  radiance *= mix( 0.3, smoothstep( 0.0, 0.5, vBake.x ), uBake );
+}
+#include <lights_fragment_end>
+// Ground is matt, except where it is wet stones.
+float gShine = mix( 0.12, 0.7, siteWet * gBare );
+reflectedLight.directSpecular *= gShine; reflectedLight.indirectSpecular *= gShine;`);
+  };
+  m.customProgramCacheKey = () => 'ground-v5';
+  return m;
+}
+
+/**
  * A material for small loose things: iron fittings, torch brands, keys. They are not part of the
  * light bake, and left to themselves they would be lit by the open sky wherever they are, indoors
  * included. Here they get a faint fixed ambient instead, and otherwise only the real lights.

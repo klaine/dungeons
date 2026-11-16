@@ -222,8 +222,26 @@ export function meshSite(site: Site): SceneDescription {
      * Running water, as the ground knows it: a line of points down which a bed has been cut. The
      * height of the bed at each point is in `bed`, and falls all the way: see where they are made.
      */
-    interface Channel { x: number[]; z: number[]; bed: number[]; half: number; depth: number; x0: number; x1: number; z0: number; z1: number }
+    interface Channel { x: number[]; z: number[]; bed: number[]; half: number; depth: number; x0: number; x1: number; z0: number; z1: number; of: NonNullable<Site['streams']>[number]; fall?: Notch }
     const channels: Channel[] = [];
+    /**
+     * Where water comes over the rim. `x` and `z` are the lip, where the top of the wall breaks;
+     * `out` is which way is out of the valley there (along x); `back` is how far the lip lies
+     * from where the stream begins at the foot. A notch is worn in the top of the wall for the
+     * water to come through, and the face under it is worn smooth.
+     */
+    interface Notch { x: number; z: number; out: number; half: number; depth: number; back: number }
+    const notches: Notch[] = [];
+    // How much of its roughness the rock keeps at a point: all of it, except down the line of a fall.
+    const roughAt = (x: number, z: number): number => {
+      let keep = 1;
+      for (const nt of notches) {
+        const along = (x - nt.x) * nt.out, off = Math.abs(z - nt.z);
+        if (along < -nt.back - 1.5 || along > 4 || off > nt.half + 2) continue;
+        keep = Math.min(keep, 1 - 0.92 * (1 - smooth((off - nt.half - 0.2) / 1.8)));
+      }
+      return keep;
+    };
     const nearest = { d: 0, bed: 0, half: 0, depth: 0, t: 0 };
     /** The nearest point of a channel to a point of ground, written to `nearest`; false if the channel is nowhere near. */
     const along = (c: Channel, x: number, z: number, reach: number): boolean => {
@@ -320,7 +338,14 @@ export function meshSite(site: Site): SceneDescription {
       // Behind the head of the valley it dies away into the hill, where it would otherwise run on as a bank to the horizon.
       y += (6.5 + 7 * fbm2(x * 0.03 + s1, z * 0.03 - s2, 2)) * (1 - smooth((inside - 2.9 + wobble) / 1.8)) * smooth((z - (p.z0 - 9)) / 7);
       const beyond = Math.max(0, -inside);
-      return y + smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+      y += smooth((beyond - 10) / 190) * 30 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+      // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
+      for (const nt of notches) {
+        const along = (x - nt.x) * nt.out, off = Math.abs(z - nt.z);
+        if (along < -2 || along > 15 || off > nt.half + 1.4) continue;
+        y -= nt.depth * (1 - smooth((off - nt.half) / 1.4)) * smooth((along + 2) / 1.6) * (1 - smooth((along - 9) / 6));
+      }
+      return y;
     };
     const slopeOf = (f: (x: number, z: number) => number, x: number, z: number, e: number) => Math.hypot(f(x + e, z) - f(x - e, z), f(x, z + e) - f(x, z - e)) / (2 * e);
 
@@ -368,7 +393,20 @@ export function meshSite(site: Site): SceneDescription {
         const surface = to.base - 0.42, last = xs.length - 1;
         for (let k = rim + 1; k <= last; k++) bed[k] = Math.min(bed[rim], bed[rim] + (surface - depth - bed[rim]) * ((k - rim) / Math.max(1, last - rim)));
       }
-      channels.push({ x: xs, z: zs, bed, half: stream.width / 2, depth, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) });
+      let fall: Notch | undefined;
+      if (stream.from === 'fall') {
+        // Out of the valley is towards whichever side wall the stream begins under. Going that
+        // way, the lip is the first place the ground has come nearly up to the top of the wall.
+        const out = xs[0] < (g.x0 + g.x1) / 2 ? -1 : 1, foot = groundBase(xs[0], zs[0]);
+        let top = foot, back = 8;
+        for (let d = 0; d <= 8; d += 0.4) top = Math.max(top, groundBase(xs[0] + out * d, zs[0]));
+        for (let d = 0; d <= 8; d += 0.2) if (groundBase(xs[0] + out * d, zs[0]) > foot + 0.85 * (top - foot)) { back = d; break; }
+        if (top - foot > 2.5) {
+          fall = { x: xs[0] + out * back, z: zs[0], out, half: stream.width * 0.5 + 0.45, depth: 0.5 + 0.12 * stream.width, back };
+          notches.push(fall);
+        }
+      }
+      channels.push({ x: xs, z: zs, bed, half: stream.width / 2, depth, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs), of: stream, fall });
     };
     // Streams into ponds first, since they settle how the ponds lie; then the rest.
     for (const st of (site.streams ?? []).filter((q) => q.to === 'pond')) cutBed(st);
@@ -523,7 +561,8 @@ export function meshSite(site: Site): SceneDescription {
     const landAir = (x: number, y: number, z: number): number => {
       if (x !== spot.x || z !== spot.z) {
         spot.x = x; spot.z = z;
-        spot.rocky = rocky.at(x, z); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
+        // (Down the line of a waterfall the face is worn smooth, so the water lies on it.)
+        spot.rocky = rocky.at(x, z) * (notches.length ? roughAt(x, z) : 1); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
         if (spot.rocky >= 0.002) {
           spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1));
           spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z);
@@ -581,22 +620,50 @@ export function meshSite(site: Site): SceneDescription {
       const t = 0.62 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);
       return [0.5 * t * outcrop[0], 0.47 * t * outcrop[1], 0.43 * t * outcrop[2]];
     };
-    // Earth shows through along the track, where feet have worn the grass away.
-    const worn = (x: number, z: number) => (z < p.z1 - 6 ? 0 : 1 - smooth((Math.abs(x - pathAt(z)) - 0.5) / 1.1)) * smooth((z - p.z1 + 6) / 3);
+    // The track is a cart's: two ruts worn bare, and grass down the middle between them in
+    // clumps, with bare earth between the clumps. The ruts are narrower than the sheet of the
+    // ground is fine, so they cannot be marked on it point by point: the sheet carries how far
+    // each point lies to one side of the middle of the track, which it can carry exactly, and
+    // the ruts are drawn from that. The same shapes are worked out here, for what grows.
+    const trackOff = (x: number, z: number): number => {
+      if (z < p.z1 - 6) return 99;
+      const off = x - pathAt(z);
+      // Where the track comes up to the flags before the door, the ruts die away.
+      return off + (off < 0 ? -1 : 1) * 4 * (1 - smooth((z - p.z1 + 6) / 3));
+    };
+    const clumpAt = (z: number) => Math.sin(z * 0.9 + 2.2 * Math.sin(z * 0.31));
+    const rutted = (x: number, z: number): number => {
+      const d = Math.abs(trackOff(x, z));
+      if (d > 1.3) return 0;
+      const rut = 1 - smooth((Math.abs(d - 0.58) - 0.2) / 0.34);
+      return Math.max(rut, smooth((-0.15 - clumpAt(z)) / 0.2) * (1 - smooth((d - 0.25) / 0.25)));
+    };
+    /**
+     * What the ground is at a point. Its colour is the turf's, and stays so; how bare it is and
+     * how wet are left in `lay`, to be written into the point's fields, and it is the material
+     * for ground that makes earth, shingle and their edges out of those.
+     */
+    const lay = { bare: 0, wet: 0, track: 0 };
     const turfAt = (x: number, z: number): Colour => {
-      const c = turfColour(x, z, s1);
-      // Bare earth shows where feet have worn the grass away, and where stones have come down on it.
-      let fallen = walled && loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0;
-      // The bed of a stream is gravel and mud, not turf.
-      for (const c of channels) if (along(c, x, z, 2)) fallen = Math.max(fallen, 0.75 * (1 - smooth((nearest.d - nearest.half) / 0.5)));
-      // So is the bed of a pond, from a little above the water line down.
-      for (const f of pondList) if (Math.abs(x - f.x) < f.r * 2 && Math.abs(z - f.z) < f.r * 2) fallen = Math.max(fallen, 0.8 * (1 - smooth((across(f, x, z) - 0.7) / 0.1)));
-      const w = Math.max(fallen, worn(x, z) * (0.75 + 0.25 * fbm2(x * 1.3, z * 1.3 + s1, 2)));
-      // Under running water it is wet, and dark with it: so a stream's bed is not taken for a path.
-      let wet = 0;
-      for (const c of channels) if (along(c, x, z, 2)) wet = Math.max(wet, 1 - smooth((nearest.d - nearest.half - 0.1) / 0.5));
-      const dark = 1 - 0.55 * wet;
-      return [(c[0] + (3.1 - c[0]) * w) * dark, (c[1] + (0.92 - c[1]) * w) * dark, (c[2] + (2.6 - c[2]) * w) * dark];
+      // Bare where stones have come down on it;
+      let bare = walled && loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0, wet = 0;
+      // in the bed of a stream and up its banks a little way, which is shingle and wet;
+      for (const ch of channels) if (along(ch, x, z, 3)) {
+        bare = Math.max(bare, 0.92 * (1 - smooth((nearest.d - nearest.half) / 1.3)));
+        wet = Math.max(wet, 1 - smooth((nearest.d - nearest.half - 0.1) / 0.75));
+      }
+      // in the bed of a pond, from a little above the water line down;
+      for (const f of pondList) if (Math.abs(x - f.x) < f.r * 2 && Math.abs(z - f.z) < f.r * 2) {
+        const rho = across(f, x, z);
+        bare = Math.max(bare, 0.85 * (1 - smooth((rho - 0.72) / 0.18)));
+        wet = Math.max(wet, 1 - smooth((rho - 0.85) / 0.14));
+      }
+      lay.bare = bare;
+      lay.wet = wet;
+      // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
+      const off = trackOff(x, z);
+      lay.track = Math.abs(off) < 6 ? 100 + off : 0;
+      return turfColour(x, z, s1);
     };
     const cliff = site.top - p.floor + 0.5;
     /** Carves one patch of the land: rock where it is steep, turf where it is level, scree where debris lies. */
@@ -626,7 +693,7 @@ export function meshSite(site: Site): SceneDescription {
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
         meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
         shade: (q, n, field, other, open) => {
-          if (other === turf) return turfAt(q.x, q.z);
+          if (other === turf) { const c = turfAt(q.x, q.z); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return c; }
           if (other === scree) return earth(q.x, q.z);
           return shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
         },
@@ -765,7 +832,7 @@ export function meshSite(site: Site): SceneDescription {
       return coarse + (y - coarse) * smooth(inside / 6);
     };
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
-    const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: turfAt, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
+    const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: (x: number, z: number) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; }, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
       ...terrain, area: fine, cell: 1.2,
       // Not where the land is carved, and not over the house: there it is the turf of the hill
@@ -904,14 +971,19 @@ export function meshSite(site: Site): SceneDescription {
           const ax = c.x[k], az = c.z[k], bx = c.x[k + 1] - ax, bz = c.z[k + 1] - az, l = Math.hypot(bx, bz) || 1;
           // Not where it runs out into still water: a pond's bed is mud.
           if (ponds.some((f) => across(f, ax, az) < 1.05)) continue;
-          for (let j = 0, n = Math.round(l * (4.5 + 2.5 * c.half)); j < n; j++) {
-            const t = bedded.next(), edge = bedded.chance(0.55);
-            // Either along one edge of the bed, or anywhere across it.
-            const off = edge ? (bedded.chance(0.5) ? 1 : -1) * c.half * bedded.range(0.8, 1.25) : c.half * bedded.range(-0.85, 0.85);
+          for (let j = 0, n = Math.round(l * (5.6 + 3 * c.half)); j < n; j++) {
+            const t = bedded.next(), edge = bedded.chance(0.6);
+            // Along one edge of the bed, or anywhere across it; and of those along the edge,
+            // some lie out on the bank: fewer the further from the water, smaller, and sunk in
+            // the turf. A bed of stones does not stop at a line.
+            const out = edge && bedded.chance(0.45) ? Math.min(2.4, -Math.log(1 - bedded.next() * 0.98) * 0.6) : 0;
+            const off = edge ? (bedded.chance(0.5) ? 1 : -1) * (c.half * bedded.range(0.8, 1.25) + out) : c.half * bedded.range(-0.85, 0.85);
             const x = ax + bx * t - (bz / l) * off, z = az + bz * t + (bx / l) * off;
-            const size = edge ? bedded.range(0.1, 0.22) + 0.22 * bedded.next() * bedded.next() : bedded.range(0.07, 0.17) + (bedded.chance(0.06) ? bedded.range(0.1, 0.25) : 0);
-            // Wet stone is dark stone.
-            layStone(softRock, x, ground(x, z) + size * bedded.range(-0.1, 0.25), z, size, bedded.range(0.34, 0.7), bedded, size < 0.3);
+            const size = (edge ? bedded.range(0.1, 0.22) + 0.22 * bedded.next() * bedded.next() : bedded.range(0.07, 0.17) + (bedded.chance(0.06) ? bedded.range(0.1, 0.25) : 0)) * (1 - 0.22 * out);
+            // Not on the track, where they would be underfoot.
+            if (out > 0 && offTrack(x, z) < 1.3) continue;
+            // Wet stone is dark stone; stones up the bank are dry, and paler.
+            layStone(softRock, x, ground(x, z) + size * (out > 0 ? bedded.range(-0.32, 0.02) : bedded.range(-0.1, 0.25)), z, size, bedded.range(0.34, 0.7) + 0.22 * Math.min(1, out), bedded, size < 0.3);
           }
         }
       }
@@ -951,7 +1023,10 @@ export function meshSite(site: Site): SceneDescription {
           const l = Math.hypot(end[0] - towards[0], end[1] - towards[1]) || 1, ux = (end[0] - towards[0]) / l, uz = (end[1] - towards[1]) / l;
           for (const [back, sideways, size] of [[1.3, 0, 1.0], [0.5, 1.5, 0.75], [0.4, -1.4, 0.65], [1.9, 1.0, 0.55], [1.7, -1.1, 0.5]]) {
             const x = end[0] + ux * back * (1 + 0.4 * st.width) - uz * sideways * (1 + 0.25 * st.width), z = end[1] + uz * back * (1 + 0.4 * st.width) + ux * sideways * (1 + 0.25 * st.width);
-            boulder(sceneryMesh('rock'), x + wet.range(-0.3, 0.3), z + wet.range(-0.3, 0.3), size * wet.range(0.85, 1.3) * (0.8 + 0.12 * st.width), wet.fork(`b${k}`));
+            const bx = x + wet.range(-0.3, 0.3), bz = z + wet.range(-0.3, 0.3), big = size * wet.range(0.85, 1.3) * (0.8 + 0.12 * st.width);
+            // Under a fall there is no boulder behind the pool: that is where the water comes down.
+            if (st.from === 'fall' && end === st.course[0] && sideways === 0) continue;
+            boulder(sceneryMesh('rock'), bx, bz, big, wet.fork(`b${k}`));
           }
         }
       });
@@ -1058,8 +1133,9 @@ export function meshSite(site: Site): SceneDescription {
       w += 0.3 * (1 - smooth((g.z1 - z - 3) / 9));
       return Math.min(1, Math.max(0, w - parched * 0.3));
     };
-    const wearAt = (x: number, z: number): number => {
-      let w = 1 - smooth((offTrack(x, z) - 0.2) / 2.4);
+    // (`close` is for how tall grass stands: it is short only in the track itself, and long right up to the ruts.)
+    const wearAt = (x: number, z: number, close = false): number => {
+      let w = close ? 1 - smooth((offTrack(x, z) - 0.95) / 0.7) : 1 - smooth((offTrack(x, z) - 0.2) / 2.4);
       w = Math.max(w, 0.8 * (1 - smooth((Math.hypot(x - doorX, z - p.z0) - 2) / 5)));
       for (const f of lies) {
         const d = Math.hypot(x - f.x, z - f.z);
@@ -1094,6 +1170,8 @@ export function meshSite(site: Site): SceneDescription {
     const grass = (x0: number, x1: number, z0: number, z1: number, step: number, scale: number, keep: (x: number, z: number) => boolean) => {
       for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
         const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
+        // (Nothing grows in the ruts of the track; what would have is drawn all the same and thrown away.)
+        planting.muted = rutted(x, z) > 0.5;
         if (!keep(x, z)) continue;
         const off = offTrack(x, z);
         if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
@@ -1110,7 +1188,7 @@ export function meshSite(site: Site): SceneDescription {
         const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z), thin = thinAt(x, z);
         const deep = Math.max(0, shade - 0.4) / 0.6;
         if (!plant.chance((1 - 0.72 * deep) * (1 - 0.45 * thin))) continue;
-        const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wear) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2));
+        const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wearAt(x, z, true)) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2));
         const w = plant.range(0.4, 0.7) * (0.75 + 0.35 * tall) * scale, h = plant.range(0.2, 0.34) * (0.35 + 1.25 * tall) * Math.sqrt(scale);
         planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z, wet));
         // Flowers want sun, some moisture, and to be left alone.
@@ -1120,6 +1198,7 @@ export function meshSite(site: Site): SceneDescription {
     grass(p.x0 + 0.2, p.x1 - 0.2, p.z0 + 0.25, p.z1 - 0.2, 0.36, 1, () => true);
     grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
     grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
+    planting.muted = false;
 
     const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : [0.42, 0.14, 0.34];
     // ---- a second, taller growth, from a stream of its own so that nothing above is disturbed
@@ -1129,8 +1208,9 @@ export function meshSite(site: Site): SceneDescription {
     // covered, not dotted.
     for (let gz = g.z0 + 0.5; gz < g.z1; gz += 0.5) for (let gx = g.x0 + 1; gx < g.x1 - 1; gx += 0.5) {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
+      planting.muted = rutted(x, z) > 0.5;
       // The cheap questions first: most places are settled by them.
-      const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z);
+      const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
       const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
       if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
       // Not inside the ring of stones or the walls of the hut.
@@ -1142,6 +1222,29 @@ export function meshSite(site: Site): SceneDescription {
       const tall = (0.42 + 0.75 * wet) * (0.7 + 0.6 * fbm2(x * 0.21 + s1, z * 0.21 - s2, 2));
       const c = turfColour(x, z, s1), dry = Math.min(1, parched + Math.max(0, (0.4 - wet) * 2));
       planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, [(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
+    }
+    planting.muted = false;
+    // Down the middle of the track, between the ruts, grass in clumps: thick for a few strides, then none.
+    {
+      const strip = rng.fork('strip');
+      for (let z = p.z1 - 2; z < g.z1 - 3; z += 0.17) {
+        const x = pathAt(z) + strip.range(-0.24, 0.24), tall = strip.range(0.2, 0.42), turn = strip.range(0, Math.PI), tone = strip.range(0.8, 1.15);
+        if (clumpAt(z) < -0.05 || rutted(x, z) > 0.4) continue;
+        const y = ground(x, z);
+        if (waterOver(x, z, y) > -0.1) continue;
+        const c = turfColour(x, z, s1);
+        planting.tuft(planting.grass, x, y - 0.05, z, 0.42 + 0.5 * tall, tall, turn, [(0.17 + 0.1 * parched) * c[0] * tone, 0.3 * c[1] * tone, 0.055 * c[2] * tone]);
+      }
+    }
+    // Under trees the ground is last year's leaves, not turf: thickest under the thickest crowns.
+    {
+      const under = (x: number, _y: number, z: number): number | undefined => {
+        if (x < sx0 || z < sz0 || x > sx0 + (snx - 1) * cellS || z > sz0 + (snz - 1) * cellS) return undefined;
+        const fx = Math.min(snx - 1.001, (x - sx0) / cellS), fz = Math.min(snz - 1.001, (z - sz0) / cellS), ii = Math.floor(fx), jj = Math.floor(fz), tx = fx - ii, tz = fz - jj;
+        const canopy = cover[jj * snx + ii] * (1 - tx) * (1 - tz) + cover[jj * snx + ii + 1] * tx * (1 - tz) + cover[(jj + 1) * snx + ii] * (1 - tx) * tz + cover[(jj + 1) * snx + ii + 1] * tx * tz;
+        return smooth((canopy - 0.3) / 0.45);
+      };
+      for (const [key, mesh] of [...kit.meshes, ...wild.meshes]) if (key.endsWith('|turf')) mesh.setField(3, under);
     }
     // Reeds: a bed of them wherever the water is shallow and the bank is low, taller than a man,
     // thickest at the water's edge. The side the landing stage is on is left open.
@@ -1300,10 +1403,27 @@ export function meshSite(site: Site): SceneDescription {
     // Running water, for whatever draws it: the line of its surface, how far the water reaches
     // to either side at each point, and how much of it is to be shown there.
     for (const c of channels) {
-      const n = c.x.length, line: number[] = [], reach: number[] = [], fade: number[] = [];
+      // The stream's own points, and before them, if it comes over the rim, the fall: from a
+      // little way back in its notch, over the lip and down the face to the pool at the foot.
+      // The water there lies on the rock, which was worn smooth for it, and goes where it goes.
+      const xs = c.x.slice(), zs = c.z.slice(), ys = c.x.map((_, k) => c.bed[k] + c.depth), head: number[] = [];
+      if (c.fall) {
+        const pool = ys[0], hx: number[] = [], hy: number[] = [];
+        let low = Infinity;
+        for (let d = c.fall.back + 3.6; d > 0.45; d -= 0.2) {
+          const x = c.x[0] + c.fall.out * d;
+          // Water does not run uphill, whatever the rock does.
+          low = Math.min(low, Math.max(pool, ground(x, c.z[0]) + 0.07));
+          hx.push(x); hy.push(low);
+        }
+        xs.unshift(...hx); zs.unshift(...hx.map(() => c.z[0])); ys.unshift(...hy);
+        for (let k = 0; k < hx.length; k++) head.push(c.fall.half * (1.05 + 0.4 * smooth((k - hx.length + 8) / 8)));
+        falls.push({ x: c.x[0], y: pool, z: c.z[0], height: hy[0] - pool, width: c.half * 2 });
+      }
+      const n = xs.length, line: number[] = [], reach: number[] = [], fade: number[] = [];
       for (let k = 0; k < n; k++) {
-        const x = c.x[k], z = c.z[k];
-        let y = c.bed[k] + c.depth;
+        const x = xs[k], z = zs[k];
+        let y = ys[k];
         // At a spring and at a sink the water comes out of the ground and goes into it: it is not cut off square.
         let shown = smooth(Math.min(k, n - 1 - k) / 2.5);
         // Where it meets still water it comes to that water's level and is lost in it, so that
@@ -1316,10 +1436,11 @@ export function meshSite(site: Site): SceneDescription {
         }
         line.push(x, y, z);
         fade.push(shown);
+        if (k < head.length) { reach.push(head[k], head[k]); continue; }
         // The water reaches as far as the ground stands above it, on each side: so its edge is
         // the bank's, with the bank's bays and points, and not a ruled line.
-        const a = Math.max(0, k - 1), b = Math.min(n - 1, k + 1), l = Math.hypot(c.x[b] - c.x[a], c.z[b] - c.z[a]) || 1;
-        const sx = -(c.z[b] - c.z[a]) / l, sz = (c.x[b] - c.x[a]) / l;
+        const a = Math.max(0, k - 1), b = Math.min(n - 1, k + 1), l = Math.hypot(xs[b] - xs[a], zs[b] - zs[a]) || 1;
+        const sx = -(zs[b] - zs[a]) / l, sz = (xs[b] - xs[a]) / l;
         for (const side of [1, -1]) {
           // Where no bank is found (the ground falls away on that side) it is kept narrow.
           let far = c.half + 0.3;
@@ -1330,8 +1451,56 @@ export function meshSite(site: Site): SceneDescription {
         }
       }
       // No narrower anywhere than its neighbours allow, or a bank that juts in would leave a gap behind it.
-      const banks = reach.map((_, i) => Math.max(reach[Math.max(i % 2, i - 2)], reach[i], reach[Math.min(reach.length - 2 + (i % 2), i + 2)]));
+      const banks = reach.map((_, i) => (i < head.length * 2 ? reach[i] : Math.max(reach[Math.max(i % 2, i - 2)], reach[i], reach[Math.min(reach.length - 2 + (i % 2), i + 2)])));
       flows.push({ line, width: c.half * 2 + 0.5, banks, fade });
+    }
+    // Where the track meets water it gets across: over a river by a bridge, through a brook on stones.
+    for (const c of channels) {
+      const cr = c.of.crossing;
+      if (!cr) continue;
+      // Where the water and the track really meet, which the site gives only to the nearest stride.
+      let kc = 0;
+      for (let k = 0; k < c.x.length; k++) if (Math.hypot(c.x[k] - pathAt(c.z[k]), c.z[k] - cr.z) < Math.hypot(c.x[kc] - pathAt(c.z[kc]), c.z[kc] - cr.z)) kc = k;
+      const cx = pathAt(c.z[kc]), cz = c.z[kc], level = c.bed[kc] + c.depth;
+      // The way the track runs here, and across it.
+      const tx = pathAt(cz + 1) - pathAt(cz - 1), tl = Math.hypot(tx, 2), ux = tx / tl, uz = 2 / tl, lx = uz, lz = -ux;
+      crossings.push({ x: cx, z: cz, by: cr.by, level });
+      if (cr.by === 'ford') {
+        // Stepping stones: flat-topped, a stride apart, standing a hand out of the water. They
+        // are for the eye and stop nobody: the brook is shallow enough to walk through.
+        const stony = rng.fork('ford');
+        for (let at = -c.half - 0.5; at <= c.half + 0.55; at += 0.72) {
+          const size = stony.range(0.5, 0.68), off = stony.range(-0.12, 0.12);
+          layStone(softRock, cx + ux * at + lx * off, level - size * 0.42, cz + uz * at + lz * off, size, stony.range(0.75, 1.05), stony);
+        }
+        continue;
+      }
+      // A bridge: two bearers from bank to bank, planks across them, posts and a rail each side.
+      const landing = (dir: number): number => {
+        for (let d = c.half + 0.6; d < 8; d += 0.2) {
+          const here = ground(cx + ux * dir * d, cz + uz * dir * d);
+          if (here > level + 0.12 && ground(cx + ux * dir * (d + 0.6), cz + uz * dir * (d + 0.6)) - here < 0.04) return d + 0.3;
+        }
+        return 8;
+      };
+      const d0 = -landing(-1), d1 = landing(1);
+      const ax = cx + ux * d0, az = cz + uz * d0, bx = cx + ux * d1, bz = cz + uz * d1;
+      const ay = ground(ax, az) + 0.1, by = ground(bx, bz) + 0.1, span = d1 - d0;
+      for (const side of [-0.72, 0.72]) beam(ax + lx * side, ay - 0.16, az + lz * side, bx + lx * side, by - 0.16, bz + lz * side, 0.2, 0.24);
+      for (let d = 0.14; d < span; d += 0.275) {
+        const t = d / span, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, z = az + (bz - az) * t, lift = plant.range(-0.008, 0.008);
+        beam(x - lx * 1.0, y - 0.015 + lift, z - lz * 1.0, x + lx * 1.0, y - 0.015 + lift, z + lz * 1.0, 0.25, 0.05);
+      }
+      for (const side of [-1.02, 1.02]) {
+        const posts = Math.max(2, Math.round(span / 2.4) + 1);
+        let last: [number, number, number] | null = null;
+        for (let i = 0; i < posts; i++) {
+          const t = i / (posts - 1), x = ax + (bx - ax) * t + lx * side, y = ay + (by - ay) * t, z = az + (bz - az) * t + lz * side;
+          beam(x, Math.min(ground(x, z), y) - 0.5, z, x, y + 1.02, z, 0.13, 0.13);
+          if (last) beam(last[0], last[1] + 0.92, last[2], x, y + 0.92, z, 0.09, 0.11);
+          last = [x, y, z];
+        }
+      }
     }
     for (const f of ponds) {
       const outline: number[] = [];
@@ -1475,6 +1644,8 @@ export function meshSite(site: Site): SceneDescription {
   const fences: { min: Vector3; max: Vector3 }[] = [];
   const waters: { x: number; z: number; r: number; level: number; outline?: number[] }[] = [];
   const flows: { line: number[]; width: number; banks?: number[]; fade?: number[] }[] = [];
+  const falls: { x: number; y: number; z: number; height: number; width: number }[] = [];
+  const crossings: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
   const wild = new Kit(`${site.seed}/wild`);
@@ -1898,6 +2069,8 @@ export function meshSite(site: Site): SceneDescription {
     fences,
     water: waters,
     streams: flows,
+    falls,
+    crossings,
     far: farCover,
     finds,
   };

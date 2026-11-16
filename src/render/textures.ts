@@ -277,6 +277,73 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = clamp(.93 + cavity * .05, .6, 1.);
 }`,
   },
+  // Beaten earth, as on a track: packed and gently uneven, paler where it has dried and darker
+  // where it holds the wet, with small stones trodden into it. No two patches the same tone, so
+  // that a path is not one colour from end to end.
+  soil: {
+    normalStrength: 5.,
+    height: /* glsl */ `
+float pebbles(vec2 uv, float n, float share, out float id) {
+  vec3 w = worleyId(uv * n + vec2(fbm(uv + n, vec2(4.), 3, .5), fbm(uv + n + 5.3, vec2(4.), 3, .5)) * 1.1, vec2(n));
+  id = w.z;
+  float size = mix(.3, .55, fract(w.z * 7.3));
+  return step(1. - share, w.z) * smoothstep(size, size * .3, w.x) * smoothstep(.0, .1, w.y - w.x);
+}
+float heightFn(vec2 uv) {
+  float ia, ib, ic;
+  float stones = max(pebbles(uv + 1.1, 9., .2, ia) * (.42 + .25 * ia), max(pebbles(uv + 6.4, 19., .34, ib) * (.26 + .16 * ib), pebbles(uv + 2.9, 41., .5, ic) * (.14 + .08 * ic)));
+  // Trodden ground: broad shallow hollows where feet fall, and the grain of dried mud.
+  float lie = fbm(uv + 2.3, vec2(4.), 4, .55) * .2 + fbm(uv + 7.1, vec2(17.), 3, .5) * .08;
+  float crack = smoothstep(.05, .0, worley(uv * 7. + fbm(uv, vec2(5.), 2, .5) * .6, vec2(7.)).y - worley(uv * 7. + fbm(uv, vec2(5.), 2, .5) * .6, vec2(7.)).x) * .08;
+  return clamp(.36 + lie + fbm(uv, vec2(70.), 3, .6) * .06 - crack + stones, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float ia, ib, ic;
+  float a = pebbles(uv + 1.1, 9., .2, ia), b = pebbles(uv + 6.4, 19., .34, ib), c = pebbles(uv + 2.9, 41., .5, ic);
+  float tone = a > .05 ? ia : b > .05 ? ib : ic;
+  vec3 stone = mix(vec3(.36, .34, .31), vec3(.62, .59, .52), fract(tone * 3.7));
+  stone = mix(stone, vec3(.5, .41, .3), step(.75, fract(tone * 11.3)) * .6);
+  float damp = fbm(uv + 5.5, vec2(3.), 4, .55), dry = fbm(uv + 9.1, vec2(11.), 3, .5);
+  // (Pale: dry trodden earth is the colour of sand, not of chocolate.)
+  vec3 earth = mix(vec3(.17, .135, .092), vec3(.33, .27, .19), smoothstep(-.35, .35, damp));
+  earth = mix(earth, vec3(.39, .33, .245), smoothstep(.05, .5, dry) * .5);
+  albedo = mix(earth, stone, smoothstep(.04, .14, max(a, max(b, c)))) * (1. - cavity * .5);
+  albedo *= .93 + hash21(floor(uv * 512.)) * .14;
+  rough = .95;
+}`,
+  },
+  // The floor of a wood: last year's leaves lying flat on one another, each its own brown, with
+  // twigs across them and dark mould showing between.
+  litter: {
+    normalStrength: 4.5,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  vec2 warp = vec2(fbm(uv + 3.1, vec2(5.), 3, .5), fbm(uv + 7.7, vec2(5.), 3, .5));
+  vec3 a = worleyId(uv * 12. + warp * 1.4, vec2(12.)), b = worleyId(uv * 21. + warp * 2. + 4.4, vec2(21.));
+  float plateA = (.42 + .4 * a.z - a.x * .32) * smoothstep(.0, .08, a.y - a.x);
+  float plateB = (.3 + .32 * b.z - b.x * .3) * smoothstep(.0, .09, b.y - b.x) * step(.25, b.z);
+  float twig = smoothstep(.035, .0, abs(gnoise(vec2(uv.x * 3., uv.y * 11.) + 1.3, vec2(3., 11.)))) * step(.12, fbm(uv + 2., vec2(4.), 2, .5)) * .62;
+  return clamp(max(max(plateA, plateB), twig) * .85 + fbm(uv, vec2(60.), 3, .6) * .07 + .07, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  vec2 warp = vec2(fbm(uv + 3.1, vec2(5.), 3, .5), fbm(uv + 7.7, vec2(5.), 3, .5));
+  vec3 a = worleyId(uv * 12. + warp * 1.4, vec2(12.)), b = worleyId(uv * 21. + warp * 2. + 4.4, vec2(21.));
+  float plateA = (.42 + .4 * a.z - a.x * .32) * smoothstep(.0, .08, a.y - a.x);
+  float plateB = (.3 + .32 * b.z - b.x * .3) * smoothstep(.0, .09, b.y - b.x) * step(.25, b.z);
+  float id = plateA >= plateB ? a.z : b.z;
+  vec3 leaf = mix(vec3(.13, .085, .045), vec3(.3, .2, .09), fract(id * 5.3));
+  leaf = mix(leaf, vec3(.27, .12, .05), step(.72, fract(id * 9.7)) * .7);
+  leaf = mix(leaf, vec3(.31, .27, .14), step(.86, fract(id * 3.1)) * .6);
+  float twig = smoothstep(.035, .0, abs(gnoise(vec2(uv.x * 3., uv.y * 11.) + 1.3, vec2(3., 11.)))) * step(.12, fbm(uv + 2., vec2(4.), 2, .5));
+  vec3 mould = vec3(.045, .036, .026);
+  albedo = mix(mould, leaf, smoothstep(.12, .24, max(plateA, plateB)));
+  albedo = mix(albedo, vec3(.2, .16, .12), twig * .9) * (1. - cavity * .55);
+  albedo *= .92 + hash21(floor(uv * 512.)) * .16;
+  rough = .9;
+}`,
+  },
   // The ground under grass: a fine, fibrous mat with earth showing in the low places. No pattern
   // large enough to be seen repeating; the grass standing on it carries the look.
   ground: {

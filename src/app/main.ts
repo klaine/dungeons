@@ -12,7 +12,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { AtmospherePass } from '../render/post';
-import { farUniforms, makeFarMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -126,6 +126,8 @@ async function start(): Promise<void> {
   const ground = generateTextureSet(renderer, 'ground', texSize, 17);
   const scree = generateTextureSet(renderer, 'scree', texSize, 23);
   const bark = generateTextureSet(renderer, 'bark', texSize, 29);
+  const soil = generateTextureSet(renderer, 'soil', texSize, 31);
+  const litter = generateTextureSet(renderer, 'litter', texSize, 37);
   const materials: Record<string, MeshStandardMaterial> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
@@ -136,7 +138,7 @@ async function start(): Promise<void> {
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
     bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeSiteMaterial(ground, moss, { normalScale: 1.0, matt: true }),
+    turf: makeGroundMaterial(ground, soil, scree, litter),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
   };
 
@@ -291,6 +293,7 @@ async function start(): Promise<void> {
   const water = new Water(desc.water ?? [], desc.streams ?? [], {
     mirror: Math.round(num('mirror', quality.mirror)),
     zenith: SKY.zenith, horizon: SKY.horizon,
+    falls: desc.falls,
     // Banks and trees with the light behind them; and foam, which is white, in the light there is.
     land: SKY.ground.map((v) => v * 0.45),
     foam: [0, 1, 2].map((c) => 0.6 * SKY.horizon[c] + 0.12 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
@@ -704,6 +707,9 @@ async function start(): Promise<void> {
   const glow = new Vector3();
   let lastPlace = -1;
   const lastStep = { x: 0, z: 0 };
+  // How near water is, for the ear: running water, a fall, and whether the player is standing in a stream.
+  const hearing = { brook: 0, fall: 0, wading: false };
+  let listened = 0;
   // In a software-rendered test run, drawing starves the bake workers; this draws rarely until the bake is done.
   const bakeFirst = params.has('bakefirst');
   let last = performance.now();
@@ -735,6 +741,22 @@ async function start(): Promise<void> {
       // What is underfoot and overhead, for sound: a roof or the sky, and grass, earth, stone or planks.
       const at = site ? placeAt(site, player.position.x, player.position.z) : undefined;
       const open = !site || !at || at.roof === 'sky';
+      // (Worked out a few times a second: it changes no faster than a walk.)
+      if (listened++ % 6 === 0) {
+        const px = player.position.x, py = player.position.y, pz = player.position.z;
+        let near = Infinity;
+        hearing.wading = false;
+        for (const st of desc.streams ?? []) for (let i = 0; i < st.line.length; i += 3) {
+          const flat = Math.hypot(st.line[i] - px, st.line[i + 2] - pz);
+          near = Math.min(near, Math.hypot(flat, st.line[i + 1] - py));
+          if (flat < st.width * 0.5 + 0.6 && py < st.line[i + 1] - 0.03 && py > st.line[i + 1] - 1) hearing.wading = true;
+        }
+        hearing.brook = Math.max(0, 1 - near / 16);
+        // A fall carries much further than a brook, and a high one further than a low one.
+        let fall = 0;
+        for (const f of desc.falls ?? []) fall = Math.max(fall, (0.5 + 0.5 * Math.min(1, f.height / 8)) / (1 + (Math.hypot(f.x - px, f.z - pz) / 11) ** 2));
+        hearing.fall = fall < 0.02 ? 0 : fall;
+      }
       let surface: Surface = 'stone';
       if (site && (!at || at.role === 'approach')) {
         const track = site.track ?? [];
@@ -746,12 +768,13 @@ async function start(): Promise<void> {
             onTrack = Math.abs(player.position.x - x) < 1.4;
           }
         }
-        const onDeck = (desc.water ?? []).some((w) => Math.hypot(player.position.x - w.x, player.position.z - w.z) < w.r * 0.8 && player.position.y > w.level + 0.2);
-        surface = onDeck ? 'wood' : onTrack ? (at ? 'stone' : 'earth') : 'grass';
+        const onDeck = (desc.water ?? []).some((w) => Math.hypot(player.position.x - w.x, player.position.z - w.z) < w.r * 0.8 && player.position.y > w.level + 0.2)
+          || (desc.crossings ?? []).some((c) => c.by === 'bridge' && Math.hypot(player.position.x - c.x, player.position.z - c.z) < 4 && player.position.y > c.level + 0.2);
+        surface = onDeck ? 'wood' : hearing.wading ? 'water' : onTrack ? (at ? 'stone' : 'earth') : 'grass';
       }
       const moved = Math.hypot(player.position.x - lastStep.x, player.position.z - lastStep.z);
       lastStep.x = player.position.x; lastStep.z = player.position.z;
-      sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface);
+      sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface, hearing);
     }
     cullCards(cardMeshes, camera.position);
     water.update(time);

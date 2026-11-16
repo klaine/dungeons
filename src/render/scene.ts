@@ -108,6 +108,10 @@ export interface SceneDescription {
   water?: { x: number; z: number; r: number; level: number; outline?: number[] }[];
   /** Running water: the middle of its surface as x, y and z in turn, from where it rises to where it ends, and its breadth. Optionally how far it reaches to the left and right of each point and how much of it shows there (0 to 1). */
   streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
+  /** Where water comes down over the rim: the pool at its foot, how far it falls, and how broad the stream is. */
+  falls?: { x: number; y: number; z: number; height: number; width: number }[];
+  /** Where the track crosses running water, how it gets over, and how high the water stands there. */
+  crossings?: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[];
   /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */
   far?: { wood: [number, number, number]; grass: [number, number, number] };
   /** Small things left lying about for whoever walks that far. */
