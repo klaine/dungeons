@@ -17,6 +17,8 @@ export function buildLandmark(
   mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour,
   /** How much larger than life it is built: by default enough to read at three hundred metres; a keep over the valley is seen close, and is built true. */
   scale?: number,
+  /** A castle built bare: its curtain walls, towers and gate, and nothing within, where something else stands. */
+  bare = false,
 ): void {
   const c = Math.cos(facing), s = Math.sin(facing);
   // From the landmark's own measures (`a` across its front, `b` back from it, `h` up) to the world.
@@ -115,9 +117,9 @@ export function buildLandmark(
     const roofs = rng.chance(0.55);
     for (const [a, b] of [[-W, -D], [W, -D], [-W, D], [W, D]]) round(a, b, 4.2, -6, wallH + 6, 10, 0.95, roofs ? 6.5 : 0);
     for (const a of [-5.6, 5.6]) round(a, -D - 1.2, 3.2, -5, wallH + 4, 8, 1, roofs ? 4.5 : 0);
-    keep(rng.range(-W * 0.35, W * 0.35), rng.range(0, D * 0.4), rng.range(6, 8), rng.range(24, 32));
+    if (!bare) keep(rng.range(-W * 0.35, W * 0.35), rng.range(0, D * 0.4), rng.range(6, 8), rng.range(24, 32));
     // Roofs of the buildings along the inside of the walls, showing over them.
-    for (const side of [-1, 1]) {
+    if (!bare) for (const side of [-1, 1]) {
       const b0 = side * (D - t / 2) - side * 6.5, b1 = side * (D - t / 2);
       block('stone', -W * 0.7, W * 0.7, Math.min(b0, b1), Math.max(b0, b1), -2, wallH + 1.2);
       const ridge = wallH + 5.5, bm = (b0 + b1) / 2;

@@ -553,9 +553,19 @@ export function meshSite(site: Site): SceneDescription {
       return beside * (1 - smooth((z - p.z0 - 0.7 - Math.max(0, wobble)) / 2.4));
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
+    // The bay below a keep: a ramp up from the valley floor over the first two-fifths of it, and a level shelf beyond.
+    const bay = vale?.bay;
+    const bayRise = (x: number, z: number): number => {
+      if (!bay) return 0;
+      const out = (x - bay.mouth) * (bay.side === 'w' ? -1 : 1), along = Math.abs(z - bay.z);
+      if (out < -5 || along > bay.half + 6) return 0;
+      return bay.rise * smooth((out + 3) / (bay.depth * 0.42)) * (1 - smooth((along - bay.half + 1) / 5));
+    };
     const swells = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
-      return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14);
+      // (Level on the bay's shelf, as a keep's ground would be; swelling elsewhere as it always did.)
+      const level = bay ? 1 - Math.min(1, bayRise(x, z) / bay.rise) : 1;
+      return p.floor - 0.03 + bayRise(x, z) + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
     };
     // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
@@ -1640,13 +1650,13 @@ export function meshSite(site: Site): SceneDescription {
     wild.group = 'soft';
     landmarkSpots.push(...landmarks.map((l) => ({ kind: l.kind, x: l.x, y: l.y, z: l.z })));
     landmarks.forEach((l, i) => buildLandmark(l.kind, l.x, l.y, l.z, Math.atan2(czA - l.z, cxA - l.x), (material) => wild.mesh(material), rng.fork(`landmark${i}`), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]]));
-    // The keep over a village, on the hillside above the valley's side: set as low as the ground falls within its walls, so it is built into the slope, and turned to look down on the valley.
-    if (site.keep && vale) {
-      const k = site.keep, reach = k.kind === 'castle' ? 22 : 8;
-      let low = Infinity;
-      for (let a = 0; a < 12; a++) for (const r of [0, reach * 0.5, reach]) low = Math.min(low, ground(k.x + Math.cos((a / 12) * Math.PI * 2) * r, k.z + Math.sin((a / 12) * Math.PI * 2) * r));
-      const mid = (sideAt('w', k.z) + sideAt('e', k.z)) / 2;
-      buildLandmark(k.kind, k.x, low, k.z, Math.atan2(0, mid - k.x), (material) => wild.mesh(material), rng.fork('keep'), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]], 1.0);
+    // The keep over a village: on the shelf of its bay, a castle's curtain walls round its tower (which is built with the towers), with
+    // the gate towards the valley; solid, since it can be walked to.
+    if (site.keep && vale?.bay && site.keep.kind === 'castle') {
+      const k = site.keep, was = wild.group;
+      wild.group = 'wild';
+      buildLandmark('castle', k.x, swells(k.x, k.z), k.z, vale.bay.side === 'w' ? Math.PI : 0, (material) => wild.mesh(material), rng.fork('keep'), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]], 0.5, true);
+      wild.group = was;
     }
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.

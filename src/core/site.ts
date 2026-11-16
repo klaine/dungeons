@@ -342,6 +342,12 @@ export interface Valley {
    * that side as an arm, which closes at its head where the side comes back to the ridge.
    */
   ridge?: { x0: number; x1: number; z: number };
+  /**
+   * A bay in one side, below a village's keep: centred at `z`, `half` along the valley either way,
+   * and reaching `depth` out beyond `mouth`, the line the side ran along before. Its floor rises
+   * `rise` over the first two-fifths of it, as a ramp, and is level beyond, a shelf for the keep.
+   */
+  bay?: { side: 'w' | 'e'; z: number; half: number; depth: number; rise: number; mouth: number };
 }
 
 export interface Site {
@@ -381,7 +387,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */
@@ -399,8 +405,9 @@ export interface Site {
    */
   settlement?: 'village' | 'hamlet' | 'manor';
   /**
-   * The keep over a village: a tower, or a small castle, on the hillside above the valley's
-   * side, outside what can be walked, where it is seen from the village. `x` and `z` are where it stands.
+   * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
+   * the shelf of a bay in the valley's side (see `Valley.bay`), up a ramp from the village. The
+   * tower is in `towers`, and can be gone into and climbed. `x` and `z` are the middle of the castle.
    */
   keep?: { x: number; z: number; kind: 'tower' | 'castle' };
   /**
