@@ -15,6 +15,8 @@ import { Player } from './player';
 
 export interface GameUi {
   toast(message: string): void;
+  /** Something happened that should be heard. */
+  sound?(event: 'door' | 'locked' | 'key' | 'find' | 'lever' | 'won'): void;
   keysChanged(keys: KeyId[]): void;
   won(seconds: number): void;
 }
@@ -237,6 +239,7 @@ export class Game {
           gate.clearAt = this.elapsed + 1.2;
         }
         this.ui.toast('You throw the lever. Iron grinds, and the portcullis rises.');
+        this.ui.sound?.('lever');
       }
       if (l.thrown && l.swing < 1) {
         l.swing = Math.min(1, l.swing + dt * 2.5);
@@ -254,6 +257,7 @@ export class Game {
         this.keys.add(k.item.key);
         this.ui.keysChanged([...this.keys]);
         this.ui.toast(`You take the ${k.item.key} key.`);
+        this.ui.sound?.('key');
       }
     }
 
@@ -265,6 +269,7 @@ export class Game {
         f.taken = true;
         f.group.visible = false;
         this.ui.toast(`You find ${f.what}.`);
+        this.ui.sound?.('find');
       }
     }
 
@@ -276,12 +281,14 @@ export class Game {
         this.foundSecret = true;
         r.group.visible = false;
         this.ui.toast('A relic, sealed up here for who knows how long. You take it.');
+        this.ui.sound?.('find');
       }
     }
 
     if (!this.won && this.goalAt && here?.id === this.site.goal && Math.hypot(p.x - this.goalAt.x, p.z - this.goalAt.z) < 2.0) {
       this.won = true;
       this.ui.won(this.elapsed);
+      this.ui.sound?.('won');
     }
   }
 
@@ -290,6 +297,7 @@ export class Game {
       if (time < d.quietUntil) return;
       d.quietUntil = time + 5;
       this.ui.toast(message);
+      this.ui.sound?.('locked');
     };
     const { lock, barredFrom } = d.spec;
     if (d.gate) {
@@ -316,6 +324,7 @@ export class Game {
     }
     d.open = true;
     d.blocker.active = false;
+    this.ui.sound?.('door');
   }
 
   /**

@@ -20,6 +20,7 @@ import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
+import { Sound, Surface } from './sound';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
@@ -135,6 +136,17 @@ async function start(): Promise<void> {
   const site = params.get('scene') === 'test' ? null : generateSite(seed);
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
+  // Sound starts with the first click or key, which is the earliest a browser allows.
+  const sound = new Sound();
+  const muteButton = document.getElementById('mute') as HTMLButtonElement;
+  const showMute = () => (muteButton.textContent = sound.muted ? 'Sound off' : 'Sound on');
+  showMute();
+  muteButton.addEventListener('click', () => { sound.start(); sound.toggleMute(); showMute(); });
+  window.addEventListener('pointerdown', () => sound.start(), { once: true });
+  window.addEventListener('keydown', (e) => {
+    sound.start();
+    if (e.code === 'KeyN') { sound.toggleMute(); showMute(); }
+  });
   // The opening card: what this place is, how to move, and how much detail to draw.
   const intro = document.getElementById('intro')!;
   if (site && !params.has('nointro')) {
@@ -152,6 +164,7 @@ async function start(): Promise<void> {
     document.getElementById('begin')!.addEventListener('click', () => {
       intro.hidden = true;
       document.body.classList.remove('intro');
+      sound.start();
       if (!coarse) canvas.requestPointerLock?.();
     });
     intro.hidden = false;
@@ -370,6 +383,7 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ doors, keys and the goal
   const game = site ? new Game(site, desc, scene, materials, player, {
     toast,
+    sound: (event) => sound.play(event),
     keysChanged: (keys) => {
       document.getElementById('keys')!.innerHTML = keys.map((k) => `<span class="${k}">${k} key</span>`).join('');
     },
@@ -535,6 +549,7 @@ async function start(): Promise<void> {
   let metering = false;
   const glow = new Vector3();
   let lastPlace = -1;
+  const lastStep = { x: 0, z: 0 };
   // In a software-rendered test run, drawing starves the bake workers; this draws rarely until the bake is done.
   const bakeFirst = params.has('bakefirst');
   let last = performance.now();
@@ -558,6 +573,28 @@ async function start(): Promise<void> {
     })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
     vegetationUniforms.uTime.value = time;
+    {
+      // What is underfoot and overhead, for sound: a roof or the sky, and grass, earth, stone or planks.
+      const at = site ? placeAt(site, player.position.x, player.position.z) : undefined;
+      const open = !site || !at || at.roof === 'sky';
+      let surface: Surface = 'stone';
+      if (site && (!at || at.role === 'approach')) {
+        const track = site.track ?? [];
+        let onTrack = false;
+        for (let k = 0; k < track.length - 1; k++) {
+          const [ax, az] = track[k], [bx, bz] = track[k + 1];
+          if (player.position.z >= Math.min(az, bz) && player.position.z <= Math.max(az, bz)) {
+            const x = ax + ((bx - ax) * (player.position.z - az)) / (bz - az || 1);
+            onTrack = Math.abs(player.position.x - x) < 1.4;
+          }
+        }
+        const onDeck = (desc.water ?? []).some((w) => Math.hypot(player.position.x - w.x, player.position.z - w.z) < w.r * 0.8 && player.position.y > w.level + 0.2);
+        surface = onDeck ? 'wood' : onTrack ? (at ? 'stone' : 'earth') : 'grass';
+      }
+      const moved = Math.hypot(player.position.x - lastStep.x, player.position.z - lastStep.z);
+      lastStep.x = player.position.x; lastStep.z = player.position.z;
+      sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface);
+    }
     cullCards(cardMeshes, camera.position);
     water.update(time);
 
@@ -620,7 +657,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { groundAt, renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, renderer, atmosphere, bloom, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

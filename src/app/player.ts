@@ -24,6 +24,9 @@ export class Player {
   private jumpQueued = false;
   private velocity = new Vector3();
   private onGround = false;
+  /** Whether the player is standing on something, and whether they are running: for footsteps. */
+  get grounded(): boolean { return this.onGround; }
+  running = false;
   private keys = new Set<string>();
   private spawn = new Vector3();
   private segment = new Line3();
@@ -69,6 +72,7 @@ export class Player {
   update(dt: number): void {
     const run = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight') || this.analogRun;
     const speed = run ? 6.5 : 3.2;
+    this.running = run;
     let fx = 0, fz = 0;
     if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz -= 1;
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz += 1;
