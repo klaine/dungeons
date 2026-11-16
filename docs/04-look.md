@@ -142,6 +142,27 @@ The target is a steady 60 frames per second in a desktop browser on a mid-range 
 - Generation and baking in background workers so the view stays responsive.
 - Textures generated at the resolution the tier calls for.
 
+## Open air: the target and where it stands
+
+The target for outdoor scenes is the look of a well-made open-world game: a wooded valley under a hazy sky, with long grass and flowers underfoot, leafy trees and dark firs, one species in blossom for colour, mossy boulders and outcrops, a worn path, water, and mountains fading into the distance. Two reference pictures supplied for the project show this; they are not kept in the repository.
+
+What that takes, and what is in place:
+
+| Ingredient | State |
+|---|---|
+| Ground cover: grass, flowers, low bushes | In place, as instanced cards with wind. Thin at the foot of the banks. |
+| Trees with leafy crowns, several kinds, one in blossom | In place. Crowns are clouds of leaf cards shaded about a common centre; firs are tiers of bough cards. Trunks are plain, without branches. |
+| Land running to the horizon | In place: a fine sheet near the site, a coarse one out to 250 metres, and a ring of mountains to 750. |
+| Rock: banks, outcrops, boulders | Shaped and placed, but too smooth close to: it needs a rock material of its own and finer relief. |
+| Leaves lit from behind | Not done. Leaves are matt and opaque to light. |
+| A worn earth path, and ground that is more than one texture | Not done. The path is flags on turf. |
+| Water | Not done. |
+| Things built outdoors: fences, steps, bridges, jetties | Not done. |
+| Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |
+| Distant trees cheaper than near ones | Partly: fewer, larger cards with distance. No impostors, and no culling by distance. |
+
+Leaves and blades must be matt. With the standard material every card mirrors the sky at a glancing angle, and a meadow seen from head height is all glancing angles: it turned pale and blue until the mirror term was removed.
+
 ## 2D maps
 
 Maps are assets in their own right, for use in games, on virtual tabletops and in print, and they double as the in-tool navigation aid.

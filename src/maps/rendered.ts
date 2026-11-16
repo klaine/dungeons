@@ -1,4 +1,4 @@
-import { DirectionalLight, Light, OrthographicCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three';
+import { DirectionalLight, Light, Object3D, OrthographicCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three';
 import { Site } from '../core/site';
 
 /**
@@ -25,6 +25,8 @@ export interface RenderedOptions {
   outdoorExposure: number;
   /** Lights that belong to the player or follow them, switched off while the map is taken. */
   mute: Light[];
+  /** Things that belong to the open air only, such as the country beyond the site: left out of the indoor picture. */
+  outdoorOnly?: Object3D[];
   /** Show the hidden chamber. Left out by default, so the map can be put in front of players. */
   secrets?: boolean;
 }
@@ -83,6 +85,7 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
   try {
     // Indoors: cut open, exposure up, a little light from above.
     scene.add(fill, fill.target);
+    for (const o of opts.outdoorOnly ?? []) o.visible = false;
     renderer.clippingPlanes = [new Plane(new Vector3(0, -1, 0), cut)];
     renderer.toneMappingExposure = opts.indoorExposure;
     renderer.render(scene, camera);
@@ -91,6 +94,7 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
     // Outdoors: whole, in daylight, and only where a place is open to the sky. The light from
     // above is turned up to stand in for the sky, or shadows on the ground would come out black.
     fill.intensity = 2.6;
+    for (const o of opts.outdoorOnly ?? []) o.visible = true;
     renderer.clippingPlanes = [];
     renderer.toneMappingExposure = opts.outdoorExposure;
     renderer.render(scene, camera);
@@ -104,6 +108,7 @@ export function renderMap(renderer: WebGLRenderer, scene: Scene, site: Site, opt
     ctx.drawImage(renderer.domElement, 0, 0);
     ctx.restore();
   } finally {
+    for (const o of opts.outdoorOnly ?? []) o.visible = true;
     scene.remove(fill, fill.target);
     renderer.clippingPlanes = was.planes;
     renderer.toneMappingExposure = was.exposure;

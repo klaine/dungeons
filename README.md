@@ -24,9 +24,11 @@ Or as a battle map: the built world itself from straight above, roofs cut away, 
 
 <img src="docs/images/battle-map.jpg" alt="A battle map of the same place rendered from the 3D world: stone floors, furniture, trees and their shadows" width="640">
 
-You arrive outdoors, across open ground in a hollow of the rock:
+You arrive outdoors, in a meadow below the house, with wooded hills and mountains beyond:
 
-![The approach: turf, a flagged path, trees and the house front](docs/images/approach.jpg)
+![The approach: a flagged path through grass and flowers to the house front, under trees](docs/images/approach.jpg)
+
+![Open air: a leafy tree, boulders and bushes below a rock bank, with trees in blossom and firs beyond](docs/images/open-air.jpg)
 
 Some houses hide a chamber behind a stretch of wall that is really a door:
 

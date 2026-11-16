@@ -35,6 +35,31 @@ export interface DoorDesc {
   barSide: number;
 }
 
+/**
+ * Flat cards drawn many times over: grass, flowers, leaves. Each is a small textured sheet; a
+ * crown of a tree is a few hundred of them. They are placed by the mesher and drawn by the
+ * renderer, and take no part in the bake or in collision.
+ */
+export interface CardSet {
+  /** What is painted on the cards. */
+  kind: 'grass' | 'flower' | 'leaf' | 'needle';
+  /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
+  shape: 'tuft' | 'card';
+  /** Whether the cards cast shadows. */
+  shadow: boolean;
+  /** Per card: a 4 by 4 transform (column-major), a colour, and the point its shading curves about. */
+  matrices: number[];
+  colours: number[];
+  centres: number[];
+}
+
+/** What surrounds the site and is only looked at: far ground, mountains, and everything that grows. */
+export interface Scenery {
+  /** Unbaked geometry by material name. */
+  meshes: Map<string, MeshBuilder>;
+  cards: CardSet[];
+}
+
 export interface SceneDescription {
   /**
    * Geometry, keyed by "group|material". Each key becomes one mesh, so grouping by place lets
@@ -58,4 +83,7 @@ export interface SceneDescription {
   doors?: DoorDesc[];
   /** Per place, the spot where a thing can be set down: the top of its chest or pedestal. */
   anchors?: Map<number, Vector3>;
+  scenery?: Scenery;
+  /** Boxes the player cannot enter: the edge of the world, where no rock happens to stand in the way. */
+  fences?: { min: Vector3; max: Vector3 }[];
 }

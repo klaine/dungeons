@@ -21,8 +21,11 @@ export interface RockOptions {
   cell: number;
   /** Texture repeats per metre. */
   uvScale: number;
-  /** Colour at a point, given its normal; and moss, wet and soot written to `field`. */
-  shade: (p: Vector3, n: Vector3, field: Float32Array) => [number, number, number];
+  /**
+   * Colour at a point, given its normal; and moss, wet and soot written to `field`. `face` is the
+   * way the whole triangle faces, which is what `meshFor` was asked about.
+   */
+  shade: (p: Vector3, n: Vector3, field: Float32Array, face: Vector3) => [number, number, number];
   /** Sends a triangle to another mesh by which way it faces: turf for level ground, say. */
   meshFor?: (faceNormal: Vector3, centre: Vector3) => MeshBuilder | null;
   /** Texture repeats per metre for triangles sent to another mesh. */
@@ -95,7 +98,7 @@ export function carveRock(mesh: MeshBuilder, density: Density, o: RockOptions): 
         const u = ay >= ax && ay >= az ? p.x : ax >= az ? p.z : p.x;
         const w = ay >= ax && ay >= az ? p.z : p.y;
         field[0] = 0; field[1] = 0; field[2] = 0;
-        const [r, g, b] = o.shade(p, N[v], field);
+        const [r, g, b] = o.shade(p, N[v], field, F);
         const scale = target === mesh ? o.uvScale : o.otherUvScale ?? o.uvScale;
         ids.push(target.addVertex(p.x, p.y, p.z, N[v].x, N[v].y, N[v].z, u * scale, w * scale, r, g, b, field[0], field[1], field[2], 0));
       }

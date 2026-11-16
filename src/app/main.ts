@@ -18,6 +18,7 @@ import { generateSite } from '../core/generate';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
+import { makeCards, paintCards, vegetationUniforms } from '../render/vegetation';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSite } from '../render/siteMesher';
 import { Torch, TorchLights } from '../render/torch';
@@ -88,7 +89,7 @@ async function start(): Promise<void> {
   renderer.shadowMap.type = PCFShadowMap;
 
   const scene = new Scene();
-  const camera = new PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.08, 400);
+  const camera = new PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.08, 900);
 
   // ------------------------------------------------------------------ materials
   hud.status.textContent = 'Generating materials';
@@ -143,6 +144,34 @@ async function start(): Promise<void> {
     parts.push({ mesh, offset: vertexTotal, count: builder.vertexCount, albedo: MEAN_ALBEDO[material] ?? 0.5, plan: builder.bakePlan() });
     vertexTotal += builder.vertexCount;
     triTotal += builder.triangleCount;
+  }
+  // What lies beyond the site is drawn but not baked or collided with. Its share of sky is the
+  // whole sky, written into the same attributes the bake fills for everything else.
+  const scenic: Mesh[] = [];
+  for (const [material, builder] of desc.scenery?.meshes ?? []) {
+    const geometry = builder.build();
+    const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
+    const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];
+    const bk = geometry.getAttribute('aBake') as BufferAttribute;
+    for (let i = 0; i < builder.vertexCount; i++) {
+      for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c], 0, (Math.PI / 2) * L[c] * 0.8, 0);
+      bk.setXY(i, 1, 0.6);
+    }
+    const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
+    mesh.name = `scenery:${material}`;
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    mesh.matrixAutoUpdate = false;
+    scene.add(mesh);
+    scenic.push(mesh);
+  }
+  // Grass, flowers and leaves: one draw call for each kind.
+  let cardTotal = 0;
+  for (const set of desc.scenery?.cards ?? []) {
+    const cards = makeCards(set, paintCards(set.kind));
+    scene.add(cards);
+    scenic.push(cards);
+    cardTotal += set.matrices.length / 16;
   }
   const buildMs = performance.now() - t0;
 
@@ -257,7 +286,7 @@ async function start(): Promise<void> {
   const atmosphere = new AtmospherePass(scene, camera, size.x, size.y);
   atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
   atmosphere.uniforms.uSkyColor.value.set(0.42, 0.52, 0.7).multiplyScalar(1.6);
-  atmosphere.uniforms.uDensity.value = num('fog', 0.003);
+  atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
   atmosphere.updateStatic(renderer, [...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
@@ -269,6 +298,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
+  for (const f of desc.fences ?? []) player.blockers.push({ min: f.min, max: f.max, active: true });
   new TouchControls(canvas, player, toggleLantern);
 
   // ------------------------------------------------------------------ doors, keys and the goal
@@ -304,7 +334,7 @@ async function start(): Promise<void> {
   });
   // The battle map is a picture of the scene itself, so it is taken here, where the scene is.
   const battleMap = (maxPixels = 4096) => {
-    const map = renderMap(renderer, scene, site!, { indoorExposure: 1.6, outdoorExposure: 0.42, mute: [lantern, ...torchLights.lights], maxPixels });
+    const map = renderMap(renderer, scene, site!, { indoorExposure: 1.6, outdoorExposure: 0.42, mute: [lantern, ...torchLights.lights], outdoorOnly: scenic, maxPixels });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', 1.5)));
     window.dispatchEvent(new Event('resize'));
     return map.canvas;
@@ -347,7 +377,7 @@ async function start(): Promise<void> {
     if (e.code === 'KeyB') bakeTarget = bakeTarget > 0.5 ? 0 : 1;
   });
 
-  hud.stats.textContent = `${desc.blocks.toLocaleString()} stones · ${vertexTotal.toLocaleString()} vertices · ${triTotal.toLocaleString()} triangles · built in ${buildMs.toFixed(0)} ms`;
+  hud.stats.textContent = `${desc.blocks.toLocaleString()} stones · ${vertexTotal.toLocaleString()} vertices · ${triTotal.toLocaleString()} triangles · ${cardTotal.toLocaleString()} cards · built in ${buildMs.toFixed(0)} ms`;
 
   // ------------------------------------------------------------------ bake
   let bakeTarget = 0;
@@ -461,6 +491,7 @@ async function start(): Promise<void> {
       position: s.position, color: glow.set(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16 * s.strength).clone(),
     })));
     if (sky.material.uniforms.time) sky.material.uniforms.time.value = time;
+    vegetationUniforms.uTime.value = time;
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
     composer.render(dt);
