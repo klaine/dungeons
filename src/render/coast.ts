@@ -317,6 +317,56 @@ export function buildCoast(c: CoastBuild): { deck: number } {
     c.finds.push({ at: new Vector3(k.x - Math.cos(k.facing) * 6, k.y + 0.2, k.z - Math.sin(k.facing) * 6), what: 'a rusted helm' });
   }
 
+  // ---- the ruin of a chapel on its headland: its west front with the window empty, its walls broken down
+  if (o.chapel) {
+    const k = o.chapel, fx = Math.cos(k.facing), fz = Math.sin(k.facing);
+    buildLandmark('ruin', k.x - fx * 8, k.y, k.z - fz * 8, k.facing, mesh, rng.fork('chapel'), [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]], 0.5);
+    c.finds.push({ at: new Vector3(k.x + fx * 6, k.y + 0.2, k.z + fz * 6), what: 'a bronze handbell' });
+  }
+
+  // ---- the burial ground beside the house: a dry-stone wall, headstones in rows, a high cross
+  if (o.graveyard) {
+    const q = rng.fork('graveyard'), gy = o.graveyard, base = c.ground(gy.x, gy.z);
+    const towardHouse = gy.x > (o.level.x0 + o.level.x1) / 2 ? -1 : 1;
+    const at = frame(gy.x, gy.z, base, 0);
+    // (In this frame `f` is along x and `a` along z.)
+    const wallStone = shade(stone, 0.85), H = 0.95, t = 0.55;
+    for (const [a0, a1, f0, f1, gap] of [
+      [-gy.w / 2, gy.w / 2, -gy.d / 2 - t, -gy.d / 2, towardHouse < 0], [-gy.w / 2, gy.w / 2, gy.d / 2, gy.d / 2 + t, towardHouse > 0],
+      [-gy.w / 2 - t, -gy.w / 2, -gy.d / 2 - t, gy.d / 2 + t, false], [gy.w / 2, gy.w / 2 + t, -gy.d / 2 - t, gy.d / 2 + t, false],
+    ] as [number, number, number, number, boolean][]) {
+      // Laid in lengths, each a little different in height, as dry stone is; a gateway in the side towards the house.
+      for (let u = a0; u < a1 - 1e-6;) {
+        const u1 = Math.min(a1, u + q.range(0.8, 1.4));
+        if (!(gap && Math.abs((u + u1) / 2) < 1.1)) box(at, 'stone', u, u1, -0.4, H + q.range(-0.12, 0.08), f0, f1, shade(wallStone, q.range(0.85, 1.1)), 0.6);
+        u = u1;
+      }
+    }
+    // Headstones in rows, facing the way the house's door does; some leaning, a few fallen.
+    for (let f = -gy.d / 2 + 1.6; f < gy.d / 2 - 1.2; f += q.range(1.8, 2.3)) for (let a = -gy.w / 2 + 1.4; a < gy.w / 2 - 1.2; a += q.range(1.2, 1.7)) {
+      if (q.chance(0.22)) continue;
+      const wide = q.range(0.45, 0.7), tall = q.range(0.5, 1.0), thick = q.range(0.08, 0.13), lean = q.range(-0.12, 0.12), tone = shade(stone, q.range(0.75, 1.05));
+      const p = (da: number, h: number, df: number): P3 => at(a + da, h, f + df + h * lean);
+      if (q.chance(0.12)) {
+        // Fallen flat on its face.
+        solid('stone', [p(-wide / 2, 0, 0), p(wide / 2, 0, 0), p(wide / 2, 0, tall), p(-wide / 2, 0, tall), p(-wide / 2, thick, 0), p(wide / 2, thick, 0), p(wide / 2, thick, tall), p(-wide / 2, thick, tall)], tone, 0.8);
+      } else solid('stone', [p(-wide / 2, -0.3, 0), p(wide / 2, -0.3, 0), p(wide / 2, -0.3, thick), p(-wide / 2, -0.3, thick), p(-wide * 0.48, tall, 0), p(wide * 0.48, tall, 0), p(wide * 0.48, tall, thick), p(-wide * 0.48, tall, thick)], tone, 0.8);
+    }
+    // The high cross: a stepped base, a tall shaft, arms, and a ring about the crossing; facing the gateway.
+    {
+      const ca = gy.w / 2 - 2.2, cf = 0, cross = shade(stone, 0.92);
+      box(at, 'stone', ca - 0.9, ca + 0.9, -0.3, 0.35, cf - 0.9, cf + 0.9, cross);
+      box(at, 'stone', ca - 0.6, ca + 0.6, 0.35, 0.75, cf - 0.6, cf + 0.6, cross);
+      box(at, 'stone', ca - 0.2, ca + 0.2, 0.75, 4.1, cf - 0.14, cf + 0.14, cross);
+      box(at, 'stone', ca - 0.85, ca + 0.85, 3.05, 3.4, cf - 0.13, cf + 0.13, cross);
+      for (let k = 0; k < 12; k++) {
+        const t0 = (k / 12) * Math.PI * 2, t1 = ((k + 1) / 12) * Math.PI * 2, r0 = 0.48, r1 = 0.62, cy = 3.22;
+        const ring = (tt: number, r: number, df: number): P3 => at(ca + Math.cos(tt) * r, cy + Math.sin(tt) * r, cf + df);
+        solid('stone', [ring(t0, r0, -0.1), ring(t1, r0, -0.1), ring(t1, r1, -0.1), ring(t0, r1, -0.1), ring(t0, r0, 0.1), ring(t1, r0, 0.1), ring(t1, r1, 0.1), ring(t0, r1, 0.1)], cross);
+      }
+    }
+  }
+
   // ---- in the sea cave, at its far end, something somebody hid
   if (o.seaCave) {
     const sc = o.seaCave, a = sc.length * 0.8;

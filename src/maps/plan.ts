@@ -141,6 +141,17 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         ctx.globalAlpha = 0.7; ctx.fillRect(-11 * scale, -14 * scale, 22 * scale, 28 * scale); ctx.globalAlpha = 1;
         ctx.restore();
       }
+      if (isle.chapel) {
+        const k = isle.chapel;
+        ctx.save(); ctx.translate(X(k.x), Z(k.z)); ctx.rotate(k.facing);
+        ctx.globalAlpha = 0.55; ctx.fillRect(-8 * scale, -4 * scale, 18 * scale, 8 * scale); ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      if (isle.graveyard) {
+        const q = isle.graveyard;
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.8 * ratio, 0.4 * scale);
+        ctx.strokeRect(X(q.x - q.d / 2), Z(q.z - q.w / 2), q.d * scale, q.w * scale);
+      }
       for (const h of isle.cottages) {
         ctx.save(); ctx.translate(X(h.x), Z(h.z)); ctx.rotate(h.faces);
         ctx.fillRect(-h.d / 2 * scale, -h.w / 2 * scale, h.d * scale, h.w * scale);

@@ -96,6 +96,8 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     for (const q of o.cottages) flat(q.x, q.z, q.y, Math.max(q.w, q.d) * 0.62 + 1.2);
     if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
     if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
+    if (o.chapel) flat(o.chapel.x, o.chapel.z, o.chapel.y, 13);
+    if (o.graveyard) { const q = o.graveyard, w = 1 - smooth((Math.hypot(Math.max(Math.abs(x - q.x) - q.d / 2, 0), Math.max(Math.abs(z - q.z) - q.w / 2, 0)) - 1) / 5); top += (floor - top) * w; }
   }
   // Below the top of the cliff the land goes down to the sea bed: steeply where it is cliff, which
   // the builder turns to rock, and gently under a beach.
@@ -303,6 +305,32 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       taken.push({ x, z, r: 24 });
       break;
     }
+    // Where there is no castle, as often as not the ruin of a chapel stands on a headland instead, as on so many of the western isles.
+    const h = rng.fork('chapel');
+    if (!island.castle && h.chance(0.65)) for (let tries = 0; tries < 80; tries++) {
+      const a = h.range(0, TAU);
+      if (Math.abs(turnBetween(a, cove.out)) < 0.9 || Math.abs(turnBetween(a, toHouse)) < 0.7) continue;
+      if (island.lighthouse && Math.abs(turnBetween(a, Math.atan2(island.lighthouse.z - island.z, island.lighthouse.x - island.x))) < 0.9) continue;
+      const back = coastAt(island, a) - h.range(18, 24), x = island.x + Math.cos(a) * back, z = island.z + Math.sin(a) * back;
+      if (inland(island, x, z) < 16 || !clear(x, z, 18) || fromTrack(x, z) < 18) continue;
+      island.chapel = { x: round(x), z: round(z), y: round(plain(x, z)), facing: Math.round((a + Math.PI / 2) * 1000) / 1000 };
+      taken.push({ x, z, r: 18 });
+      break;
+    }
+  }
+
+  // The burial ground, beside the house on one side or the other, on the forecourt's level.
+  {
+    const q = rng.fork('graveyard');
+    for (const side of q.chance(0.5) ? [1, -1] : [-1, 1]) {
+      const w = round(q.range(12, 18)), d = round(q.range(9, 13)), x = round(side > 0 ? level.x1 + d / 2 + 1.5 : level.x0 - d / 2 - 1.5), z = round(level.z0 + 6 + w / 2 + q.range(0, Math.max(0, level.z1 - level.z0 - w - 12)));
+      const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([i, j]) => [x + (i * d) / 2, z + (j * w) / 2]);
+      if (corners.some(([cx, cz]) => coastAt(island, Math.atan2(cz - island.z, cx - island.x)) - Math.hypot(cx - island.x, cz - island.z) < 12)) continue;
+      if (fromTrack(x, z) < Math.max(w, d) / 2 + 4) continue;
+      island.graveyard = { x, z, w, d };
+      taken.push({ x, z, r: Math.max(w, d) / 2 + 2 });
+      break;
+    }
   }
 
   // Stacks off the headlands, and off the cliffs here and there; none in the way into the cove.
@@ -364,7 +392,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
     }
     return best;
   };
-  const footpath = (x: number, z: number, to: 'lighthouse' | 'castle') => {
+  const footpath = (x: number, z: number, to: 'lighthouse' | 'castle' | 'chapel') => {
     const [sx, sz] = nearestOnTrack(x, z), points: [number, number][] = [];
     const n = Math.max(2, Math.round(Math.hypot(x - sx, z - sz) / 7)), q = rng.fork(`path/${to}`), sway = q.range(-6, 6);
     for (let k = 0; k <= n; k++) {
@@ -378,6 +406,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const lh = island.lighthouse;
   if (lh) footpath(lh.x + Math.cos(lh.door) * (lh.r + 2.2), lh.z + Math.sin(lh.door) * (lh.r + 2.2), 'lighthouse');
   if (island.castle) { const c = island.castle; footpath(c.x - Math.cos(c.facing) * 13, c.z - Math.sin(c.facing) * 13, 'castle'); }
+  if (island.chapel) { const c = island.chapel; footpath(c.x - Math.cos(c.facing) * 12, c.z - Math.sin(c.facing) * 12, 'chapel'); }
 
   // The box that holds the island.
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
