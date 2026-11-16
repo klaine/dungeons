@@ -26,7 +26,7 @@ Keep these up to date in the same commit as the change they describe.
 ## How the code is laid out
 
 - `src/core`: the site document (`site.ts`), the generator (`generate.ts`), locks, keys and the solver (`mission.ts`). No rendering.
-- `src/render`: site to geometry (`siteMesher.ts`, `geom/`), materials and textures, the light bake (`bake/`), vegetation, water, post-processing. Rock is in `geom/rock.ts` (carving a solid from a function: marching cubes for caves, an edge-keeping carver for rock in the open) and `geom/rockForms.ts` (the functions: beds, joints, facets, boulders, and the wearing-down of cliffs); trees are grown in `planting.ts`.
+- `src/render`: site to geometry (`siteMesher.ts`, `geom/`), materials and textures, the light bake (`bake/`), vegetation, water, post-processing. Rock is in `geom/rock.ts` (carving a solid from a function: marching cubes for caves, an edge-keeping carver for rock in the open) and `geom/rockForms.ts` (the functions: beds, joints, facets, boulders, and the wearing-down of cliffs); trees are grown in `planting.ts`. The hills beyond the valley are one sheet laid in `landscape.ts` and drawn with the far-land material in `siteMaterial.ts`; haze, mist and cloud are in `post.ts`.
 - `src/app`: the program: main loop, player, game rules, touch, sound.
 - `src/maps`, `src/export`, `src/gallery`, `examples/viewer`: maps, exports, the gallery page, and a viewer for exported files.
 
@@ -43,11 +43,13 @@ Measured in November 2026 on a desktop with a Radeon RX 6800, in the app's embed
 site builds in 5 to 6 seconds (it was 2 before the cliffs were carved; about 1.4 seconds of it is
 the valley rim, and the water and its stones added the last second) and its light bakes in 15 to 22
 seconds. With a lake in view, a frame at 1063 by 650 took about 15 milliseconds, of which some 6 are
-the second drawing of the scene that the water mirrors; away from water it took 8 to 10. Those are
+the second drawing of the scene that the water mirrors; away from water it took 8 to 10. (At 1298
+by 849 the same view with water took 20, of which 8 are the mirror; the haze, the mist, the far
+land's material and its eight thousand trees together are about 1.5 of it.) Those are
 times for drawing frames back to back, not a frame rate seen in play, which sat at the browser's
 cap (144, later 60). An iPad was reported to run the earlier, lighter scene well on high; it has not
-been tried since the cliffs, the trees with branches, the doubled leaf count, the clouds and the
-mirroring water went in, and that is the first thing to try. Sound has been measured for level but
+been tried since the cliffs, the trees with branches, the doubled leaf count, the clouds, the
+mirroring water, the haze and the far hills went in, and that is the first thing to try. Sound has been measured for level but
 still never listened to.
 
 The scene is now about a million triangles in the site, 450,000 to 600,000 in rock, and 280,000 to

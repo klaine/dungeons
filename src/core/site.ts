@@ -206,6 +206,12 @@ export interface Setting {
   season?: 'spring' | 'summer' | 'autumn';
   /** How much of the sky is cloud, from 0 for clear to 1 for overcast. Clouds drift, and shade what is under them. */
   cloud?: number;
+  /** Whether that cloud is heaped up or lies in flat banks. */
+  cloudForm?: 'heaped' | 'layered';
+  /** How much mist lies in the low ground, from 0 for none to 1 for a morning you cannot see across. */
+  mist?: number;
+  /** How thick the air is with distance, from 0 for the clearest day to 1 for hills that are barely there. */
+  haze?: number;
 }
 
 /**

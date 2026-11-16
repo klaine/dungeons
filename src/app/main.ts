@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, FrontSide, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, WebGLCubeRenderTarget, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
   MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, PMREMGenerator, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, WebGLRenderer,
@@ -12,7 +12,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { AtmospherePass } from '../render/post';
-import { makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { farUniforms, makeFarMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -112,7 +112,8 @@ async function start(): Promise<void> {
   renderer.shadowMap.type = PCFShadowMap;
 
   const scene = new Scene();
-  const camera = new PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.08, 900);
+  // It sees as far as the furthest range of hills.
+  const camera = new PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.08, 3600);
   camera.layers.enable(1);
 
   // ------------------------------------------------------------------ materials
@@ -131,6 +132,7 @@ async function start(): Promise<void> {
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
     rock: makeRockMaterial(rock, moss),
+    far: makeFarMaterial(),
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
     bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
@@ -154,8 +156,13 @@ async function start(): Promise<void> {
       site.sun = [d[0] / l, d[1] / l, d[2] / l];
     }
     if (params.has('cloud')) site.setting.cloud = Math.min(1, Math.max(0, Number(params.get('cloud'))));
+    // So can the air: how much mist and haze, and whether the cloud lies in banks.
+    if (params.has('mist')) site.setting.mist = Math.min(1, Math.max(0, Number(params.get('mist'))));
+    if (params.has('haze')) site.setting.haze = Math.min(1, Math.max(0, Number(params.get('haze'))));
+    if (params.has('layered')) site.setting.cloudForm = params.get('layered') === '0' ? 'heaped' : 'layered';
   }
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
+  if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
   // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
   if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
@@ -272,7 +279,8 @@ async function start(): Promise<void> {
       // What grows low on the ground is left out of the picture still water mirrors: there it is
       // a fringe a few pixels high, and drawing it twice cost a tenth of the frame. The eye sees
       // the second layer and the mirror does not. Reeds stand in the water and are kept.
-      if (cards.userData.ground && set.kind !== 'reed') cards.layers.set(1);
+      // Nor are the whole trees of the far hillsides: in a lake they are a few points of the picture under ripples.
+      if ((cards.userData.ground && set.kind !== 'reed') || set.kind === 'fir' || set.kind === 'tree') cards.layers.set(1);
       scene.add(cards);
       scenic.push(cards);
       cardMeshes.push(cards);
@@ -476,6 +484,33 @@ async function start(): Promise<void> {
       u.uGlow.value.set(0.55, 0.22, 0.14).multiplyScalar(night > 0.9 ? 0.05 : 1);
       u.uNight.value = night;
     }
+  }
+  {
+    // The air at a distance. What the land fades into is the sky itself, low down in whatever
+    // direction is looked in: so the sky, without the sun's disc, is drawn once into a small
+    // picture that the haze reads.
+    const u = atmosphere.uniforms;
+    const skyPicture = new WebGLCubeRenderTarget(64, { type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter });
+    new CubeCamera(1, 20000, skyPicture).update(renderer, envScene);
+    u.tSky.value = skyPicture.texture;
+    u.uAirOn.value = 1;
+    const haze = desc.sun?.haze ?? 0.5, mist = desc.sun?.mist ?? 0, floor = desc.sun?.floor ?? 0, low = site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk';
+    // Haze: thin enough that the valley is clear across, thick enough that each range of hills
+    // is paler than the one in front of it. A low sun has more air to shine through.
+    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
+    // Mist: a few metres deep on the valley floor, from a veil to a fog.
+    u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
+    // And in the country beyond the valley, on its own higher ground, from some way out.
+    u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
+    u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
+    // The haze is alight towards the sun only while the sun is up.
+    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
+    // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
+    // banks it is a thin layer; heaped, it towers.
+    const cover = u.uCloudCover.value as number, layered = !!desc.sun?.layered;
+    u.uCloudBase.value = floor + 310 - 150 * cover;
+    u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
+    u.uCloudFlat.value = layered ? 1 : 0;
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);

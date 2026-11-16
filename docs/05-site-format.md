@@ -57,6 +57,9 @@ The document is the source. The model and the maps are made from it, so they alw
 | `setting.kind` | What the house is called: priory, abbey and so on. Only a name. |
 | `setting.condition` | `kept`, `damp` or `forsaken`. A forsaken house may have lost a roof. |
 | `setting.cloud` | How much of the sky is cloud, from 0 (clear) to 1 (overcast). May be absent in older documents. |
+| `setting.cloudForm` | `heaped` or `layered`: whether that cloud towers or lies in flat banks. May be absent, which means heaped. |
+| `setting.mist` | How much mist lies in the low ground, from 0 (none) to 1 (a morning that cannot be seen across). Mostly when the day is young or done, and more in autumn. May be absent. |
+| `setting.haze` | How thick the air is with distance, from 0 (the clearest day) to 1 (hills barely there). May be absent. |
 | `setting.season` | `spring`, `summer` or `autumn`. It colours what grows: blossom and fresh green, deeper green and drier grass, or gold, rust and straw. |
 | `sun` | Unit vector pointing towards the sun. |
 | `wallThickness` | Thickness of the wall between two neighbouring places. |

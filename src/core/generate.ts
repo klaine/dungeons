@@ -174,6 +174,18 @@ export function generateSite(seed: string): Site {
     const later = base.fork('later').next();
     setting.hour = later < 0.3 ? 'sunset' : later < 0.4 ? 'dusk' : later < 0.47 ? 'night' : 'evening';
   }
+  // The air, from a stream of its own. Mist lies in low ground when the day is young or done,
+  // and more in autumn; haze stands in the distance on any day, some days much more than
+  // others; and cloud is heaped, or lies in flat banks, which it does oftenest under a low sun
+  // and when there is much of it.
+  {
+    const air = base.fork('air');
+    const damp = { morning: 0.5, midday: 0.04, evening: 0.16, sunset: 0.4, dusk: 0.58, night: 0.46 }[setting.hour];
+    setting.mist = Math.round(Math.min(1, Math.max(0, damp + air.range(-0.28, 0.3) + (setting.season === 'autumn' ? 0.14 : 0))) * 100) / 100;
+    setting.haze = Math.round((0.3 + 0.7 * air.next()) * 100) / 100;
+    const low = setting.hour === 'morning' || setting.hour === 'sunset' || setting.hour === 'dusk';
+    setting.cloudForm = air.chance(0.2 + (low ? 0.3 : 0) + ((setting.cloud ?? 0) > 0.55 ? 0.2 : 0)) ? 'layered' : 'heaped';
+  }
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
   const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);

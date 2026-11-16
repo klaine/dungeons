@@ -102,43 +102,64 @@ export function turfColour(x: number, z: number, seed: number): [number, number,
  * The heights are ridged noise, summed the way water would have it: each finer layer counts for
  * less where the layers before it are already steep. That leaves sharp crests with long smooth
  * flanks below them and gullies between, which is what running water makes of a mountain, where
- * plain noise gives lumps. What covers the ground is then decided by its height and slope:
- * forest low down and in the gullies, pasture above it, bare rock in bands where it is steep,
- * scree below the faces, and snow on what is high and not too steep to hold it.
+ * plain noise gives lumps. What covers the ground is decided where it is drawn, by the material
+ * for far land, from the height and the hollowness recorded here at each point.
  */
-export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: number, seed: number, stone: [number, number, number] = [1, 1, 1]): void {
+export function layMountains(
+  rock: MeshBuilder, cx: number, cz: number, base: number, seed: number, stone: [number, number, number] = [1, 1, 1],
+  /** Called for each tree that stands on the nearer slopes: where, whether it is a fir, and a number between 0 and 1 of its own. */
+  tree?: (x: number, y: number, z: number, fir: boolean, own: number) => void,
+): void {
   const around = 560;
   const radii: number[] = [];
-  for (let r = 215; r <= 800; r += 5.5 + (r - 215) * 0.022) radii.push(r);
+  for (let r = 215; r <= 3050; r += 5.5 + (r - 215) * 0.022) radii.push(r);
   const rings = radii.length;
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(valueNoise2(x, z, s) * 2 - 1); return v * v; };
-  const height = (x: number, z: number): number => {
-    const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);
-    // The range is not a circle: it stands nearer in some quarters than others, and is higher in some.
-    const crest = 470 + 70 * Math.sin(a * 2 + seed) + 45 * Math.sin(a * 5 + seed * 1.7);
-    const swell = Math.exp(-(((r - crest) / (r < crest ? 150 : 230)) ** 2));
-    const massif = 0.4 + 1.1 * fbm2(x * 0.0022 + seed, z * 0.0022 - seed, 2);
-    let sum = 0, amp = 0.55, fx = x * 0.0034 + seed, fz = z * 0.0034 - seed * 0.7, sx = 0, sz = 0;
+  /** Ridges and gullies at a point, between 0 and about 1: `grain` is how many of the broadest to the metre. */
+  const relief = (x: number, z: number, grain: number, s: number, spacing: number): number => {
+    let sum = 0, amp = 0.55, fx = x * grain + s, fz = z * grain - s * 0.7, sx = 0, sz = 0;
     // No layer is finer than the sheet can draw here: one that was would come out as needles.
-    // The sheet is coarser the further off it is, so the far side of the range is plainer.
-    const spacing = Math.max(5.5 + (r - 215) * 0.022, (Math.PI * 2 * r) / around);
-    let wave = 1 / 0.0034;
+    // The sheet is coarser the further off it is, so the far side of a range is plainer.
+    let wave = 1 / grain;
     for (let o = 0; o < 6; o++) {
       const drawn = Math.min(1, Math.max(0, (wave / spacing - 4.5) / 4.5));
       wave /= 2.03;
       if (drawn <= 0) break;
       amp *= drawn;
-      const e = 0.02, v = ridge(fx, fz, seed + o * 13);
+      const e = 0.02, v = ridge(fx, fz, s + o * 13);
       // How steep this layer is here, added to the steepness of those before it.
-      sx += (ridge(fx + e, fz, seed + o * 13) - v) / e * amp;
-      sz += (ridge(fx, fz + e, seed + o * 13) - v) / e * amp;
+      sx += (ridge(fx + e, fz, s + o * 13) - v) / e * amp;
+      sz += (ridge(fx, fz + e, s + o * 13) - v) / e * amp;
       sum += (amp * v) / (1 + 0.9 * (sx * sx + sz * sz));
       amp *= 0.5;
       // Each layer is turned as well as shrunk, so that none lines up with the last.
       const nx = (fx * 0.8 - fz * 0.6) * 2.03, nz = (fx * 0.6 + fz * 0.8) * 2.03;
       fx = nx; fz = nz;
     }
-    return base - 6 + swell * massif * (26 + 215 * sum);
+    return sum;
+  };
+  /**
+   * Three ranges, one behind another, so that looking out there is always a nearer hill in
+   * front of a further one: wooded foothills a few hundred metres off, the mountains behind
+   * them, and far behind those a range several times as high, which is what goes up into the
+   * cloud. Between each two the ground comes down again, and that is where mist lies.
+   */
+  const height = (x: number, z: number): number => {
+    const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);
+    const spacing = Math.max(5.5 + (r - 215) * 0.022, (Math.PI * 2 * r) / around);
+    let y = base - 6;
+    // None of them is a circle: each stands nearer in some quarters than others, and higher in some.
+    const footCrest = 292 + 26 * Math.sin(a * 3 + seed * 2.3) + 14 * Math.sin(a * 7 - seed);
+    const foot = Math.exp(-(((r - footCrest) / (r < footCrest ? 44 : 40)) ** 2));
+    // (Cut by gullies, like the range behind them: a hill with no water running off it is a lump.)
+    if (foot > 0.004) y += foot * (8 + 105 * fbm2(x * 0.0055 - seed, z * 0.0055 + seed * 1.3, 3) ** 1.5 * (0.5 + 1.1 * relief(x, z, 0.0085, seed + 7, spacing)));
+    const crest = 470 + 70 * Math.sin(a * 2 + seed) + 45 * Math.sin(a * 5 + seed * 1.7);
+    const swell = Math.exp(-(((r - crest) / (r < crest ? 95 : 230)) ** 2));
+    if (swell > 0.004) y += swell * (0.4 + 1.1 * fbm2(x * 0.0022 + seed, z * 0.0022 - seed, 2)) * (26 + 215 * relief(x, z, 0.0034, seed, spacing));
+    const farCrest = 1700 + 260 * Math.sin(a * 2 + seed * 0.6) + 170 * Math.sin(a * 3 - seed * 1.9);
+    const far = Math.exp(-(((r - farCrest) / (r < farCrest ? 520 : 800)) ** 2));
+    if (far > 0.004) y += far * (0.35 + 1.2 * fbm2(x * 0.0007 - seed, z * 0.0007 + seed, 2)) * (40 + 740 * relief(x, z, 0.0011, seed + 40, spacing));
+    return y;
   };
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
   for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
@@ -147,14 +168,16 @@ export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: nu
     H[o] = height(X[o], Z[o]);
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
-  // Any point still standing far above all four of its neighbours is a spike, not a summit, and is brought down.
-  for (let pass = 0; pass < 3; pass++) {
+  // Rock does not stand in needles. Anything steeper than rock holds for long is worn down to
+  // what it holds: a point may stand above its lowest neighbour only so far as the distance
+  // between them allows. A tower two points wide goes in a few passes; a broad face is left.
+  for (let pass = 0; pass < 10; pass++) {
     const was = H.slice();
     for (let ri = 1; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
       const o = ri * around + k;
-      const top = Math.max(was[at(ri, k + 1)], was[at(ri, k - 1)], was[at(ri + 1, k)], was[at(ri - 1, k)]);
-      const span = Math.hypot(X[at(ri, k + 1)] - X[o], Z[at(ri, k + 1)] - Z[o]) + (radii[ri + 1] - radii[ri]);
-      if (was[o] > top + span * 0.2) H[o] = top + span * 0.2;
+      const along = Math.hypot(X[at(ri, k + 1)] - X[o], Z[at(ri, k + 1)] - Z[o]), across = radii[ri + 1] - radii[ri];
+      const most = Math.min(Math.min(was[at(ri, k + 1)], was[at(ri, k - 1)]) + along * 1.25, Math.min(was[at(ri + 1, k)], was[at(ri - 1, k)]) + across * 1.25);
+      if (was[o] > most) H[o] = most;
     }
   }
   const ids = new Int32Array(rings * around);
@@ -170,24 +193,37 @@ export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: nu
     // Whether the ground here is a hollow or a crest, from how it stands against its neighbours.
     const span = Math.hypot(ax, az) * 0.5 + Math.hypot(bx, bz) * 0.5;
     const hollow = Math.min(1, Math.max(-1, (((H[e] + H[w] + H[n] + H[s]) / 4 - y) / span) * 9));
-    const h = (y - base) / 190, steep = Math.min(1, Math.max(0, (0.8 - ny) / 0.3));
-    const patch = fbm2(x * 0.011 + seed, z * 0.011, 3), fine = fbm2(x * 0.05, z * 0.05 + seed, 2);
-    // Rock: in beds some metres thick, each its own shade, darker where it is steep and in hollows.
-    const bed = hash01(Math.floor((y + x * 0.06 + patch * 30) / 9), seed);
-    const tone = (0.5 + 0.28 * bed + 0.22 * patch) * (1 - 0.3 * steep) * (1 - 0.28 * Math.max(0, hollow));
-    let r = 0.37 * tone * (0.6 + 0.4 * stone[0]), g = 0.37 * tone * (0.6 + 0.4 * stone[1]), b = 0.4 * tone * (0.6 + 0.4 * stone[2]);
-    const lay = (cr: number, cg: number, cb: number, w: number) => { r += (cr - r) * w; g += (cg - g) * w; b += (cb - b) * w; };
-    const sm = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
-    // Scree: pale and even, on slopes below the faces that are neither steep nor level.
-    lay(0.33, 0.32, 0.31, 0.6 * sm((h - 0.3) / 0.2) * (1 - steep) * sm((0.93 - ny) / 0.1));
-    // Pasture above the trees, on what is not too steep.
-    lay(0.16, 0.2, 0.08, sm((0.62 - h + 0.15 * (patch - 0.5)) / 0.12) * (1 - steep) * 0.85);
-    // Forest low down, reaching higher up the gullies than on the spurs between them.
-    lay(0.06 + 0.03 * fine, 0.13 + 0.05 * fine, 0.06, sm((0.36 - h + 0.12 * hollow + 0.2 * (patch - 0.5)) / 0.08) * (1 - 0.8 * steep));
-    // Snow on what is high, lying deeper in hollows and blown off what is steep.
-    const snow = sm((h - 0.6 + 0.12 * hollow + 0.1 * (patch - 0.5)) / 0.1) * sm((ny - 0.5) / 0.22);
-    lay(1.3, 1.34, 1.42, snow);
-    ids[o] = rock.addVertex(x, y, z, nx, ny, nz, x * 0.012, z * 0.012, r, g, b);
+    // The far range is several times as high, and its woods, pastures and snow lie as much higher.
+    const far = Math.min(1, Math.max(0, (radii[ri] - 800) / 500));
+    const h = (y - base) / (190 * (1 + 2.3 * far * far * (3 - 2 * far)));
+    // The sheet carries the colour of the bare stone and, for whatever draws it, how high this
+    // point stands in its range and how much of a hollow it is. What covers the ground is worked
+    // out from those where it is drawn, point by point of the picture: see the far material.
+    const r = 0.37 * (0.6 + 0.4 * stone[0]), g = 0.37 * (0.6 + 0.4 * stone[1]), b = 0.4 * (0.6 + 0.4 * stone[2]);
+    ids[o] = rock.addVertex(x, y, z, nx, ny, nz, x * 0.012, z * 0.012, r, g, b, 0, 0, hollow, h);
+  }
+  // Trees on the nearer slopes, where a hillside is close enough for its skyline to be seen
+  // toothed with them. They stand where the far material paints woods: low down, up the
+  // gullies, and not on what is steep. Fewer the further off, since less of each is seen.
+  if (tree) {
+    const own = (i: number, salt: number) => { let v = Math.imul(i + 1, 374761393) ^ Math.imul(salt + Math.floor(seed * 977), 668265263); v = Math.imul(v ^ (v >>> 13), 1274126177); return ((v ^ (v >>> 16)) >>> 0) / 4294967296; };
+    for (let ri = 0; ri < rings - 1 && radii[ri] < 440; ri++) for (let k = 0; k < around; k++) {
+      const a = at(ri, k), b = at(ri, k + 1), c = at(ri + 1, k + 1), d = at(ri + 1, k);
+      const area = Math.hypot(X[b] - X[a], Z[b] - Z[a]) * (radii[ri + 1] - radii[ri]);
+      const want = area / (22 + (radii[ri] - 240) * 0.22), n = Math.floor(want) + (own(a, 1) < want % 1 ? 1 : 0);
+      for (let j = 0; j < n; j++) {
+        const u = own(a * 7 + j, 2), v = own(a * 7 + j, 3);
+        const x = (X[a] * (1 - u) + X[b] * u) * (1 - v) + (X[d] * (1 - u) + X[c] * u) * v, z = (Z[a] * (1 - u) + Z[b] * u) * (1 - v) + (Z[d] * (1 - u) + Z[c] * u) * v;
+        const y = (H[a] * (1 - u) + H[b] * u) * (1 - v) + (H[d] * (1 - u) + H[c] * u) * v;
+        // How steep the cell is, from its fall across and along.
+        const fall = Math.max(Math.abs(H[b] - H[a]) / Math.hypot(X[b] - X[a], Z[b] - Z[a]), Math.abs(H[d] - H[a]) / (radii[ri + 1] - radii[ri]));
+        const hollow = Math.min(1, Math.max(-1, (((H[at(ri, k + 2)] + H[at(ri, k - 1)] + H[at(ri + 2, k)] + H[at(ri - 1, k)]) / 4 - y) / (radii[ri + 1] - radii[ri])) * 4));
+        const patch = fbm2(x * 0.03 + seed, z * 0.03 - seed, 2) - 0.5;
+        const wooded = 0.37 - (y - base) / 190 + 0.13 * hollow + 0.42 * patch;
+        if (wooded < 0.02 * own(a * 7 + j, 4) || fall > 0.85) continue;
+        tree(x, y, z, fbm2(x * 0.011 + 5, z * 0.011 + 5, 1) + ((y - base) / 190 - 0.2) * 0.5 > 0.5, own(a * 7 + j, 5));
+      }
+    }
   }
   // The near edge of the sheet is turned down into the ground, so that from the air nobody sees
   // under the foot of the mountains to the sky beyond.
@@ -206,10 +242,4 @@ export function layMountains(rock: MeshBuilder, cx: number, cz: number, base: nu
     rock.addTriangle(a, b, c);
     rock.addTriangle(a, c, d);
   }
-}
-
-function hash01(i: number, seed: number): number {
-  let h = Math.imul(i, 374761393) ^ Math.imul(Math.floor(seed * 977), 668265263);
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }

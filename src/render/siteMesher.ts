@@ -808,7 +808,20 @@ export function meshSite(site: Site): SceneDescription {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 6,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
-    layMountains(sceneryMesh('rock'), cxA, czA, p.floor + 30, s2, stoneTint);
+    // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
+    wild.group = 'soft';
+    const farLand = wild.mesh('far');
+    wild.group = 'wild';
+    // On the nearer hillsides the woods have trees standing in them: each a single tuft of
+    // cards with a whole tree painted on it, in the colours of the season.
+    layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
+      const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
+      const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
+      planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
+    });
+    // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
+    const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
+    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
 
     // ---- what lies and grows in the valley
     const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
@@ -1457,6 +1470,7 @@ export function meshSite(site: Site): SceneDescription {
     scenery.cards.push(...planting.sets);
   };
   const planting = new Planting();
+  let farCover: { wood: [number, number, number]; grass: [number, number, number] } | undefined;
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
   const waters: { x: number; z: number; r: number; level: number; outline?: number[] }[] = [];
@@ -1874,7 +1888,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
-    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud },
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: approach.floor },
     doors,
     anchors,
     furnishing,
@@ -1884,6 +1898,7 @@ export function meshSite(site: Site): SceneDescription {
     fences,
     water: waters,
     streams: flows,
+    far: farCover,
     finds,
   };
 }

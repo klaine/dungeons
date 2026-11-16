@@ -42,7 +42,7 @@ export interface DoorDesc {
  */
 export interface CardSet {
   /** What is painted on the cards. */
-  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle';
+  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle' | 'fir' | 'tree';
   /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
   shape: 'tuft' | 'card';
   /** Whether the cards cast shadows. */
@@ -78,6 +78,8 @@ export interface SceneDescription {
     colour: [number, number, number]; intensity: number; sky: { zenith: number[]; horizon: number[]; ground: number[] };
     /** Where the sun itself stands, if not where the light comes from; how far the stars are out; how far eyes open; how much cloud. */
     disc?: [number, number, number]; night?: number; eyes?: number; cloud?: number;
+    /** The air: whether cloud lies in flat banks, how much mist is in the low ground and how much haze in the distance (each 0 to 1), and how high the valley floor is, which the mist lies on. */
+    layered?: boolean; mist?: number; haze?: number; floor?: number;
   };
   /** A one-line description to show the player. */
   title?: string;
@@ -106,6 +108,8 @@ export interface SceneDescription {
   water?: { x: number; z: number; r: number; level: number; outline?: number[] }[];
   /** Running water: the middle of its surface as x, y and z in turn, from where it rises to where it ends, and its breadth. Optionally how far it reaches to the left and right of each point and how much of it shows there (0 to 1). */
   streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
+  /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */
+  far?: { wood: [number, number, number]; grass: [number, number, number] };
   /** Small things left lying about for whoever walks that far. */
   finds?: { at: Vector3; what: string }[];
 }

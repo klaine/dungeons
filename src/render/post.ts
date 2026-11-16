@@ -19,6 +19,13 @@ import { FullScreenQuad, Pass } from 'three/addons/postprocessing/Pass.js';
  * bases and bright edges against the sun. Looking at the land, the same question is asked of the
  * line from each point to the sun, and the answer is the shadow of the cloud passing over it.
  * After dark the stars and the moon are drawn here too, behind the clouds.
+ *
+ * And it is what gives the land its distance. Fog that is walked through reaches only a stone's
+ * throw from the eye; beyond that the air is reckoned, not walked: how much of it lies along
+ * each line of sight, thinning with height, and with it how far the land there has faded into
+ * the colour of the sky behind it. So one ridge stands paler than the ridge in front, mist
+ * lies in the low ground with the hilltops standing out of it, and cloud is in front of
+ * whatever it is nearer than, peaks included.
  */
 
 const MAX_LIGHTS = 4;
@@ -81,6 +88,15 @@ export class AtmospherePass extends Pass {
       uGlowDir: { value: new Vector3(0, 0, 1) },
       uGlow: { value: new Vector3() },
       uNight: { value: 0 },
+      // The air at a distance: see AIR below. With no picture of the sky given, there is none.
+      tSky: { value: null },
+      uAirOn: { value: 0 },
+      uHaze: { value: new Vector3(0.0004, 300, 0) },
+      uMist: { value: new Vector3(0, 4, 0) },
+      uMistFar: { value: new Vector4(0, 10, 24, 170) },
+      uAirCentre: { value: new Vector3() },
+      uGlare: { value: new Vector3() },
+      uCloudFlat: { value: 0 },
     };
 
     this.quad = new FullScreenQuad(new ShaderMaterial({
@@ -251,7 +267,7 @@ function depthTarget(size: number): WebGLRenderTarget {
  */
 export const CLOUDS = /* glsl */ `
 uniform sampler3D tCloud;
-uniform float uCloudCover, uCloudBase, uCloudTop;
+uniform float uCloudCover, uCloudBase, uCloudTop, uCloudFlat;
 uniform vec3 uCloudDrift, uCloudSun, uCloudAir, uSunDir;
 
 float phaseHG(float c, float g) {
@@ -264,7 +280,8 @@ float phaseHG(float c, float g) {
 float cloudAt(vec3 p, bool fine) {
   float h = (p.y - uCloudBase) / (uCloudTop - uCloudBase);
   if (h <= 0.0 || h >= 1.0) return 0.0;
-  vec3 q = p / 1150.0 + uCloudDrift;
+  // Cloud in flat banks is the same cloud drawn out one way, in a layer too thin to heap up.
+  vec3 q = p * vec3(mix(1.0, 0.4, uCloudFlat), 1.0, mix(1.0, 1.2, uCloudFlat)) / 1150.0 + uCloudDrift;
   float shape = texture(tCloud, q).r;
   // The more of the sky the day gives to cloud, the lower the bar a piece of air must clear to
   // be cloud. The bar rises with height, so a cloud is broad at its flat base and only its
@@ -293,11 +310,11 @@ float cloudShade(vec3 p) {
   return 1.0 - exp(-through * 1.1);
 }
 
-// Clouds along a line of sight: the light they send, and the share of what is behind them
-// that still comes through.
-vec4 cloudMarch(vec3 ro, vec3 rd, float jitter) {
+// Clouds along a line of sight, as far as \`reach\`: the light they send, and the share of what
+// is behind them that still comes through.
+vec4 cloudMarch(vec3 ro, vec3 rd, float jitter, float reach) {
   if (rd.y < 0.015) return vec4(0.0, 0.0, 0.0, 1.0);
-  float t0 = max((uCloudBase - ro.y) / rd.y, 0.0), t1 = min((uCloudTop - ro.y) / rd.y, 14000.0);
+  float t0 = max((uCloudBase - ro.y) / rd.y, 0.0), t1 = min(min((uCloudTop - ro.y) / rd.y, 14000.0), reach);
   if (t1 <= t0) return vec4(0.0, 0.0, 0.0, 1.0);
   float dt = (t1 - t0) / float(CLOUD_STEPS);
   float t = t0 + dt * jitter;
@@ -330,6 +347,60 @@ vec4 cloudMarch(vec3 ro, vec3 rd, float jitter) {
 
 `;
 
+/**
+ * The air at a distance, as shader code. Air is thickest low down and thins upward, so the
+ * amount of it along a line of sight can be written down without walking the line. There are
+ * three such layers: haze, which is everywhere and deep; mist, which is thick and lies a few
+ * metres deep on the valley floor; and the mist of the country beyond the valley, which lies on
+ * its own, higher, ground and begins some way out. What the land fades into is the sky low
+ * down in the same direction, read from a small picture of the sky, so that hills against a
+ * sunset fade to gold and hills away from it to blue.
+ */
+export const AIR = /* glsl */ `
+uniform samplerCube tSky;
+uniform float uAirOn;
+uniform vec3 uHaze, uMist, uAirCentre, uGlare;
+uniform vec4 uMistFar;
+uniform vec3 uSkyZenith, uSkyHorizon, uGlowDir, uGlow;
+
+// What the sky has after sunset that the daytime sky does not: a faint light of its own, and a glow where the sun went down.
+vec3 skyAfterDark(vec3 rd) {
+  float up = clamp(rd.y, 0.0, 1.0);
+  return mix(uSkyHorizon, uSkyZenith, pow(up, 0.45)) + uGlow * pow(max(dot(normalize(rd.xz), normalize(uGlowDir.xz)), 0.0), 4.0) * exp(-up * 5.5);
+}
+
+// The colour distance takes: the sky a little above the horizon, that way.
+vec3 airColour(vec3 rd) {
+  vec3 low = normalize(vec3(rd.x, 0.07 + 0.25 * max(rd.y, 0.0), rd.z));
+  vec3 sky = textureLod(tSky, low, 2.0).rgb;
+  // Towards the sun the sky is many times brighter than anything can be shown; it is brought
+  // down whole, keeping its colour, or the haze there would go through every colour to white.
+  return sky * min(1.0, 1.25 / max(max(sky.r, sky.g), max(sky.b, 0.001))) + skyAfterDark(low);
+}
+
+// How much air of one layer lies along a line of sight between two distances. A layer is
+// (thickness at its own level, the height over which it thins to a third, its level).
+float airAlong(vec3 layer, float y, float dy, float ta, float tb) {
+  if (tb <= ta || layer.x <= 0.0) return 0.0;
+  float ya = max((y + dy * ta - layer.z) / layer.y, -1.0), yb = max((y + dy * tb - layer.z) / layer.y, -1.0);
+  float thick = abs(yb - ya) < 0.001 ? exp(-ya) : (exp(-ya) - exp(-yb)) / (yb - ya);
+  return layer.x * thick * (tb - ta);
+}
+
+// All the air beyond \`from\` along a line of sight that ends at \`reach\`: x is haze, y is mist.
+vec2 airBeyond(vec3 ro, vec3 rd, float from, float reach, float hazeTo) {
+  float haze = airAlong(uHaze, ro.y, rd.y, 0.0, hazeTo);
+  float mist = airAlong(uMist, ro.y, rd.y, from, reach) * 0.85;
+  // The far country's mist begins where a line of sight leaves the valley.
+  vec2 o = ro.xz - uAirCentre.xz;
+  float a = dot(rd.xz, rd.xz), b = dot(o, rd.xz), c = dot(o, o) - uMistFar.w * uMistFar.w;
+  float leaves = c > 0.0 ? 0.0 : a < 1e-6 ? 1e9 : (-b + sqrt(max(b * b - a * c, 0.0))) / a;
+  mist += airAlong(vec3(uMistFar.x, uMistFar.y, uMistFar.z), ro.y, rd.y, max(leaves, from), reach);
+  return vec2(haze, mist);
+}
+
+`;
+
 const FRAGMENT = /* glsl */ `
 precision highp float;
 precision highp sampler3D;
@@ -344,7 +415,6 @@ uniform float uDensity, uIndoorDensity, uFrame, uEnabled;
 uniform vec4 uLightPos[MAX_LIGHTS];
 uniform vec3 uLightCol[MAX_LIGHTS];
 uniform float uCloudOn, uShade, uNight;
-uniform vec3 uSkyZenith, uSkyHorizon, uGlowDir, uGlow;
 
 float ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 
@@ -357,6 +427,14 @@ float seen(sampler2D map, mat4 vp, vec3 p, float bias) {
 }
 
 ${CLOUDS}
+${AIR}
+// How thick the mist is at a point near the eye. It lies in drifts, not evenly.
+float mistAt(vec3 p) {
+  if (uMist.x <= 0.0) return 0.0;
+  float d = uMist.x * exp(-max((p.y - uMist.z) / uMist.y, -1.0));
+  return d * (uCloudOn > 0.5 ? 1.7 * smoothstep(0.28, 0.72, texture(tCloud, p * vec3(0.021, 0.05, 0.021) + uCloudDrift * 9.0).r) : 0.85);
+}
+
 void main() {
   // The sun's disc is thousands of times brighter than anything else; left alone, bloom spreads it over the whole view.
   vec3 col = min(texture2D(tColor, vUv).rgb, vec3(6.0));
@@ -367,12 +445,11 @@ void main() {
   vec3 rd = wp - uCamPos;
   float dist = length(rd);
   rd /= dist;
-  if (depth > 0.999999) {
+  bool open = depth > 0.999999;
+  if (open) {
     // Open sky. After sunset it has a faint light of its own, a glow where the sun went down,
     // and stars; then the moon; then the clouds in front of all of them.
-    float up = clamp(rd.y, 0.0, 1.0);
-    col += mix(uSkyHorizon, uSkyZenith, pow(up, 0.45));
-    col += uGlow * pow(max(dot(normalize(rd.xz), normalize(uGlowDir.xz)), 0.0), 4.0) * exp(-up * 5.5);
+    col += skyAfterDark(rd);
     if (uNight > 0.0) {
       vec3 g = rd * 190.0, c = floor(g), f = fract(g) - 0.5;
       float star = fract(sin(dot(c, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -380,7 +457,7 @@ void main() {
       float moon = smoothstep(0.99982, 0.99988, dot(rd, uSunDir)) * step(0.5, uNight);
       col = mix(col, vec3(1.5, 1.62, 1.85) * (0.82 + 0.18 * fract(sin(dot(floor(rd * 900.0), vec3(12.9, 78.2, 37.7))) * 4375.5)), moon);
     }
-    if (uCloudOn > 0.5) { vec4 cloud = cloudMarch(uCamPos, rd, ign(gl_FragCoord.xy)); col = col * cloud.a + cloud.rgb; }
+    if (uCloudOn > 0.5) { vec4 cloud = cloudMarch(uCamPos, rd, ign(gl_FragCoord.xy), 1e9); col = col * cloud.a + cloud.rgb; }
   } else if (uCloudOn > 0.5 && uShade > 0.0) {
     // Land: the shadow of whatever cloud stands between it and the sun, where the sun would
     // otherwise reach it and it lies under the sky.
@@ -395,6 +472,9 @@ void main() {
   float phase = mix(phaseHG(c, 0.55), 0.0796, 0.35);
   vec3 scatter = vec3(0.0);
   float trans = 1.0;
+  vec3 air = uAirOn > 0.5 ? airColour(rd) : vec3(0.0);
+  // Whether the walk ended under the sky: if it did, the mist goes on from there.
+  float outside = 1.0;
   for (int i = 0; i < STEPS; i++) {
     vec3 p = uCamPos + rd * t;
     float sky = seen(tSkyDepth, uSkyVP, p, 0.0006);
@@ -402,9 +482,22 @@ void main() {
     // Still air indoors holds more dust than the open courtyard.
     float dens = uDensity * mix(uIndoorDensity, 1.0, sky) * exp(-max(p.y, 0.0) * 0.06);
     vec3 light = uSunColor * sun * phase + uSkyColor * sky * 0.0796;
-    scatter += trans * light * dens * dt;
-    trans *= exp(-dens * dt);
+    // Mist is out of doors only, and is a little darker where the house's shadow lies through it.
+    float mist = uAirOn > 0.5 ? mistAt(p) * sky : 0.0;
+    scatter += trans * (light * dens + air * mist * mix(0.55, 1.0, sun)) * dt;
+    trans *= exp(-(dens + mist) * dt);
+    outside = sky;
     t += dt;
+  }
+  if (uAirOn > 0.5) {
+    // Beyond that walk, the air is reckoned. Open sky has its own haze already and takes only the mist.
+    vec2 thick = airBeyond(uCamPos, rd, tMax, open ? 1e5 : dist, open ? 0.0 : dist);
+    thick.y *= outside;
+    float through = exp(-thick.x - thick.y);
+    // Towards a low sun the haze itself is alight.
+    col = col * through + air * (1.0 - through) + uGlare * phaseHG(c, 0.76) * (1.0 - exp(-thick.x * 1.5));
+    // Cloud that is nearer than the land stands in front of it: so peaks go up into cloud.
+    if (!open && uCloudOn > 0.5) { vec4 cloud = cloudMarch(uCamPos, rd, ign(gl_FragCoord.xy), dist); col = col * cloud.a + cloud.rgb; }
   }
   // Glow round local lights: closed-form integral of inverse-square falloff along the ray.
   for (int i = 0; i < MAX_LIGHTS; i++) {

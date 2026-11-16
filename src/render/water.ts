@@ -1,6 +1,6 @@
-import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, Scene, ShaderMaterial, Texture, Vector2, Vector3, WebGLRenderer } from 'three';
+import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DepthTexture, Matrix4, Mesh, MeshStandardMaterial, PlaneGeometry, RepeatWrapping, Scene, ShaderMaterial, Texture, Vector2, Vector3, WebGLRenderer } from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { CLOUDS } from './post';
+import { AIR, CLOUDS } from './post';
 import { Rng } from '../core/rng';
 
 /**
@@ -43,6 +43,29 @@ function rippleMap(size = 256): Texture {
 }
 
 /**
+ * What water mirrors is seen through as much air as lies along the whole way to it: from the
+ * eye down to the water and on up to the thing. The picture the water mirrors is drawn without
+ * air, so the air is put in here, as it is for the land itself, from how far off the picture
+ * says each thing in it is. Without this a far hill would stand sharper and darker in the lake
+ * than it stands above it.
+ */
+const HAZED = /* glsl */ `
+uniform sampler2D tFar;
+uniform mat4 uUnproject;
+${AIR}
+vec3 hazed( vec3 shown, vec4 at, vec3 from, vec3 dir ) {
+  if ( uAirOn < 0.5 ) return shown;
+  vec3 ndc = vec3( at.xy / at.w, texture2DProj( tFar, at ).x ) * 2.0 - 1.0;
+  vec4 back = uUnproject * vec4( ndc, 1.0 );
+  // That is how far the thing is from the eye by way of the water; the air between eye and water is put in with the land's.
+  float far = max( length( back.xyz / back.w ) - distance( cameraPosition, from ), 0.0 );
+  vec2 thick = airBeyond( from, dir, 0.0, far, far );
+  float through = exp( -thick.x - thick.y );
+  return shown * through + airColour( dir ) * ( 1.0 - through );
+}
+`;
+
+/**
  * How still water is shaded when it is a mirror. The scene is drawn a second time, upside down
  * as the water would show it, and that picture is laid on the surface: so the far bank, the
  * trees and the mountains stand in the water as they stand above it. Ripples bend the picture a
@@ -55,7 +78,10 @@ const MIRROR = {
     color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: null },
     tRipples: { value: null as Texture | null }, uTime: { value: 0 }, uDeep: { value: new Vector3(0.02, 0.05, 0.045) },
     // The sky's weather, shared with whatever draws the sky: see `mirrorSky`.
-    tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudCover: { value: 0 }, uCloudBase: { value: 260 }, uCloudTop: { value: 620 },
+    tSky: { value: null }, uAirOn: { value: 0 }, uHaze: { value: new Vector3() }, uMist: { value: new Vector3() }, uMistFar: { value: null }, uAirCentre: { value: new Vector3() }, uGlare: { value: new Vector3() },
+    uSkyZenith: { value: new Vector3() }, uSkyHorizon: { value: new Vector3() }, uGlowDir: { value: new Vector3(0, 0, 1) }, uGlow: { value: new Vector3() },
+    tFar: { value: null }, uUnproject: { value: new Matrix4() },
+    tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudCover: { value: 0 }, uCloudBase: { value: 260 }, uCloudTop: { value: 620 }, uCloudFlat: { value: 0 },
     uCloudDrift: { value: new Vector3() }, uCloudSun: { value: new Vector3() }, uCloudAir: { value: new Vector3() }, uSunDir: { value: new Vector3(0, 1, 0) },
   },
   vertexShader: /* glsl */ `
@@ -77,6 +103,7 @@ uniform sampler2D tDiffuse;
 uniform sampler2D tRipples;
 uniform float uTime, uCloudOn;
 ${CLOUDS}
+${HAZED}
 uniform vec3 uDeep;
 varying vec4 vUv;
 varying vec3 vWorld;
@@ -96,10 +123,12 @@ void main() {
   vec3 seen = picture.rgb;
   // Where the picture shows open sky, the clouds are put into it: they are not things in the
   // scene, and so were not in the picture.
-  if ( uCloudOn > 0.5 && picture.a < 0.5 ) {
-    vec4 cloud = cloudMarch( vWorld, reflect( -view, normal ), 0.5 );
-    seen = seen * cloud.a + cloud.rgb;
-  }
+  if ( picture.a < 0.5 ) {
+    if ( uCloudOn > 0.5 ) {
+      vec4 cloud = cloudMarch( vWorld, reflect( -view, normal ), 0.5, 1e9 );
+      seen = seen * cloud.a + cloud.rgb;
+    }
+  } else seen = hazed( seen, at, vWorld, reflect( -view, normal ) );
   // The glare of the sun's own disc is spread by the ripples; unspread it would be a hard white dot.
   seen = min( seen, vec3( 9.0 ) );
   vec3 colour = mix( uDeep, seen, mirror );
@@ -148,6 +177,7 @@ uniform sampler2D tRipples;
 uniform mat4 uPicture;
 uniform float uPictured, uLevel, uTime, uCloudOn;
 ${CLOUDS}
+${HAZED}
 uniform vec3 uDeep, uZenith, uHorizon, uLand, uFoam;
 varying vec3 vWorld;
 varying vec2 vFlow;
@@ -176,10 +206,12 @@ void main() {
     at.xy += ripple * 0.22 * at.w;
     vec4 picture = texture2DProj( tDiffuse, at );
     vec3 shown = picture.rgb;
-    if ( uCloudOn > 0.5 && picture.a < 0.5 ) {
-      vec4 cloud = cloudMarch( vWorld, dir, 0.5 );
-      shown = shown * cloud.a + cloud.rgb;
-    }
+    if ( picture.a < 0.5 ) {
+      if ( uCloudOn > 0.5 ) {
+        vec4 cloud = cloudMarch( vWorld, dir, 0.5, 1e9 );
+        shown = shown * cloud.a + cloud.rgb;
+      }
+    } else shown = hazed( shown, at, vWorld, dir );
     seen = mix( seen, min( shown, vec3( 9.0 ) ), uPictured );
   }
   vec3 colour = mix( uDeep, seen, mirror );
@@ -310,7 +342,10 @@ export class Water {
           uPicture: { value: new Matrix4() }, uPictured: { value: 0 }, uLevel: { value: this.level }, uTime: { value: 0 },
           uDeep: { value: vec(o.deep, 0.02, 0.05, 0.045) }, uZenith: { value: vec(o.zenith, 0.14, 0.28, 0.66) }, uHorizon: { value: vec(o.horizon, 0.6, 0.72, 0.88) },
           uLand: { value: vec(o.land, 0.02, 0.03, 0.015) }, uFoam: { value: vec(o.foam, 0.8, 0.8, 0.8) },
-          tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudCover: { value: 0 }, uCloudBase: { value: 260 }, uCloudTop: { value: 620 },
+          tSky: { value: null }, uAirOn: { value: 0 }, uHaze: { value: new Vector3() }, uMist: { value: new Vector3() }, uMistFar: { value: null }, uAirCentre: { value: new Vector3() }, uGlare: { value: new Vector3() },
+          uSkyZenith: { value: new Vector3() }, uSkyHorizon: { value: new Vector3() }, uGlowDir: { value: new Vector3(0, 0, 1) }, uGlow: { value: new Vector3() },
+          tFar: { value: null }, uUnproject: { value: new Matrix4() },
+          tCloud: { value: null }, uCloudOn: { value: 0 }, uCloudCover: { value: 0 }, uCloudBase: { value: 260 }, uCloudTop: { value: 620 }, uCloudFlat: { value: 0 },
           uCloudDrift: { value: new Vector3() }, uCloudSun: { value: new Vector3() }, uCloudAir: { value: new Vector3() }, uSunDir: { value: new Vector3(0, 1, 0) },
         },
         vertexShader: FLOW.vertexShader, fragmentShader: FLOW.fragmentShader, transparent: true, depthWrite: false,
@@ -375,13 +410,19 @@ export class Water {
 
   /** Has the mirror note when it makes its picture, and keeps out of that picture whatever is marked as not to be mirrored. */
   private watch(mirror: Reflector): void {
+    // The picture keeps how far off each thing in it is, for the air to be put in: see HAZED.
+    const target = mirror.getRenderTarget(), uniforms = (mirror.material as ShaderMaterial).uniforms;
+    target.depthTexture = new DepthTexture(target.width, target.height);
+    uniforms.tFar.value = target.depthTexture;
     const make = mirror.onBeforeRender;
     mirror.onBeforeRender = (renderer, scene, camera, ...rest) => {
-      mirror.getReflectionCamera(camera).layers.set(0);
+      const eye = mirror.getReflectionCamera(camera);
+      eye.layers.set(0);
       if (mirror === this.sheet) this.fresh = true;
       this.mirroring = true;
       make.call(mirror, renderer, scene, camera, ...rest);
       this.mirroring = false;
+      uniforms.uUnproject.value.copy(eye.projectionMatrix).invert();
     };
   }
 
@@ -400,6 +441,8 @@ export class Water {
       if (hidden) sheet.visible = false;
     }
     flowing.uniforms.uPicture.value.multiplyMatrices((sheet.material as ShaderMaterial).uniforms.textureMatrix.value, this.fromWorld);
+    flowing.uniforms.uUnproject.value.copy((sheet.material as ShaderMaterial).uniforms.uUnproject.value);
+    flowing.uniforms.tFar.value = sheet.getRenderTarget().depthTexture;
     // With the eye below the sheet there is no picture to be had; it gives way before that.
     flowing.uniforms.uPictured.value = Math.min(1, Math.max(0, (above - 0.1) / 0.6));
   }
@@ -409,9 +452,9 @@ export class Water {
     this.fresh = false;
   }
 
-  /** Lets still water mirror the clouds: `sky` is the uniforms of whatever draws them, shared and not copied, so they move together. */
+  /** Lets water mirror the clouds and the air: `sky` is the uniforms of whatever draws them, shared and not copied, so they move together. */
   mirrorSky(sky: Record<string, { value: unknown }>): void {
-    for (const m of this.flowing ? [...this.mirrors, this.flowing] : this.mirrors) for (const name of ['tCloud', 'uCloudOn', 'uCloudCover', 'uCloudBase', 'uCloudTop', 'uCloudDrift', 'uCloudSun', 'uCloudAir', 'uSunDir']) m.uniforms[name] = sky[name] as { value: unknown };
+    for (const m of this.flowing ? [...this.mirrors, this.flowing] : this.mirrors) for (const name of ['tCloud', 'uCloudOn', 'uCloudCover', 'uCloudBase', 'uCloudTop', 'uCloudFlat', 'tSky', 'uAirOn', 'uHaze', 'uMist', 'uMistFar', 'uAirCentre', 'uGlare', 'uSkyZenith', 'uSkyHorizon', 'uGlowDir', 'uGlow', 'uCloudDrift', 'uCloudSun', 'uCloudAir', 'uSunDir']) m.uniforms[name] = sky[name] as { value: unknown };
   }
 
   update(time: number): void {

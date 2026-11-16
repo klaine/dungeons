@@ -180,7 +180,7 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
       const a = (k / 5) * Math.PI * 2 + rng.range(-0.3, 0.3);
       twig(size / 2, size / 2, a, size * rng.range(0.3, 0.42), size * 0.018, 1);
     }
-  } else {
+  } else if (kind === 'needle') {
     // A conifer bough seen from above: a stem up the card with side shoots, all bristling with
     // needles, broad at the foot of the card (the trunk end is at the top).
     const shoot = (x0: number, y0: number, x1: number, y1: number, width: number) => {
@@ -206,6 +206,34 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
     for (let k = 0; k < 9; k++) {
       const f = 0.12 + 0.8 * (k / 9), y = 6 + (size - 14) * f, reach = (0.16 + 0.3 * f) * size;
       for (const side of [-1, 1]) shoot(size / 2, y, size / 2 + side * reach * rng.range(0.8, 1.05), y + reach * rng.range(0.45, 0.75), 12);
+    }
+  } else if (kind === 'fir') {
+    // A whole fir: a spire of drooping tiers, widest near the foot, each lighter at its edge.
+    // Painted solid, because it is only ever seen small, and what is thin would vanish.
+    ctx.fillStyle = grey(0.3);
+    ctx.fillRect(size * 0.485, size * 0.82, size * 0.03, size * 0.18);
+    for (let k = 0; k < 13; k++) {
+      const f = k / 12, y = size * (0.04 + 0.84 * f), half = size * (0.03 + 0.4 * Math.pow(f, 0.85)) * rng.range(0.85, 1.1), drop = size * 0.085;
+      for (const side of [-1, 1]) {
+        ctx.fillStyle = grey(rng.range(0.5, 0.72) + 0.25 * (1 - f));
+        ctx.beginPath();
+        ctx.moveTo(size / 2, y - drop * 0.6);
+        ctx.quadraticCurveTo(size / 2 + side * half * 0.6, y - drop * 0.1, size / 2 + side * half, y + drop * rng.range(0.7, 1.2));
+        ctx.lineTo(size / 2 + side * half * 0.5, y + drop * 0.55);
+        ctx.lineTo(size / 2, y + drop * 0.9);
+        ctx.fill();
+      }
+    }
+  } else if (kind === 'tree') {
+    // A whole broadleaved tree: a short trunk and a crown of rounded masses, lighter above.
+    ctx.fillStyle = grey(0.28);
+    ctx.fillRect(size * 0.475, size * 0.66, size * 0.05, size * 0.34);
+    for (let k = 0; k < 46; k++) {
+      const a = rng.range(0, Math.PI * 2), d = Math.sqrt(rng.next()), x = size * (0.5 + 0.34 * d * Math.cos(a)), y = size * (0.4 + 0.3 * d * Math.sin(a));
+      ctx.fillStyle = grey(0.5 + 0.45 * (1 - y / (size * 0.72)) + rng.range(-0.08, 0.08));
+      ctx.beginPath();
+      ctx.ellipse(x, y, size * rng.range(0.07, 0.13), size * rng.range(0.06, 0.1), rng.range(0, 3), 0, Math.PI * 2);
+      ctx.fill();
     }
   }
   const texture = new CanvasTexture(canvas);
@@ -235,10 +263,12 @@ export const vegetationRange = { value: 75 };
  * too far away to matter are dropped as well (see `cullCards`).
  */
 export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
-  const ground = set.kind !== 'leaf' && set.kind !== 'needle';
-  const block = ground ? 24 : 48;
+  // Whole trees stand far off, are never dropped for distance, and are drawn in large lots.
+  const whole = set.kind === 'fir' || set.kind === 'tree';
+  const ground = set.kind !== 'leaf' && set.kind !== 'needle' && !whole;
+  const block = whole ? 220 : ground ? 24 : 48;
   const base = shapeGeometry(set.shape);
-  const sway = ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
+  const sway = whole ? 0.004 : ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
   const material = new MeshStandardMaterial({
     map: texture, alphaTest: 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: true,
   });
@@ -276,7 +306,7 @@ void RE_Direct_Leaf( const in IncidentLight directLight, const in vec3 geometryP
   RE_Direct_Physical( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );
   float against = pow( saturate( dot( -geometryViewDir, directLight.direction ) ), 3.0 );
   float behind = saturate( -dot( geometryNormal, directLight.direction ) );
-  reflectedLight.directDiffuse += directLight.color * material.diffuseColor * RECIPROCAL_PI * vec3( 1.2, 1.25, 0.55 ) * ( against * 0.9 + behind * 0.22 );
+  reflectedLight.directDiffuse += directLight.color * material.diffuseColor * RECIPROCAL_PI * vec3( 1.2, 1.25, 0.55 ) * ( against * 0.9 + behind * 0.22 )${whole ? ' * 0.25' : ''};
 }
 #undef RE_Direct
 #define RE_Direct RE_Direct_Leaf`)
@@ -289,7 +319,7 @@ normal = normalize( vNormal );`)
 reflectedLight.indirectSpecular = vec3( 0.0 );
 reflectedLight.directSpecular *= 0.2;`);
   };
-  material.customProgramCacheKey = () => `cards4-${set.shape}-${sway}-${ground}`;
+  material.customProgramCacheKey = () => `cards5-${set.shape}-${sway}-${ground}-${whole}`;
   const depth = set.shadow ? new MeshDepthMaterial({ depthPacking: RGBADepthPacking, map: texture, alphaTest: 0.42 }) : null;
 
   // Which block each card falls in.

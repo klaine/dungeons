@@ -27,9 +27,12 @@ export class Planting {
   readonly reeds: CardSet = { kind: 'reed', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
   readonly leaves: CardSet = { kind: 'leaf', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
   readonly needles: CardSet = { kind: 'needle', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
+  /** Whole trees, each painted on one tuft of cards: for hillsides too far off for anything more. */
+  readonly firs: CardSet = { kind: 'fir', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
+  readonly farTrees: CardSet = { kind: 'tree', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
 
   get sets(): CardSet[] {
-    return [this.grass, this.flowers, this.ferns, this.herbs, this.reeds, this.leaves, this.needles].filter((s) => s.matrices.length > 0);
+    return [this.grass, this.flowers, this.ferns, this.herbs, this.reeds, this.leaves, this.needles, this.firs, this.farTrees].filter((s) => s.matrices.length > 0);
   }
 
   /** Adds a card whose place and size have just been composed, with its colour and the point its shading curves about. */
@@ -47,6 +50,12 @@ export class Planting {
   tuft(set: CardSet, x: number, y: number, z: number, width: number, height: number, yaw: number, colour: Colour): void {
     M.compose(P.set(x, y, z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(width, height, width));
     this.push(set, colour, x, y - 1000, z);
+  }
+
+  /** A whole tree far off, as one tuft: shaded as a rounded body about a point a third of the way up it. */
+  farTree(fir: boolean, x: number, y: number, z: number, width: number, height: number, yaw: number, colour: Colour): void {
+    M.compose(P.set(x, y, z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(width, height, width));
+    this.push(fir ? this.firs : this.farTrees, colour, x, y + height * 0.35, z);
   }
 
   /**
