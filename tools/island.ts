@@ -47,6 +47,10 @@ for (let k = 0; k < count; k++) {
       if (blocking) problems.push(`${where} ${key}: ${blocking} triangles across the doorway`);
     }
   }
+  // Nothing left to be found may stand inside the fences that keep the player on the island.
+  for (const f of scene.finds ?? []) {
+    if ((scene.fences ?? []).some((b) => f.at.x > b.min.x && f.at.x < b.max.x && f.at.z > b.min.z && f.at.z < b.max.z && f.at.y > b.min.y - 1 && f.at.y < b.max.y)) problems.push(`${f.what} is fenced off`);
+  }
   if (problems.length) failed++;
   console.log(`${seed}: ${site.setting.stone}, ${scene.fences?.length} fences, ${JSON.stringify(scene.planted)}, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock${problems.length ? ' | ' + problems.join('; ') : ''}`);
 }
