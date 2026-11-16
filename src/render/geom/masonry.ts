@@ -95,6 +95,24 @@ function splitRange(lo: number, hi: number, range: readonly [number, number], rn
   return out;
 }
 
+/**
+ * Whether a triangle next to a hole should be left out. Vertices inside a hole are moved to its
+ * edge, so most such triangles simply end there. Two cases must go: one whose corners were all
+ * inside, which collapses to nothing; and one whose corners were moved to opposite sides of the
+ * hole, which would stretch across it.
+ */
+function acrossHole(flag: ArrayLike<number | boolean>, before: Float32Array, after: Float32Array, a: number, b: number, c: number): boolean {
+  if (!flag[a] && !flag[b] && !flag[c]) return false;
+  if (flag[a] && flag[b] && flag[c]) return true;
+  const stretched = (i: number, j: number) => {
+    if (!flag[i] && !flag[j]) return false;
+    const was = Math.hypot(before[i * 2] - before[j * 2], before[i * 2 + 1] - before[j * 2 + 1]);
+    const now = Math.hypot(after[i * 2] - after[j * 2], after[i * 2 + 1] - after[j * 2 + 1]);
+    return now > was * 1.7 + 0.06;
+  };
+  return stretched(a, b) || stretched(b, c) || stretched(a, c);
+}
+
 function axisCoords(a: number, b: number, joint: number, bevel: number, maxSeg: number, openA: boolean, openB: boolean): number[] {
   const insetA = openA ? bevel : joint + bevel;
   const insetB = openB ? bevel : joint + bevel;
@@ -162,6 +180,8 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
       const rises = new Float32Array(nu * nv);
       const uvs = new Float32Array(nu * nv * 2);
       const holed = opts.hole ? new Uint8Array(nu * nv) : null;
+      const uvBefore = new Float32Array(nu * nv * 2);
+      const uvAfter = new Float32Array(nu * nv * 2);
 
       for (let j = 0; j < nv; j++) {
         for (let i = 0; i < nu; i++) {
@@ -196,6 +216,8 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
           uv[0] = u; uv[1] = v;
           if (holed && opts.hole!(u, v)) holed[j * nu + i] = 1;
           if (opts.clampUV) opts.clampUV(uv);
+          uvBefore[(j * nu + i) * 2] = u; uvBefore[(j * nu + i) * 2 + 1] = v;
+          uvAfter[(j * nu + i) * 2] = uv[0]; uvAfter[(j * nu + i) * 2 + 1] = uv[1];
           surface(uv[0], uv[1], P, N);
           const k = (j * nu + i) * 3;
           px[k] = P.x + N.x * h; px[k + 1] = P.y + N.y * h; px[k + 2] = P.z + N.z * h;
@@ -234,13 +256,17 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
         }
         const su = su2;
         const holeFlags: boolean[] = [];
+        const backBefore = new Float32Array((su + 1) * (sv + 1) * 2);
+        const backAfter = new Float32Array((su + 1) * (sv + 1) * 2);
         const b0 = mesh.vertexCount;
         for (let j = 0; j <= sv; j++) {
           for (let i = 0; i <= su; i++) {
             uv[0] = bu0 - grow + ((bu1 - bu0 + 2 * grow) * i) / su;
             uv[1] = bv0 - grow + ((bv1 - bv0 + 2 * grow) * j) / sv;
             holeFlags.push(nearHole && opts.hole!(uv[0], uv[1]));
+            backBefore[(j * (su + 1) + i) * 2] = uv[0]; backBefore[(j * (su + 1) + i) * 2 + 1] = uv[1];
             if (opts.clampUV) opts.clampUV(uv);
+            backAfter[(j * (su + 1) + i) * 2] = uv[0]; backAfter[(j * (su + 1) + i) * 2 + 1] = uv[1];
             surface(uv[0], uv[1], P, N);
             P.addScaledVector(N, back);
             fieldOut[0] = 0; fieldOut[1] = 0; fieldOut[2] = 0;
@@ -257,9 +283,10 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
         for (let j = 0; j < sv; j++) {
           for (let i = 0; i < su; i++) {
             const a = b0 + j * (su + 1) + i, b = a + 1, c = a + su + 1, d = c + 1;
-            if (holeFlags[a - b0] || holeFlags[b - b0] || holeFlags[c - b0] || holeFlags[d - b0]) continue;
-            if (backFlip) { mesh.addTriangle(a, c, b); mesh.addTriangle(b, c, d); }
-            else { mesh.addTriangle(a, b, c); mesh.addTriangle(b, d, c); }
+            const skip1 = acrossHole(holeFlags, backBefore, backAfter, a - b0, b - b0, c - b0);
+            const skip2 = acrossHole(holeFlags, backBefore, backAfter, b - b0, d - b0, c - b0);
+            if (backFlip) { if (!skip1) mesh.addTriangle(a, c, b); if (!skip2) mesh.addTriangle(b, c, d); }
+            else { if (!skip1) mesh.addTriangle(a, b, c); if (!skip2) mesh.addTriangle(b, d, c); }
           }
         }
       }
@@ -311,13 +338,14 @@ export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptio
           const b = a + 1;
           const c = a + nu;
           const d = c + 1;
-          if (holed && (holed[a - base] || holed[b - base] || holed[c - base] || holed[d - base])) continue;
+          const skip1 = holed !== null && acrossHole(holed, uvBefore, uvAfter, a - base, b - base, c - base);
+          const skip2 = holed !== null && acrossHole(holed, uvBefore, uvAfter, b - base, d - base, c - base);
           if (flip) {
-            mesh.addTriangle(a, c, b);
-            mesh.addTriangle(b, c, d);
+            if (!skip1) mesh.addTriangle(a, c, b);
+            if (!skip2) mesh.addTriangle(b, c, d);
           } else {
-            mesh.addTriangle(a, b, c);
-            mesh.addTriangle(b, d, c);
+            if (!skip1) mesh.addTriangle(a, b, c);
+            if (!skip2) mesh.addTriangle(b, d, c);
           }
         }
       }

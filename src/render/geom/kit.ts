@@ -23,6 +23,11 @@ export interface Opening {
   y0: number;
   /** Height at which the round arch springs. */
   ys: number;
+  /**
+   * Width of the band of dressed stone that will cover the cut edge of the wall on this face.
+   * Leave unset for the usual band; set to zero where the wall must run right up to the opening.
+   */
+  band?: number;
 }
 
 export interface Frame {
@@ -180,12 +185,14 @@ export class Kit {
     u0?: number; u1?: number;
   } = {}): void {
     const openings = o.openings ?? [];
-    const target = BAND * 0.5;
+    // Distance beyond the line each opening's wall is cut back to: half way under its band.
+    const target = 0;
     const sd = (u: number, y: number) => {
       let d = Infinity;
-      for (const op of openings) d = Math.min(d, openingSdf(op, u, y));
+      for (const op of openings) d = Math.min(d, openingSdf(op, u, y) - (op.band ?? BAND) * 0.5);
       return d;
     };
+    const inside = (u: number, y: number) => openings.some((op) => openingSdf(op, u, y) < -0.005);
     this.patch(material, planeSurface(f.a, f.dir, UP, f.normal), {
       u0: o.u0 ?? 0, u1: o.u1 ?? f.length, v0: y0, v1: y1, style,
       courseKey: o.courseKey ?? 'wall',
@@ -196,7 +203,7 @@ export class Kit {
         return !(sd(bu0, bv0) < target && sd(bu1, bv0) < target && sd(bu0, bv1) < target && sd(bu1, bv1) < target
           && sd((bu0 + bu1) / 2, (bv0 + bv1) / 2) < target);
       },
-      hole: openings.length ? (u, v) => sd(u, v) < -0.005 : undefined,
+      hole: openings.length ? inside : undefined,
       clampUV: openings.length ? (uv) => {
         for (let it = 0; it < 3; it++) {
           const d = sd(uv[0], uv[1]);

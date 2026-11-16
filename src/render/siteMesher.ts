@@ -64,9 +64,11 @@ export function meshSite(site: Site): SceneDescription {
     if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35 };
     return { y0: lo - 0.1, ys: hi + (w.kind === 'arch' ? 1.9 : 2.0) };
   };
+  // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
+  const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
   const holesOn = (p: Place, side: Side, e: number): Hole[] =>
     site.ways.filter((w) => (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
-      .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w) }));
+      .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w), ...(hiddenFrom(w, p) ? { band: 0.03 } : {}) }));
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
   const isEndWall = (p: Place, side: Side) => (p.axis === 'x') === (side === 'e' || side === 'w');
@@ -389,7 +391,8 @@ export function meshSite(site: Site): SceneDescription {
       const f = frameOf(p, w.side, 0.1);
       const c = alongFrame(p, w.side, w.at, 0.1);
       const op: Opening = { c, w: w.halfWidth, ...shape(w) };
-      kit.openingTrim('stone', f, op, T, dressed, 'both');
+      const secret = w.door?.leaf === 'secret';
+      kit.openingTrim('stone', f, op, T, dressed, secret ? (p.id === site.secret ? 'front' : 'back') : 'both');
       if (w.kind === 'window') {
         const sill = wallBox(f, c - w.halfWidth - 0.22, c + w.halfWidth + 0.22, op.y0 - 0.14, op.y0, -0.07, T + 0.07);
         kit.box('stone', sill.min, sill.max, coping, coping);
@@ -410,11 +413,14 @@ export function meshSite(site: Site): SceneDescription {
         kit.box('floor', b.min, b.max, stepStyle, hallFlag, 'step');
       }
       // A door leaf, hung at the higher side so it stands on the top stair and swings away from the steps.
+      // A secret door instead sits flush with the wall of the room it is hidden from, and swings away from it.
       if (w.door) {
-        const highIsHere = p.floor > q.floor;
-        const t = highIsHere ? 0.2 : T - 0.2;
+        const publicIsHere = secret && p.id !== site.secret;
+        const highIsHere = secret ? !publicIsHere : p.floor > q.floor;
+        const thick = secret ? 0.1 : 0.07;
+        const t = secret ? (publicIsHere ? thick / 2 - 0.004 : T - thick / 2 + 0.004) : highIsHere ? 0.2 : T - 0.2;
         const towardsHigh = highIsHere ? f.normal.clone() : f.normal.clone().negate();
-        const lw = w.halfWidth - 0.02;
+        const lw = w.halfWidth - (secret ? 0.012 : 0.02);
         const hingeLow = rng.chance(0.5);
         const d = hingeLow ? f.dir.clone() : f.dir.clone().negate();
         const hinge = f.a.clone().addScaledVector(f.dir, hingeLow ? c - lw : c + lw).addScaledVector(f.normal, -t).setY(hi + 0.006);
@@ -423,13 +429,15 @@ export function meshSite(site: Site): SceneDescription {
         const barred = w.door.barredFrom;
         const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + 3.2, t - 0.14, t + 0.14);
         // A door that starts shut is baked shut, so a locked room does not fill with its neighbour's light.
-        if (w.door.leaf === 'shut') {
+        if (w.door.leaf === 'shut' || secret) {
           const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + 3.2, t - 0.03, t + 0.03);
           kit.mass(slab.min, slab.max);
         }
+        const leafSeed = `${site.seed}/door${site.ways.indexOf(w)}`;
         doors.push({
-          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: 0.07,
-          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(`${site.seed}/door${site.ways.indexOf(w)}`, lw, 2.0, 0.07),
+          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: thick,
+          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(leafSeed, lw, 2.0, thick, secret ? { ...ashlar, length: [0.4, 0.8], course: [0.27, 0.36] } : undefined),
+          material: secret ? 'stone' : 'wood',
           blocker: block,
           centre: f.a.clone().addScaledVector(f.dir, c).addScaledVector(f.normal, -t).setY(hi + 1.2),
           barSide: barred === undefined ? 0 : (barred === (highIsHere ? p.id : q.id) ? faces : -faces),

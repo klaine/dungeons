@@ -191,6 +191,7 @@ export function score(site: Site): number {
     + 0.8 * site.items.length
     + (site.ways.some((w) => w.door?.barredFrom !== undefined) ? 1 : 0)
     + (site.levers.length ? 1.2 : 0)
+    + (site.secret >= 0 ? 0.7 : 0)
     + (roofs.has('sky') && site.places.some((p) => p.role === 'court') ? 0.8 : 0)
     + (roofs.has('cave') ? 0.8 : 0)
     + (roofs.has('timber') && roofs.has('barrel') ? 0.5 : 0)
@@ -269,7 +270,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
 
   const around = (c: Cell): Cell[] => [{ i: c.i, j: c.j - 1 }, { i: c.i + 1, j: c.j }, { i: c.i - 1, j: c.j }, { i: c.i, j: c.j + 1 }];
   const free = (c: Cell) => inGrid(c) && !byCell.has(key(c));
-  const rooms = () => places.filter((p) => p.roof !== 'sky').length;
+  const rooms = () => places.filter((p) => p.roof !== 'sky' && p.name !== 'hidden chamber').length;
 
   // ---- entrance, and the room farthest from it
   const entrance = placeOf(draft.entrance);
@@ -332,6 +333,24 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
     }
   }
 
+  // ---- a secret: a chamber behind a stretch of wall that is really a door. Nothing depends on
+  // finding it; it is there for whoever looks closely.
+  let secretId = -1;
+  if (rng.chance(0.5)) {
+    const hostsForSecret = shuffle(places.filter((p) => p.roof !== 'sky' && p.role !== 'entrance' && p.role !== 'goal'), rng);
+    for (const host of hostsForSecret) {
+      const cell = [...byCell.entries()].find(([, id]) => id === host.id)![0].split(',').map(Number);
+      const spot = shuffle(around({ i: cell[0], j: cell[1] }).filter(free), rng)[0];
+      if (!spot) continue;
+      const hidden = addCell(spot, 'reward', 'hidden chamber');
+      connect({ i: cell[0], j: cell[1] }, spot, 'door', DOOR);
+      ways[ways.length - 1].door = { leaf: 'secret' };
+      hidden.light = 'dark';
+      secretId = hidden.id;
+      break;
+    }
+  }
+
   // ---- windows from the court into the rooms that do not open onto it
   if (court) {
     const cp = placeOf(court);
@@ -356,7 +375,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   for (const p of places) {
     const doors = ways.filter((w) => w.kind !== 'window' && (w.a === p.id || w.b === p.id));
     const roomy = Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 4.6;
-    if (p.role === 'reward' && doors.length === 1 && roomy && rng.chance(0.5)) {
+    if (p.role === 'reward' && p.id !== secretId && doors.length === 1 && roomy && rng.chance(0.5)) {
       p.roof = 'cave';
       p.light = 'dark';
       p.wall = rng.range(3.3, 4.4);
@@ -388,7 +407,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
 
   // ---- a forsaken house has lost a roof: one room lies open, with what fell still in it
   if (setting.condition === 'forsaken') {
-    const options = places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && p.role !== 'goal' && p.role !== 'entrance' && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 5);
+    const options = places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && p.id !== secretId && p.role !== 'goal' && p.role !== 'entrance' && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 5);
     if (options.length) {
       const p = rng.pick(options);
       p.roof = 'sky';
@@ -408,7 +427,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   for (const p of places) {
     if (p.light !== 'torch' || p.role === 'entrance' || p.role === 'goal') continue;
     const besideDark = ways.some((w) => w.kind !== 'window' && (w.a === p.id || w.b === p.id) && places[w.a === p.id ? w.b : w.a].light === 'dark');
-    if (!besideDark && rng.chance(p.role === 'reward' ? 0.5 : 0.28)) p.light = 'dark';
+    if (p.id !== secretId && !besideDark && rng.chance(p.role === 'reward' ? 0.5 : 0.28)) p.light = 'dark';
   }
 
   // ---- floor levels: a gentle walk in steps out from the entrance, then pulled together until
@@ -422,7 +441,8 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
       const n = places[w.a === id ? w.b : w.a];
       if (level.has(n.id)) continue;
       const base = level.get(id)!;
-      level.set(n.id, n.role === 'goal' ? base + 3 : n.role === 'court' ? base - 1 : base + rng.pick([-1, 0, 0, 0, 1, 1]));
+      // A secret door must sit flush in its wall, so the floor beyond is level with the floor before.
+      level.set(n.id, n.id === secretId ? base : n.role === 'goal' ? base + 3 : n.role === 'court' ? base - 1 : base + rng.pick([-1, 0, 0, 0, 1, 1]));
       order.push(n.id);
     }
   }
@@ -438,12 +458,16 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
     }
     if (!changed) break;
   }
+  if (secretId >= 0) {
+    const w = ways.find((x) => x.door?.leaf === 'secret')!;
+    level.set(secretId, level.get(w.a === secretId ? w.b : w.a)!);
+  }
   const lowest = Math.min(...level.values());
   for (const p of places) p.floor = Math.round((level.get(p.id)! - lowest) * STEP * 100) / 100;
 
   // ---- depth from the start, roofline
   const site: Site = {
-    seed, places, ways, items: [], levers: [], start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
+    seed, places, ways, items: [], levers: [], secret: secretId, start: forecourt.id, wallThickness: T, top: 0, entrance: entrance.id, goal: goal.id,
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
   };
   const adj = neighbours(site);
@@ -477,7 +501,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng): Site {
   if (chambers.length) parts.push(`and ${count(chambers.length)} side ${chambers.length === 1 ? 'chamber' : 'chambers'}`);
   const caves = places.filter((p) => p.roof === 'cave').length;
   if (caves) parts.push(caves === 1 ? 'one of them a natural cave' : `${count(caves)} of them natural caves`);
-  const dark = places.filter((p) => p.light === 'dark').length;
+  const dark = places.filter((p) => p.light === 'dark' && p.id !== secretId).length;
   const unlit = dark ? ` ${count(dark)[0].toUpperCase()}${count(dark).slice(1)} of its rooms ${dark === 1 ? 'is' : 'are'} unlit.` : '';
   const when = { morning: 'in the morning', midday: 'at midday', evening: 'at evening' }[setting.hour];
   if (places.some((p) => p.fallen)) parts.push('one with its roof fallen in');

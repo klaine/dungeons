@@ -49,7 +49,8 @@ function distances(site: Site, from: number, blocked: (w: Way) => boolean = () =
 export function planMission(site: Site, rng: Rng): void {
   const doors = site.ways.filter((w) => w.kind === 'door');
   const ways = (place: number) => site.ways.filter((w) => walkable(w) && (w.a === place || w.b === place));
-  const isLocked = (w: Way) => !!w.door?.lock;
+  // A secret door counts as shut for planning: nothing the mission needs may lie behind one.
+  const isLocked = (w: Way) => !!w.door?.lock || w.door?.leaf === 'secret';
   const entry = doors.find((w) => other(w, site.start) === site.entrance && (w.a === site.start || w.b === site.start));
 
   // 1. The goal behind a locked door, when it has a single way in.
@@ -67,7 +68,7 @@ export function planMission(site: Site, rng: Rng): void {
     let best: number | undefined;
     let bestScore = -Infinity;
     for (const p of site.places) {
-      if (!fromStart.has(p.id) || avoid.includes(p.id) || p.roof === 'sky') continue;
+      if (!fromStart.has(p.id) || avoid.includes(p.id) || p.roof === 'sky' || p.id === site.secret) continue;
       if (p.id === site.start || p.id === site.entrance || p.id === site.goal) continue;
       const deadEnd = ways(p.id).length === 1;
       const score = fromStart.get(p.id)! + (toGoal.get(p.id) ?? 0) + (deadEnd ? 2.5 : 0) + (p.light === 'dark' ? 1 : 0) + rng.next();

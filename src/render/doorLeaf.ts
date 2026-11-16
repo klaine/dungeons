@@ -15,7 +15,7 @@ const board: MasonryStyle = {
   maxSeg: 0.3, chip: 0, tint: [0.92, 0.88, 0.82], tintVar: 0.22, hueVar: 0.05, mortar: [0.08, 0.06, 0.04], uvScale: 0.55,
 };
 
-export function buildDoorLeaf(seed: string, halfWidth: number, spring: number, thickness: number): MeshBuilder {
+export function buildDoorLeaf(seed: string, halfWidth: number, spring: number, thickness: number, stone?: MasonryStyle): MeshBuilder {
   const mesh = new MeshBuilder();
   const rng = new Rng(seed);
   const w = halfWidth;
@@ -32,6 +32,17 @@ export function buildDoorLeaf(seed: string, halfWidth: number, spring: number, t
     }
   };
   for (const side of [1, -1]) {
+    if (stone) {
+      // A secret door: coursed stone, to pass for wall. Courses run across, so u is across and v is height.
+      layMasonry(mesh, (u, v, p: Vector3, n: Vector3) => {
+        p.set(u, v, (side * thickness) / 2);
+        n.set(0, 0, side);
+      }, {
+        u0: 0, u1: 2 * w, v0: 0, v1: top, style: stone, rng: rng.fork(`face${side}`),
+        clampUV: (uv) => { const t: [number, number] = [uv[1], uv[0]]; clamp(t); uv[0] = t[1]; uv[1] = t[0]; },
+      });
+      continue;
+    }
     // Boards run up the door: u is height, v is across.
     layMasonry(mesh, (u, v, p: Vector3, n: Vector3) => {
       p.set(v, u, (side * thickness) / 2);
@@ -41,7 +52,7 @@ export function buildDoorLeaf(seed: string, halfWidth: number, spring: number, t
   // The edge all the way round, as four runs so the corners stay square.
   const edge = (length: number, at: (u: number, p: Vector3, n: Vector3) => void, label: string) => {
     layMasonry(mesh, (u, v, p: Vector3, n: Vector3) => { at(u, p, n); p.z = v; }, {
-      u0: 0, u1: length, v0: -thickness / 2, v1: thickness / 2, style: { ...board, length: [0.4, 0.6], course: [thickness, thickness] },
+      u0: 0, u1: length, v0: -thickness / 2, v1: thickness / 2, style: { ...(stone ?? board), length: [0.4, 0.6], course: [thickness, thickness] },
       rng: rng.fork(label), singleCourse: true, open: { u0: true, u1: true, v0: true, v1: true },
     });
   };

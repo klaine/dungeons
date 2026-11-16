@@ -1,5 +1,5 @@
 import {
-  BoxGeometry, BufferAttribute, Color, CylinderGeometry, Group, Material, Mesh, Scene, TorusGeometry, Vector3,
+  BoxGeometry, BufferAttribute, Color, CylinderGeometry, Group, Material, Mesh, OctahedronGeometry, Scene, TorusGeometry, Vector3,
 } from 'three';
 import { makePropMaterial } from '../render/siteMaterial';
 import { DoorSpec, Item, KeyId, Lever, Site } from '../core/site';
@@ -64,7 +64,11 @@ export class Game {
   private elapsed = 0;
   private goalAt: Vector3 | null;
 
-  constructor(private site: Site, desc: SceneDescription, scene: Scene, wood: Material, private player: Player, private ui: GameUi) {
+  /** Whether the relic in the hidden chamber has been found. */
+  foundSecret = false;
+  private relic: { group: Group; at: Vector3 } | null = null;
+
+  constructor(private site: Site, desc: SceneDescription, scene: Scene, materials: Record<string, Material>, private player: Player, private ui: GameUi) {
     const iron = makePropMaterial({ color: new Color(0.07, 0.065, 0.06), roughness: 0.74, metalness: 0.5 });
     const timber = makePropMaterial({ color: new Color(0.2, 0.13, 0.08), roughness: 0.85, metalness: 0 });
 
@@ -100,16 +104,16 @@ export class Game {
           group.add(rail);
         }
       } else {
-        leaf = new Mesh(d.leaf.build(), wood);
+        leaf = new Mesh(d.leaf.build(), materials[d.material] ?? materials.wood);
         leaf.receiveShadow = true;
         group.add(leaf);
-        // Iron straps and a ring pull on both faces.
-        for (const y of [0.42, 1.5]) {
+        // Iron straps and a ring pull on both faces; a secret door has neither, or it would be no secret.
+        for (const y of d.material === 'stone' ? [] : [0.42, 1.5]) {
           const strap = new Mesh(new BoxGeometry(W - 0.12, 0.075, t + 0.024), iron);
           strap.position.set(W / 2 - 0.03, y, 0);
           group.add(strap);
         }
-        for (const side of [1, -1]) {
+        for (const side of d.material === 'stone' ? [] : [1, -1]) {
           const ring = new Mesh(new TorusGeometry(0.055, 0.011, 6, 14), iron);
           ring.position.set(W - 0.16, 1.02, side * (t / 2 + 0.014));
           group.add(ring);
@@ -170,6 +174,19 @@ export class Game {
       scene.add(group);
       this.levers.push({ lever, handle, at, thrown: false, swing: 0 });
     }
+    // What the hidden chamber holds: something small that catches the light.
+    const hiddenAt = site.secret >= 0 ? desc.anchors?.get(site.secret) : undefined;
+    if (hiddenAt) {
+      const colour = new Color(0.35, 0.9, 0.75);
+      const gem = new Mesh(new OctahedronGeometry(0.09), makePropMaterial({ color: colour, metalness: 0.3, roughness: 0.15, emissive: colour, emissiveIntensity: 0.6 }));
+      gem.scale.y = 1.5;
+      const group = new Group();
+      group.add(gem);
+      const at = hiddenAt.clone().add(new Vector3(0, 0.3, 0));
+      group.position.copy(at);
+      scene.add(group);
+      this.relic = { group, at };
+    }
     this.goalAt = desc.anchors?.get(site.goal) ?? null;
     this.visited.add(site.start);
   }
@@ -183,7 +200,9 @@ export class Game {
     for (const d of this.doors) {
       if (!d.open) {
         const c = d.desc.centre;
-        const near = Math.hypot(p.x - c.x, p.z - c.z) < 1.7 && Math.abs(p.y + 1.2 - c.y) < 1.6;
+        // A secret door has to be all but leaned on before it gives.
+        const reach = d.spec.leaf === 'secret' ? 0.85 : 1.7;
+        const near = Math.hypot(p.x - c.x, p.z - c.z) < reach && Math.abs(p.y + 1.2 - c.y) < 1.6;
         if (near) this.tryDoor(d, time);
       }
       if (d.blocker.active && this.elapsed >= d.clearAt) d.blocker.active = false;
@@ -227,6 +246,17 @@ export class Game {
       }
     }
 
+    if (this.relic && !this.foundSecret) {
+      const r = this.relic;
+      r.group.rotation.y = time * 1.3;
+      r.group.position.y = r.at.y + Math.sin(time * 2.1) * 0.03;
+      if (Math.hypot(p.x - r.at.x, p.z - r.at.z) < 1.2 && Math.abs(p.y + 1.0 - r.at.y) < 1.7) {
+        this.foundSecret = true;
+        r.group.visible = false;
+        this.ui.toast('A relic, sealed up here for who knows how long. You take it.');
+      }
+    }
+
     if (!this.won && this.goalAt && here?.id === this.site.goal && Math.hypot(p.x - this.goalAt.x, p.z - this.goalAt.z) < 2.0) {
       this.won = true;
       this.ui.won(this.elapsed);
@@ -259,6 +289,8 @@ export class Game {
       if (d.bar) d.bar.visible = false;
     } else if (lock) {
       this.ui.toast(`The ${lock} key turns.`);
+    } else if (d.spec.leaf === 'secret') {
+      this.ui.toast('The wall gives under your hand. A door, faced in stone.');
     }
     d.open = true;
     d.blocker.active = false;

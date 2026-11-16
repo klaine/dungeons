@@ -16,6 +16,10 @@ Four seeds, four plans: a ring round a court, two rings side by side, two rings 
 
 <img src="docs/images/plans.png" alt="Plans of four generated places with different layouts" width="640">
 
+Some houses hide a chamber behind a stretch of wall that is really a door:
+
+![A secret door shut, passing for wall, and open](docs/images/secret-door.jpg)
+
 Rooms have uses and are furnished for them, and a forsaken house has lost a roof:
 
 ![A refectory, a dormitory, and a hall whose roof has fallen in](docs/images/rooms-in-use.jpg)

@@ -268,14 +268,14 @@ async function start(): Promise<void> {
   new TouchControls(canvas, player, toggleLantern);
 
   // ------------------------------------------------------------------ doors, keys and the goal
-  const game = site ? new Game(site, desc, scene, materials.wood, player, {
+  const game = site ? new Game(site, desc, scene, materials, player, {
     toast,
     keysChanged: (keys) => {
       document.getElementById('keys')!.innerHTML = keys.map((k) => `<span class="${k}">${k} key</span>`).join('');
     },
     won: (seconds) => {
       const m = Math.floor(seconds / 60), s = Math.round(seconds % 60);
-      document.getElementById('wonText')!.textContent = `You reached the heart of the house in ${m ? `${m} min ` : ''}${s} s, having seen ${game!.visited.size - 1} of its ${site.places.length - 1} places.`;
+      document.getElementById('wonText')!.textContent = `You reached the heart of the house in ${m ? `${m} min ` : ''}${s} s, having seen ${game!.visited.size - 1} of its ${site.places.length - 1} places${site.secret >= 0 ? (game!.foundSecret ? ', and found what it was hiding' : ', but not what it was hiding') : ''}.`;
       document.getElementById('won')!.hidden = false;
       document.exitPointerLock?.();
     },
@@ -458,6 +458,7 @@ async function start(): Promise<void> {
         labels: map.classList.contains('big'),
         visited: revealAll || !game ? undefined : game.visited,
         shut: new Set(game?.doors.filter((d) => !d.open).map((d) => d.desc.way)),
+        showSecrets: revealAll,
         items: game?.things.filter((k) => !k.taken).map((k) => k.item),
         levers: game?.levers.filter((l) => !l.thrown).map((l) => l.lever),
       });

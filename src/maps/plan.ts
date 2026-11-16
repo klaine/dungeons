@@ -17,6 +17,8 @@ export interface PlanOptions {
   shut?: Set<number>;
   /** Keys still lying where they were left. */
   items?: Item[];
+  /** Draw secret doors that are still shut. Off in play, so the map does not give them away. */
+  showSecrets?: boolean;
   /** Levers not yet thrown. */
   levers?: Lever[];
   /** Draw at exactly this many pixels square, ignoring the canvas's size on the page. */
@@ -76,7 +78,8 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     });
   }
   const drawn = (p: Place) => known(p) || glimpsed.has(p.id);
-  const wayDrawn = (w: Way) => known(site.places[w.a]) || known(site.places[w.b]);
+  const hidden = (w: Way, i: number) => w.door?.leaf === 'secret' && shut.has(i) && !opts.showSecrets;
+  const wayDrawn = (w: Way, i: number) => !hidden(w, i) && (known(site.places[w.a]) || known(site.places[w.b]));
 
   // Masonry: every place grown by half a wall, in ink. Low outer walls are drawn thinner.
   for (const p of site.places) {
@@ -117,7 +120,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
 
   // Ways: cut through the wall; windows are a thin slot; stairs are ruled across the opening.
   site.ways.forEach((w, index) => {
-    if (!wayDrawn(w)) return;
+    if (!wayDrawn(w, index)) return;
     const a = site.places[w.a], b = site.places[w.b];
     const alongX = w.side === 'n' || w.side === 's';
     const wall = w.side === 'n' ? a.z0 - T : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0 - T;
@@ -133,7 +136,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     else rect(wall - 0.05, lo, wall + T + 0.05, hi);
     // A shut door is a stroke across the opening, in the colour of its lock if it has one.
     if (shut.has(index)) {
-      ctx.fillStyle = w.door?.lock ? KEY_COLOUR[w.door.lock] : INK;
+      ctx.fillStyle = w.door?.lock ? KEY_COLOUR[w.door.lock] : w.door?.leaf === 'secret' ? ACCENT : INK;
       if (alongX) rect(lo, wall + T * 0.36, hi, wall + T * 0.64);
       else rect(wall + T * 0.36, lo, wall + T * 0.64, hi);
       return;

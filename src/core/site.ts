@@ -59,9 +59,10 @@ export type KeyId = 'iron' | 'gold';
 export interface DoorSpec {
   /**
    * Shut doors open when approached, unless something holds them. Open ones are just standing open.
-   * A gate is a portcullis: it can be seen through, and only its lever raises it.
+   * A gate is a portcullis: it can be seen through, and only its lever raises it. A secret door
+   * is faced in stone to pass for wall, and gives way when pressed.
    */
-  leaf: 'shut' | 'open' | 'gate';
+  leaf: 'shut' | 'open' | 'gate' | 'secret';
   /** Index into the site's levers of the one that raises this gate. */
   lever?: number;
   /** Needs this key. */
@@ -105,6 +106,8 @@ export interface Site {
   ways: Way[];
   items: Item[];
   levers: Lever[];
+  /** A place hidden behind a secret door, with something in it worth finding; -1 if there is none. */
+  secret: number;
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

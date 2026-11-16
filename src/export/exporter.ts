@@ -39,7 +39,7 @@ export function exportJson(site: Site): void {
 /** The plan, fully revealed and numbered, above a key listing every place. */
 export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
   const map = document.createElement('canvas');
-  drawPlan(map, site, { pixels: size, labels: true, items: site.items, levers: site.levers, shut: new Set(site.ways.map((w, i) => (w.door?.leaf === 'shut' || w.door?.leaf === 'gate' ? i : -1))) });
+  drawPlan(map, site, { pixels: size, labels: true, items: site.items, levers: site.levers, showSecrets: true, shut: new Set(site.ways.map((w, i) => (w.door && w.door.leaf !== 'open' ? i : -1))) });
   const rows = site.places.filter((p) => p.role !== 'approach');
   const line = size * 0.021;
   const columns = 2;
@@ -67,6 +67,7 @@ export function planCanvas(site: Site, size = 1800): HTMLCanvasElement {
     if (p.light === 'dark') notes.push('unlit');
     for (const it of site.items) if (it.place === p.id) notes.push(`${it.key} key`);
     if (site.levers.some((l) => l.place === p.id)) notes.push('lever');
+    if (p.id === site.secret) notes.push('behind a secret door, with a relic');
     if (p.id === site.goal) notes.push('the goal');
     ctx.fillText(`${p.id + 1}. ${p.name[0].toUpperCase()}${p.name.slice(1)}: ${notes.join(', ')}`, x, y, size / columns - line * 2);
   });

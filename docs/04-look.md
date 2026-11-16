@@ -104,6 +104,8 @@ In the hand-assembled scene the solids are listed alongside the skin. In generat
 
 **Solid things are closed things.** Any free-standing or projecting piece — a coping, a sill, a merlon, a step, a beam, a chest — is built with all six of its faces, including ones that seem hidden against a wall or floor. Leaving out faces "the player cannot see" was tried and was wrong twice: undersides of overhanging stones showed the sky through them. The few extra hidden faces cost little; a see-through stone costs the whole illusion.
 
+Walls are cut exactly at openings. Vertices of a wall that fall inside an opening are moved to its edge, so the stones simply end there; a triangle is left out only if all its corners were inside, or if its corners were moved to opposite sides and it would stretch across. This matters most for a secret door, where no band of dressed stone hides the cut.
+
 Two smaller measures keep the skin closed: every stone has a plain backing sheet just behind its mortar, slightly larger than the stone, so no pixel-wide gaps show between neighbours; and where a wall is cut for an opening, triangles touching the hole are left out and the dressed stones round the opening cover the edge.
 
 ### Atmosphere and finish

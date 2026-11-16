@@ -25,6 +25,8 @@ export interface DoorDesc {
   thickness: number;
   /** Geometry in the leaf's own coordinates; see `buildDoorLeaf`. A gate has none: it is a grille of bars. */
   leaf: MeshBuilder | null;
+  /** What the leaf is made of. */
+  material: 'wood' | 'stone';
   /** The space the shut door fills, for stopping the player. */
   blocker: { min: Vector3; max: Vector3 };
   /** Middle of the doorway, for deciding when the player has come up to it. */
