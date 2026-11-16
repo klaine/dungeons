@@ -42,7 +42,7 @@ export interface DoorDesc {
  */
 export interface CardSet {
   /** What is painted on the cards. */
-  kind: 'grass' | 'flower' | 'leaf' | 'needle';
+  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'leaf' | 'needle';
   /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
   shape: 'tuft' | 'card';
   /** Whether the cards cast shadows. */
@@ -84,6 +84,8 @@ export interface SceneDescription {
   /** Per place, the spot where a thing can be set down: the top of its chest or pedestal. */
   anchors?: Map<number, Vector3>;
   scenery?: Scenery;
+  /** How many of each kind of plant were set out below the trees, for tuning the rules. */
+  planted?: Record<string, number>;
   /** Boxes the player cannot enter: the edge of the world, where no rock happens to stand in the way. */
   fences?: { min: Vector3; max: Vector3 }[];
   /** Points along the way from where the player arrives to the door, for anything that must walk it. */

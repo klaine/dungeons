@@ -412,57 +412,12 @@ export function meshSite(site: Site): SceneDescription {
       if (inMeadow(x, z, size + 1) || offTrack(x, z) < 2.5 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
-    const grassColour = (x: number, z: number): Colour => {
-      const c = turfColour(x, z, s1), t = plant.range(0.75, 1.2);
-      // Mostly green; straw-coloured where the ground is dry, and in the odd tuft anywhere.
-      const dry = Math.min(1, parched + Math.max(0, (fbm2(x * 0.07 + s1 * 0.3, z * 0.07 - s1, 3) - 0.5) * 5) + (plant.chance(0.08) ? 0.8 : 0));
-      return [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t];
-    };
-    const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
-    const flowerAt = (x: number, z: number, y: number, size: number) => {
-      if (fbm2(x * 0.13 + s1 * 3, z * 0.13 + s2, 2) < 0.64 || !plant.chance(0.45 * inFlower)) return;
-      const hue = flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
-      planting.tuft(planting.flowers, x, y - 0.02, z, size, size * plant.range(0.9, 1.3), plant.range(0, Math.PI), hue);
-    };
-    // Grass: thick in the meadow, a little coarser across the valley, thin by the path, long in
-    // patches, and rough on the rim and just beyond it.
-    const grass = (x0: number, x1: number, z0: number, z1: number, step: number, scale: number, keep: (x: number, z: number) => boolean) => {
-      for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
-        const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
-        if (!keep(x, z)) continue;
-        const off = offTrack(x, z);
-        if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
-        if (slopeOf(ground, x, z, 0.3) > 0.55 || !clearOfStones(x, z, -0.15)) continue;
-        const long = Math.max(0, fbm2(x * 0.3 + s2, z * 0.3 + s1, 2) - 0.5) * 2.4;
-        const w = plant.range(0.4, 0.7) * (1 + long * 0.5) * scale, h = plant.range(0.22, 0.42) * (1 + long * 1.7) * Math.sqrt(scale);
-        const y = ground(x, z);
-        // Nothing grows under water; at its edge, reeds: tall, close and pale.
-        const depth = waterOver(x, z, y);
-        if (depth > 0.3) continue;
-        if (depth > -0.22) {
-          for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5), plant.range(0, Math.PI), [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
-          continue;
-        }
-        planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z));
-        if (plant.chance(0.12 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
-      }
-    };
-    grass(p.x0 + 0.2, p.x1 - 0.2, p.z0 + 0.25, p.z1 - 0.2, 0.36, 1, () => true);
-    grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
-    grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
-    // Bushes: by boulders and trees, and along the foot of the rock.
-    for (let k = 0; k < 150; k++) {
-      const x = plant.range(g.x0 + 3, g.x1 - 3), z = plant.range(g.z0 + 3, g.z1 - 3);
-      if (offTrack(x, z) < 2.4 || slopeOf(ground, x, z, 0.4) > 0.6 || !clearOfStones(x, z, 0.1) || clearOfFeatures(x, z) < 0.5) continue;
-      const byRock = stones.some((q) => Math.hypot(q[0] - x, q[1] - z) < q[2] + 2.2) || Math.min(x - g.x0, g.x1 - x, g.z1 - z) < 8 || z - g.z0 < 6;
-      if (!byRock && !plant.chance(0.25)) continue;
-      const size = plant.range(0.6, 1.1);
-      planting.crown(x, ground(x, z) + size * 0.5, z, size, size * 0.7, 46, size * 0.75, leafOf(plant.pick(greens)), plant);
-    }
-    // Woods. Trees thin out into glades, firs take the higher ground, and here and there a stand
-    // is in blossom. In the valley the trunks are solid; the track and the meadow are kept clear.
+    // Woods first, because what grows under and between trees depends on where they stand.
+    // Trees thin out into glades, firs take the higher ground, and here and there a stand is in
+    // blossom. In the valley the trunks are solid; the track and the meadow are kept clear.
     const wood = sceneryMesh('wood');
     const bark: Colour = [0.3, 0.26, 0.22];
+    const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number) => {
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
@@ -471,10 +426,12 @@ export function meshSite(site: Site): SceneDescription {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
         layTrunk(wood, x, y, z, height * 0.9, plant.range(0.16, 0.26), bark);
         planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), leafOf(plant.pick(firs)), plant);
+        canopies.push([x, z, radius * 1.15, 1]);
       } else {
         const height = plant.range(5.5, 9.5), spread = plant.range(2.2, 3.4);
         layTrunk(wood, x, y, z, height * 0.8, plant.range(0.17, 0.3), bark, [plant.range(-0.4, 0.4), plant.range(-0.4, 0.4)]);
         planting.broadleaf(x, y, z, height, spread, Math.round(26 + 260 * detail), leafOf(inBlossom ? blossom : plant.pick(greens)), plant, 1.7 - 0.85 * detail);
+        canopies.push([x, z, spread * 1.3, 0.75]);
       }
     };
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
@@ -491,6 +448,161 @@ export function meshSite(site: Site): SceneDescription {
     const inFine = (x: number, z: number) => x > fine.x0 && x < fine.x1 && z > fine.z0 && z < fine.z1;
     woods(fine, 6.2, eased, () => false);
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+
+    /**
+     * The lie of the land, as four numbers at any point, each from 0 to 1. Everything that grows
+     * below the trees is placed by them, and so is the height of the grass.
+     *  - shade: how much of the sky the trees take, plus the foot of the rim that faces away from the sun;
+     *  - wet: low ground, the margins of water, and the shaded foot of rock, where water gathers;
+     *  - wear: where feet go, along the track, before the door and about the things people visit;
+     *  - thin: where soil is shallow, on slopes and against rock.
+     */
+    const cellS = 1.5, sx0 = g.x0 - 14, sz0 = g.z0 - 8;
+    const snx = Math.ceil((g.x1 + 14 - sx0) / cellS) + 1, snz = Math.ceil((g.z1 + 14 - sz0) / cellS) + 1;
+    const cover = new Float32Array(snx * snz);
+    for (const [cx, cz, cr, dense] of canopies) {
+      const i0 = Math.max(0, Math.floor((cx - cr - sx0) / cellS)), i1 = Math.min(snx - 1, Math.ceil((cx + cr - sx0) / cellS));
+      const j0 = Math.max(0, Math.floor((cz - cr - sz0) / cellS)), j1 = Math.min(snz - 1, Math.ceil((cz + cr - sz0) / cellS));
+      for (let jj = j0; jj <= j1; jj++) for (let ii = i0; ii <= i1; ii++) {
+        const d = Math.hypot(sx0 + ii * cellS - cx, sz0 + jj * cellS - cz) / cr;
+        if (d < 1) cover[jj * snx + ii] = Math.min(1, cover[jj * snx + ii] + dense * (1 - d * d));
+      }
+    }
+    const shadeAt = (x: number, z: number): number => {
+      const fx = Math.min(snx - 1.001, Math.max(0, (x - sx0) / cellS)), fz = Math.min(snz - 1.001, Math.max(0, (z - sz0) / cellS));
+      const ii = Math.floor(fx), jj = Math.floor(fz), tx = fx - ii, tz = fz - jj;
+      const canopy = cover[jj * snx + ii] * (1 - tx) * (1 - tz) + cover[jj * snx + ii + 1] * tx * (1 - tz) + cover[(jj + 1) * snx + ii] * (1 - tx) * tz + cover[(jj + 1) * snx + ii + 1] * tx * tz;
+      // The sun stands to the south, so it is the southern rim whose foot lies in shadow.
+      return Math.min(1, canopy + 0.55 * (1 - smooth((g.z1 - z - 3) / 9)));
+    };
+    const wetAt = (x: number, z: number): number => {
+      let w = 0.38 - (swells(x, z) - p.floor) * 0.2 + (fbm2(x * 0.05 + s1 * 2, z * 0.05 - s2, 3) - 0.5) * 0.5;
+      for (const f of ponds) w = Math.max(w, 1 - smooth((Math.hypot(x - f.x, z - f.z) - f.r * 0.75) / 9));
+      w += 0.3 * (1 - smooth((g.z1 - z - 3) / 9));
+      return Math.min(1, Math.max(0, w - parched * 0.3));
+    };
+    const wearAt = (x: number, z: number): number => {
+      let w = 1 - smooth((offTrack(x, z) - 0.2) / 2.4);
+      w = Math.max(w, 0.8 * (1 - smooth((Math.hypot(x - doorX, z - p.z0) - 2) / 5)));
+      for (const f of lies) {
+        const d = Math.hypot(x - f.x, z - f.z);
+        if (f.kind === 'stones') w = Math.max(w, 0.6 * (1 - smooth((d - f.r * 0.9) / 2.5)));
+        if (f.kind === 'ruin') w = Math.max(w, 0.45 * (1 - smooth((d - f.r * 0.5) / 2)));
+      }
+      return w;
+    };
+    const thinAt = (x: number, z: number): number => {
+      let t = Math.min(1, slopeOf(ground, x, z, 0.5) * 1.7);
+      for (const q of stones) t = Math.max(t, 0.7 * (1 - smooth((Math.hypot(q[0] - x, q[1] - z) - q[2] - 0.2) / 1.4)));
+      const rim = Math.min(x - g.x0, g.x1 - x, g.z1 - z, z - p.z0 + (x > p.x0 && x < p.x1 ? 99 : 0));
+      return Math.max(t, 0.75 * (1 - smooth((rim - 2.5) / 3)));
+    };
+
+    const grassColour = (x: number, z: number, wet: number): Colour => {
+      const c = turfColour(x, z, s1), t = plant.range(0.75, 1.2);
+      // Green where there is water for it; straw-coloured where the ground is dry, and in the odd tuft anywhere.
+      const dry = Math.min(1, parched + Math.max(0, (0.42 - wet) * 2.2) + (plant.chance(0.08) ? 0.8 : 0));
+      return [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t];
+    };
+    const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
+    const hueAt = (x: number, z: number) => flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
+    const flowerAt = (x: number, z: number, y: number, size: number) => {
+      if (fbm2(x * 0.13 + s1 * 3, z * 0.13 + s2, 2) < 0.64 || !plant.chance(0.45 * inFlower)) return;
+      planting.tuft(planting.flowers, x, y - 0.02, z, size, size * plant.range(0.9, 1.3), plant.range(0, Math.PI), hueAt(x, z));
+    };
+    // Grass. How tall it stands is worked out, not scattered: long where the ground is moist and
+    // open and nobody walks, short where it is trodden or the soil is thin, and sparse under trees.
+    const grass = (x0: number, x1: number, z0: number, z1: number, step: number, scale: number, keep: (x: number, z: number) => boolean) => {
+      for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
+        const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
+        if (!keep(x, z)) continue;
+        const off = offTrack(x, z);
+        if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
+        if (slopeOf(ground, x, z, 0.3) > 0.55 || !clearOfStones(x, z, -0.15)) continue;
+        const y = ground(x, z);
+        // Nothing grows under water; at its edge, reeds: tall, close and pale.
+        const depth = waterOver(x, z, y);
+        if (depth > 0.3) continue;
+        if (depth > -0.22) {
+          for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5), plant.range(0, Math.PI), [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
+          continue;
+        }
+        const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z), thin = thinAt(x, z);
+        const deep = Math.max(0, shade - 0.4) / 0.6;
+        if (!plant.chance((1 - 0.72 * deep) * (1 - 0.45 * thin))) continue;
+        const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wear) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2));
+        const w = plant.range(0.4, 0.7) * (0.75 + 0.35 * tall) * scale, h = plant.range(0.2, 0.34) * (0.35 + 1.25 * tall) * Math.sqrt(scale);
+        planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z, wet));
+        // Flowers want sun, some moisture, and to be left alone.
+        if (shade < 0.35 && wear < 0.4 && wet > 0.25 && plant.chance(0.14 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
+      }
+    };
+    grass(p.x0 + 0.2, p.x1 - 0.2, p.z0 + 0.25, p.z1 - 0.2, 0.36, 1, () => true);
+    grass(g.x0 - 2, g.x1 + 2, g.z0, g.z1 + 2, 0.56, 1.5, (x, z) => !inMeadow(x, z, -0.2) && !inHouse(x, z, 0.5));
+    grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
+
+    // The other plants, each where it would grow.
+    const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
+    const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : [0.42, 0.14, 0.34];
+    const open = (x: number, z: number) => inGrounds(x, z, 0.5) && offTrack(x, z) > 1.6 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
+    const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0 };
+    for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
+      const x = gx + plant.range(0, 0.95), z = gz + plant.range(0, 0.95);
+      if (!open(x, z) || inMeadow(x, z, -1.5) && offTrack(x, z) < 4) continue;
+      const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z), thin = thinAt(x, z);
+      const y = ground(x, z);
+      if (waterOver(x, z, y) > -0.25 || wear > 0.35) continue;
+      // Ferns: in shade, where it is not dry. They take the place of grass under the trees.
+      if (shade > 0.45 && wet + shade > 0.85 && plant.chance(0.55 * shade)) {
+        const size = plant.range(0.8, 1.4) * (0.8 + 0.4 * wet), t = plant.range(0.75, 1.2);
+        planting.tuft(planting.ferns, x, y - 0.04, z, size, size * plant.range(0.55, 0.8), plant.range(0, Math.PI), [fernGreen[0] * t, fernGreen[1] * t, fernGreen[2] * t]);
+        census.ferns++;
+        continue;
+      }
+      // Tall herbs: in drifts on moist open ground that nothing grazes or treads.
+      if (shade < 0.3 && wet > 0.52 && thin < 0.4 && fbm2(x * 0.09 - s1, z * 0.09 + s2 * 2, 2) > 0.52 && plant.chance(0.4)) {
+        const size = plant.range(0.5, 0.85);
+        const hue = season === 'autumn' ? [0.4, 0.3, 0.16] as Colour : hueAt(x + 40, z);
+        planting.tuft(planting.herbs, x, y - 0.03, z, size, plant.range(0.95, 1.5), plant.range(0, Math.PI), hue);
+        census.herbs++;
+        continue;
+      }
+      // Heather and its like: low mounds on thin dry soil in the sun, against rock.
+      if (thin > 0.5 && shade < 0.35 && wet < 0.5 && plant.chance(0.16)) {
+        const size = plant.range(0.3, 0.55);
+        planting.crown(x, y + size * 0.35, z, size, size * 0.5, 16, size * 0.9, leafOf(heather), plant);
+        census.heather++;
+        continue;
+      }
+      // Thicket: bushes where wood meets open ground, which is where the light and the shelter both are.
+      if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.035)) {
+        const size = plant.range(0.7, 1.35);
+        planting.crown(x, y + size * 0.55, z, size, size * 0.75, 52, size * 0.72, leafOf(plant.pick(greens)), plant);
+        census.thicket++;
+        // And now and then a young tree coming up among them.
+        if (plant.chance(0.22)) {
+          const sx = x + plant.range(-1.2, 1.2), sz = z + plant.range(-1.2, 1.2);
+          if (open(sx, sz)) {
+            const height = plant.range(2.2, 3.6);
+            layTrunk(wood, sx, ground(sx, sz), sz, height * 0.8, 0.06, bark);
+            planting.broadleaf(sx, ground(sx, sz), sz, height, plant.range(0.8, 1.2), 70, leafOf(plant.pick(greens)), plant, 0.7);
+            census.saplings++;
+          }
+        }
+      }
+    }
+    // Nettles and docks: rank green growth on the enriched ground about a ruin.
+    for (const f of ruins) {
+      for (let k = 0; k < 70; k++) {
+        const a = plant.range(0, Math.PI * 2), d = f.r * plant.range(0.75, 1.25);
+        const x = f.x + Math.cos(a) * d, z = f.z + Math.sin(a) * d * 0.85;
+        if (offTrack(x, z) < 1.5 || !clearOfStones(x, z, 0.05)) continue;
+        const t = plant.range(0.8, 1.2);
+        planting.tuft(planting.herbs, x, ground(x, z) - 0.03, z, plant.range(0.5, 0.8), plant.range(0.7, 1.15), plant.range(0, Math.PI), [0.1 * t, 0.24 * t, 0.05 * t]);
+        census.nettles++;
+      }
+    }
+    censuses.push(census);
 
     // ---- what has been built or set up out here
     const timber: Colour = [0.5, 0.42, 0.33];
@@ -627,6 +739,7 @@ export function meshSite(site: Site): SceneDescription {
   const fences: { min: Vector3; max: Vector3 }[] = [];
   const waters: { x: number; z: number; r: number; level: number }[] = [];
   const finds: { at: Vector3; what: string }[] = [];
+  const censuses: Record<string, number>[] = [];
   const wild = new Kit(`${site.seed}/wild`);
   wild.group = 'wild';
   const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: wild.meshes, cards: [] };
@@ -942,6 +1055,7 @@ export function meshSite(site: Site): SceneDescription {
     anchors,
     furnishing,
     scenery,
+    planted: censuses[0],
     fences,
     water: waters,
     finds,

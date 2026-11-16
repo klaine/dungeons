@@ -40,6 +40,10 @@ Valleys differ from one place to the next in size and season, and in what they h
 
 ![A pond with a landing stage, under a rock rim and mountains](docs/images/pond.jpg)
 
+What grows is placed by rule, from shade, moisture, wear and soil: ferns under the trees, tall herbs in damp open ground, bushes at the edge of the wood, nettles about a ruin, and grass that is long where nobody walks.
+
+![A wood's edge: thicket, drifts of white flowers in a damp glade, and a ruin among nettles](docs/images/woodland.jpg)
+
 ![The approach: a flagged path through grass and flowers to the house front, under trees](docs/images/approach.jpg)
 
 ![Open air: a leafy tree, boulders and bushes below a rock bank, with trees in blossom and firs beyond](docs/images/open-air.jpg)

@@ -110,6 +110,14 @@ docs/
 - **Lighting many rooms.** Four shadow-casting lights are shared among all torches and follow the player; rooms further off are lit by baked bounce light only until the player comes near.
 - **The hand-built scene** is kept as a fixed test bed for the look, at `?scene=test`.
 
+## Direction received, and where it goes
+
+Three things were asked for after the valley became walkable.
+
+1. **Shrubs and other plants besides grass and trees; how to place them; how to decide where grass is taller.** Done as a first pass: ferns, tall herbs, heather, thicket, saplings and nettles, placed by four numbers computed for every point of the valley (shade, wet, wear, thin soil), which also set the height and colour of the grass. The rules are in document 4.
+2. **Cave sections much longer and more complex than one room, with some light at times.** Next. Several cave places joined by natural passages into one system, with floors at different levels, and light that belongs there: a shaft open to the sky, and things that glow.
+3. **Verticality of spaces, built and natural.** After that, natural first: ledges and terraces in the valley reached by a climb, and caves on more than one level. Built verticality (stairs between storeys, galleries over halls, towers, cellars) needs places that lie one above another, which is version 2 of the site document and the start of milestone 6.
+
 ## Risks
 
 | Risk | Mitigation |

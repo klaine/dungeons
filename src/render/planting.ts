@@ -21,11 +21,13 @@ export type Colour = [number, number, number];
 export class Planting {
   readonly grass: CardSet = { kind: 'grass', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
   readonly flowers: CardSet = { kind: 'flower', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
+  readonly ferns: CardSet = { kind: 'fern', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
+  readonly herbs: CardSet = { kind: 'herb', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
   readonly leaves: CardSet = { kind: 'leaf', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
   readonly needles: CardSet = { kind: 'needle', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
 
   get sets(): CardSet[] {
-    return [this.grass, this.flowers, this.leaves, this.needles].filter((s) => s.matrices.length > 0);
+    return [this.grass, this.flowers, this.ferns, this.herbs, this.leaves, this.needles].filter((s) => s.matrices.length > 0);
   }
 
   private push(set: CardSet, colour: Colour, cx: number, cy: number, cz: number): void {

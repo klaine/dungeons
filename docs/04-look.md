@@ -150,7 +150,7 @@ What that takes, and what is in place:
 
 | Ingredient | State |
 |---|---|
-| Ground cover: grass, flowers, low bushes | In place, as instanced cards with wind. Thin at the foot of the banks. |
+| Ground cover: grass, flowers, ferns, tall herbs, heather, thicket | In place, as instanced cards with wind, each placed by rule; see *What grows where* below. |
 | Trees with leafy crowns, several kinds, one in blossom | In place. Crowns are clouds of leaf cards shaded about a common centre; firs are tiers of bough cards. Trunks are plain, without branches. |
 | Land running to the horizon | In place: a fine sheet over the valley and its rim, which can be walked, a coarse one out to 250 metres, and a ring of mountains to 750. |
 | Rock: cliffs, outcrops, boulders, standing stones | Shaped and placed, with a rock material of its own: plates split by cracks, bedding and lichen. The shapes themselves are still smooth at the scale of a hand; the relief is all in the material. |
@@ -160,6 +160,30 @@ What that takes, and what is in place:
 | Things built outdoors: fences, steps, bridges, jetties | A landing stage and a post-and-rail fence, in plain squared timber. No steps or bridges. |
 | Haze and light shafts through the trees | Haze is in place. The fog does not yet know about the trees, so there are no shafts between them. |
 | Keeping the cost down | Cards are sorted into blocks of ground so that those out of view are not drawn, and grass and flowers shrink away and stop being drawn beyond a distance set by the level of detail (40, 55 or 80 metres). Three levels of detail, chosen on the opening card, also set the pixel ratio, texture size, bake rays and bloom. Distant trees have fewer, larger cards. No impostors. None of this has been measured on a real graphics card. |
+
+### What grows where
+
+Nothing below the trees is scattered at random. The lie of the land is reduced to four numbers at every point, each from 0 to 1, and every plant is placed by them.
+
+| Number | High where |
+|---|---|
+| Shade | Under the crowns of trees, and at the foot of the valley's southern rim, which faces away from the sun |
+| Wet | On low ground, at the margins of water, and at the shaded foot of rock, where water gathers; less everywhere in a dry season |
+| Wear | Along the track, before the door, and about the things people visit |
+| Thin | On slopes and against rock, where the soil is shallow |
+
+| Plant | Grows where | Why |
+|---|---|---|
+| Grass | Everywhere there is soil and light. Its height goes as `0.45 + 1.1 wet`, cut down by wear, deep shade and thin soil: from under 20 centimetres where it is trodden to about 75 by water | Long grass is moist open ground that nobody walks on; a lawn is trodden ground; under trees there is little of it |
+| Reeds | In the last few centimetres above and below a water line | |
+| Flowers | In sun, with some moisture, away from wear, in drifts | |
+| Ferns | Shade above 0.45, where shade and wet together pass 0.85 | They take the place of grass on the woodland floor |
+| Tall herbs | Open (shade under 0.3), wet above 0.5, good soil, in drifts | The rank growth of a damp meadow: by the pond and in the hollows |
+| Heather and its like | Thin dry soil in sun | Low mounds against boulders and under the rim; in flower from summer |
+| Thicket | Shade between 0.18 and 0.5: the edge of the wood | Bushes want the light of the open and the shelter of the trees, and get both at the margin. Young trees come up among them |
+| Nettles and docks | The ground about a ruin | Where people lived the soil is rich |
+
+The same numbers colour the grass: green where it is wet, straw where it is dry.
 
 Leaves and blades must be matt. With the standard material every card mirrors the sky at a glancing angle, and a meadow seen from head height is all glancing angles: it turned pale and blue until the mirror term was removed.
 

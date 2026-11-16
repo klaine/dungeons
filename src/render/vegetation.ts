@@ -64,6 +64,57 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
         ctx.fill();
       }
     }
+  } else if (kind === 'fern') {
+    // Fronds arching out from the foot of the card, each a midrib with leaflets down both sides.
+    for (let k = 0; k < 7; k++) {
+      const lean = (k / 6 - 0.5) * 1.9 + rng.range(-0.12, 0.12), reach = rng.range(0.62, 0.95) * size, tone = rng.range(0.6, 1.0);
+      let x = size / 2, y = size - 2, dir = -Math.PI / 2 + lean * 0.55;
+      const steps = 22;
+      for (let s = 0; s < steps; s++) {
+        const f = s / steps, nx = x + Math.cos(dir) * (reach / steps), ny = y + Math.sin(dir) * (reach / steps);
+        ctx.strokeStyle = grey(tone * 0.55);
+        ctx.lineWidth = 2.2 * (1 - f) + 0.6;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
+        // Leaflets: longest a third of the way up, dwindling to the tip.
+        const len = size * 0.085 * Math.sin(Math.min(1, f * 1.5 + 0.12) * Math.PI) * (1.15 - f * 0.5) + 2;
+        for (const side of [-1, 1]) {
+          ctx.strokeStyle = grey(tone * rng.range(0.75, 1.0));
+          ctx.lineWidth = 3.2 * (1 - f * 0.6);
+          ctx.beginPath();
+          ctx.moveTo(nx, ny);
+          ctx.lineTo(nx + Math.cos(dir + side * 1.25) * len, ny + Math.sin(dir + side * 1.25) * len);
+          ctx.stroke();
+        }
+        x = nx; y = ny;
+        dir += lean * 0.055;
+      }
+    }
+  } else if (kind === 'herb') {
+    // Tall stems with leaves low down and a flat head of small flowers at the top of each.
+    for (let k = 0; k < 6; k++) {
+      const x0 = rng.range(0.2, 0.8) * size, h = rng.range(0.6, 0.96) * size, lean = rng.range(-0.12, 0.12) * size;
+      ctx.strokeStyle = grey(0.3);
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x0, size);
+      ctx.quadraticCurveTo(x0, size - h * 0.5, x0 + lean, size - h);
+      ctx.stroke();
+      for (let l = 0; l < 5; l++) {
+        const f = rng.range(0.08, 0.6), side = l % 2 ? 1 : -1, len = rng.range(16, 30) * (1 - f * 0.7);
+        ctx.fillStyle = grey(rng.range(0.4, 0.6));
+        ctx.beginPath();
+        ctx.ellipse(x0 + lean * f * f + side * len * 0.5, size - h * f - len * 0.15, len * 0.55, len * 0.2, -side * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const spread = rng.range(16, 26);
+      for (let d = 0; d < 26; d++) {
+        const a = rng.range(Math.PI, Math.PI * 2), r = Math.sqrt(rng.next()) * spread;
+        ctx.fillStyle = grey(rng.range(0.85, 1));
+        ctx.beginPath();
+        ctx.arc(x0 + lean + Math.cos(a) * r, size - h + Math.sin(a) * r * 0.45 + 3, rng.range(2.2, 3.6), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
   } else if (kind === 'leaf') {
     // A spray of leaves filling a rough disc, with twigs behind them.
     ctx.strokeStyle = grey(0.3);
@@ -145,7 +196,7 @@ export const vegetationRange = { value: 75 };
  * too far away to matter are dropped as well (see `cullCards`).
  */
 export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
-  const ground = set.kind === 'grass' || set.kind === 'flower';
+  const ground = set.kind !== 'leaf' && set.kind !== 'needle';
   const block = ground ? 24 : 48;
   const base = shapeGeometry(set.shape);
   const sway = ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
