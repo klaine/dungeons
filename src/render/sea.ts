@@ -174,7 +174,7 @@ export class Sea {
       const breakup: N = smoothstep(-0.3, 0.45, rip(P.xz.mul(0.27).add(vec2(0.02, -0.03).mul(t))).x.add(rip(P.zx.mul(0.61).sub(vec2(0.01, 0.04).mul(t))).y.mul(0.6)));
       const edge: N = one(smoothstep(0.05, 0.55, d)).mul(smoothstep(-0.6, 0.2, rip(P.xz.mul(0.5).add(t.mul(0.03))).x)).toVar();
       // And now and then a crest breaks out on the open water.
-      const caps: N = smoothstep(0.55, 0.9, rip(P.xz.mul(0.021).add(vec2(0.004, 0.002).mul(t))).x.add(rip(P.zx.mul(0.09).add(t.mul(0.02))).y.mul(0.5))).mul(smoothstep(4, 12, d)).mul(fade).mul(0.5);
+      const caps: N = smoothstep(0.78, 1.05, rip(P.xz.mul(0.021).add(vec2(0.004, 0.002).mul(t))).x.add(rip(P.zx.mul(0.09).add(t.mul(0.02))).y.mul(0.5))).mul(smoothstep(4, 12, d)).mul(fade).mul(0.35);
       const foam: N = clamp(max(lines.mul(breakup), edge).add(caps.mul(breakup)), 0, 1).toVar();
       colour = mix(colour, foamColour, foam.mul(0.9));
       // Shallow water shows what lies under it; at the very edge it thins to nothing, so the shore has no hard line.

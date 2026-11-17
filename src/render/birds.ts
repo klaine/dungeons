@@ -40,11 +40,13 @@ export class Birds {
         const base = position.length / 3, size = rng.range(0.85, 1.25);
         const along = rng.range(18, 60), across = along * rng.range(0.35, 0.8), speed = rng.range(5, 8.5) / along, phase = rng.range(0, Math.PI * 2), turn = rng.range(0, Math.PI * 2);
         const cx = spot.x + rng.range(-12, 12), cy = spot.y + rng.range(-6, 14), cz = spot.z + rng.range(-12, 12);
+        // (Drawn once for the bird, not for each of its corners, or its corners would fly apart.)
+        const way = rng.chance(0.5) ? 1 : -1, own = rng.range(0, 100), beat = rng.range(2, 6);
         for (const [x, y, z, w] of shape) {
           position.push(x * size, y * size, z * size);
           centre.push(cx, cy, cz);
-          orbit.push(along, across, speed * (rng.chance(0.5) ? 1 : -1), phase);
-          wing.push(w * Math.sign(x || 1) * size, turn, rng.range(0, 100), rng.range(2, 6));
+          orbit.push(along, across, speed * way, phase);
+          wing.push(w * Math.sign(x || 1) * size, turn, own, beat);
         }
         for (const t of tris) index.push(base + t[0], base + t[1], base + t[2]);
         birds++;
