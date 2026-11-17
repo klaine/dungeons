@@ -333,6 +333,32 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
       const f = 0.12 + 0.8 * (k / 9), y = 6 + (size - 14) * f, reach = (0.16 + 0.3 * f) * size;
       for (const side of [-1, 1]) shoot(size / 2, y, size / 2 + side * reach * rng.range(0.8, 1.05), y + reach * rng.range(0.45, 0.75), 12);
     }
+    // And one shoot by itself, lying along its picture: a twig with needles standing off it all the way along, leaning forward, the
+    // newest at its tip the palest. Boughs that are made shoot by shoot wear it (see `boughSprig`).
+    const w = 256, h = 64, c1 = document.createElement('canvas');
+    c1.width = w; c1.height = h;
+    const one = c1.getContext('2d')!;
+    one.lineCap = 'round';
+    one.strokeStyle = grey(0.26);
+    one.lineWidth = 3;
+    one.beginPath(); one.moveTo(3, h / 2); one.lineTo(w - 12, h / 2); one.stroke();
+    for (let x = 4; x < w - 8; x += 2.2) {
+      const f = x / w;
+      for (const side of [-1, 1]) {
+        one.strokeStyle = grey(rng.range(0.42, 0.9) * (0.8 + 0.3 * f));
+        one.lineWidth = rng.range(1.5, 2.4);
+        const l = (h / 2 - 3) * rng.range(0.6, 1) * (1 - 0.45 * Math.pow(f, 3));
+        one.beginPath(); one.moveTo(x, h / 2); one.lineTo(x + l * rng.range(0.25, 0.6), h / 2 + side * l); one.stroke();
+      }
+    }
+    const single = new CanvasTexture(c1);
+    single.colorSpace = SRGBColorSpace;
+    single.anisotropy = 4;
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.anisotropy = 4;
+    texture.userData.single = single;
+    return texture;
   } else if (kind === 'fir') {
     // A whole fir: a spire of drooping tiers, widest near the foot, each lighter at its edge.
     // Painted solid, because it is only ever seen small, and what is thin would vanish.
@@ -457,6 +483,53 @@ function bladeClump(): BufferGeometry {
  * sheet, and seen edge on a sheet is a line. It fills the same square as the card does, so one
  * can stand for the other; this one is for trees near enough to walk under (`sprigRange`).
  */
+/**
+ * A conifer's bough made shoot by shoot, to hang where the painted bough hangs: a stem down the
+ * card and side shoots off it to either side, as the painting has them, but each shoot is two
+ * strips crossed along its length, so that it bristles all round and is a brush from any side;
+ * and the side shoots do not lie in the card's plane but droop out of it, some one way and some
+ * the other. The trunk end is at the top of the card, as in the painting.
+ */
+function boughSprig(): BufferGeometry {
+  const P: number[] = [], Nn: number[] = [], C: number[] = [], U: number[] = [], I: number[] = [];
+  let seed = 9173;
+  const r = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = (a: number[]) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const shoot = (a: number[], b: number[], wide: number, tone: number) => {
+    const dir = unit([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    const s0 = unit(cross(dir, Math.abs(dir[2]) > 0.9 ? [1, 0, 0] : [0, 0, 1])), s1 = unit(cross(dir, s0));
+    const turn = r() * Math.PI;
+    for (let q = 0; q < 2; q++) {
+      const an = turn + (q * Math.PI) / 2, c = Math.cos(an), sn = Math.sin(an);
+      const side = [s0[0] * c + s1[0] * sn, s0[1] * c + s1[1] * sn, s0[2] * c + s1[2] * sn], n = unit(cross(dir, side));
+      const base = P.length / 3;
+      const pts = [[a, -1, 0], [a, 1, 0], [b, 1, 1], [b, -1, 1]] as const;
+      for (const [at, sgn, u] of pts) {
+        P.push(at[0] + side[0] * wide * sgn, at[1] + side[1] * wide * sgn, at[2] + side[2] * wide * sgn);
+        Nn.push(n[0], n[1], n[2]); C.push(tone, tone, tone); U.push(u, sgn > 0 ? 1 : 0);
+      }
+      I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  };
+  // The stem, in two lengths so that it can bow a little out of the card's plane.
+  const bow = (r() - 0.5) * 0.16, top = [0, 0.48, 0], mid = [0, 0, bow], tip = [0, -0.48, 0];
+  shoot(top, mid, 0.06, 0.8);
+  shoot(mid, tip, 0.06, 1);
+  for (let k = 0; k < 9; k++) {
+    const f = 0.12 + 0.8 * (k / 9), y = 0.48 - 0.96 * f, reach = 0.16 + 0.3 * f, z0 = bow * (1 - Math.abs(y) / 0.48);
+    for (const side of [-1, 1]) {
+      const out = reach * (0.8 + 0.25 * r()), fall = reach * (0.45 + 0.3 * r()), hang = reach * (r() - 0.5) * 0.9;
+      // Darker by the stem's upper end, where the old growth is, and paler outward.
+      shoot([0, y, z0], [side * out, y - fall, z0 + hang], 0.047, 0.78 + 0.3 * f * r() + 0.08 * r());
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(P, 3)); g.setAttribute('normal', new Float32BufferAttribute(Nn, 3));
+  g.setAttribute('color', new Float32BufferAttribute(C, 3)); g.setAttribute('uv', new Float32BufferAttribute(U, 2)); g.setIndex(I);
+  return g;
+}
+
 function sprigClump(): BufferGeometry {
   const P: number[] = [], Nn: number[] = [], C: number[] = [], U: number[] = [], I: number[] = [];
   let seed = 4711;
@@ -561,7 +634,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   // and by the cards themselves shrinking away over the hand-over. (`?blades=0` keeps the painted tufts alone.)
   const split = set.kind === 'grass' && new URLSearchParams(location.search).get('blades') !== '0';
   // Leaves likewise: near the eye, sprigs of leaves made one by one; farther off, the painted sprays.
-  const sprigs = set.kind === 'leaf' && !!texture.userData.single && new URLSearchParams(location.search).get('sprigs') !== '0';
+  const sprigs = (set.kind === 'leaf' || set.kind === 'needle') && !!texture.userData.single && new URLSearchParams(location.search).get('sprigs') !== '0';
   const sway = whole ? 0.004 : ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
   const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N, uSprig = sprigRangeUniform as N;
   // Where each card stands, and how large it is.
@@ -636,11 +709,13 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     if (relief) { material.roughness = 0.58; material.color.setScalar(1.16); }
     // A painted spray seen edge on is a streak across the crown. As a card turns its edge to the eye it thins away instead.
     if (relief && !sprig) material.opacityNode = smoothstep(0.05, 0.32, abs(dot(positionViewDirection, normalViewGeometry)));
+    // (A painted bough the same, more gently: there are few of them to a tree, and a spruce must not go thin from one side.)
+    if (set.kind === 'needle' && !sprig) material.opacityNode = smoothstep(0.02, 0.16, abs(dot(positionViewDirection, normalViewGeometry)));
     (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1, relief ? 0.55 : 0.2);
     return material;
   };
   const layers: { layer: 'painted' | 'blades' | 'sprigs' | 'far'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
-  if (sprigs) layers.push({ layer: 'sprigs', base: sprigClump(), material: materialFor('sprigs') });
+  if (sprigs) layers.push({ layer: 'sprigs', base: set.kind === 'needle' ? boughSprig() : sprigClump(), material: materialFor('sprigs') });
   if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
   layers.push({ layer: 'painted', base: shapeGeometry(set.shape, set.kind === 'leaf'), material: materialFor('painted') });
   if (set.kind === 'grass') layers.push({ layer: 'far', base: shapeGeometry(set.shape), material: materialFor('far') });
