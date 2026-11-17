@@ -526,6 +526,7 @@ async function start(): Promise<void> {
     catch (e) { console.error(e); say(`${what} failed: ${(e as Error).message}`, 'bad', 60); }
   };
   let drawn: { what: string; since: number; frames: number } | null = null;
+  const drawnNow = { triangles: 0, calls: 0 };
 
   heading('Views');
   buttons(VIEWS.map((v) => [`${v.key.toUpperCase()} ${v.name}`, () => view(v.key)] as [string, () => void]));
@@ -660,6 +661,9 @@ async function start(): Promise<void> {
     if (shadowsDue > 0) { shadowsDue--; sun.shadow.needsUpdate = true; }
     atmosphere.update();
     pipeline.render();
+    // What this frame drew, in every pass of it: it falls as blocks of grass and leaves pass out of range and are left out. (Cards that
+    // have shrunk to nothing inside a block that is still drawn are counted all the same: they are sent, and cost their points.)
+    { const info = renderer.info.render as unknown as { triangles: number; drawCalls: number }; drawnNow.triangles = info.triangles; drawnNow.calls = info.drawCalls; }
     if (drawn && ++drawn.frames === 2) { say(`${drawn.what}, and drawn after ${(performance.now() - drawn.since).toFixed(0)} ms`, 'good'); drawn = null; }
     if (wantPicture) { const give = wantPicture; wantPicture = null; give(canvas.toDataURL('image/png')); }
     // The eye adjusts, as in the game, unless exposure is held.
@@ -676,7 +680,7 @@ async function start(): Promise<void> {
       const far = camera.position.distanceTo(controls.target);
       foot.innerHTML = '';
       if (said.text) el('div', foot, said.text).className = said.kind;
-      el('div', foot, `${fps.toFixed(0)} frames a second · ${([...stage.meshes.values()].reduce((n, m) => n + m.triangleCount, 0) / 1000).toFixed(0)}k triangles and ${cardMeshes.reduce((n, m) => n + m.count, 0).toLocaleString()} cards on the stage · ${far < 10 ? far.toFixed(1) : far.toFixed(0)} m from what is looked at · exposure ${exposure.toFixed(2)}${state.exposure !== null ? ' (held)' : ''} · ${state.stone}, ${state.season}, ${state.hour}`).className = 'dim';
+      el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawnNow.triangles / 1e6).toFixed(2)} million triangles drawn in ${drawnNow.calls} calls · ${far < 10 ? far.toFixed(1) : far.toFixed(0)} m from what is looked at · exposure ${exposure.toFixed(2)}${state.exposure !== null ? ' (held)' : ''} · ${state.stone}, ${state.season}, ${state.hour}`).className = 'dim';
       if (state.exposure === null) showExposure();
     }
   };
