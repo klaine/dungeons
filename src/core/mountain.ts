@@ -747,6 +747,23 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     if (Math.abs(x - doorX) > 6 && nearestOn(m.way ?? [], x, z, 9).off > 5 && nearestOn(m.climb ?? [], x, z, 9).off > 5) m.belfry = { x: round(x), z: round(z), y: F, height: round(q.range(11.5, 15)) };
   }
 
+  // The kitchen's chimney, against the outside of the house: on the wall of the kitchen if it has one that is an outer wall, or of the
+  // refectory, or of whichever room has. And the yard: a low wall along the front of the level ground with the way coming in through
+  // it, and a cross on steps at the end of it away from the bell tower.
+  {
+    const rooms = [...others].filter((r) => (r.level ?? 0) === 0 && r.roof !== 'sky' && r.roof !== 'cave').sort((a, b) => Number(b.name === 'kitchen') - Number(a.name === 'kitchen') || Number(b.name === 'refectory') - Number(a.name === 'refectory'));
+    for (const r of rooms) {
+      const zc = (r.z0 + r.z1) / 2, xc = (r.x0 + r.x1) / 2;
+      const sides: [number, number, [number, number], boolean][] = [[r.x0 - T, zc, [-1, 0], Math.abs(r.x0 - T - house.x0) < 0.05], [r.x1 + T, zc, [1, 0], Math.abs(r.x1 + T - house.x1) < 0.05], [xc, r.z0 - T, [0, -1], Math.abs(r.z0 - T - house.z0) < 0.05]];
+      const side = sides.find((sd) => sd[3]);
+      if (!side) continue;
+      m.hearth = { x: round(side[0]), z: round(side[1]), out: side[2] };
+      break;
+    }
+    const tower = m.belfry ? m.belfry.x : null, crossX = tower !== null && tower > hx ? level.x0 + 3 : level.x1 - 3;
+    m.yard = { x0: level.x0 + 0.6, x1: level.x1 - 0.6, z: round(level.z1 - 0.5), gap: doorX, cross: [round(crossX), round(level.z1 - 2.6)] };
+  }
+
   // The gallery way: on most mountains there is a second way up, along the mountainside.
   if (rng.fork('gallery?').chance(0.8)) layGallery(site, m, F, rng.fork('gallery'));
 

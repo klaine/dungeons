@@ -226,7 +226,9 @@ const snowOn = (P: N, up: N): N => {
   const drift: N = farFbm(P.xz.mul(0.045).add(3.7)), fringe: N = farNoise(P.xz.mul(0.85));
   // (And more of it higher up, above a line, if one is given: in summer the old snow lies on the summit and hardly anywhere below it.)
   const higher: N = smoothstep(line.x, line.x.add(35), P.y).mul(line.y);
-  return smoothstep(0, 0.12, mix(-1.15, 0.75, cover).add(higher).add(up.sub(0.8).mul(2.4)).add(drift.sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, cover));
+  // (Where a line is given, nothing lies far below it: old snow in summer is on the heights, not about the house.)
+  const below: N = mix(1, smoothstep(line.x.sub(10), line.x.add(8), P.y), step(0.001, line.y));
+  return smoothstep(0, 0.12, mix(-1.15, 0.75, cover).add(higher).add(up.sub(0.8).mul(2.4)).add(drift.sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, cover)).mul(below);
 };
 /** Snow's own colour: white, a little blue, and darker and greyer where it has been trodden. */
 const SNOW: [number, number, number] = [0.84, 0.87, 0.93];

@@ -516,6 +516,13 @@ export interface Mountain {
   bridge?: { a: [number, number, number]; b: [number, number, number]; width: number };
   /** A gateway of stone where the way comes off the ridge onto the top: two piers and an arch over the way, a cross on it, seen on the skyline from all down the ridge. The way goes through it towards `heading` (radians). */
   gate?: { x: number; z: number; y: number; heading: number };
+  /** The hospice's kitchen chimney: a stack of stone built against the outside of the house's wall at `x`, `z`, on the side `out` (the unit step away from the wall), rising over the roofline. Smoke comes from it. */
+  hearth?: { x: number; z: number; out: [number, number] };
+  /**
+   * The wall of the hospice's yard: a low wall along the south edge of the level ground, where the way comes in, from `x0` to `x1` at `z`,
+   * with a gap for the way at `gap`; and a tall cross of stone on steps at its end, at `cross`.
+   */
+  yard?: { x0: number; x1: number; z: number; gap: number; cross: [number, number] };
   /** A bell tower standing by itself beside the hospice's forecourt, on the level ground: square, `height` to the eaves of its roof, the bell hung in its open top stage. Rung in cloud, to bring travellers in. */
   belfry?: { x: number; z: number; y: number; height: number };
   /** A shelter of dry stone beside the way on the ridge, a little above the cloud, its door towards `facing` (radians), on ground levelled at `y`. */

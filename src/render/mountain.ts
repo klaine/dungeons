@@ -574,6 +574,56 @@ export function buildMountain(b: MountainBuild): MountainResult {
     }
   }
 
+  // The hospice's chimney: a stack of coursed stone against the outside of the wall, a breast at its foot, drawn in above the eaves,
+  // a slab on four stones over its top to keep the snow out; and its yard wall with the cross.
+  const smokes: MountainResult['smokes'] = [];
+  {
+    const q = rng.fork('hospice');
+    type P3 = [number, number, number];
+    const tone = (k = 1): Colour => { const t = q.range(0.84, 1.05) * k; return [stone[0] * t, stone[1] * t, stone[2] * t]; };
+    const boxAt = (material: string, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, colour: Colour) =>
+      solid(material, ([[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]] as P3[]), colour);
+    if (m.hearth) {
+      const h = m.hearth, [ox, oz] = h.out, top = site.top + 1.9;
+      // (Its own terms: `a` along the wall, `o` out from it.)
+      const part = (a0: number, a1: number, o0: number, o1: number, y0: number, y1: number, colour: Colour) => {
+        const xs = [h.x + ox * o0 - oz * a0, h.x + ox * o1 - oz * a1], zs = [h.z + oz * o0 + ox * a0, h.z + oz * o1 + ox * a1];
+        boxAt('stone', Math.min(...xs), Math.max(...xs), y0, y1, Math.min(...zs), Math.max(...zs), colour);
+      };
+      for (let y = F - 0.8; y < F + 2.6; y += 0.45) part(-1.1, 1.1, -0.05, 0.75, y, Math.min(F + 2.6, y + 0.45), tone());
+      for (let y = F + 2.6; y < top; y += 0.45) part(-0.62, 0.62, -0.05, 0.6, y, Math.min(top, y + 0.45), tone());
+      part(-0.74, 0.74, -0.12, 0.72, top, top + 0.14, tone(1.06));
+      for (const [a, o] of [[-0.55, 0.05], [0.55, 0.05], [-0.55, 0.5], [0.55, 0.5]]) part(a - 0.1, a + 0.1, o - 0.1, o + 0.1, top + 0.14, top + 0.5, tone(0.9));
+      part(-0.8, 0.8, -0.16, 0.76, top + 0.5, top + 0.6, tone(0.95));
+      smokes.push({ x: h.x + ox * 0.3, y: top + 0.45, z: h.z + oz * 0.3, height: 16 });
+    }
+    if (m.yard) {
+      const yd = m.yard;
+      // The wall: rubble in courses, a coping of flat stones; open where the way comes in, with a taller pier either side of the opening.
+      for (let x = yd.x0; x < yd.x1 - 0.2;) {
+        const long = Math.min(q.range(0.7, 1.2), yd.x1 - x);
+        if (Math.abs(x + long / 2 - yd.gap) > 2.1 + long / 2) {
+          const base = Math.min(F, ground(x + long / 2, yd.z + 0.4)) - 0.5;
+          boxAt('stone', x, x + long - 0.02, base, F + 0.5, yd.z - 0.28, yd.z + 0.28, tone(0.92));
+          boxAt('stone', x, x + long - 0.02, F + 0.5, F + 0.9, yd.z - q.range(0.24, 0.28), yd.z + q.range(0.24, 0.28), tone());
+          boxAt('stone', x - 0.02, x + long, F + 0.9, F + 1.0, yd.z - 0.34, yd.z + 0.34, tone(1.05));
+        }
+        x += long;
+      }
+      for (const sd of [-1, 1]) {
+        const px = yd.gap + sd * 2.35;
+        boxAt('stone', px - 0.38, px + 0.38, F - 0.6, F + 1.7, yd.z - 0.38, yd.z + 0.38, tone());
+        boxAt('stone', px - 0.46, px + 0.46, F + 1.7, F + 1.84, yd.z - 0.46, yd.z + 0.46, tone(1.06));
+        boxAt('stone', px - 0.2, px + 0.2, F + 1.84, F + 2.14, yd.z - 0.2, yd.z + 0.2, tone());
+      }
+      // The cross: three steps, a tall tapering shaft, a short arm, as stands before a hospice for those who did not reach it.
+      const [cx, cz] = yd.cross, y0 = ground(cx, cz);
+      for (let k = 0; k < 3; k++) boxAt('stone', cx - 1.15 + k * 0.3, cx + 1.15 - k * 0.3, y0 - 0.4 + k * 0.24, y0 + 0.24 * (k + 1) - 0.16, cz - 1.15 + k * 0.3, cz + 1.15 - k * 0.3, tone(1.02));
+      const sy = y0 + 0.56;
+      solid('stone', [[cx - 0.2, sy, cz - 0.16], [cx + 0.2, sy, cz - 0.16], [cx + 0.2, sy, cz + 0.16], [cx - 0.2, sy, cz + 0.16], [cx - 0.13, sy + 3.5, cz - 0.11], [cx + 0.13, sy + 3.5, cz - 0.11], [cx + 0.13, sy + 3.5, cz + 0.11], [cx - 0.13, sy + 3.5, cz + 0.11]], tone(1.04));
+      boxAt('stone', cx - 0.62, cx + 0.62, sy + 2.55, sy + 2.85, cz - 0.11, cz + 0.11, tone(1.04));
+    }
+  }
   // The bell tower beside the forecourt: a square shaft of coursed stone, a little narrower at each string course; an open stage at
   // the top, an arch in each face with the bell hanging within; a steep four-sided roof of slate and a cross. The hospice's own
   // roofs are low; this is what is seen of it from the ridge and from the summit, and in cloud its bell is what brings people in.
@@ -1049,7 +1099,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       ...[0.4, 1.9, 3.5, 5.1].map((a) => { const r = m.rim[Math.floor((a / (Math.PI * 2)) * m.rim.length) % m.rim.length] + 22; return { x: m.x + Math.cos(a + s1) * r, y: F - 12, z: m.z + Math.sin(a + s1) * r }; }),
       ...(m.cairn ? [{ x: m.cairn.x + 14, y: m.cairn.y + 6, z: m.cairn.z - 10 }] : []),
     ],
-    smokes: m.shelter ? [{ x: m.shelter.x - Math.cos(m.shelter.facing) * 0.3, y: m.shelter.y + 2.3, z: m.shelter.z - Math.sin(m.shelter.facing) * 0.3, height: 9 }] : [],
+    smokes: [...smokes, ...(m.shelter ? [{ x: m.shelter.x - Math.cos(m.shelter.facing) * 0.3, y: m.shelter.y + 2.3, z: m.shelter.z - Math.sin(m.shelter.facing) * 0.3, height: 9 }] : [])],
     planted: { ...planted, pines },
     lookout,
     torches,
