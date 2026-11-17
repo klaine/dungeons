@@ -605,14 +605,17 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   const firs: N = smoothstep(0.42, 0.58, farNoise(fp.mul(0.011).add(5)).add(high.sub(0.2).mul(0.5))).toVar();
   const size = mix(3.7, 2.6, firs);
   const crown: N = farCrowns(fp.div(size)).toVar();
-  const seen: N = one(smoothstep(0.25, 0.7, grain.div(size))).toVar();
+  // (Crowns are painted as seen from above. On ground that is steep they would be drawn out down the slope into pillars with round
+  // tops, row on row, which is what the turned-down edge of the sheet used to show. There the wood is its colour only, and trees
+  // of cards stand in front of it.)
+  const seen: N = one(smoothstep(0.25, 0.7, grain.div(size))).mul(smoothstep(0.55, 0.8, n0.y)).toVar();
   const green: N = uWood.mul(mix(vec3(1), vec3(0.62, 0.74, 0.82), firs)).mul(fine.mul(0.2).add(0.9));
   // Under the trees it is dark, whatever the ground is.
   land = mix(land, green.mul(0.45), wood.mul(0.9));
   // A wood thins out a tree at a time, not all together: each tree stands or does not.
   const standing: N = step(fract(crown.w.mul(91.3)), wood.mul(1.05)).mul(smoothstep(0, 0.3, crown.x)).toVar();
   const tone = crown.x.mul(0.36).add(0.74).mul(crown.w.mul(0.4).add(0.8));
-  land = mix(land, green.mul(mix(0.84, tone, seen)), mix(wood, standing, seen).mul(step(0.0001, wood)));
+  land = mix(land, green.mul(mix(0.84, tone, seen)).mul(mix(0.6, 1, smoothstep(0.3, 0.7, n0.y))), mix(max(wood, one(smoothstep(0.3, 0.6, n0.y)).mul(step(high, 0.5)).mul(0.9)), standing, seen).mul(step(0.0001, wood)));
   const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(step(0.0001, wood)))).toVar();
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
   const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(0.5, 0.72, farN.y)).toVar();

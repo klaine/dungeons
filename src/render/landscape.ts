@@ -178,6 +178,12 @@ export function layMountains(
   tree?: (x: number, y: number, z: number, fir: boolean, own: number) => void,
   /** Places where something stands on the hills: the ground is made level there, `r` across the half of it, at height `y`, and no tree grows on it. */
   sites: { x: number; z: number; r: number; y: number }[] = [],
+  /**
+   * How high the ground stands inside the ring, where the nearer land is laid by someone else. The sheet's inner edge is brought down
+   * to it and rises to its own height over seventy metres. Left to itself the sheet begins wherever its hills happen to stand, as
+   * much as fifty metres above the ground it begins on, and the edge turned down to close the gap is a wall round the valley's mouth.
+   */
+  inner?: HeightFn,
 ): void {
   const around = 560;
   const radii: number[] = [];
@@ -189,6 +195,7 @@ export function layMountains(
     const a = (k / around) * Math.PI * 2, o = ri * around + k;
     X[o] = cx + Math.cos(a) * radii[ri]; Z[o] = cz + Math.sin(a) * radii[ri];
     H[o] = height(X[o], Z[o]);
+    if (inner && radii[ri] < 285) { const t = Math.min(1, Math.max(0, (radii[ri] - 215) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
   // Rock does not stand in needles. Anything steeper than rock holds for long is worn down to
@@ -243,7 +250,8 @@ export function layMountains(
     for (let ri = 0; ri < rings - 1 && radii[ri] < 440; ri++) for (let k = 0; k < around; k++) {
       const a = at(ri, k), b = at(ri, k + 1), c = at(ri + 1, k + 1), d = at(ri + 1, k);
       const area = Math.hypot(X[b] - X[a], Z[b] - Z[a]) * (radii[ri + 1] - radii[ri]);
-      const want = area / (22 + (radii[ri] - 240) * 0.22), n = Math.floor(want) + (own(a, 1) < want % 1 ? 1 : 0);
+      // (Thickest on the nearest slopes, which are looked at most and are steepest: trees of cards are what makes those a wood.)
+      const want = area / (13 + Math.max(0, radii[ri] - 240) * 0.26), n = Math.floor(want) + (own(a, 1) < want % 1 ? 1 : 0);
       for (let j = 0; j < n; j++) {
         const u = own(a * 7 + j, 2), v = own(a * 7 + j, 3);
         const x = (X[a] * (1 - u) + X[b] * u) * (1 - v) + (X[d] * (1 - u) + X[c] * u) * v, z = (Z[a] * (1 - u) + Z[b] * u) * (1 - v) + (Z[d] * (1 - u) + Z[c] * u) * v;
@@ -253,7 +261,7 @@ export function layMountains(
         const hollow = Math.min(1, Math.max(-1, (((H[at(ri, k + 2)] + H[at(ri, k - 1)] + H[at(ri + 2, k)] + H[at(ri - 1, k)]) / 4 - y) / (radii[ri + 1] - radii[ri])) * 4));
         const patch = fbm2(x * 0.03 + seed, z * 0.03 - seed, 2) - 0.5;
         const wooded = 0.37 - (y - base) / 190 + 0.13 * hollow + 0.42 * patch;
-        if (wooded < 0.02 * own(a * 7 + j, 4) || fall > 0.85) continue;
+        if (wooded < 0.02 * own(a * 7 + j, 4) || fall > 1.7) continue;
         if (sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r * 1.4)) continue;
         tree(x, y, z, fbm2(x * 0.011 + 5, z * 0.011 + 5, 1) + ((y - base) / 190 - 0.2) * 0.5 > 0.5, own(a * 7 + j, 5));
       }

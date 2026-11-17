@@ -1944,6 +1944,10 @@ export function meshSite(site: Site): SceneDescription {
     const reach = 246;
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), ground, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 6,
+      // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
+      // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
+      // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)
+      bare: 0.8,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
     // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
@@ -1962,7 +1966,7 @@ export function meshSite(site: Site): SceneDescription {
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
-    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })));
+    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground);
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
