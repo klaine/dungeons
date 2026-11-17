@@ -9,6 +9,7 @@ happened. They need Playwright with Chromium (`npm install --no-save playwright`
 |---|---|
 | `node tools/browser/play.cjs <seed> …` | Walks every doorway in both directions, then follows the solver's route from where the player arrives to the end of the game. |
 | `node tools/browser/roam.cjs <seed> …` | Drives the player at the edges of the valley from thirty-six directions, jumping, and reports anyone who got out or fell through. Then walks to each thing left in the valley and checks it is picked up. |
+| `node tools/browser/lighthouse.cjs <seed> …` | On islands: walks in at the lighthouse door, up the stair round the newel, out onto the gallery and round to the spyglass, and reports how far it got. |
 | `node tools/browser/jetty.cjs <seed> …` | Walks out along the landing stage and reports the player's height at each step, to show they stayed on the deck. |
 
 `play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`.
