@@ -303,18 +303,38 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
   // and bright at its edge: each spray is tinted by how deep in the crown it hangs.
   let crownReach = 1;
   for (const tip of tips) crownReach = Math.max(crownReach, tip.at.distanceTo(heart));
-  const hang = (list: { at: Vector3; reach: number }[], cards: number, size: number, dim: number) => {
-    const each = Math.max(1, Math.round(cards / list.length));
-    for (const tip of list) {
+  // What the eye takes for a living crown, apart from its shape, is the variety in it. Each spray
+  // has its own shade: new growth at the sunlit edge is yellower and brighter, the old leaf inside
+  // and beneath is bluer and darker, and from bough to bough the green wanders a little. And the
+  // outer shell is not quite whole: some sprays are left out, so the outline is lumpy and the sky
+  // shows through in places, the leaves of the rest made a little more numerous to keep the crown full.
+  // (Drawn from a stream of its own, so the branching of trees already seen is not changed.)
+  const look = rng.fork('crown-look');
+  const gaps = o.detail > 0.3;
+  const hang = (list: { at: Vector3; reach: number }[], cards: number, size: number, dim: number, outer = false) => {
+    let kept = 0;
+    const keep: boolean[] = list.map((tip) => {
+      const depth = Math.min(1, tip.at.distanceTo(heart) / crownReach);
+      const k = !(gaps && outer && look.chance(0.3 * depth * depth * depth));
+      if (k) kept++;
+      return k;
+    });
+    const each = Math.max(1, Math.round(cards / Math.max(1, kept)));
+    list.forEach((tip, i) => {
+      if (!keep[i]) return;
       const r = Math.min(1.6, 0.3 + tip.reach * 0.55);
       const depth = Math.min(1, tip.at.distanceTo(heart) / crownReach);
+      const up = Math.min(1, Math.max(0, (tip.at.y - heart.y) / (crownReach * 0.7) + 0.5));
       const light = dim * (0.5 + 0.5 * depth * depth) * (tip.at.y < heart.y ? 0.82 : 1);
+      // Towards yellow in the sun at the edge, towards blue-green in the old leaf; and a wander of its own.
+      const warm = (depth * depth * up - 0.25) * 0.3 + (look.next() - 0.5) * 0.16;
+      const tint = [1 + warm * 0.9, 1 + warm * 0.1, 1 - warm * 1.1];
       const centre = tip.at.clone().lerp(heart, 0.5);
-      planting.spray(tip.at.x, tip.at.y, tip.at.z, r, r * 0.65, each, size, (q) => { const c = o.leaf(q); return [c[0] * light, c[1] * light, c[2] * light]; }, rng, centre.x, centre.y - r, centre.z);
+      planting.spray(tip.at.x, tip.at.y, tip.at.z, r, r * 0.65, each, size, (q) => { const c = o.leaf(q); return [c[0] * light * tint[0], c[1] * light * tint[1], c[2] * light * tint[2]]; }, rng, centre.x, centre.y - r, centre.z);
       spread = Math.max(spread, Math.hypot(tip.at.x - x, tip.at.z - z) + r * 0.7);
-    }
+    });
   };
-  hang(tips, o.cards * 0.78, o.cardSize, 1);
+  hang(tips, o.cards * 0.78, o.cardSize, 1, true);
   // Larger, darker boughs fill the inside, so the sky does not show through the middle of the tree.
   if (inner.length) hang(inner, o.cards * 0.22, o.cardSize * 1.7, 0.62);
   return spread;
