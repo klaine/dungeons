@@ -45,13 +45,13 @@ function softMax(a: number, b: number, k: number): number {
 }
 
 /** Where a point lies against the ridge: how far from its crest line, and how far along it (0 at the rim, 1 at its end; less or more beyond). */
-export function onSpur(m: Mountain, x: number, z: number): { off: number; t: number; y: number } {
+export function onSpur(m: Mountain, x: number, z: number): { off: number; t: number; y: number; d: number } {
   const crest = m.spur.crest;
   if (!crest) {
     // (Before its line is laid: straight from its head to its end.)
     const [ax, az] = m.spur.from, [bx, bz] = m.spur.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
     const t = ((x - ax) * dx + (z - az) * dz) / l2, tc = clamp01(t);
-    return { off: Math.hypot(x - ax - dx * tc, z - az - dz * tc), t, y: m.spur.y0 + (m.spur.y1 - m.spur.y0) * tc };
+    return { off: Math.hypot(x - ax - dx * tc, z - az - dz * tc), t, y: m.spur.y0 + (m.spur.y1 - m.spur.y0) * tc, d: tc * Math.sqrt(l2) };
   }
   // Its line is indexed once in squares of the ground, with how far along it each point is, so that only the lengths of it near a point are looked at.
   let index = CRESTS.get(crest);
@@ -69,7 +69,7 @@ export function onSpur(m: Mountain, x: number, z: number): { off: number; t: num
   }
   const near = index.cells.get(Math.floor(x / index.C) * 100003 + Math.floor(z / index.C));
   // (Far from it, it is as if it were not there.)
-  if (!near) return { off: 1e4, t: 0, y: m.spur.y0 };
+  if (!near) return { off: 1e4, t: 0, y: m.spur.y0, d: 0 };
   let off = Infinity, t = 0, y = 0;
   for (const k of near) {
     const [ax, az, ay] = crest[k], [bx, bz, by] = crest[k + 1];
@@ -77,7 +77,7 @@ export function onSpur(m: Mountain, x: number, z: number): { off: number; t: num
     const d = Math.hypot(x - ax - dx * u, z - az - dz * u);
     if (d < off) { off = d; y = ay + (by - ay) * u; t = (index.along[k] + (index.along[k + 1] - index.along[k]) * u) / index.total; }
   }
-  return { off, t, y };
+  return { off, t, y, d: t * index.total };
 }
 const CRESTS = new WeakMap<object, { cells: Map<number, number[]>; C: number; along: number[]; total: number }>();
 
@@ -238,14 +238,17 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   // and then over its own lesser precipices.
   const s = onSpur(m, x, z), tc = clamp01(s.t), half = spurHalf(m, x, z, s.t);
   const crest = s.y + (fbm2(x / 17 + 1.3, z / 17, 2, 5) - 0.5) * 2.4 * smooth(s.t / 0.2);
-  const ridge = crest - 4.5 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - fall(s.off - half, 14 + 12 * tc);
+  // The cleft: a gap cut clean across the ridge, steep-walled, where a band of weaker rock has gone; the bridge is over it.
+  const notch = m.spur.notch, cleft = notch && s.off < 60 ? notch.deep * (1 - smooth((Math.abs(s.d - notch.at) - notch.wide * 0.28) / (notch.wide * 0.24))) : 0;
+  const ridge = crest - cleft - 4.5 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - fall(s.off - half, 14 + 12 * tc);
   let y = softMax(main, ridge, 4);
   if (!levelled) y += torsAt(m, x, z);
   if (levelled) {
     // The way is cut and made up to its own level, across a mule's breadth and a little more, and eased into the land beside it.
     if (m.way) {
       const w = nearestOn(m.way, x, z, 9);
-      if (w.off < 9) y += (w.y - y) * (1 - smooth((w.off - 2.3) / 6));
+      // (Not across the cleft, which the way goes over by its bridge: the ground is not made up to it there.)
+      if (w.off < 9) y += (w.y - y) * (1 - smooth((w.off - 2.3) / 6)) * (notch ? 1 - smooth(cleft / (notch.deep * 0.12)) : 1);
     }
     // A little platform on the summit for the cairn and whoever stands by it. (Made before the climb, which comes up onto it: where
     // the two meet, the climb's own level holds, or its last strides would end at a wall.)
@@ -503,6 +506,17 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const end = fallen(1);
     m.spur.crest = line.map(([x, z], k) => [round(x), round(z), round(m.spur.y0 + (m.spur.y1 - m.spur.y0) * (fallen(k / (line.length - 1)) / end))]);
     m.spur.to = [m.spur.crest[m.spur.crest.length - 1][0], m.spur.crest[m.spur.crest.length - 1][1]];
+    // The cleft across it, on most mountains: in its upper half, where the bridge over it will be above the cloud.
+    if (rng.fork('notch?').chance(0.75)) {
+      const total = line.reduce((sum, pt, k) => (k ? sum + Math.hypot(pt[0] - line[k - 1][0], pt[1] - line[k - 1][1]) : 0), 0);
+      // (Where the crest runs most nearly level, on a knoll's top or in a saddle: a bridge wants its two ends at one height.)
+      let at = total * 0.36, least = Infinity;
+      for (let d = total * 0.24; d <= total * 0.5; d += 3) {
+        const slope = Math.abs(crestPoint(m, (d + 9) / total).y - crestPoint(m, (d - 9) / total).y) / 18 + q.range(0, 0.02);
+        if (slope < least) { least = slope; at = d; }
+      }
+      m.spur.notch = { at: round(at), wide: round(q.range(7.5, 10.5)), deep: round(q.range(11, 17)) };
+    }
   }
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
@@ -525,7 +539,9 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       const total = (m.spur.crest ?? []).reduce((sum, p, k, all) => (k ? sum + Math.hypot(p[0] - all[k - 1][0], p[1] - all[k - 1][1]) : 0), 0) || 1;
       const p1 = q.range(0, TAU), p2 = q.range(0, TAU), room = Math.max(0.6, m.spur.width / 2 - 7);
       for (let d = 0.07 * total; d <= 0.93 * total; d += 2) {
-        const c = crestPoint(m, d / total), t = (d / total - 0.07) / 0.86, wander = (room * 0.8 * Math.sin(d / 17 + p1) + room * 0.35 * Math.sin(d / 6.3 + p2)) * smooth(t / 0.08) * smooth((1 - t) / 0.06);
+        // (It comes to the cleft square and on the crest's own line, where the bridge is.)
+        const toNotch = m.spur.notch ? smooth((Math.abs(d - m.spur.notch.at) - 7) / 16) : 1;
+        const c = crestPoint(m, d / total), t = (d / total - 0.07) / 0.86, wander = (room * 0.8 * Math.sin(d / 17 + p1) + room * 0.35 * Math.sin(d / 6.3 + p2)) * smooth(t / 0.08) * smooth((1 - t) / 0.06) * toNotch;
         down.push([c.x - Math.sin(c.heading) * wander, c.z + Math.cos(c.heading) * wander]);
       }
       down.push(foot);
@@ -543,7 +559,22 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     for (const p of pts) if (Math.hypot(p[0] - track[track.length - 1][0], p[1] - track[track.length - 1][1]) > 1.2) track.push(p);
     // The way's level line, from the forecourt to the arrival.
     const line: [number, number][] = track.slice(1);
+    // (Its level line is taken from the ridge as it would be without the cleft: the way does not go down into that.)
+    const cut = m.spur.notch;
+    delete m.spur.notch;
     m.way = levelLine(line, plain, F, plain(foot[0], foot[1]), 0.5);
+    if (cut) m.spur.notch = cut;
+    // The bridge: over the cleft the way does not go down and up, it goes across, straight and level from lip to lip.
+    if (m.spur.notch) {
+      const n = m.spur.notch, over = m.way.map(([x, z]) => { const sp = onSpur(m, x, z); return sp.off < 8 && Math.abs(sp.d - n.at) < n.wide / 2 + 2.2; });
+      const i0 = over.indexOf(true), i1 = over.lastIndexOf(true);
+      if (i0 > 2 && i1 < m.way.length - 3 && i1 > i0) {
+        const a = m.way[i0 - 1], b = m.way[i1 + 1];
+        // (The lips stand at what the land has there without the cleft; the way either side is eased to them by its own grade.)
+        for (let k = i0; k <= i1; k++) { const f = (k - i0 + 1) / (i1 - i0 + 2); m.way[k] = [round(a[0] + (b[0] - a[0]) * f), round(a[1] + (b[1] - a[1]) * f), round(a[2] + (b[2] - a[2]) * f)]; track[k + 1] = [m.way[k][0], m.way[k][1]]; }
+        m.bridge = { a: [a[0], a[1], a[2]], b: [b[0], b[1], b[2]], width: 2.5 };
+      } else delete m.spur.notch;
+    }
     // The gateway: where the way comes off the ridge onto the top.
     {
       const k = m.way.findIndex(([x, z]) => onSpur(m, x, z).t > 0.035 && onSpur(m, x, z).off < 30);
@@ -573,6 +604,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       const [x0, z0, y0] = wy[k], [x1, z1] = wy[k + 1], dir = Math.atan2(z1 - z0, x1 - x0), side = q.chance(0.5) ? 1 : -1, off = q.range(6, 7.5);
       const x = x0 + Math.cos(dir + (side * Math.PI) / 2) * off, z = z0 + Math.sin(dir + (side * Math.PI) / 2) * off;
       if (inside(m, x, z) < 7.5 || nearestOn(wy, x, z, 9).off < 5.4) continue;
+      if (m.spur.notch && Math.abs(onSpur(m, x, z).d - m.spur.notch.at) < m.spur.notch.wide / 2 + 16) continue;
       m.shelter = { x: round(x), z: round(z), y: y0, facing: Math.round(Math.atan2(z0 - z, x0 - x) * 1000) / 1000 };
     }
   }
@@ -708,6 +740,13 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     }
   }
 
+  // The bell tower: beside the forecourt, at the corner of the level ground away from where the climb sets out, clear of the way.
+  {
+    const q = rng.fork('belfry'), side = m.peaks[0].x < hx ? 1 : -1;
+    const x = side > 0 ? level.x1 - 3.4 : level.x0 + 3.4, z = level.z1 - 3.6;
+    if (Math.abs(x - doorX) > 6 && nearestOn(m.way ?? [], x, z, 9).off > 5 && nearestOn(m.climb ?? [], x, z, 9).off > 5) m.belfry = { x: round(x), z: round(z), y: F, height: round(q.range(11.5, 15)) };
+  }
+
   // The gallery way: on most mountains there is a second way up, along the mountainside.
   if (rng.fork('gallery?').chance(0.8)) layGallery(site, m, F, rng.fork('gallery'));
 
@@ -744,6 +783,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
           if ((m.landings ?? []).some((ld) => Math.hypot(ld.x - x, ld.z - z) < ld.r + r + 1.5) || (m.cairn && Math.hypot(m.cairn.x - x, m.cairn.z - z) < r + 7)) continue;
           if (m.shelter && Math.hypot(m.shelter.x - x, m.shelter.z - z) < r + 6) continue;
           if (m.gate && Math.hypot(m.gate.x - x, m.gate.z - z) < r + 7) continue;
+          if (m.spur.notch) { const sp = onSpur(m, x, z); if (sp.off < 40 && Math.abs(sp.d - m.spur.notch.at) < m.spur.notch.wide / 2 + r + 5) continue; }
           m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 2.2 : 1.6, 3.1)) });
         }
       }

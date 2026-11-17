@@ -498,7 +498,7 @@ export interface Mountain {
    * It does not run straight: `crest` is its line as points `[x, z, y]` from `from` to `to`, swinging one way and then the other,
    * `y` the height of the crest at each, which falls unevenly, over knolls and through saddles. It is narrow, a crest with a drop on either hand; at `swell` of the way along it (0 to 1) it broadens into a shoulder, where the shelter stands.
    */
-  spur: { from: [number, number]; to: [number, number]; width: number; y0: number; y1: number; swell?: number; crest?: [number, number, number][] };
+  spur: { from: [number, number]; to: [number, number]; width: number; y0: number; y1: number; swell?: number; crest?: [number, number, number][]; notch?: { at: number; wide: number; deep: number } };
   /** Summits, the highest first: rising `height` metres over the forecourt's floor about `x`, `z`, falling away over `r`, steep and broken. */
   peaks: { x: number; z: number; r: number; height: number }[];
   /** The ground about the house, kept level at the forecourt's floor. */
@@ -509,8 +509,15 @@ export interface Mountain {
   climb?: [number, number, number][];
   /** How far up the climb, in metres along it from where it leaves the level ground, its last stretch becomes a stair cut in the rock, if it does. */
   climbStair?: number;
+  /**
+   * A bridge of timber over the cleft in the ridge (`spur.notch`: a gap cut clean across the crest `at` metres along it, `wide` at
+   * its lips and `deep`): its deck runs from `a` to `b`, points `[x, z, y]` on the rock at either lip, `width` across, and the way goes over it.
+   */
+  bridge?: { a: [number, number, number]; b: [number, number, number]; width: number };
   /** A gateway of stone where the way comes off the ridge onto the top: two piers and an arch over the way, a cross on it, seen on the skyline from all down the ridge. The way goes through it towards `heading` (radians). */
   gate?: { x: number; z: number; y: number; heading: number };
+  /** A bell tower standing by itself beside the hospice's forecourt, on the level ground: square, `height` to the eaves of its roof, the bell hung in its open top stage. Rung in cloud, to bring travellers in. */
+  belfry?: { x: number; z: number; y: number; height: number };
   /** A shelter of dry stone beside the way on the ridge, a little above the cloud, its door towards `facing` (radians), on ground levelled at `y`. */
   shelter?: { x: number; z: number; y: number; facing: number };
   /**

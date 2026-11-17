@@ -555,6 +555,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       since = 0;
       const [x0, z0] = way[k - 1], [x1, z1] = way[k], l = Math.hypot(x1 - x0, z1 - z0) || 1, side = k % 2 ? 1 : -1;
       const px = x1 - ((z1 - z0) / l) * 2.1 * side, pz = z1 + ((x1 - x0) / l) * 2.1 * side, y = ground(px, pz);
+      if (y < way[k][2] - 1.5) continue;
       const lean = [q.range(-0.04, 0.04), q.range(-0.04, 0.04)], tall = q.range(2.1, 2.5);
       block('wood', px, y - 0.3, pz, 0.09, 0.09, tall - 0.4, q.range(0, 3), timber, lean);
       block('wood', px + lean[0] * (tall - 0.7), y - 0.3 + tall - 0.7, pz + lean[1] * (tall - 0.7), 0.095, 0.095, 0.4, q.range(0, 3), [0.62, 0.1, 0.06], lean);
@@ -571,6 +572,87 @@ export function buildMountain(b: MountainBuild): MountainResult {
     }
   }
 
+  // The bell tower beside the forecourt: a square shaft of coursed stone, a little narrower at each string course; an open stage at
+  // the top, an arch in each face with the bell hanging within; a steep four-sided roof of slate and a cross. The hospice's own
+  // roofs are low; this is what is seen of it from the ridge and from the summit, and in cloud its bell is what brings people in.
+  if (m.belfry) {
+    const bf = m.belfry, q = rng.fork('belfry');
+    type P3 = [number, number, number];
+    const tone = (k = 1): Colour => { const t = q.range(0.84, 1.05) * k; return [stone[0] * t, stone[1] * t, stone[2] * t]; };
+    const box = (material: string, x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, colour: Colour) =>
+      solid(material, [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]].map(([x, y, z]) => [bf.x + x, bf.y + y, bf.z + z] as P3), colour);
+    const H = bf.height, STAGE = 2.9;
+    // The shaft, in three lifts, each set in a hand's breadth, with a string course between.
+    let half = 1.75, y = -0.8;
+    for (let lift = 0; lift < 3; lift++) {
+      const top = lift === 2 ? H - STAGE : -0.8 + ((H - STAGE + 0.8) * (lift + 1)) / 3;
+      for (; y < top - 0.01;) { const tall = Math.min(0.5, top - y); box('stone', -half, half, y, y + tall, -half, half, tone()); y += tall; }
+      if (lift < 2) { box('stone', -half - 0.07, half + 0.07, y - 0.14, y, -half - 0.07, half + 0.07, tone(1.06)); half -= 0.1; }
+    }
+    // A door at its foot towards the forecourt (shut: a leaf of boards in a stone frame), and a slit in each lift.
+    box('wood', -0.5, 0.5, 0, 2.0, -1.78, -1.7, [timber[0] * 0.8, timber[1] * 0.8, timber[2] * 0.8]);
+    box('stone', -0.68, 0.68, 2.0, 2.26, -1.82, -1.7, tone(1.05));
+    for (const yy of [H * 0.38, H * 0.6]) box('wood', -0.09, 0.09, yy, yy + 0.95, -1.71, -1.6, [0.05, 0.05, 0.05]);
+    // The bell stage: a floor, four corner piers, a lintel course over each opening, a cornice.
+    const b0 = H - STAGE, hb = half;
+    box('stone', -hb - 0.1, hb + 0.1, b0 - 0.16, b0, -hb - 0.1, hb + 0.1, tone(1.06));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box('stone', sx * hb - (sx > 0 ? 0.55 : 0), sx * hb + (sx > 0 ? 0 : 0.55), b0, b0 + STAGE - 0.5, sz * hb - (sz > 0 ? 0.55 : 0), sz * hb + (sz > 0 ? 0 : 0.55), tone());
+    box('stone', -hb, hb, b0 + STAGE - 0.5, b0 + STAGE, -hb, hb, tone());
+    box('stone', -hb - 0.16, hb + 0.16, b0 + STAGE, b0 + STAGE + 0.16, -hb - 0.16, hb + 0.16, tone(1.08));
+    // (A low parapet in each opening.)
+    for (const [ax, az] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) box('stone', ax ? ax * hb - (ax > 0 ? 0.3 : 0) : -hb + 0.55, ax ? ax * hb + (ax > 0 ? 0 : 0.3) : hb - 0.55, b0, b0 + 0.85, az ? az * hb - (az > 0 ? 0.3 : 0) : -hb + 0.55, az ? az * hb + (az > 0 ? 0 : 0.3) : hb - 0.55, tone(0.96));
+    // The bell, on a timber headstock.
+    box('wood', -hb + 0.3, hb - 0.3, b0 + STAGE - 0.78, b0 + STAGE - 0.56, -0.1, 0.1, [timber[0] * 0.7, timber[1] * 0.7, timber[2] * 0.7]);
+    const bronze: Colour = [0.34, 0.26, 0.12];
+    for (const [r, h0, h1] of [[0.2, 1.55, 2.1], [0.3, 1.2, 1.56], [0.4, 0.98, 1.21]] as const) box('metal', -r, r, b0 + h0, b0 + h1, -r, r, bronze);
+    // The roof: four slopes of slate to a point, and the cross.
+    const r0 = b0 + STAGE + 0.16, e = hb + 0.3, tip: P3 = [bf.x, bf.y + r0 + 3.4, bf.z], slate: Colour = [0.3, 0.32, 0.36];
+    const corner = (sx: number, sz: number): P3 => [bf.x + sx * e, bf.y + r0, bf.z + sz * e];
+    const { face } = anyAngle((mm) => wild.mesh(mm));
+    for (const [c0, c1] of [[corner(-1, -1), corner(1, -1)], [corner(1, -1), corner(1, 1)], [corner(1, 1), corner(-1, 1)], [corner(-1, 1), corner(-1, -1)]]) face('slate', [c0, c1, tip], slate, [bf.x, bf.y + r0 + 0.5, bf.z]);
+    face('slate', [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)], slate, [bf.x, bf.y + r0 + 0.5, bf.z]);
+    block('metal', tip[0], tip[1] - 0.1, tip[2], 0.05, 0.05, 1.0, 0, [0.15, 0.14, 0.13]);
+    block('metal', tip[0], tip[1] + 0.55, tip[2], 0.5, 0.05, 0.05, 0, [0.15, 0.14, 0.13]);
+  }
+  // The bridge over the cleft in the ridge: two great bearers of larch from lip to lip, braced from below against the rock on
+  // either side; a deck of planks laid across them; posts and two rails on each hand. It is walked on.
+  if (m.bridge) {
+    const br = m.bridge, q = rng.fork('bridge'), [ax, az, ay] = br.a, [bx, bz, by] = br.b, len = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / len, uz = (bz - az) / len, half = br.width / 2;
+    type P3 = [number, number, number];
+    // (In the bridge's own terms: `f` along it from its first end, `a` across, `h` above the deck.)
+    const at = (f: number, a: number, h: number): P3 => [ax + ux * f - uz * a, ay + (by - ay) * (f / len) + h, az + uz * f + ux * a];
+    const boxOf = (material: string, f0: number, f1: number, a0: number, a1: number, h0: number, h1: number, colour: Colour) =>
+      solid(material, [at(f0, a0, h0), at(f1, a0, h0), at(f1, a1, h0), at(f0, a1, h0), at(f0, a0, h1), at(f1, a0, h1), at(f1, a1, h1), at(f0, a1, h1)], colour);
+    const wood = (k = 1): Colour => { const t = q.range(0.78, 1.08) * k; return [timber[0] * t, timber[1] * t, timber[2] * t]; };
+    const beam = (p0: P3, p1: P3, t: number, colour: Colour) => {
+      const dx = p1[0] - p0[0], dz = p1[2] - p0[2], l = Math.hypot(dx, dz) || 1, px = (-dz / l) * t, pz = (dx / l) * t;
+      solid('wood', [[p0[0] - px, p0[1] - t, p0[2] - pz], [p0[0] + px, p0[1] - t, p0[2] + pz], [p1[0] + px, p1[1] - t, p1[2] + pz], [p1[0] - px, p1[1] - t, p1[2] - pz], [p0[0] - px, p0[1] + t, p0[2] - pz], [p0[0] + px, p0[1] + t, p0[2] + pz], [p1[0] + px, p1[1] + t, p1[2] + pz], [p1[0] - px, p1[1] + t, p1[2] - pz]], colour);
+    };
+    // The bearers, their ends let into the rock; and a tie across under the deck at each third.
+    for (const a of [-half + 0.32, half - 0.32]) boxOf('wood', -1.2, len + 1.2, a - 0.17, a + 0.17, -0.5, -0.09, wood(0.85));
+    for (const f of [len / 3, (len * 2) / 3]) boxOf('wood', f - 0.12, f + 0.12, -half - 0.25, half + 0.25, -0.72, -0.5, wood(0.8));
+    // Struts: from the rock some way down each wall of the cleft up to the bearers at their thirds.
+    for (const a of [-half + 0.32, half - 0.32]) for (const [f0, f1] of [[0.9, len / 3], [len - 0.9, (len * 2) / 3]]) {
+      const foot = at(f0, a, -0.5), down = Math.min(4.2, len * 0.3);
+      beam([foot[0], foot[1] - down, foot[2]], at(f1, a, -0.55), 0.11, wood(0.8));
+    }
+    // The deck: planks side by side, no two quite alike, their ends not in a line.
+    for (let f = -0.6; f < len + 0.6;) {
+      const w = q.range(0.22, 0.32), o0 = q.range(0, 0.1), o1 = q.range(0, 0.1);
+      boxOf('wood', f, f + w - 0.012, -half - o0, half + o1, -0.09, 0, wood());
+      f += w;
+    }
+    // Posts and rails.
+    for (const side of [-1, 1]) {
+      const a = side * (half - 0.07);
+      const n = Math.max(3, Math.round(len / 1.7));
+      for (let k = 0; k <= n; k++) { const f = (len * k) / n; boxOf('wood', f - 0.06, f + 0.06, a - 0.06, a + 0.06, -0.3, 1.12, wood(0.9)); }
+      beam(at(-0.2, a, 1.06), at(len + 0.2, a, 1.06), 0.05, wood(0.95));
+      beam(at(-0.2, a, 0.56), at(len + 0.2, a, 0.56), 0.04, wood(0.9));
+      // (And nobody goes over the side: what stops them is here, since the fences of the mountain's edge do not know a bridge.)
+      for (let f = 0; f <= len; f += 0.45) { const [x, y, z] = at(f, side * (half + 0.2), 0); b.fences.push({ min: V(x - 0.24, y - 3, z - 0.24), max: V(x + 0.24, F + 160, z + 0.24) }); }
+    }
+  }
   // The gateway at the head of the ridge: two piers of squared stone, a round arch turned over the way, a wall above it stepped up to
   // a coping, and an iron cross on that. It stands on the skyline for whoever is coming up the ridge, and frames the top for them when they reach it.
   if (m.gate) {
@@ -733,7 +815,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       const at = (a: number, f: number, up: number): P3 => [x + c * a - sn * f, y - 0.05 + up, z + sn * a + c * f];
       const tone = q.range(0.75, 1.25);
       solid('rock', [at(-w, -dd, 0), at(w, -dd, 0), at(w, dd, 0), at(-w, dd, 0),
-        at(-w * tw + tx, -dd * tw + tz, h * q.range(0.7, 1)), at(w * tw + tx, -dd * tw + tz, h), at(w * tw + tx, dd * tw + tz, h * q.range(0.6, 1)), at(-w * tw + tx, dd * tw + tz, h * q.range(0.8, 1))], rockColour(tone * 1.3), 0.4);
+        at(-w * tw + tx, -dd * tw + tz, h * q.range(0.7, 1)), at(w * tw + tx, -dd * tw + tz, h), at(w * tw + tx, dd * tw + tz, h * q.range(0.6, 1)), at(-w * tw + tx, dd * tw + tz, h * q.range(0.8, 1))], rockColour(tone * 0.95), 0.4);
       laid++;
     }
     wild.group = was;
@@ -756,10 +838,12 @@ export function buildMountain(b: MountainBuild): MountainResult {
             if (q.chance(0.16)) continue;
             const t = f / run, x = ax + (bx - ax) * t + nx * (half + q.range(-0.06, 0.1)), z = az + (bz - az) * t + nz * (half + q.range(-0.06, 0.1));
             if (other(x, z) || insideOuter(x, z, 0.5) || (x > p.x0 - 0.5 && x < p.x1 + 0.5 && z < p.z1 + 0.5 && z > p.z0)) continue;
+            // (None over a void: on the bridge the way has rails.)
+            if (ground(x, z) < ay + (by - ay) * t - 1.2) continue;
             const y = Math.min(ay + (by - ay) * t, ground(x, z)) - 0.14, yaw = heading + q.range(-0.25, 0.25), c = Math.cos(yaw), sn = Math.sin(yaw);
-            const w = q.range(0.2, 0.36), d = q.range(0.09, 0.16), h = q.range(0.26, 0.44), tw = q.range(0.6, 0.9);
+            const w = q.range(0.13, 0.24), d = q.range(0.07, 0.12), h = q.range(0.18, 0.32), tw = q.range(0.6, 0.9);
             const at = (u: number, v: number, up: number): P3 => [x + c * u - sn * v, y + up, z + sn * u + c * v];
-            solid('rock', [at(-w, -d, 0), at(w, -d, 0), at(w, d, 0), at(-w, d, 0), at(-w * tw, -d * 0.8, h * q.range(0.8, 1)), at(w * tw, -d * 0.8, h), at(w * tw, d * 0.8, h * q.range(0.8, 1)), at(-w * tw, d * 0.8, h * q.range(0.85, 1))], rockColour(q.range(0.8, 1.3)), 0.4);
+            solid('rock', [at(-w, -d, 0), at(w, -d, 0), at(w, d, 0), at(-w, d, 0), at(-w * tw, -d * 0.8, h * q.range(0.8, 1)), at(w * tw, -d * 0.8, h), at(w * tw, d * 0.8, h * q.range(0.8, 1)), at(-w * tw, d * 0.8, h * q.range(0.85, 1))], rockColour(q.range(0.6, 0.95)), 0.4);
           }
           carry = 0.4;
         }
@@ -780,6 +864,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       for (let k = Math.max(0, from); k < line.length - 1; k++) {
         const [ax, az, ay] = line[k], [bx, bz, by] = line[k + 1], run = Math.hypot(bx - ax, bz - az);
         if (run < 0.3 || Math.abs(by - ay) / run < 0.38) continue;
+        if (ground((ax + bx) / 2, (az + bz) / 2) < Math.min(ay, by) - 1.5) continue;
         const heading = Math.atan2(bz - az, bx - ax), n = Math.max(1, Math.round(run / 0.6)), up = by > ay;
         for (let j = 0; j < n; j++) {
           // Each tread a slab or two of the mountain's own stone, split and laid as it came: no two the same breadth or quite square to the way.
