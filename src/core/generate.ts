@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { armsOf, edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
+import { armRise, armsOf, edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -423,6 +423,47 @@ function layOutMill(site: Site, fromTrack: (x: number, z: number) => number, rng
       return;
     }
   }
+}
+
+/**
+ * A way through the hill. Where a cave chamber of the house lies at its outer edge beside an arm
+ * of the valley, a tunnel may run from it straight out through the ridge to a mouth in the
+ * ridge's side: so whoever goes in at the front can come out in the arm, by the path to the
+ * cave or the ruin there. Only from a chamber that can be reached without a key, a bar, a lever
+ * or a secret door, so that it is no way round any of them.
+ */
+function layOutBackWay(site: Site, meadow: Place, rng: Rng): void {
+  const v = site.valley, r = v?.ridge;
+  if (!v || !r || site.stands === 'free' || !rng.chance(0.85)) return;
+  // What can be reached from the door with nothing in hand.
+  const open = new Set<number>([site.start]), queue = [site.start];
+  while (queue.length) {
+    const id = queue.shift()!;
+    for (const w of site.ways) {
+      if (w.kind === 'window' || (w.a !== id && w.b !== id)) continue;
+      if (w.door && (w.door.lock || w.door.barredFrom !== undefined || w.door.leaf === 'gate' || w.door.leaf === 'secret')) continue;
+      const n = w.a === id ? w.b : w.a;
+      if (!open.has(n)) { open.add(n); queue.push(n); }
+    }
+  }
+  const fits: NonNullable<Site['backWay']>[] = [];
+  for (const p of site.places) {
+    if (p.roof !== 'cave' || (p.level ?? 0) !== 0 || !open.has(p.id) || p.id === site.secret) continue;
+    const z = Math.round(((p.z0 + p.z1) / 2) * 10) / 10;
+    if (z > meadow.z0 - 10.5 || p.z1 - p.z0 < 4) continue;
+    for (const side of ['w', 'e'] as const) {
+      // The outermost place on that side at that place along the house, with an arm beside the ridge broad enough for a mouth to open into.
+      if (site.places.some((q) => q !== p && q.role !== 'approach' && q.z0 < z + 2.5 && q.z1 > z - 2.5 && (side === 'w' ? q.x0 < p.x0 : q.x1 > p.x1))) continue;
+      const edge = side === 'w' ? r.x0 : r.x1, arm = side === 'w' ? r.x0 - edgeAt(v, 'w', z) : edgeAt(v, 'e', z) - r.x1, length = side === 'w' ? p.x0 - r.x0 : r.x1 - p.x1;
+      if (arm < 12 || length < 6 || length > 16) continue;
+      // (Its floor climbs or falls from the chamber's to the arm's, no steeper than a hill path.)
+      if (Math.abs(meadow.floor + armRise(z, meadow.z0) - p.floor) > 0.3 * (length + 3)) continue;
+      const mx = edge + (side === 'w' ? -5.5 : 5.5);
+      if ((site.features ?? []).some((f) => Math.hypot(f.x - mx, f.z - z) < f.r + 3.5)) continue;
+      fits.push({ place: p.id, side, z });
+    }
+  }
+  if (fits.length) site.backWay = rng.pick(fits);
 }
 
 /**
@@ -1442,6 +1483,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   // ---- the mission: doors, locks, bars and keys, then proof that it can be completed
   planMission(site, rng.fork('mission'));
   if (!solve(site).ok) throw new Error(`generated site cannot be completed (seed ${seed})`);
+  layOutBackWay(site, forecourt, rng.fork('backway'));
 
   // ---- title
   const number = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen'];

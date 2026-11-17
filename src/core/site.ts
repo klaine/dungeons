@@ -425,6 +425,13 @@ export interface Site {
    * builds it puts it on the highest ground at that bearing in that range.
    */
   landmarks?: { kind: 'castle' | 'tower' | 'ruin' | 'monument'; angle: number; range: 'near' | 'far' }[];
+  /**
+   * A way through the hill: a tunnel from one of the house's cave chambers (`place`) straight
+   * out through the ridge to a cave mouth in the ridge's side, in the arm of the valley on that
+   * `side`, at `z`. It leaves the chamber through its wall on that side. It is not one of
+   * `ways`: it joins a place to the open valley, and no door hangs in it.
+   */
+  backWay?: { place: number; side: 'w' | 'e'; z: number };
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

@@ -1077,6 +1077,9 @@ async function start(): Promise<void> {
     const v = site?.valley;
     if (!v) return -1;
     if ((site.grottoes ?? []).some((q) => Math.abs(z - q.z) < (q.hall ? q.hall.width / 2 + 12 : q.r * 1.25 + 4) && (q.side === 'w' ? edgeAt(v, 'w', q.z) - x : x - edgeAt(v, 'e', q.z)) < (q.hall ? q.hall.length + 30 : q.r + 6))) return -1;
+    // (Nor has whoever is in the way through the hill.)
+    const bw = site.backWay;
+    if (bw && v.ridge && Math.abs(z - bw.z) < 4 && x > Math.min(v.ridge.x0, site.places[bw.place].x0) - 1 && x < Math.max(v.ridge.x1, site.places[bw.place].x1) + 1) return -1;
     return Math.max(-insideOf(v, x, z), z - v.mouth - 8.5, v.z0 - 2.5 - z);
   };
   (window as any).__dbg.walk = (points: [number, number][], reach = 0.35) => {

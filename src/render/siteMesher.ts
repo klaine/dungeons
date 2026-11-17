@@ -15,7 +15,7 @@ import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
-import { boxValley, edgeAt, insideOf, slantAt } from '../core/valley';
+import { armRise, boxValley, edgeAt, insideOf, slantAt } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -229,6 +229,34 @@ export function meshSite(site: Site): SceneDescription {
       if (list.length) outerWindows.set(q.id, list);
     }
   }
+
+  // ------------------------------------------------------------------ a way through the hill
+  // The tunnel from a cave chamber out through the ridge to the arm beside it. Its air is one function, and three carvings take it
+  // in: the chamber's, where it leaves; the land's, where its mouth opens in the ridge's side; and one of its own for the stretch
+  // between. `along` is how far a point is into the ridge from the ridge's side: less than nothing out in the arm.
+  const backWay = (() => {
+    const bw = site.backWay, r = site.valley?.ridge, yard = places.find((q) => q.role === 'approach');
+    if (!bw || !r || !yard || !site.grounds) return null;
+    const p = places[bw.place], dir = bw.side === 'w' ? 1 : -1, edge = bw.side === 'w' ? r.x0 : r.x1, length = (bw.side === 'w' ? p.x0 : p.x1) * dir - edge * dir;
+    const seeds = rng.fork('backway'), n1 = seeds.range(0, 50), n2 = seeds.range(0, 50), bend = seeds.range(-0.9, 0.9);
+    const out = yard.floor - 0.03 + armRise(bw.z, yard.z0), OUT = 6.5, IN = 2.6;
+    const along = (x: number) => (x - edge) * dir;
+    const floorAt = (a: number) => {
+      const t = Math.min(1, Math.max(0, (a + 2.5) / (length + 2.5)));
+      // (Out in the arm it comes up a little, so that it meets whatever lies at the foot of the rock as a ramp and not a step.)
+      return out + (p.floor - out) * (t * t * (3 - 2 * t)) + 0.16 * Math.max(0, -3 - a);
+    };
+    const air = (x: number, y: number, z: number): number => {
+      const a = along(x);
+      if (a < -OUT - 0.5 || a > length + IN + 0.5 || Math.abs(z - bw.z) > 3.2) return -9;
+      const off = z - bw.z - bend * Math.sin(Math.min(1, Math.max(0, a / length)) * Math.PI);
+      const floor = floorAt(a) + (fbm2(x * 1.1 + n1, z * 1.1, 2) - 0.5) * 0.08;
+      const wide = 0.95 + (fbm2(a * 0.8 + n1, y * 0.7, 2) - 0.5) * 0.45, high = 2.3 + (fbm2(x * 0.7 + n2, z * 0.7, 2) - 0.5) * 0.5;
+      return Math.min(smin(smin(wide - Math.abs(off), y - floor, 0.3), floor + high - y, 0.4), a + OUT, length + IN - a);
+    };
+    const top = Math.max(out, p.floor) + 4.2;
+    return { p, dir, edge, length, z: bw.z, along, air, top, low: Math.min(out, p.floor), x: (a: number) => edge + dir * a };
+  })();
 
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
   const torchesByPlace = new Map<number, TorchSpec[]>();
@@ -1382,18 +1410,20 @@ export function meshSite(site: Site): SceneDescription {
       }
       const turf = into('turf'), scree = into('scree');
       // (Where there is a grotto, its air is taken with the land's.)
-      carveRock(into('rock'), grottoes.length || portalAir ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9) : landAir, {
+      carveRock(into('rock'), grottoes.length || portalAir || backWay ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9, backWay ? backWay.air(x, y, z) : -9) : landAir, {
         min: V(c.x0, Math.floor((lo - 2) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
         // (Nor is the floor of a grotto turf, though the hill over it may be.)
-        meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
+        meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) && !(backWay && backWay.along(at.x) > -4.6 && backWay.air(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
         shade: (q, n, field, other, open) => {
           if (other === turf) { const c = turfAt(q.x, q.z); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return c; }
           if (other === scree) return earth(q.x, q.z);
           const c = shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
           // Rock out here is lit as if the whole sky stood over it. Inside a grotto it does not,
           // and the rock is made as much darker as the daylight falls off going in.
+          // (So in the mouth of the way through the hill.)
+          if (backWay && backWay.along(q.x) > -4 && backWay.air(q.x, q.y, q.z) > -0.6) { const dim = 1 - 0.82 * smooth((backWay.along(q.x) + 4) / 3.5); c[0] *= dim; c[1] *= dim; c[2] *= dim; }
           if (grottoes.length && grottoAir(q.x, q.y, q.z) > -0.6) { const dim = 1 - 0.86 * grottoDeep; c[0] *= dim; c[1] *= dim; c[2] *= dim; field[1] = Math.max(field[1], 0.5 * grottoDeep); }
           return c;
         },
@@ -1426,7 +1456,11 @@ export function meshSite(site: Site): SceneDescription {
     );
     // Up each side of the ridge that has an arm beside it, a fence a little way into the ridge, as along the valley's sides.
     if (vale?.ridge) for (const [arm, x0, x1] of [[armW, vale.ridge.x0 + 1.2, vale.ridge.x0 + 3], [armE, vale.ridge.x1 - 3, vale.ridge.x1 - 1.2]] as const) {
-      if (arm) fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, p.z0 - 1.2) });
+      if (!arm) continue;
+      // (With a gap where the way through the hill goes under it.)
+      const gap = backWay && Math.abs(backWay.edge - (x0 + x1) / 2) < 4 ? backWay : null;
+      if (!gap) fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, p.z0 - 1.2) });
+      else fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, gap.z - 3) }, { min: V(x0, gap.top + 0.4, gap.z - 3), max: V(x1, p.floor + 80, gap.z + 3) }, { min: V(x0, p.floor - 6, gap.z + 3), max: V(x1, p.floor + 80, p.z0 - 1.2) });
     }
     // Solid rock beside the house, and under the meadow.
     // It stops well behind the face of the scarp, which is cut back in places by a stride or two.
@@ -1463,7 +1497,9 @@ export function meshSite(site: Site): SceneDescription {
     kit.group = `p${p.id}`;
     // (Where the stair of a hall goes down out of the land's reach, the land's rock is left out: the hall's own carving has it.)
     const underOwn = (at: Vector3) => grottoes.some((q) => q.hall && 7 - (at.x - q.edge) * q.inw > UNDER_FROM && Math.abs(at.z - q.z) < 2.6 && at.y < q.y0 + 4.2);
-    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, grottoes.some((q) => q.hall) ? (at) => !underOwn(at) : undefined);
+    // (Nor where the way through the hill has gone in under the ridge: from there its own carving has it.)
+    const backOwn = (at: Vector3) => !!backWay && backWay.along(at.x) > -0.3 && Math.abs(at.z - backWay.z) < 3 && at.y < backWay.top;
+    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, (at) => !underOwn(at) && !backOwn(at));
 
     const stones: [number, number, number][] = [];
     let boulders = 0;
@@ -1679,6 +1715,8 @@ export function meshSite(site: Site): SceneDescription {
       for (const t of towers) clear = Math.min(clear, Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) - t.half - 2.6);
       // (More of it about a large building than a cottage: it is meant to be seen.)
       for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' ? 4 : 1.8));
+      // Nor before the mouth of the way through the hill.
+      if (backWay && backWay.along(x) > -9 && backWay.along(x) < -1.5 && Math.abs(z - backWay.z) < 2.4) clear = Math.min(clear, -1);
       // Nor before the mouth of a grotto.
       for (const q of grottoes) { const inside = (x - q.edge) * q.inw; if (inside > 2 && inside < 9.5 && Math.abs(z - q.z) < 2.2) clear = Math.min(clear, -1); }
       // Nothing stands in the way up to a terrace.
@@ -2903,7 +2941,8 @@ export function meshSite(site: Site): SceneDescription {
       if (system[0] === p.id) {
         const airs = system.map((id) => chamberAir(places[id]));
         const clefts = site.ways.filter((w) => w.natural && system.includes(w.a)).map(cleftAir);
-        const all = [...airs, ...clefts];
+        const through = backWay && system.includes(backWay.p.id) ? backWay : null;
+        const all = through ? [...airs, ...clefts, through.air] : [...airs, ...clefts];
         const members = system.map((id) => places[id]);
         const shafted = members.some((q) => q.shaft);
         const wetField = indoorField([], Math.min(...members.map((q) => q.floor)));
@@ -2930,6 +2969,18 @@ export function meshSite(site: Site): SceneDescription {
             return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
           },
         });
+        // The stretch of the way through the hill between the chamber and the rock that is carved with the land.
+        if (through) {
+          const xa = through.x(-0.7), xb = through.x(through.length + 0.3), tone3 = rng.fork('backwaytone').range(0, 50);
+          carveRock(kit.mesh('rock'), through.air, {
+            min: V(Math.min(xa, xb), through.low - 1, through.z - 3), max: V(Math.max(xa, xb), through.top, through.z + 3), cell: 0.28, uvScale: 0.45,
+            shade: (c, n, field) => {
+              wetField(c, n, field);
+              const tone = 0.72 + 0.4 * fbm2((c.y + c.x * 0.18) * 2.6, c.z * 0.15 + tone3, 3) + 0.24 * fbm2(c.x * 0.9 + tone3, c.z * 0.9 + c.y * 0.7, 3);
+              return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
+            },
+          });
+        }
       }
       // Rock above the chamber; where a shaft goes up through it, rock all round the shaft.
       const above = p.floor + p.wall + 1.25;

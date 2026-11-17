@@ -145,3 +145,6 @@ export function armsOf(v: Valley): { side: 'w' | 'e'; head: number; middle: (z: 
   }
   return out;
 }
+
+/** How much the floor of an arm of the valley has risen, at `z`, above the ground before the house front (which is at `front`). */
+export const armRise = (z: number, front: number): number => 4.5 * smooth((front - 3.35 - z) / 45);
