@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { fbm2, fbm3, Rng } from '../core/rng';
+import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
@@ -1963,6 +1963,69 @@ export function meshSite(site: Site): SceneDescription {
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
     }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })));
+    // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
+    // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
+    // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
+    // and of the same stone, but five times as coarsely, since nobody comes nearer than a furlong. Its beds, its stains and the
+    // relief of its faces are the rock material's doing, which draws them at the size the distance calls for.
+    {
+      const cq = rng.fork('crags'), count = cq.int(2, 4), turn = cq.range(0, Math.PI * 2), CELL = 1.6;
+      for (let k = 0; k < count; k++) {
+        const angle = turn + (k / count) * Math.PI * 2 + cq.range(-0.5, 0.5), far = cq.range(262, 335);
+        const x0 = cxA + Math.cos(angle) * far, z0 = czA + Math.sin(angle) * far, own = cq.fork(`crag${k}`), seedC = own.int(1, 9999);
+        // (Not where something is built on the hills.)
+        if (landmarks.some((l) => Math.hypot(l.x - x0, l.z - z0) < l.r + 75)) continue;
+        // One to three summits close together, the first the highest.
+        const tops: number[][] = [];
+        for (let t = 0, n = own.int(1, 3); t < n; t++) {
+          const a = own.range(0, Math.PI * 2), d = t === 0 ? 0 : own.range(18, 38);
+          tops.push([x0 + Math.cos(a) * d, z0 + Math.sin(a) * d, (t === 0 ? own.range(42, 82) : own.range(22, 48)), (t === 0 ? own.range(30, 46) : own.range(16, 28))]);
+        }
+        const reachC = Math.max(...tops.map((t) => Math.hypot(t[0] - x0, t[1] - z0) + t[3])) + 16, high = Math.max(...tops.map((t) => t[2])) + 12;
+        // The hill it stands on, read once on a lattice: the hills' own reckoning is too slow to ask at every point of the carving.
+        const gx0 = x0 - reachC - 4, gz0 = z0 - reachC - 4, gn = Math.ceil((reachC * 2 + 8) / 4) + 1, under = new Float32Array(gn * gn);
+        let low = Infinity, top = -Infinity;
+        for (let j = 0; j < gn; j++) for (let i = 0; i < gn; i++) { const h = hills(gx0 + i * 4, gz0 + j * 4); under[j * gn + i] = h; low = Math.min(low, h); top = Math.max(top, h); }
+        const hillAt = (x: number, z: number): number => {
+          const fx = Math.min(gn - 1.001, Math.max(0, (x - gx0) / 4)), fz = Math.min(gn - 1.001, Math.max(0, (z - gz0) / 4)), i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j;
+          return (under[j * gn + i] * (1 - tx) + under[j * gn + i + 1] * tx) * (1 - tz) + (under[(j + 1) * gn + i] * (1 - tx) + under[(j + 1) * gn + i + 1] * tx) * tz;
+        };
+        const cleft = new Float32Array(5);
+        /** How high the stone stands over the hill at a spot: nothing beyond its foot, and steepest there. */
+        const stands = (x: number, z: number): number => {
+          let h = 0;
+          for (const t of tops) { const u = Math.hypot(x - t[0], z - t[1]) / t[3]; if (u < 1) h = Math.max(h, t[2] * Math.pow(1 - u, 0.7) * (0.8 + 0.4 * fbm2(x * 0.03 + seedC, z * 0.03, 2))); }
+          return h;
+        };
+        const air = (x: number, y: number, z: number): number => {
+          const plain = (y - hillAt(x, z) + 3 - stands(x, z)) / 1.9;
+          if (plain > 14 || plain < -14) return plain;
+          // Its faces are pushed out into buttresses and drawn back into gullies, and cleft along its great joints.
+          let out = (fbm3(x * 0.035, y * 0.014, z * 0.035, 3, seedC) - 0.5) * 20 + (fbm3(x * 0.12, y * 0.05, z * 0.12, 2, seedC + 3) - 0.5) * 7;
+          cells3((x + y * 0.1) / 15 + seedC * 0.21, 0.5, (z - y * 0.05) / 15, seedC + 9, 0.8, cleft, 0);
+          const which = ((cleft[2] + cleft[3]) * 5.3) % 1;
+          if (which > 0.45) out -= (3 + 8 * (which - 0.45)) * (1 - smooth((cleft[4] * 15) / 4));
+          // (Sideways for the faces: away from the middle of the crag. And a little downward, so that its top is broken ground.)
+          const dx = x - x0, dz = z - z0, dl = Math.hypot(dx, dz) || 1;
+          const sx = x - (dx / dl) * out, sz = z - (dz / dl) * out;
+          return (y + out * 0.2 - hillAt(x, z) + 3 - stands(sx, sz)) / 1.9;
+        };
+        const snapC = (v: number, up: boolean) => (up ? Math.ceil(v / CELL) : Math.floor(v / CELL)) * CELL;
+        const greenSeed = own.int(1, 9999);
+        carveRock(softRock, air, {
+          min: V(snapC(x0 - reachC, false), snapC(low - 6, false), snapC(z0 - reachC, false)), max: V(snapC(x0 + reachC, true), snapC(top + high, true), snapC(z0 + reachC, true)),
+          cell: CELL, uvScale: 0.4, fromSamples: true, occlusion: [CELL, CELL * 3], sharp: true, crease: 36 + 24 * rockKind.round, normalReach: CELL * 0.5,
+          // Only the crag itself: where no stone stands over the hill, the hill's own sheet is the ground.
+          keep: (c) => stands(c.x, c.z) > 1.5 || c.y > hillAt(c.x, c.z) + 1,
+          shade: (q, n, field, _other, open) => {
+            const c = shadeRock(q, n, field, open, 0.25 + 0.75 * rockKind.bedded);
+            // What lies back far enough to hold soil is green, in patches, as the hill about it is.
+            field[0] = Math.max(field[0], 2.8 * smooth((n.y - 0.7) / 0.16) * smooth((fbm2(q.x * 0.07 + greenSeed, q.z * 0.07, 3) - 0.36) / 0.2));
+            return c;
+          },
+        });
+      }
+    }
     // (Drawn but solid to nobody, and turned to face the valley.)
     wild.group = 'soft';
     landmarkSpots.push(...landmarks.map((l) => ({ kind: l.kind, x: l.x, y: l.y, z: l.z })));
