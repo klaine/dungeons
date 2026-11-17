@@ -68,6 +68,7 @@ const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
 
 export function buildMountain(b: MountainBuild): MountainResult {
+  // (For finding where the time goes: with DBG_T set, as `DBG_T=1 npx tsx tools/mountain.ts 1`, each stage says how long it took.)
   let __t = performance.now();
   const __T = (label: string) => { if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_T) console.log('  ', label, (performance.now() - __t).toFixed(0), 'ms'); __t = performance.now(); };
   const { site, p, kit, wild } = b;
@@ -225,7 +226,10 @@ export function buildMountain(b: MountainBuild): MountainResult {
       if (spot.rocky >= 0.002) { spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1)); spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z); }
     }
     const d = (y - spot.h) / spot.steep;
-    if (spot.rocky < 0.002 || d > 5.4 || d < -5.4) return d;
+    // (Further from the ground than the rock's breaks can shift its face, only which side of it a point is on matters, and that is
+    // plain: the breaks are not reckoned there. They shift it by its relief, which is the less the less rocky the ground.)
+    const within = 3.9 * spot.rocky + 0.7;
+    if (spot.rocky < 0.002 || d > within || d < -within) return d;
     let out = Math.min(2.4, Math.max(-2.4, relief.broad(x, y, z)));
     const most = FINE_MOST * spot.rocky + 0.45;
     if (Math.abs(d - out * spot.rocky) > most) return d - out * spot.rocky;
