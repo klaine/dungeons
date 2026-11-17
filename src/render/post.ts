@@ -244,12 +244,17 @@ export class Atmosphere {
       uHaze: uniform(new Vector3(0.0004, 300, 0)),
       uMist: uniform(new Vector3(0, 4, 0)),
       uMistFar: uniform(new Vector4(0, 10, 24, 170)),
+      // (The mist has a floor: it lies on the valley's ground and does not sink into what is dug beneath it.)
+      uMistLow: uniform(-1e6),
       uAirCentre: uniform(new Vector3()),
       uGlare: uniform(new Vector3()),
       uCloudFlat: uniform(0),
       // A box of space that is underground though it is outside the house: no daylight, no mist.
       uUnderMin: uniform(new Vector3(1, 1, 1)),
       uUnderMax: uniform(new Vector3(0, 0, 0)),
+      // (A second such box: about the cavern under the hill and the passage to it, which lie apart from any hall.)
+      uUnder2Min: uniform(new Vector3(1, 1, 1)),
+      uUnder2Max: uniform(new Vector3(0, 0, 0)),
       // A shaft of daylight under the hill: where it begins and how broad it is; which way it goes and how far; its light.
       uShaftTop: uniform(new Vector4(0, 0, 0, 0)),
       uShaftDown: uniform(new Vector4(0, -1, 0, 0)),
@@ -276,7 +281,7 @@ export class Atmosphere {
     const mistAt = (p: N): N => {
       const d = u.uMist.x.mul(exp(max(p.y.sub(u.uMist.z).div(u.uMist.y), -1).negate()));
       const drifts = select(u.uCloudOn.greaterThan(0.5), smoothstep(0.28, 0.72, u.tCloud.sample(p.mul(vec3(0.021, 0.05, 0.021)).add(u.uCloudDrift.mul(9))).level(0).r).mul(1.7), 0.85);
-      return select(u.uMist.x.greaterThan(0), d.mul(drifts), 0);
+      return select(u.uMist.x.greaterThan(0), d.mul(drifts).mul(smoothstep(u.uMistLow.sub(1.5), u.uMistLow, p.y)), 0);
     };
 
     this.node = Fn(() => {
@@ -328,7 +333,9 @@ export class Atmosphere {
           const sun: N = seen(this.sunDepth.depthTexture!, u.uSunVP, p, 0.0006).toVar();
           const held: N = vec3(0).toVar();
           // (Under the hill, though outside the house and off both maps: no sky and no sun there either.)
-          If(p.x.greaterThan(u.uUnderMin.x).and(p.y.greaterThan(u.uUnderMin.y)).and(p.z.greaterThan(u.uUnderMin.z)).and(p.x.lessThan(u.uUnderMax.x)).and(p.y.lessThan(u.uUnderMax.y)).and(p.z.lessThan(u.uUnderMax.z)), () => {
+          const under1 = p.x.greaterThan(u.uUnderMin.x).and(p.y.greaterThan(u.uUnderMin.y)).and(p.z.greaterThan(u.uUnderMin.z)).and(p.x.lessThan(u.uUnderMax.x)).and(p.y.lessThan(u.uUnderMax.y)).and(p.z.lessThan(u.uUnderMax.z));
+          const under2 = p.x.greaterThan(u.uUnder2Min.x).and(p.y.greaterThan(u.uUnder2Min.y)).and(p.z.greaterThan(u.uUnder2Min.z)).and(p.x.lessThan(u.uUnder2Max.x)).and(p.y.lessThan(u.uUnder2Max.y)).and(p.z.lessThan(u.uUnder2Max.z));
+          If(under1.or(under2), () => {
             open3.assign(0); sun.assign(0); held.assign(u.uUnderAir);
           });
           // Still air indoors holds more dust than the open courtyard.

@@ -506,6 +506,7 @@ async function start(): Promise<void> {
     u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
     // Mist: a few metres deep on the valley floor, from a veil to a fog.
     u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
+    u.uMistLow.value = desc.groundLow !== undefined ? desc.groundLow - 0.5 : -1e6;
     // And in the country beyond the valley, on its own higher ground, from some way out.
     u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
     // The haze is alight towards the sun only while the sun is up.
@@ -549,6 +550,8 @@ async function start(): Promise<void> {
     u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
     applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
   }
+  if (desc.underDeep) { atmosphere.uniforms.uUnder2Min.value.copy(desc.underDeep.min); atmosphere.uniforms.uUnder2Max.value.copy(desc.underDeep.max); }
+  else { atmosphere.uniforms.uUnder2Min.value.set(1, 1, 1); atmosphere.uniforms.uUnder2Max.value.set(0, 0, 0); }
   if (desc.unders?.length) {
     // One box about everything that is under the hill out of doors.
     const lowest = atmosphere.uniforms.uUnderMin.value.set(Infinity, Infinity, Infinity), highest = atmosphere.uniforms.uUnderMax.value.set(-Infinity, -Infinity, -Infinity);

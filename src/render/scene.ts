@@ -112,6 +112,10 @@ export interface SceneDescription {
   falls?: { x: number; y: number; z: number; height: number; width: number }[];
   /** Boxes of space that are underground though outside the house: no mist lies in them and no daylight reaches them. */
   unders?: { min: Vector3; max: Vector3 }[];
+  /** A box about the cavern under the hill and the passage to it: no sky and no mist in it, as in `unders`, but kept apart from them so that the two are not made one box with open air between. */
+  underDeep?: { min: Vector3; max: Vector3 };
+  /** The lowest open ground of the valley: mist lies no lower than a little under this. */
+  groundLow?: number;
   /** The lowest floor there is anywhere, if it is lower than the places' own floors and the halls under the hill: nobody has fallen out of the world who is above it. */
   lowest?: number;
   /** What stands on the far hills, and where: for checks and pictures. */
