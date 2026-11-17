@@ -336,26 +336,50 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // on for ever, but closes and opens again along the face. Ruled lines are what gives a drawn cliff away.
   // (They roll, slowly: by the same stone read from far off, and read blurred, or its grain would make every line between beds a scribble.)
   const roll: N = (texture(base.map, vec2(P.x.add(P.z.mul(0.71)), P.y.mul(0.9).add(P.z.mul(0.37))).mul(scale * 0.11)) as N).bias(max(blur, 4.5)).toVar();
-  const bed0: N = P.y.add(dot(P.xz, vec2(dip[0], dip[1]))).mul(3.3).add(roll.r.sub(0.5).mul(5)).toVar();
-  const bedAt: N = bed0.add(sin(bed0.mul(1.9).add(roll.g.mul(5))).mul(0.3)).add(sin(bed0.mul(0.83).add(1.3)).mul(0.26)).toVar();
+  // How high a point lies among the beds, in metres: they dip a little, and roll.
+  const level: N = P.y.add(dot(P.xz, vec2(dip[0], dip[1]))).add(roll.r.sub(0.5).mul(1.5)).toVar();
   // (Water-worn stone is not bedded alike all over: stretches of it are massive, one pale face with hardly a line across it.)
-  const beds: N = f.w.mul(steep).mul(one(smoothstep(0.2, 0.55, fwidth(bedAt)))).mul(mix(1, smoothstep(0.3, 0.6, farTex.a), uWorn.mul(0.75))).toVar();
-  const bedIn: N = fract(bedAt).toVar();
-  const bedTone = mix(0.72, 1.14, fract(sin(floor(bedAt).mul(91.7)).mul(43758.5))).mul(mix(0.86, 1.1, fract(sin(floor(bedAt.mul(0.27)).mul(57.3)).mul(24634.6))));
-  // The plane nearest this point, and three numbers of its own: how open it is, how wide, and where along the face it is shut.
-  const plane: N = floor(bedAt.add(0.5)).toVar();
-  const planeOpen: N = fract(sin(plane.mul(57.3)).mul(24634.6)).toVar();
-  const shut = farNoise(vec2(P.x.add(P.z.mul(0.6)).mul(0.3), plane.mul(7.13)));
-  const open: N = smoothstep(0.4, 0.8, planeOpen).mul(smoothstep(0.42, 0.6, shut)).toVar();
-  const planeWide: N = fract(planeOpen.mul(7.31)).toVar();
-  const fromPlane: N = min(bedIn, one(bedIn)).div(mix(0.1, 0.3, planeWide)).toVar();
-  const bedLine: N = mix(1, smoothstep(0, 1, fromPlane), open).toVar();
-  // Where water has worked the stone the open planes are eaten back into grooves a hand deep: darker, and with a lip above and below that the light catches.
-  rock = rock.mul(mix(1, bedTone.mul(mix(mix(0.62, mix(0.86, 0.5, planeWide), uWorn), 1, bedLine)), beds));
-  // How steeply the surface runs into the groove, signed: up above the plane, down below it.
-  const lip: N = fromPlane.mul(one(fromPlane)).mul(4).mul(step(fromPlane, 1)).mul(select(bedIn.lessThan(0.5), 1, -1)).mul(open).mul(beds).mul(uWorn).toVar();
-  // The pits and cracks of the texture hold less of the sky's light.
-  const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(mix(0.65, mix(0.9, 0.5, planeWide), uWorn), 1, bedLine), beds)).toVar();
+  const bedded: N = f.w.mul(steep).mul(mix(1, smoothstep(0.3, 0.6, farTex.a), uWorn.mul(0.75))).toVar();
+  const along: N = P.x.add(P.z.mul(0.6));
+  /**
+   * Beds of one thickness, in metres. Stone is bedded at every size: plates a hand thick lie in
+   * beds of a stride, and those in great beds as tall as a house. Which of them the eye can see
+   * depends on how far off it stands, so all three are drawn, each for as long as it is large
+   * enough in the picture not to shimmer: close to, the plates; across a valley, the strides;
+   * on a mountain a mile off, the great beds alone. One size of bed drawn at every distance is
+   * right at one distance only: nearer it is too coarse, and farther it is a few stray lines.
+   */
+  const bedsOf = (thick: number, k: number) => {
+    const u0: N = level.div(thick).add(k * 3.7).toVar();
+    const u: N = u0.add(sin(u0.mul(1.9).add(roll.g.mul(5))).mul(0.3)).add(sin(u0.mul(0.83).add(1.3)).mul(0.26)).toVar();
+    const large: N = one(smoothstep(0.2, 0.55, fwidth(u))).toVar();
+    const within: N = fract(u).toVar();
+    const tone = mix(0.72, 1.14, fract(sin(floor(u).mul(91.7)).mul(43758.5)));
+    // The plane nearest this point, and three numbers of its own: how open it is, how wide, and where along the face it is shut.
+    const plane: N = floor(u.add(0.5)).toVar();
+    const planeOpen: N = fract(sin(plane.mul(57.3)).mul(24634.6)).toVar();
+    const open: N = smoothstep(0.4, 0.8, planeOpen).mul(smoothstep(0.42, 0.6, farNoise(vec2(along.mul(0.09 / thick), plane.mul(7.13))))).toVar();
+    const wide: N = fract(planeOpen.mul(7.31)).toVar();
+    // (A great bed's plane is wider than a plate's, but not as many times wider as the bed is thicker.)
+    const from: N = min(within, one(within)).div(mix(0.1, 0.3, wide).mul(Math.sqrt(0.3 / thick))).toVar();
+    const line: N = mix(1, smoothstep(0, 1, from), open).toVar();
+    // Where water has worked the stone the open planes are eaten back into grooves: darker, and with a lip above and below that the light catches.
+    const dark = mix(0.62, mix(0.86, 0.5, wide), uWorn);
+    // How steeply the surface runs into the groove, signed: up above the plane, down below it.
+    const lip = from.mul(one(from)).mul(4).mul(step(from, 1)).mul(select(within.lessThan(0.5), 1, -1)).mul(open);
+    return { large, tone, line, dark, lip };
+  };
+  const plates = bedsOf(0.3, 0), strides = bedsOf(1.4, 1), greats = bedsOf(6.5, 2);
+  // Each size has its shades wherever it can be seen; its dark lines only once the size below it has grown too small to show its own,
+  // or a face seen close would be ruled across with lines that nothing in its shape answers to.
+  const seenP: N = bedded.mul(plates.large).toVar(), seenS: N = bedded.mul(strides.large).toVar(), seenG: N = bedded.mul(greats.large).toVar();
+  const lineS: N = mix(1, strides.line, one(plates.large.mul(0.8))).toVar(), lineG: N = mix(1, greats.line, one(strides.large.mul(0.8))).toVar();
+  rock = rock.mul(mix(1, plates.tone.mul(mix(plates.dark, 1, plates.line)), seenP))
+    .mul(mix(1, mix(1, strides.tone, 0.6).mul(mix(strides.dark, 1, lineS)), seenS))
+    .mul(mix(1, mix(1, greats.tone, 0.55).mul(mix(greats.dark, 1, lineG)), seenG));
+  const lip: N = plates.lip.mul(seenP).add(strides.lip.mul(seenS).mul(one(plates.large.mul(0.8)))).mul(uWorn).toVar();
+  // The pits and cracks of the texture hold less of the sky's light; so do the planes between beds.
+  const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(mix(0.65, 0.5, uWorn), 1, plates.line), seenP)).mul(mix(1, mix(0.6, 1, lineS), seenS)).mul(mix(1, mix(0.6, 1, lineG), seenG)).toVar();
   // Where water runs down a face it leaves dark streaks, long and narrow.
   const streak = (texture(base.map, vec2(P.z.mul(0.37), P.y.mul(0.03))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.37), P.y.mul(0.03).add(0.5))) as N).a.mul(w.z));
   const stain: N = smoothstep(0.5, 0.72, streak).mul(steep).mul(f.w.mul(0.65).add(0.35)).toVar();
