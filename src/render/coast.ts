@@ -80,7 +80,8 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const [ax, az] = o.jetty.from, [bx, bz] = o.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
     const at = frame(ax, az, 0, heading), half = o.jetty.width / 2, q = rng.fork('jetty');
     // (Where it starts on the beach, its deck comes down to the sand as a ramp.)
-    const rootY = Math.min(deck, c.ground(ax, az) + 0.04);
+    // (Where it stands from the foot of a cliff it is level from end to end; from a beach it comes down to the sand.)
+    const rootY = o.landing === 'stair' ? deck : Math.min(deck, c.ground(ax, az) + 0.04);
     for (let f = 0; f < len - 1e-6;) {
       const f1 = Math.min(len, f + q.range(1.1, 1.6)), y0 = rootY + (deck - rootY) * Math.min(1, f / 4), y1 = rootY + (deck - rootY) * Math.min(1, f1 / 4);
       const foot = Math.min(c.ground(...at2(at, 0, f)), c.ground(...at2(at, 0, f1))) - 0.6;
@@ -103,6 +104,25 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const fence = (a: number, f: number) => { const p = at(a, 0, f); c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
     for (let f = 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
     for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
+  }
+
+  // ---- the stair cut in the cliff: a step of dressed stone at every half stride, set into the slope it is cut in.
+  // They are for the eye, as the valley's are: what is walked on is the slope, so no foot catches on a riser.
+  if (o.stair) {
+    const was = wild.group, q = rng.fork('stair'), st = o.stair;
+    wild.group = 'soft';
+    for (let k = 0; k < st.length - 1; k++) {
+      const [ax, az, ay] = st[k], [bx, bz, by] = st[k + 1], run = Math.hypot(bx - ax, bz - az);
+      if (run < 0.05) continue;
+      const heading = Math.atan2(bz - az, bx - ax), at = frame(ax, az, 0, heading), n = Math.max(1, Math.round(run / 0.5));
+      for (let j = 0; j < n; j++) {
+        const f0 = (run * j) / n, f1 = (run * (j + 1)) / n, top = ay + (by - ay) * ((j + 1) / n);
+        // (Level stretches, the landings, are paved, not stepped.)
+        const flat = Math.abs(by - ay) < 0.05;
+        box(at, 'stone', -1.35, 1.35, top - (flat ? 0.12 : 0.3), top + 0.02, f0, f1 + 0.03, shade(stone, q.range(0.78, 1.0)), 0.6);
+      }
+    }
+    wild.group = was;
   }
 
   // ---- the fishermen's cottages
@@ -404,7 +424,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const k = o.chapel, fx = Math.cos(k.facing), fz = Math.sin(k.facing);
     buildLandmark('ruin', k.x - fx * 8, k.y, k.z - fz * 8, k.facing, mesh, rng.fork('chapel'), [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]], 0.5);
     // (Left on the step before its west front, where the footpath comes: the walls of the nave stand too close and too high to be got through.)
-    c.finds.push({ at: new Vector3(k.x - fx * 10.5, c.ground(k.x - fx * 10.5, k.z - fz * 10.5) + 0.25, k.z - fz * 10.5), what: 'a bronze handbell' });
+    c.finds.push({ at: new Vector3(k.x - fx * 9.5, c.ground(k.x - fx * 9.5, k.z - fz * 9.5) + 0.25, k.z - fz * 9.5), what: 'a bronze handbell' });
   }
 
   // ---- the burial ground beside the house: a dry-stone wall, headstones in rows, a high cross

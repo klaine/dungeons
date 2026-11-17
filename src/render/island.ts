@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
-import { beachness, coastAt, inland, landAt } from '../core/island';
+import { beachness, coastAt, inland, landAt, onStair } from '../core/island';
 import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
@@ -80,7 +80,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const nearStack = (x: number, z: number, m: number) => o.stacks.some((s) => Math.hypot(x - s.x, z - s.z) < s.r * 2.2 + m);
   const cave = o.seaCave;
   const nearCave = (x: number, z: number, m: number) => !!cave && Math.hypot(x - cave.x - Math.cos(cave.heading) * cave.length * 0.5, z - cave.z - Math.sin(cave.heading) * cave.length * 0.5) < cave.length * 0.5 + 8 + m;
-  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0); };
+  // (Steep ground inland is carved as rock too: the crags of the summits. And the stair, wherever it runs, is carved with the cliff it is cut in.)
+  const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 0.9; };
+  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)); };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
@@ -125,7 +127,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     for (let j = nz - 2; j > 0; j--) for (let i = nx - 2; i > 0; i--) { const k = j * nx + i; if (far[k]) far[k] = Math.min(far[k], far[k + 1] + D1, far[k + nx] + D1, far[k + nx + 1] + D2, far[k + nx - 1] + D2); }
     const before = land.data.slice(), active = new Uint8Array(land.data.length);
     // Nothing is worn where something has been built, or where the ground was levelled for it, or on the beach.
-    const built = (x: number, z: number) => o.cottages.some((q) => Math.hypot(x - q.x, z - q.z) < Math.max(q.w, q.d) + 3)
+    const built = (x: number, z: number) => onStair(o, x, z).off < 4 || o.cottages.some((q) => Math.hypot(x - q.x, z - q.z) < Math.max(q.w, q.d) + 3)
       || (!!o.lighthouse && Math.hypot(x - o.lighthouse.x, z - o.lighthouse.z) < o.lighthouse.r + 9)
       || (!!o.castle && Math.hypot(x - o.castle.x, z - o.castle.z) < 24)
       || Math.hypot(x - o.jetty.from[0], z - o.jetty.from[1]) < 8;
@@ -153,6 +155,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const ground = (x: number, z: number): number => (wornBy.holds(x, z) ? plain(x, z) + wornBy.at(x, z) : plain(x, z));
 
   // ---- steepness, the way uphill, and how far the ground is rock: read off the worn heights, as for the valley
+  // (The box that holds the stair, with room about it, for asking quickly whether a point could be on it.)
+  const stairBox = o.stair ? [Math.min(...o.stair.map((q) => q[0])) - 3, Math.max(...o.stair.map((q) => q[0])) + 3, Math.min(...o.stair.map((q) => q[1])) - 3, Math.max(...o.stair.map((q) => q[1])) + 3] : null;
   const steepness = land.like(), rocky = land.like(), upX = land.like(), upZ = land.like();
   {
     const H = land.data, nxL = land.nx, raw = new Float32Array(H.length);
@@ -184,6 +188,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
     ease(raw, 1); ease(upX.data, 3); ease(upZ.data, 3);
     for (let k = 0; k < H.length; k++) {
       rocky.data[k] = raw[k];
+      // (The stair is cut clean: no broken rock on its treads.)
+      if (stairBox) { const x = land.x0 + (k % nxL) * CELL, z = land.z0 + Math.floor(k / nxL) * CELL; if (known[k] && x > stairBox[0] && x < stairBox[1] && z > stairBox[2] && z < stairBox[3] && onStair(o, x, z).off < 2.1) rocky.data[k] = 0; }
       const l = Math.hypot(upX.data[k], upZ.data[k]), f = l > 1e-6 ? smooth(l / 0.8) / l : 0;
       upX.data[k] *= f; upZ.data[k] *= f;
     }
@@ -437,7 +443,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
       let lo = y, hi = y;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7]]) { const h = ground(x + dx * 1.1, z + dz * 1.1); lo = Math.min(lo, h); hi = Math.max(hi, h); }
       // Ground that can be stood on: not a drop, and not deeper than the knee in the sea; the jetty, and the floor of the cave.
-      ok[j * nx + i] = (hi - lo < 1.7 && y > sea - 0.35 && lo > sea - 0.6) || onJetty(x, z) || inCave(x, z) ? 1 : 0;
+      ok[j * nx + i] = (hi - lo < 1.7 && y > sea - 0.35 && lo > sea - 0.6) || onJetty(x, z) || inCave(x, z) || onStair(o, x, z).off < 1.25 ? 1 : 0;
     }
     // Only what is reached from the forecourt counts: a ledge halfway down a cliff is not ground anyone walks to.
     const reach = new Uint8Array(nx * nz), queue: number[] = [];

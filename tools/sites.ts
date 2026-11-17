@@ -58,11 +58,22 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
   try {
     const site = generateSite(seed, 'island'), o = site.island!;
     if (!solve(site).ok) throw new Error('cannot be completed');
+    const tally2 = (k: string) => isles.set(k, (isles.get(k) ?? 0) + 1);
     for (const q of o.cottages) if (inland(o, q.x, q.z) < Math.max(q.w, q.d) / 2 + 3) throw new Error('a cottage at the cliff edge');
     if (o.lighthouse && inland(o, o.lighthouse.x, o.lighthouse.z) < 8) throw new Error('the lighthouse at the cliff edge');
-    const track = site.track!;
-    for (const [x, z] of track.slice(0, -3)) if (inland(o, x, z) < 3) throw new Error(`the track off the land at ${x}, ${z}`);
-    const tally2 = (k: string) => isles.set(k, (isles.get(k) ?? 0) + 1);
+    // The way over the land stays on it, and climbs no more steeply than a path can; the stair, if there is one, climbs at one in two and has no gaps.
+    const way = o.way ?? [];
+    for (const [x, z] of way) if (Math.hypot(x - way[way.length - 1][0], z - way[way.length - 1][1]) > 12 && inland(o, x, z) < 3) throw new Error(`the way off the land at ${x}, ${z}`);
+    let steepest = 0;
+    for (let k = 1; k < way.length; k++) steepest = Math.max(steepest, Math.abs(way[k][2] - way[k - 1][2]) / (Math.hypot(way[k][0] - way[k - 1][0], way[k][1] - way[k - 1][1]) || 1));
+    if (steepest > 0.42) throw new Error(`the way climbs at ${steepest.toFixed(2)}`);
+    const stair = o.stair ?? [];
+    for (let k = 1; k < stair.length; k++) {
+      const run = Math.hypot(stair[k][0] - stair[k - 1][0], stair[k][1] - stair[k - 1][1]), rise = stair[k][2] - stair[k - 1][2];
+      if (run > 4.5 || rise > run * 0.62 + 0.15) throw new Error(`the stair breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+    }
+    tally2(`landing=${o.landing}`);
+    tally2(`peaks=${(o.peaks ?? []).length}`);
     tally2(`cottages=${o.cottages.length}`);
     tally2(`lighthouse=${!!o.lighthouse}`);
     tally2(`castle=${!!o.castle}`);

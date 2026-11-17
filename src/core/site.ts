@@ -377,6 +377,25 @@ export interface Island {
   coast: number[];
   sea: number;
   cove: { x: number; z: number; r: number; out: number; mouth: number; beach: number };
+  /**
+   * How the island is come to. At a `beach`, the land comes down to the head of the cove through a
+   * hollow, and a jetty runs out from the sand. At a `stair`, the cove is walled all round by cliff:
+   * a stone quay stands at the foot of it, and a stair cut in the rock (`stair`) climbs the cove's
+   * wall from the quay to the top, turning back on itself where it runs out of room.
+   */
+  landing?: 'beach' | 'stair';
+  /** The stair cut in the cliff, as points `[x, z, y]` from its foot on the quay to its head on the top, a stride or so apart. */
+  stair?: [number, number, number][];
+  /**
+   * The way from the door to the landing (to the head of the stair, or the head of the jetty), as
+   * points `[x, z, y]`: the ground is cut and made up to this level along it, so that it never
+   * climbs more steeply than a path can, whatever the land does about it.
+   */
+  way?: [number, number, number][];
+  /** Summits: high ground rising `height` metres over the forecourt's floor about `x`, `z`, falling away over `r`, steep and broken. */
+  peaks?: { x: number; z: number; r: number; height: number }[];
+  /** How far the land comes down towards the sea near the coast in each of the directions `coast` is given for, 0 to 1: at 1 it runs down to a low rocky shore, at 0 it ends in the full height of the cliff. */
+  edge?: number[];
   /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
   crown: { x: number; z: number; r: number; height: number };
   /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
