@@ -439,8 +439,14 @@ export interface Site {
      * if `toward` is -1), turns out under the arm, and comes down into a cavern whose middle is at
      * `x`, `z`, `rx` and `rz` across the halves of it, `height` high, its floor `drop` metres
      * below the tunnel's where the branch leaves it.
+     *
+     * `join`, if present, is a second way into the cavern: from the back of the cave in the wall
+     * of the same arm (the first of `grottoes`), a passage that follows the foot of that wall
+     * under the rock for `run` metres (towards lesser z if `toward` is -1), going down all the
+     * way, and then turns in under the arm to the cavern's outer rim. So the cave in the arm, the
+     * cavern and the house are one system. Its line is `joinLine` in `valley.ts`.
      */
-    deep?: { from: number; leg: number; toward: -1 | 1; x: number; z: number; rx: number; rz: number; height: number; drop: number };
+    deep?: { from: number; leg: number; toward: -1 | 1; x: number; z: number; rx: number; rz: number; height: number; drop: number; join?: { toward: -1 | 1; run: number } };
   };
   /** Where the player starts. */
   start: number;

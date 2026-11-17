@@ -11,7 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { Atmosphere } from '../render/post';
-import { edgeAt, insideOf } from '../core/valley';
+import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
@@ -1080,6 +1080,16 @@ async function start(): Promise<void> {
     // (Nor has whoever is in the way through the hill.)
     const bw = site.backWay;
     if (bw && v.ridge && Math.abs(z - bw.z) < 4 && x > Math.min(v.ridge.x0, site.places[bw.place].x0) - 1 && x < Math.max(v.ridge.x1, site.places[bw.place].x1) + 1) return -1;
+    // (Nor whoever is in the cavern under the arm, or in the passage up from it to the cave in the arm's wall, which runs behind the valley's side.)
+    const dp = bw?.deep, cave = site.grottoes?.[0];
+    if (dp && Math.hypot((x - dp.x) / (dp.rx + 2), (z - dp.z) / (dp.rz + 2)) < 1) return -1;
+    if (dp?.join && cave) {
+      const line = joinLine(v, cave, dp);
+      for (let i = 0; i + 1 < line.length; i++) {
+        const [ax, az] = line[i], bx = line[i + 1][0] - ax, bz = line[i + 1][1] - az, f = Math.min(1, Math.max(0, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz)));
+        if (Math.hypot(x - ax - bx * f, z - az - bz * f) < 3.5) return -1;
+      }
+    }
     return Math.max(-insideOf(v, x, z), z - v.mouth - 8.5, v.z0 - 2.5 - z);
   };
   (window as any).__dbg.walk = (points: [number, number][], reach = 0.35) => {

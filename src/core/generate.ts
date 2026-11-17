@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { armRise, armsOf, edgeAt, insideOf, shapeValley, slantAt, walkable } from './valley';
+import { armRise, armsOf, edgeAt, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -469,16 +469,45 @@ function layOutBackWay(site: Site, meadow: Place, rng: Rng): void {
   // And from the tunnel, more often than not, a way down: to a cavern under the arm, deep enough that the arm's floor lies well over its roof.
   const deep = rng.fork('deep'), p = site.places[bw.place], round = (x: number) => Math.round(x * 10) / 10;
   const dir = bw.side === 'w' ? 1 : -1, edge = bw.side === 'w' ? r.x0 : r.x1, length = (bw.side === 'w' ? p.x0 - r.x0 : r.x1 - p.x1);
-  if (!deep.chance(0.75) || p.floor - (meadow.floor + armRise(bw.z, meadow.z0)) > 0.8) return;
-  const from = round(Math.max(2.5, length - 3)), leg = 8, rx = round(deep.range(6, 8)), rz = round(deep.range(5, 6.5));
+  const lucky = deep.chance(0.75);
+  if (p.floor - (meadow.floor + armRise(bw.z, meadow.z0)) > 0.8) return;
+  const from = round(Math.max(2.5, length - 3)), rx = round(deep.range(6, 8)), rz = round(deep.range(5, 6.5));
+  // The branch runs along the ridge between its side and the house: no place may stand out into that strip.
+  const stripClear = (z1: number) => !site.places.some((q) => q !== p && q.role !== 'approach' && q.z0 < Math.max(bw.z, z1) + 2 && q.z1 > Math.min(bw.z, z1) - 2 && (bw.side === 'w' ? q.x0 < p.x0 - 1 : q.x1 > p.x1 + 1));
+  // If there is a cave in the wall of that arm, the cavern is put where a passage can come down to it from the back of the cave as
+  // well: so the cave, the cavern and the house are one system, and the hill can be gone into at one and come out of at another.
+  const cave = (site.grottoes ?? [])[0];
+  if (cave && !cave.hall && cave.side === bw.side && cave.z < r.z) {
+    let best: { cost: number; deep: NonNullable<NonNullable<Site['backWay']>['deep']> } | null = null;
+    for (const s of [-1, 1] as const) for (let run = 14; run <= 36; run += 2) {
+      // The cavern is not under the arm, which draws in towards its head and seldom has room, but under the hill behind the arm's
+      // outer wall: the passage from the cave runs behind that wall to it, and the way from the house crosses to it deep under the arm.
+      // (The passage, going on as it was going, runs into the cavern's end; the way from the house comes into its side. So the two do not arrive together, one over the other.)
+      const endZ = cave.z + s * (1.2 * cave.r + run), cz = round(endZ + s * (rz + 2.5)), toward = cz >= bw.z ? 1 : -1, leg = 8, z1 = bw.z + toward * leg;
+      if (Math.max(z1 + 6, cz + rz) > meadow.z0 || cz - rz < v.z0 - 12 || !stripClear(z1)) continue;
+      const made = { from, leg, toward, x: round(edgeAt(v, bw.side, endZ) - dir * 7.4), z: cz, rx, rz, height: 5, drop: 8.5, join: { toward: s, run } } as const;
+      const line = joinLine(v, cave, made), lens = line.slice(1).map((q, i) => Math.hypot(q[0] - line[i][0], q[1] - line[i][1])), total = lens.reduce((t, l) => t + l, 0);
+      // (It goes down no steeper than the other way does, leaves the cave on the level, and comes level into the cavern; its last leg is not a mere kink; it does not pass over the cavern, where it would break in through the roof; and it keeps away from water at the wall's foot.)
+      const fall = meadow.floor + armRise(cave.z, meadow.z0) - (p.floor - 8.5) + 0.5;
+      if ((total - 5) * 0.4 < fall || lens[lens.length - 1] < 2.5) continue;
+      if (line.slice(0, -1).some(([x, z]) => Math.hypot((x - made.x) / (rx + 2.6), (z - cz) / (rz + 2.6)) < 1)) continue;
+      // (Nor does the way from the house, crossing to the cavern, pass under it anywhere but at the cavern.)
+      const ax = edge + dir * 5, bx = made.x + dir * (rx - 1.2) - ax, bz = cz - z1;
+      if (line.slice(0, -1).some(([x, z]) => { const t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - z1) * bz) / (bx * bx + bz * bz))); return Math.hypot(x - ax - bx * t, z - z1 - bz * t) < 4; })) continue;
+      if ((site.features ?? []).some((f) => line.some(([x, z]) => Math.hypot(f.x - x, f.z - z) < f.r + 5))) continue;
+      if ((site.streams ?? []).some((st) => st.course.some(([x, z]) => line.slice(0, -1).some(([lx, lz]) => Math.hypot(lx - x, lz - z) < 6)))) continue;
+      if (!best || run < best.cost) best = { cost: run, deep: made };
+    }
+    if (best) { bw.deep = best.deep; return; }
+  }
+  if (!lucky) return;
+  const leg = 8;
   for (const toward of [-1, 1] as const) {
     const z1 = bw.z + toward * leg, cz = z1 + toward * 1.5;
     // (Not under the valley below the house front, where ponds lie in hollows; nor near a hall under the hill on that side.)
     if (Math.max(z1, cz + rz) > meadow.z0 - 6) continue;
     if ((site.grottoes ?? []).some((q) => q.side === bw.side && Math.abs(q.z - cz) < (q.hall ? 24 : 9))) continue;
-    // The branch runs along the ridge between its side and the house: no place may stand out into that strip.
-    const za = Math.min(bw.z, z1) - 2, zb = Math.max(bw.z, z1) + 2;
-    if (site.places.some((q) => q !== p && q.role !== 'approach' && q.z0 < zb && q.z1 > za && (bw.side === 'w' ? q.x0 < p.x0 - 1 : q.x1 > p.x1 + 1))) continue;
+    if (!stripClear(z1)) continue;
     bw.deep = { from, leg, toward, x: round(edge - dir * (6 + rx)), z: round(cz), rx, rz, height: 5, drop: 8.5 };
     return;
   }
