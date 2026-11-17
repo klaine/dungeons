@@ -376,12 +376,18 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const lineS: N = mix(1, strides.line, one(plates.large.mul(0.8))).toVar(), lineG: N = mix(1, greats.line, one(strides.large.mul(0.8))).toVar();
   rock = rock.mul(mix(1, plates.tone.mul(mix(plates.dark, 1, plates.line)), seenP))
     .mul(mix(1, mix(1, strides.tone, 0.6).mul(mix(strides.dark, 1, lineS)), seenS))
-    .mul(mix(1, mix(1, greats.tone, 0.55).mul(mix(greats.dark, 1, lineG)), seenG));
-  const lip: N = plates.lip.mul(seenP).add(strides.lip.mul(seenS).mul(one(plates.large.mul(0.8)))).mul(uWorn).toVar();
+    .mul(mix(1, mix(1, greats.tone, 0.45).mul(mix(greats.dark, 1, lineG)), seenG));
+  // (Every size of bed has its lip, each taking over from the one below as the lines do; and on stone that water has not worked, a fainter one.)
+  const lip: N = plates.lip.mul(seenP).add(strides.lip.mul(seenS).mul(one(plates.large.mul(0.8)))).add(greats.lip.mul(seenG).mul(one(strides.large.mul(0.8))).mul(1.3)).mul(mix(0.35, 1, uWorn)).toVar();
   // The pits and cracks of the texture hold less of the sky's light; so do the planes between beds.
   const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(mix(0.65, 0.5, uWorn), 1, plates.line), seenP)).mul(mix(1, mix(0.6, 1, lineS), seenS)).mul(mix(1, mix(0.6, 1, lineG), seenG)).toVar();
   // Where water runs down a face it leaves dark streaks, long and narrow.
-  const streak = (texture(base.map, vec2(P.z.mul(0.37), P.y.mul(0.03))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.37), P.y.mul(0.03).add(0.5))) as N).a.mul(w.z));
+  // (The streaks a walker sees are a stride or two apart, and the texture they are read from comes round again every three metres. On a
+  // cliff that is no matter. On a mountain's face a furlong off it is a fence of upright bars, evenly spaced, and crossed with the beds
+  // it is a chequerboard. So with distance the streaks are read eight times as broad: the great stains of a face, which do not repeat in sight.)
+  const streakClose = (texture(base.map, vec2(P.z.mul(0.37), P.y.mul(0.03))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.37), P.y.mul(0.03).add(0.5))) as N).a.mul(w.z));
+  const streakFar = (texture(base.map, vec2(P.z.mul(0.043), P.y.mul(0.007).add(0.31))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.043), P.y.mul(0.007).add(0.77))) as N).a.mul(w.z));
+  const streak: N = mix(streakFar, streakClose, one(smoothstep(30, 100, length(positionView)))).toVar();
   const stain: N = smoothstep(0.5, 0.72, streak).mul(steep).mul(f.w.mul(0.65).add(0.35)).toVar();
   // (On pale water-worn stone the streaks are a grey film, not a dark one, and in places they run rust-coloured from iron in the rock.)
   const rust: N = smoothstep(0.62, 0.8, farTex.r.add(farTex.a).mul(0.5).add(streak.sub(0.5).mul(0.5))).mul(steep).mul(uWorn).toVar();
@@ -411,12 +417,17 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // faces a stride or two across, which the carved surface is too coarse to hold an edge on.
   const lift = one(mossy.mul(0.6)).mul(bump);
   const closeTo: N = one(smoothstep(3, 13, length(positionView))).mul(0.8).toVar();
+  const farOff: N = smoothstep(30, 130, length(positionView)).mul(1.5).toVar();
   const grain = (at: N, broad: N): N => {
     const t: N = read(base.normalMap, at).xyz.mul(2).sub(1);
     const wide: N = (texture(base.normalMap, at.mul(0.23).add(0.37)) as N).xy.mul(2).sub(1).mul(broad);
     // And once more, much smaller, for whoever stands within reach of it: the pits and the grain of a hand's breadth of stone.
     const fine: N = (texture(base.normalMap, at.mul(3.7).add(0.19)) as N).xy.mul(2).sub(1).mul(closeTo);
-    return vec3(t.xy.add(wide).add(fine), t.z);
+    // And from far off, very large: a face a furlong away is carved too coarsely to hold a buttress ten metres across or a ledge under
+    // it, and without them it is a smooth ramp with stripes on. The same broken surface read sixty metres to the repeat gives them, as
+    // light and shade; it comes in with distance, as the smaller relief goes out of sight.
+    const vast: N = (texture(base.normalMap, at.mul(0.052).add(0.71)) as N).xy.mul(2).sub(1).mul(farOff);
+    return vec3(t.xy.add(wide).add(fine).add(vast), t.z);
   };
   const tx = grain(ux, uBroad), ty = grain(uy, uBroad.mul(0.5)), tz = grain(uz, uBroad);
   const bx: N = vec3(tx.xy.mul(lift).add(rockN.zy), abs(tx.z).mul(rockN.x));

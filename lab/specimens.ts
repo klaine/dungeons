@@ -8,7 +8,7 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../src/core/rng';
 import { Stone } from '../src/core/site';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
-import { carveRock } from '../src/render/geom/rock';
+import { carveRock, smax, smin } from '../src/render/geom/rock';
 import { boulderForm, cliffRelief, ROCK, Strata } from '../src/render/geom/rockForms';
 import { stoneStyles } from '../src/render/geom/styles';
 import { turfColour } from '../src/render/landscape';
@@ -26,6 +26,13 @@ export interface Stage {
   near: { min: Vector3; max: Vector3 };
   /** Where things stand, for pointing the camera at them. */
   spots: Record<string, [number, number, number]>;
+  /**
+   * Carves land painted with the brush: balls of rock that run together where they touch, less
+   * whatever balls were dug out of them, broken as the cliff is and of the same stone. Each ball is
+   * its middle, its radius, and 1 to add or -1 to dig. The larger the whole, the coarser it is
+   * carved, so that a hill takes no longer than a boulder. Null if there is nothing to carve.
+   */
+  carveMass: (balls: number[][]) => { mesh: MeshBuilder; cell: number; ms: number } | null;
   /** How long each part took to make, in milliseconds. */
   times: Record<string, number>;
   counts: Record<string, number>;
@@ -342,11 +349,57 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     for (const set of planting.sets) counts[set.kind] = set.matrices.length / 16;
   });
 
+  const reliefSeed = rng.fork('relief').int(1, 9999);
+  const carveMass = (balls: number[][]): { mesh: MeshBuilder; cell: number; ms: number } | null => {
+    const adds = balls.filter((b) => b[4] > 0), digs = balls.filter((b) => b[4] < 0);
+    if (!adds.length) return null;
+    const t0 = performance.now();
+    const lo = V(Infinity, Infinity, Infinity), hi = V(-Infinity, -Infinity, -Infinity);
+    let least = Infinity, most = 0;
+    for (const [x, y, z, r] of adds) { lo.min(V(x - r, y - r, z - r)); hi.max(V(x + r, y + r, z + r)); least = Math.min(least, r); most = Math.max(most, r); }
+    // Room for the relief to stand out of the plain shape; and nothing is carved far below the ground.
+    const room = Math.min(4, most);
+    lo.addScalar(-room); hi.addScalar(room);
+    lo.y = Math.max(lo.y, -3);
+    const size = hi.clone().sub(lo);
+    const cell = Math.max(Math.max(0.08, Math.min(0.3, most / 5)), Math.cbrt((size.x * size.y * size.z) / 1.0e6));
+    for (const k of ['x', 'y', 'z'] as const) lo[k] = Math.floor(lo[k] / cell) * cell;
+    const coarse = cell > 0.6;
+    const rel = coarse ? cliffRelief(strata, reliefSeed, cell) : relief;
+    // Small lumps are broken less deeply than a hill, or they would be all relief and no lump.
+    const k = Math.max(cell, least * 0.6), deep = Math.min(1, most / 5);
+    const air = (x: number, y: number, z: number): number => {
+      let d = 1e9;
+      for (let i = 0; i < adds.length; i++) {
+        const b = adds[i], di = Math.hypot(x - b[0], y - b[1], z - b[2]) - b[3];
+        if (di < d + k) d = smin(d, di, k);
+      }
+      for (let i = 0; i < digs.length; i++) {
+        const b = digs[i], di = b[3] - Math.hypot(x - b[0], y - b[1], z - b[2]);
+        if (di > d - k) d = smax(d, di, k);
+      }
+      if (d > 4.5 || d < -4.5) return d;
+      return d - (Math.min(2.4, Math.max(-2.4, rel.broad(x, y, z))) + Math.min(1.5, Math.max(-1.5, rel.fine(x, y, z)))) * deep;
+    };
+    const mass = new MeshBuilder(), mossSeed = s1 * 0.37;
+    carveRock(mass, air, {
+      min: lo, max: hi, cell, uvScale: 0.4, fromSamples: true, occlusion: [cell, cell * 2.5], sharp: true, crease: 36 + 24 * kind.round, normalReach: cell * 0.5,
+      keep: (c) => c.y > ground(c.x, c.z) - 0.6,
+      shade: (q, n, field, _other, open) => {
+        const c = shadeRock(q, n, field, open, coarse);
+        // What lies back far enough to hold soil is green, in patches.
+        field[0] = Math.max(field[0], 2.6 * smooth((n.y - 0.72) / 0.16) * smooth((fbm2(q.x * 0.09 + mossSeed, q.z * 0.09, 3) - 0.36) / 0.2));
+        return c;
+      },
+    });
+    return { mesh: mass, cell, ms: performance.now() - t0 };
+  };
+
   spots.cliff = [0, 7.5, FACE_Z];
   spots.boulders = [1.6, 1, -8.5];
   spots.track = [trackX(14), ground(trackX(14), 14), 14];
   spots.path = [1, ground(1, 18.5), 18.5];
   spots.hollow = [HOLLOW.x, ground(HOLLOW.x, HOLLOW.z), HOLLOW.z];
   spots.meadow = [-4, ground(-4, 24), 24];
-  return { meshes, cards: planting.sets, ground, near: { min: V(-99, -3, -216), max: V(111, 99, 46) }, spots, times, counts };
+  return { meshes, cards: planting.sets, ground, carveMass, near: { min: V(-99, -3, -216), max: V(111, 99, 46) }, spots, times, counts };
 }
