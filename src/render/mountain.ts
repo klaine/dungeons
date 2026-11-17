@@ -374,7 +374,9 @@ export function buildMountain(b: MountainBuild): MountainResult {
     lay.track = Math.min(Math.abs(off) * 0.42, f) < 3 ? 200 + Math.min(Math.abs(off) * 0.42, f) : 0;
     const c = turfColour(x, z, s1);
     // Thin turf, browned by sun and wind: less green than a valley's by a good deal.
-    return [c[0] * 1.0, c[1] * 0.78, c[2] * 0.68];
+    // (Its colour changes from place to place more than a meadow's: olive in the hollows, ochre where it is driest.)
+    const dry = fbm2(x * 0.05 - s2, z * 0.05 + s1, 2);
+    return [c[0] * (0.92 + 0.22 * dry), c[1] * (0.74 - 0.08 * dry), c[2] * (0.62 - 0.1 * dry)];
   };
   const earth = (x: number, z: number): Colour => {
     const t = 0.66 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);

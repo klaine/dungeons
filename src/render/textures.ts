@@ -310,6 +310,54 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = clamp(.93 + cavity * .05, .6, 1.);
 }`,
   },
+  // Talus: rock split by frost and lying where it fell, on a mountain. Not rounded, as the scree of a valley's
+  // foot is drawn: every piece has the outline it broke with, straight-edged and cornered, and a flat face
+  // uppermost, tilted its own way, so that one catches the light and the next does not. Three sizes, the
+  // larger lying on the smaller; between them grit, not earth.
+  talus: {
+    normalStrength: 8.,
+    height: /* glsl */ `
+float shard(vec2 uv, float n, float share, out float id) {
+  vec2 x = uv * n + vec2(fbm(uv + n, vec2(4.), 2, .5), fbm(uv + n + 5.3, vec2(4.), 2, .5)) * .45;
+  vec2 i = floor(x), f = fract(x), to = vec2(0.);
+  float d1 = 9., d2 = 9.;
+  id = 0.;
+  for (int yy = -1; yy <= 1; yy++) for (int xx = -1; xx <= 1; xx++) {
+    vec2 g = vec2(float(xx), float(yy));
+    vec2 c = mod(i + g, vec2(n));
+    vec2 r = g + hash22(c) - f;
+    float d = length(r);
+    if (d < d1) { d2 = d1; d1 = d; to = r; id = hash21(c + 17.3); } else if (d < d2) { d2 = d; }
+  }
+  // Its top is a plane through its own middle, tilted its own way; its edge is where the next piece begins, and is sharp.
+  vec2 tilt = (hash22(vec2(id * 91.7, id * 33.1)) - .5) * 1.5;
+  float top = .66 + .3 * fract(id * 5.3) - dot(tilt, to);
+  return step(1. - share, id) * smoothstep(.0, .06, d2 - d1) * clamp(top, .12, 1.);
+}
+float heightFn(vec2 uv) {
+  float ia, ib, ic;
+  float big = shard(uv, 4., .45, ia) * (.62 + .36 * ia);
+  float mid = shard(uv + 3.7, 9., .7, ib) * (.4 + .2 * ib);
+  float small = shard(uv + 8.1, 22., .92, ic) * (.2 + .1 * ic);
+  float grit = fbm(uv + 1.7, vec2(70.), 3, .6);
+  return clamp(max(big, max(mid, small)) + .08 + grit * .07 + fbm(uv, vec2(3.), 3, .5) * .08, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float ia, ib, ic;
+  float big = shard(uv, 4., .45, ia), mid = shard(uv + 3.7, 9., .7, ib), small = shard(uv + 8.1, 22., .92, ic);
+  float tone = big > .05 ? ia : mid > .05 ? ib : ic;
+  // (Grey, without a cast of its own: whoever lays it tints it to the rock it broke from.)
+  vec3 stone = vec3(mix(.46, .76, fract(tone * 3.7)));
+  // Weathered faces are darker than fresh breaks; a few carry a crust of lichen.
+  stone *= mix(.82, 1.06, smoothstep(-.2, .3, fbm(uv + 4.4, vec2(13.), 3, .5)));
+  stone = mix(stone, vec3(.5, .52, .36), step(.86, fract(tone * 11.3)) * smoothstep(.1, .3, fbm(uv + 9.9, vec2(31.), 2, .5) + .15) * .55);
+  vec3 grit = vec3(.36, .35, .33) * (.85 + .3 * hash21(floor(uv * 256.)));
+  albedo = mix(grit, stone, smoothstep(.13, .22, h)) * (1. - cavity * .62);
+  albedo *= .95 + hash21(floor(uv * 512.)) * .1;
+  rough = clamp(.92 + cavity * .06, .6, 1.);
+}`,
+  },
   // Beaten earth, as on a track: packed and gently uneven, paler where it has dried and darker
   // where it holds the wet, with small stones trodden into it. No two patches the same tone, so
   // that a path is not one colour from end to end.

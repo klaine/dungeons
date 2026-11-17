@@ -171,6 +171,8 @@ async function start(): Promise<void> {
   const tile = generateTextureSet('tile', texSize, 43);
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? generateTextureSet('sand', texSize, 53) : null;
+  // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
+  const talus = place === 'mountain' ? generateTextureSet('talus', texSize, 71) : null;
   doneGenerating();
   const materials: Record<string, Material> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
@@ -179,7 +181,7 @@ async function start(): Promise<void> {
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
     rock: makeRockMaterial(rock, moss),
     far: makeFarMaterial(),
-    scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
+    scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true }),
     // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)
     // Each kind of tree has its own: an oak's ridged, an ash's smooth, a pine's in plates, a spruce's in scales (see `barkRecipe`).
     bark: makeSiteMaterial(bark, moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
@@ -187,7 +189,7 @@ async function start(): Promise<void> {
     barkPine: makeSiteMaterial(barkPine, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.04, hollow: 0.35 }),
     barkFir: makeSiteMaterial(barkFir, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeGroundMaterial(ground, sand ?? soil, scree, litter, thatch, moss),
+    turf: makeGroundMaterial(ground, sand ?? soil, talus ?? scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
