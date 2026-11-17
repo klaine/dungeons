@@ -1,5 +1,6 @@
 import { fbm2, Rng } from './rng';
-import { Island, Place, Site } from './site';
+import { Building, Island, Place, Site } from './site';
+import { footprintOf, planClassical } from './building';
 
 /**
  * An island in the sea. Where a valley is a strip of land between two lines of rock, an island
@@ -69,6 +70,14 @@ function fromBeach(o: Island, x: number, z: number): number {
   const head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(z - c.z, x - c.x);
   const off = Math.max(0, Math.abs(turnBetween(head, at)) - c.beach);
   return Math.max(0, d - c.r) + off * (c.r + 10) * 1.6;
+}
+
+/** How far a point is outside the ground a classical building stands on, its wings included: nothing within it. */
+export function outsideBuilding(b: Building, x: number, z: number): number {
+  const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+  let best = Infinity;
+  for (const r of footprintOf(b)) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - v, 0, v - r.v1)));
+  return best;
 }
 
 /** How far a point is outside a rectangle, or nothing inside it. */
@@ -169,6 +178,7 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
     if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
     if (o.chapel) flat(o.chapel.x, o.chapel.z, o.chapel.y, 15);
+    if (o.mansion) { const w = 1 - smooth((outsideBuilding(o.mansion.building, x, z) - 3) / 5); top += (o.mansion.y - top) * w; }
     if (o.graveyard) { const q = o.graveyard, w = 1 - smooth((Math.hypot(Math.max(Math.abs(x - q.x) - q.d / 2, 0), Math.max(Math.abs(z - q.z) - q.w / 2, 0)) - 1) / 5); top += (floor - top) * w; }
   }
   // Below the top of the cliff the land goes down to the sea bed: steeply where it is cliff, which
@@ -596,9 +606,35 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       taken.push({ x, z, r: 24 });
       break;
     }
-    // Where there is no castle, as often as not the ruin of a chapel stands on a headland instead, as on so many of the western isles.
+    // Where there is no castle, now and then a mansion: a stuccoed classical house standing back from a headland, its front to the sea.
+    const m = rng.fork('mansion');
+    if (!island.castle && m.chance(0.45)) for (let tries = 0; tries < 120 && !island.mansion; tries++) {
+      const a = m.range(0, TAU);
+      if (Math.abs(turnBetween(a, cove.out)) < 0.8 || Math.abs(turnBetween(a, toHouse)) < 0.6) continue;
+      if (island.lighthouse && Math.abs(turnBetween(a, Math.atan2(island.lighthouse.z - island.z, island.lighthouse.x - island.x))) < 0.8) continue;
+      // From a pavilion of three windows to a front of nine; two or three storeys, the principal one tall.
+      const bays = m.pick([3, 5, 5, 7, 7, 9]), storeys = m.pick([2, 2, 3, 3]), w = round(bays * 2.55 + 1.6), d = round(m.range(9.4, 11.5));
+      const heights = [round(m.range(3.4, 4.2)), round(m.range(3.8, 4.8)), ...Array.from({ length: storeys - 2 }, () => round(m.range(2.9, 3.4)))];
+      const back = coastAt(island, a) - m.range(24, 32), x = island.x + Math.cos(a) * back, z = island.z + Math.sin(a) * back;
+      // (Its front looks out, east or west as the classical houses are built, whichever is the more towards the sea.)
+      const faces: 'e' | 'w' = Math.cos(a) > 0 ? 'e' : 'w', turn = faces === 'w' ? 1 : -1;
+      const b: Building = { style: 'imperial', x: round(x), z: round(z), w, d, faces, storeys, heights, bays, colour: m.pick([[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78], [0.88, 0.84, 0.72]] as [number, number, number][]), portico: bays >= 7 || (bays === 5 && m.chance(0.5)) };
+      if (bays >= 7 && m.chance(0.5)) b.wings = [{ side: m.chance(0.5) ? -1 : 1, width: round(m.range(5.4, Math.min(8.8, w / 2 - 4))), length: round(m.range(7, 11)) }];
+      // All of its ground well in from the cliffs, clear of what else is built, on land that can be levelled, and its door reached on foot.
+      const corners = footprintOf(b).flatMap((r) => [[r.u0, r.v0], [r.u1, r.v0], [r.u0, r.v1], [r.u1, r.v1]]).map(([u, v]) => [b.x - (turn * b.d) / 2 + turn * v, b.z + turn * u]);
+      const y = made(b.x, b.z);
+      if (corners.some(([cx, cz]) => inland(island, cx, cz) < 9 || Math.abs(made(cx, cz) - y) > 4.5)) continue;
+      const span = Math.max(w, d) / 2 + 8;
+      if (!clear(b.x, b.z, span) || fromTrack(b.x, b.z) < span) continue;
+      const doorX = b.x - turn * (b.d / 2 + 3), doorZ = b.z;
+      if (inland(island, doorX, doorZ) < 6 || !reached(doorX, doorZ)) continue;
+      b.plan = planClassical(b, m.fork('plan'));
+      island.mansion = { building: b, y: round(y) };
+      taken.push({ x: b.x, z: b.z, r: span });
+    }
+    // Where there is neither, as often as not the ruin of a chapel stands on a headland instead, as on so many of the western isles.
     const h = rng.fork('chapel');
-    if (!island.castle && h.chance(0.65)) for (let tries = 0; tries < 80; tries++) {
+    if (!island.castle && !island.mansion && h.chance(0.65)) for (let tries = 0; tries < 80; tries++) {
       const a = h.range(0, TAU);
       if (Math.abs(turnBetween(a, cove.out)) < 0.9 || Math.abs(turnBetween(a, toHouse)) < 0.7) continue;
       if (island.lighthouse && Math.abs(turnBetween(a, Math.atan2(island.lighthouse.z - island.z, island.lighthouse.x - island.x))) < 0.9) continue;
@@ -701,7 +737,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
     }
     return best;
   };
-  const footpath = (x: number, z: number, to: 'lighthouse' | 'castle' | 'chapel') => {
+  const footpath = (x: number, z: number, to: 'lighthouse' | 'castle' | 'chapel' | 'mansion') => {
     const [sx, sz] = nearestOnTrack(x, z), points: [number, number][] = [];
     const n = Math.max(2, Math.round(Math.hypot(x - sx, z - sz) / 7)), q = rng.fork(`path/${to}`), sway = q.range(-6, 6);
     for (let k = 0; k <= n; k++) {
@@ -715,6 +751,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const lh = island.lighthouse;
   if (lh) footpath(lh.x + Math.cos(lh.door) * (lh.r + 2.2), lh.z + Math.sin(lh.door) * (lh.r + 2.2), 'lighthouse');
   if (island.castle) { const c = island.castle; footpath(c.x - Math.cos(c.facing) * 13, c.z - Math.sin(c.facing) * 13, 'castle'); }
+  if (island.mansion) { const b = island.mansion.building, turn = b.faces === 'w' ? 1 : -1; footpath(b.x - turn * (b.d / 2 + 2.5), b.z, 'mansion'); }
   if (island.chapel) { const c = island.chapel; footpath(c.x - Math.cos(c.facing) * 12, c.z - Math.sin(c.facing) * 12, 'chapel'); }
 
   // The box that holds the island.

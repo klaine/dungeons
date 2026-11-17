@@ -412,6 +412,12 @@ export interface Island {
   lighthouse?: { x: number; z: number; y: number; r: number; height: number; door: number };
   /** The ruin of a castle on another headland, facing `facing` (radians), solid and walked round, not gone into. */
   castle?: { x: number; z: number; y: number; facing: number };
+  /**
+   * Or a mansion: a stuccoed classical house of the kind a valley may have for its manor, made by
+   * the same rules (see `Building`, style `imperial`), standing back from a headland with its
+   * front to the sea, on ground levelled for it at `y`. It can be gone into.
+   */
+  mansion?: { building: Building; y: number };
   /** Or, on an island with no castle, the ruin of a chapel on that headland: its west front standing and its walls broken down, its east end towards `facing`. */
   chapel?: { x: number; z: number; y: number; facing: number };
   /**
@@ -477,7 +483,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'lighthouse' | 'castle' | 'chapel' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */

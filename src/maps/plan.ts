@@ -1,4 +1,5 @@
 import { drawStorey } from './buildingPlan';
+import { footprintOf } from '../core/building';
 import { boxValley, edgeAt } from '../core/valley';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
@@ -146,6 +147,16 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         ctx.save(); ctx.translate(X(k.x), Z(k.z)); ctx.rotate(k.facing);
         ctx.globalAlpha = 0.55; ctx.fillRect(-8 * scale, -4 * scale, 18 * scale, 8 * scale); ctx.globalAlpha = 1;
         ctx.restore();
+      }
+      if (isle.mansion) {
+        // (Drawn solid, as the valley's buildings are, wings and all.)
+        const b = isle.mansion.building, turn = b.faces === 'w' ? 1 : -1;
+        ctx.globalAlpha = 0.8;
+        for (const r of footprintOf(b)) {
+          const xs = [b.x - (turn * b.d) / 2 + turn * r.v0, b.x - (turn * b.d) / 2 + turn * r.v1], zs = [b.z + turn * r.u0, b.z + turn * r.u1];
+          ctx.fillRect(X(Math.min(...xs)), Z(Math.min(...zs)), Math.abs(xs[1] - xs[0]) * scale, Math.abs(zs[1] - zs[0]) * scale);
+        }
+        ctx.globalAlpha = 1;
       }
       if (isle.graveyard) {
         const q = isle.graveyard;

@@ -1,5 +1,5 @@
 import { Rng, fbm2 } from '../core/rng';
-import { beachness, inland } from '../core/island';
+import { beachness, inland, outsideBuilding } from '../core/island';
 import { Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { Colour, growConifer, growTree, Planting } from './planting';
@@ -51,6 +51,7 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     if (o.lighthouse && Math.hypot(x - o.lighthouse.x, z - o.lighthouse.z) < o.lighthouse.r + 0.6 + m) return true;
     if (o.castle && Math.hypot(x - o.castle.x, z - o.castle.z) < 17 + m) return true;
     if (o.chapel && Math.hypot(x - o.chapel.x, z - o.chapel.z) < 12 + m) return true;
+    if (o.mansion && outsideBuilding(o.mansion.building, x, z) < 1.5 + m) return true;
     if (o.graveyard && Math.abs(x - o.graveyard.x) < o.graveyard.d / 2 + 0.7 + m && Math.abs(z - o.graveyard.z) < o.graveyard.w / 2 + 0.7 + m) return true;
     const [ax, az] = o.jetty.from;
     return Math.hypot(x - ax, z - az) < 2.5 + m;

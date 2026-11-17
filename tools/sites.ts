@@ -81,6 +81,7 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     tally2(`cottages=${o.cottages.length}`);
     tally2(`lighthouse=${!!o.lighthouse}`);
     tally2(`castle=${!!o.castle}`);
+    tally2(`mansion=${o.mansion ? `${o.mansion.building.bays} bays x${o.mansion.building.storeys}` : 'none'}`);
     tally2(`cave=${!!o.seaCave}`);
     tally2(`stacks=${o.stacks.length}`);
   } catch (e) {

@@ -5,6 +5,8 @@ import { Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
 import { buildLandmark } from './landmarks';
+import { buildBuilding } from './buildings';
+import { CLASSICAL } from '../core/building';
 import { Colour } from './planting';
 
 /**
@@ -484,6 +486,13 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     c.finds.push({ at: new Vector3(sc.x + Math.cos(sc.heading) * a, c.caveFloor + a * 0.02 + 0.3, sc.z + Math.sin(sc.heading) * a), what: 'a smuggler\'s lantern' });
   }
   for (const [m, from] of begun) mesh(m).setOpenBy((x, y, z) => { let v = 1; for (const f of indoors) v = Math.min(v, f(x, y, z)); return v; }, from);
+  // ---- the mansion, built as the valley's classical houses are, which marks its own rooms as indoors (and so is built after the rest is marked).
+  if (o.mansion) {
+    const b = o.mansion.building, turn = b.faces === 'w' ? 1 : -1;
+    buildBuilding(b, o.mansion.y, mesh, rng.fork('mansion'), c.stoneTint, false);
+    // Somebody left something in its entrance hall.
+    c.finds.push({ at: new Vector3(b.x - turn * (b.d / 2 - 3), o.mansion.y + CLASSICAL.plinth + 0.3, b.z + 0.6), what: 'a silver snuffbox' });
+  }
   return { deck, lamp: o.lighthouse ? { x: o.lighthouse.x, y: o.lighthouse.y + o.lighthouse.height + 1.6, z: o.lighthouse.z } : undefined };
 }
 

@@ -74,6 +74,22 @@ const { chromium } = require('playwright');
           out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (along the strand from the beach; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
           continue;
         }
+        // A mansion is gone into by its front door, up its steps.
+        const mansion = site.island && site.island.mansion;
+        if (mansion && Math.hypot(f.at.x - mansion.building.x, f.at.z - mansion.building.z) < mansion.building.w) {
+          const b = mansion.building, turn = b.faces === 'w' ? 1 : -1, front = b.x - turn * (b.d / 2);
+          player.place({ x: front - turn * 10, y: groundAt(front - turn * 10, b.z) + 1.8, z: b.z }, 0);
+          const legs = [[front - turn * 1.5, b.z], [front + turn * 1.5, b.z], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 2400 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg < 2 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.5) leg++;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (in by the front door; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
         // A castle is gone into by its gate.
         const castle = site.island && site.island.castle;
         if (castle && Math.hypot(f.at.x - castle.x, f.at.z - castle.z) < 20) {
