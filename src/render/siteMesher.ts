@@ -8,6 +8,7 @@ import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { carveRock, smin } from './geom/rock';
 import { buildCamp } from './camp';
+import { buildMineYard } from './mine';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
 import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
@@ -914,12 +915,36 @@ export function meshSite(site: Site): SceneDescription {
       }
       return air;
     };
+    /**
+     * The air of a mine, measured as a hall's is. An adit a little over two metres broad and high, its roof cut to a
+     * slight arch, driven level into the hill; a crosscut off one side of it, lower, that was given up; and at the end the
+     * working, where the lode was followed: broader and higher, its roof uneven, the ground at the back left standing in two steps.
+     */
+    const mineAir = (q: (typeof grottoes)[number], t: number, off: number, y: number): number => {
+      const m = q.mine!, floor = q.y0 + 0.24 * Math.max(0, 2.6 - t), end = 7 + m.length;
+      let a = Math.min(1.15 - Math.abs(off), y - floor, floor + 2.32 - 0.2 * (off / 1.15) ** 2 - y, t + 0.4, end + 0.5 - t);
+      const so = off * m.cross.side;
+      a = Math.max(a, Math.min(0.9 - Math.abs(t - 7 - m.cross.at), so + 0.5, m.cross.length - so, y - floor, floor + 2.05 - y));
+      const u = t - end;
+      if (u > -1.5) {
+        const wide = 2.7 + 0.5 * (fbm2(t * 0.8 + q.n1, y * 0.6, 2) - 0.5) * 2, roof = floor + 3.0 + 0.6 * (fbm2(t * 0.9 + q.n2, off * 0.9, 2) - 0.5) * 2;
+        a = Math.max(a, Math.min(u + 0.3, 5.4 - u, wide - Math.abs(off), y - floor - (u > 3.5 ? 0.64 : u > 2.4 ? 0.32 : 0), roof - y));
+      }
+      return a;
+    };
     // How far into a grotto a point is: less than nothing outside it; 0 at its mouth; 1 well inside.
     let grottoDeep = 0;
     const grottoAir = (x: number, y: number, z: number): number => {
       let air = -Infinity;
       for (const q of grottoes) {
         const inside = (x - q.edge) * q.inw, t = 7 - inside, off = z - q.z;
+        if (q.mine) {
+          // A mine: only the mouth of its adit lies in the rock that is carved with the land.
+          if (t < -0.5 || t > UNDER_FROM + 1.3 || Math.abs(off) > 2.2 || y > q.y0 + 5 || y < q.y0 - 1) continue;
+          const a = mineAir(q, t, off, y);
+          if (a > air) { air = a; grottoDeep = smooth((t - 2.6) / 3.2); }
+          continue;
+        }
         if (q.hall) {
           // A hall: only its doorway and the head of its stair lie in the rock that is carved with the land.
           if (t < -0.5 || t > q.hall0 + 1 || Math.abs(off) > 2.2 || y > q.y0 + 5 || y < q.y0 - q.hall.drop - 1) continue;
@@ -1012,6 +1037,22 @@ export function meshSite(site: Site): SceneDescription {
     };
     const rings = lies.filter((f) => f.kind === 'stones');
     const ruins = lies.filter((f) => f.kind === 'ruin');
+    /**
+     * How high the spoil of a mine lies at a point. The heap begins eight metres out from the foot of the wall, on the adit's
+     * line: a bank that rises gently for the tramway, runs level, and ends in a tip that falls as steeply as loose stone will lie,
+     * as do its sides.
+     */
+    const heapAt = (x: number, z: number): number => {
+      let high = 0;
+      for (const q of grottoes) {
+        if (!q.mine) continue;
+        const along = (x - q.edge) * q.inw - 8, off = Math.abs(z - q.z), len = q.mine.heap;
+        if (along < 0 || along > len + 3 || off > 6) continue;
+        const top = 1.15 * smooth(along / 5.5) * (1 - smooth((along - len + 0.6) / 2));
+        high = Math.max(high, top * (1 - smooth((off - 1.3) / (1.5 * top + 0.5))));
+      }
+      return high;
+    };
     const campBase = site.camp ? swells(site.camp.x, site.camp.z) : 0;
     const groundBase = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
@@ -1050,6 +1091,7 @@ export function meshSite(site: Site): SceneDescription {
         const d = Math.hypot(x - site.camp.x, z - site.camp.z), r = site.camp.r;
         if (d < r * 1.7) { const k = 1 - smooth((d - r * 0.9) / (r * 0.75)); y += (campBase - y) * k; even = Math.min(even, 1 - 0.9 * k); }
       }
+      y += heapAt(x, z);
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
         // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
@@ -1543,6 +1585,8 @@ export function meshSite(site: Site): SceneDescription {
         bare = Math.max(bare, 0.85 * (1 - smooth((rho - 0.72) / 0.18)));
         wet = Math.max(wet, 1 - smooth((rho - 0.85) / 0.14));
       }
+      // on the spoil of a mine, which is broken stone;
+      bare = Math.max(bare, Math.min(0.95, heapAt(x, z) * 3));
       lay.bare = bare;
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
@@ -1672,7 +1716,7 @@ export function meshSite(site: Site): SceneDescription {
     for (const c of headPatches) carveLand(c, (m) => kit.mesh(m), (at) => !overCourt(at));
     kit.group = `p${p.id}`;
     // (Where the stair of a hall goes down out of the land's reach, the land's rock is left out: the hall's own carving has it.)
-    const underOwn = (at: Vector3) => grottoes.some((q) => q.hall && 7 - (at.x - q.edge) * q.inw > UNDER_FROM && Math.abs(at.z - q.z) < 2.6 && at.y < q.y0 + 4.2);
+    const underOwn = (at: Vector3) => grottoes.some((q) => (q.hall || q.mine) && 7 - (at.x - q.edge) * q.inw > UNDER_FROM && Math.abs(at.z - q.z) < 2.6 && at.y < q.y0 + 4.2);
     // (Nor where the way through the hill has gone in under the ridge: from there its own carving has it.)
     // (Nor anywhere near the way down from it, which passes under the foot of the land's rock.)
     const backOwn = (at: Vector3) => !!backWay && ((backWay.along(at.x) > -0.3 && Math.abs(at.z - backWay.z) < 3 && at.y < backWay.top) || (!!backWay.deepAir && at.y < backWay.start - 0.5 && backWay.deepAir(at.x, at.y, at.z) > -1.3));
@@ -1921,8 +1965,10 @@ export function meshSite(site: Site): SceneDescription {
     farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
 
     // ---- what lies and grows in the valley
+    // (The yard before a mine: the ground between its mouth and the tip, and the shed's and the stacks' beside the mouth.)
+    const inYard = (x: number, z: number, m: number) => grottoes.some((q) => { if (!q.mine) return false; const inside = (x - q.edge) * q.inw, off = Math.abs(z - q.z); return inside > 1 && ((inside < 8 + q.mine.heap && off < 1.6 + m) || (inside < 13.5 && off < 7 + m)); });
     // (The floor of the charcoal burners' camp counts as within doors for whatever asks this: nothing grows on it and nothing is strewn on it.)
-    const inHouse = (x: number, z: number, m: number) => (x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4) || (!!site.camp && Math.hypot(x - site.camp.x, z - site.camp.z) < site.camp.r * 0.9 + Math.min(m, 1));
+    const inHouse = (x: number, z: number, m: number) => (x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4) || (!!site.camp && Math.hypot(x - site.camp.x, z - site.camp.z) < site.camp.r * 0.9 + Math.min(m, 1)) || heapAt(x, z) > 0.2 || inYard(x, z, Math.min(m, 1));
     const inMeadow = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
     // (In the valley: between its sides, and no further down than a few strides past the gap, where whoever walks it is stopped.)
     const inGrounds = (x: number, z: number, m: number) => (vale ? z > g.z0 && z < vale.mouth + 6 - m && insideAt(x, z) > m : x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m);
@@ -1933,6 +1979,8 @@ export function meshSite(site: Site): SceneDescription {
       for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
       // A tower has clear ground about it.
       for (const t of towers) clear = Math.min(clear, Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) - t.half - 2.6);
+      // Nor does anything stand in the yard of a mine.
+      for (const q of grottoes) if (q.mine) { const inside = (x - q.edge) * q.inw; if (inside > 0 && inside < 14) clear = Math.min(clear, Math.abs(z - q.z) - 8); else if (inside < 9 + q.mine.heap) clear = Math.min(clear, Math.abs(z - q.z) - 3.4); }
       // The charcoal burners felled their clearing.
       if (site.camp) clear = Math.min(clear, Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 1.08);
       // (More of it about a large building than a cottage: it is meant to be seen.)
@@ -2115,8 +2163,17 @@ export function meshSite(site: Site): SceneDescription {
         const oak = inBlossom || fbm2(x * 0.045 + s2 * 3, z * 0.045 - s1, 2) > 0.44;
         // One tree in six is old: half as tall again, twice as thick, and carrying far more leaf.
         const old = detail > 0.7 && grown % 6 === 2 ? 1 : 0;
-        const reach = growTree(planting, barkMesh, x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old), girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old), {
-          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old)), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old), leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: softBark,
+        // Beyond that, trees are not all of an age: now and then one is a giant, towering over the
+        // rest, and about one in four is young, slender and low. (A stream of its own, so no other choice moves.)
+        const age = rng.fork(`age${grown}`), roll = age.next();
+        const giant = detail > 0.5 && roll < 0.05 ? age.range(1.7, 2.2) : 1, young = roll > 0.7 ? age.range(0.42, 0.7) : 1;
+        // And very rarely an oak of great age that has spread rather than risen: a short, vast trunk
+        // and limbs that reach out low and far, its crown a roof over the ground round it.
+        const epic = detail > 0.7 && oak && roll >= 0.05 && roll < 0.075;
+        const wide = epic ? age.range(2.0, 2.5) : 1;
+        const tall = giant * young * (epic ? 0.95 : 1), stout = epic ? 2.6 : giant > 1 ? giant * 1.15 : young * young, leafy = epic ? 5 : giant > 1 ? giant * giant * 0.75 : young * 0.8;
+        const reach = growTree(planting, barkMesh, x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
+          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: softBark,
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
@@ -2684,8 +2741,75 @@ export function meshSite(site: Site): SceneDescription {
       });
       if (sh && mouth && up) sunShafts.push({ top: mouth.clone().addScaledVector(up, 8), down: up.clone().negate(), length: 8 + sh.yy / sh.dy + gr!.chasm.depth, radius: sh.r });
     }
+    // A mine is carved as a hall is: beyond the rock that is carved with the land, as a body of its own that sees no sky.
     grottoes.forEach((q, k) => {
-      if (q.hall) return;
+      if (!q.mine) return;
+      const m = q.mine, fl = q.y0, end = 7 + m.length, tc = 7 + m.cross.at, cs = m.cross.side;
+      const tOf = (x: number) => 7 - (x - q.edge) * q.inw, xOf = (t: number) => q.edge + q.inw * (7 - t);
+      wild.group = 'under';
+      const rockIn = wild.mesh('rock'), woodIn = wild.mesh('wood');
+      wild.group = 'wild';
+      const woodOut = sceneryMesh('wood'), tone1 = rng.fork(`mine${k}`).range(0, 50), cut = rng.fork(`minetimber${k}`);
+      const air = (x: number, y: number, z: number) => mineAir(q, tOf(x), z - q.z, y);
+      const span = (a: Vector3, b: Vector3): [Vector3, Vector3] => [V(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.min(a.z, b.z)), V(Math.max(a.x, b.x), Math.max(a.y, b.y), Math.max(a.z, b.z))];
+      // In three pieces that overlap a little: the adit, the working at its end, and the crosscut.
+      const pieces = [
+        span(V(xOf(UNDER_FROM - 0.3), fl - 0.9, q.z - 1.7), V(xOf(end + 0.2), fl + 3.0, q.z + 1.7)),
+        span(V(xOf(end - 0.2), fl - 0.9, q.z - 3.8), V(xOf(end + 6.2), fl + 4.4, q.z + 3.8)),
+        span(V(xOf(tc - 1.5), fl - 0.9, q.z + cs * 1.3), V(xOf(tc + 1.5), fl + 2.9, q.z + cs * (m.cross.length + 0.9))),
+      ];
+      for (const [min, max] of pieces) carveRock(rockIn, air, {
+        min, max, cell: 0.32, uvScale: 0.4, fromSamples: true, sharp: true,
+        shade: (c) => {
+          // Pick marks; and in the working the lode they followed, a slanting band of green-stained stone in both walls and the face.
+          const tone = 0.78 + 0.26 * fbm2(c.x * 0.9 + tone1, c.z * 0.9 + c.y * 0.6, 3), u = tOf(c.x) - end;
+          const lode = u > -0.5 && Math.abs(c.y - (fl + 1.25 + 0.3 * (c.z - q.z) + 0.25 * (fbm2(c.x * 0.7 + tone1, c.z * 0.7, 2) - 0.5))) < 0.2;
+          const base = rockColour(tone);
+          return lode ? [base[0] * 0.55, base[1] * 1.25 + 0.03, base[2] * 1.05 + 0.02] : base;
+        },
+      });
+      // Where the adit meets the face of the hill: found as a hall's doorway is.
+      let face = 3.3;
+      for (let t = 0.5; t < 6; t += 0.15) if (ground(xOf(t), q.z) > fl + 2.4) { face = t; break; }
+      const timber: Colour = [0.36, 0.29, 0.21];
+      const beamIn = (t: number, mesh: MeshBuilder, a: Vector3, b: Vector3, w: number, d: number) => layBeam(mesh, a, b, w, d, [timber[0] * cut.range(0.8, 1.1), timber[1] * cut.range(0.8, 1.1), timber[2] * cut.range(0.8, 1.1)], cut.range(0, 9));
+      // The portal: two stout legs and a cap that stands out past them, with a strut to each leg from outside.
+      {
+        const x = xOf(face - 0.15);
+        for (const side of [-1, 1]) {
+          beamIn(face, woodOut, V(x, fl - 0.3, q.z + side * 1.12), V(x, fl + 2.2, q.z + side * 1.06), 0.24, 0.24);
+          beamIn(face, woodOut, V(xOf(face - 1.3), ground(xOf(face - 1.3), q.z + side * 1.5) - 0.2, q.z + side * 1.5), V(x, fl + 1.7, q.z + side * 1.14), 0.14, 0.14);
+        }
+        beamIn(face, woodOut, V(x, fl + 2.32, q.z - 1.5), V(x, fl + 2.32, q.z + 1.5), 0.26, 0.26);
+      }
+      // Sets of timber down the adit, a long stride apart: two legs and a cap; boards over the first few, where the ground is worst.
+      let sets = 0;
+      for (let t = face + 1.6; t < end - 0.4; t += 2.1, sets++) {
+        if (Math.abs(t - tc) < 1.25) continue;
+        const mesh = t < 6.6 ? woodOut : woodIn, x = xOf(t);
+        for (const side of [-1, 1]) beamIn(t, mesh, V(x, fl - 0.05, q.z + side * 1.02), V(x, fl + 2.0, q.z + side * 0.98), 0.15, 0.15);
+        beamIn(t, mesh, V(x, fl + 2.07, q.z - 1.12), V(x, fl + 2.07, q.z + 1.12), 0.16, 0.16);
+        if (sets < 3 || cut.chance(0.25)) for (const off of [-0.62, 0, 0.62]) beamIn(t, mesh, V(x, fl + 2.19, q.z + off), V(xOf(t + 2.1), fl + 2.19, q.z + off), 0.34, 0.04);
+      }
+      // The tramway underground: from the mouth to the foot of the working.
+      for (const [t0, t1, mesh] of [[2.6, 6.6, woodOut], [6.6, end + 2.2, woodIn]] as [number, number, MeshBuilder][]) {
+        for (const side of [-0.28, 0.28]) beamIn(t0, mesh, V(xOf(t0), fl + 0.1, q.z + side), V(xOf(t1), fl + 0.1, q.z + side), 0.07, 0.09);
+        for (let t = t0 + 0.4; t < t1; t += 1) beamIn(t, mesh, V(xOf(t), fl + 0.03, q.z - 0.5), V(xOf(t), fl + 0.03, q.z + 0.5), 0.16, 0.07);
+      }
+      // In the working: a pick left against the face, a basket, and something worth carrying out.
+      beamIn(end, woodIn, V(xOf(end + 4.9), fl + 0.66, q.z - 1.3), V(xOf(end + 5.25), fl + 1.5, q.z - 1.45), 0.045, 0.045);
+      layBeam(woodIn, V(xOf(end + 5.2), fl + 1.44, q.z - 1.62), V(xOf(end + 5.2), fl + 1.44, q.z - 1.2), 0.05, 0.07, [0.08, 0.08, 0.09], 3);
+      finds.push({ at: V(xOf(end + 4.3), fl + 0.64 + 0.4, q.z + 1.1), what: 'a leather bag of green ore and a miner\'s tally, left on the ledge at the end of the working' });
+      // Two lights underground: at the crosscut, and in the working.
+      hallTorches.push({ position: V(xOf(tc + 1.6), fl + 1.72, q.z - cs * 1.08), out: V(0, 0, cs) });
+      hallTorches.push({ position: V(xOf(end + 1.2), fl + 1.9, q.z + 2.5), out: V(0, 0, -1) });
+      unders.push({ min: V(Math.min(xOf(UNDER_FROM + 0.5), xOf(end + 6.5)), fl - 1, q.z - Math.max(4, m.cross.length + 1.2)), max: V(Math.max(xOf(UNDER_FROM + 0.5), xOf(end + 6.5)), fl + 4.6, q.z + Math.max(4, m.cross.length + 1.2)) });
+      // And the yard.
+      const yard = buildMineYard({ at: (inside, off) => [q.edge + q.inw * inside, q.z + off], heap: m.heap, shed: m.shed, mouth: 7 - 2.6, stone: rockColour(1), cut: (inside) => fl + 0.24 * Math.max(0, 2.6 - (7 - inside)) }, ground, sceneryMesh, rng.fork(`mineyard${k}`));
+      hallTorches.push(...yard.torches);
+    });
+    grottoes.forEach((q, k) => {
+      if (q.hall || q.mine) return;
       const cx = q.edge - q.inw * (q.far - 7), fy = q.y0 - 0.045 * (q.far - 2);
       const gr = rng.fork(`grottoglow${k}`), turn = gr.range(0, Math.PI * 2);
       for (let i = 0; i < 4; i++) {
