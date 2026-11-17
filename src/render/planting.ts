@@ -208,7 +208,9 @@ export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], s
     for (let i = 0; i <= sides; i++) {
       const a = (i / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
       const nx = side.x * c + fore.x * s, ny = side.y * c + fore.y * s, nz = side.z * c + fore.z * s;
-      const tone = 0.82 + 0.3 * (((i * 7 + j * 3) % 5) / 5);
+      // (A little unlike from point to point, and only a little. The points of a trunk are half a metre apart; given very different shades,
+      // the bark between them ran from one to the other, and where that run changed, at every ring, the eye saw a sharp line round the trunk.)
+      const tone = 0.95 + 0.08 * (((i * 7 + j * 3) % 5) / 5);
       // Flutes are deepest at the foot and gone by the first third of the way up; the oval stays, easing off.
       const fade = Math.max(0, 1 - j / Math.max(1, (points.length - 1) * 0.5));
       const swell = shape ? 1 + shape.amp * fade * Math.cos(shape.lobes * a + shape.phase) + shape.oval * (1 - 0.5 * j / Math.max(1, points.length - 1)) * Math.cos(2 * (a - shape.ovalAt)) : 1;
@@ -468,7 +470,7 @@ export function layTrunk(mesh: MeshBuilder, x: number, base: number, z: number, 
     const row: number[] = [];
     for (let i = 0; i <= sides; i++) {
       const a = (i / sides) * Math.PI * 2;
-      const tone = 0.8 + 0.3 * ((i * 7 + j * 3) % 5) / 5;
+      const tone = 0.95 + 0.08 * ((i * 7 + j * 3) % 5) / 5;
       row.push(mesh.addVertex(x + lean[0] * f + Math.cos(a) * r, y, z + lean[1] * f + Math.sin(a) * r, Math.cos(a), 0.1, Math.sin(a), i * 0.5, y * 0.6, colour[0] * tone, colour[1] * tone, colour[2] * tone));
     }
     ids.push(row);

@@ -17,7 +17,7 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalMap, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
+const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
 
 export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number } } = { uTime: uniform(0), uWind: uniform(1) };
 
@@ -265,6 +265,42 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
     texture.anisotropy = 4;
     // (It goes with the picture, for whoever makes a material of it.)
     texture.userData.relief = relief;
+    // And one leaf by itself, lying along its picture, for leaves that are made one by one (see `sprigClump`).
+    {
+      const w = 256, h = 128, c1 = document.createElement('canvas');
+      c1.width = w; c1.height = h;
+      const one = c1.getContext('2d')!;
+      const at = (u: number, v: number): [number, number] => [6 + u * (w - 12), h / 2 + v * (h / 2 - 5)];
+      for (const half of [-1, 1]) {
+        const look = one.createLinearGradient(...at(0, 0), ...at(1, 0));
+        const k = half < 0 ? 0.84 : 1;
+        look.addColorStop(0, cast(0.86 * k * 0.72, -0.1));
+        look.addColorStop(0.55, cast(0.86 * k, 0.1));
+        look.addColorStop(1, cast(0.86 * k * 1.12, 0.35));
+        one.fillStyle = look;
+        one.beginPath();
+        one.moveTo(...at(0, 0));
+        one.bezierCurveTo(...at(0.25, half * 1.1), ...at(0.7, half * 0.8), ...at(1, 0));
+        one.closePath();
+        one.fill();
+        one.strokeStyle = cast(1, 0.4, 0.5);
+        one.lineWidth = 1.5;
+        for (let v = 0; v < 5; v++) {
+          const u = 0.14 + v * 0.16;
+          one.beginPath(); one.moveTo(...at(u, 0)); one.lineTo(...at(u + 0.15, half * 0.62 * (1 - u * 0.75))); one.stroke();
+        }
+      }
+      one.strokeStyle = cast(1, 0.5, 0.9);
+      one.lineWidth = 2.5;
+      one.beginPath(); one.moveTo(...at(0, 0)); one.lineTo(...at(0.96, 0)); one.stroke();
+      // (A plain patch in the corner, for twigs, which have no picture of their own.)
+      one.fillStyle = 'rgb(255,255,255)';
+      one.fillRect(0, 0, 14, 14);
+      const single = new CanvasTexture(c1);
+      single.colorSpace = SRGBColorSpace;
+      single.anisotropy = 4;
+      texture.userData.single = single;
+    }
     return texture;
   } else if (kind === 'needle') {
     // A conifer bough seen from above: a stem up the card with side shoots, all bristling with
@@ -409,6 +445,68 @@ function bladeClump(): BufferGeometry {
   return g;
 }
 
+/**
+ * A sprig of real leaves, to hang where a painted spray hangs: three twigs out from the middle,
+ * not in one plane, and on them two dozen leaves made one by one. Each leaf is its own small
+ * surface, folded along its midrib, and each is turned its own way, as leaves are: mostly face
+ * up, and no two alike. Seen from any side it is a thing with depth, where the painted spray is a
+ * sheet, and seen edge on a sheet is a line. It fills the same square as the card does, so one
+ * can stand for the other; this one is for trees near enough to walk under (`sprigRange`).
+ */
+function sprigClump(): BufferGeometry {
+  const P: number[] = [], Nn: number[] = [], C: number[] = [], U: number[] = [], I: number[] = [];
+  let seed = 4711;
+  const r = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const cross = (a: number[], b: number[]) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const unit = (a: number[]) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+  const quad = (pts: number[][], uvs: number[][], colour: number[], n: number[]) => {
+    const base = P.length / 3;
+    pts.forEach((q, i) => { P.push(q[0], q[1], q[2]); Nn.push(n[0], n[1], n[2]); C.push(colour[0], colour[1], colour[2]); U.push(uvs[i][0], uvs[i][1]); });
+    I.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  };
+  const leaf = (b: number[], along: number[], face: number[], len: number) => {
+    const a = unit(along), w = unit(cross(face, a)), n = unit(cross(a, w));
+    const wide = len * (0.36 + 0.12 * r()), fold = wide * (0.25 + 0.5 * r()), tone = 0.62 + 0.38 * r(), warm = -0.5 + 1.5 * r();
+    const colour = [tone * (1 + 0.14 * warm), tone, tone * (1 - 0.28 * warm)];
+    const tip = [b[0] + a[0] * len, b[1] + a[1] * len, b[2] + a[2] * len];
+    for (const half of [-1, 1]) {
+      // The edge of this half stands up from the midrib: a leaf is a shallow trough.
+      const e0 = [b[0] + w[0] * wide * half + n[0] * fold, b[1] + w[1] * wide * half + n[1] * fold, b[2] + w[2] * wide * half + n[2] * fold];
+      const e1 = [tip[0] + w[0] * wide * half + n[0] * fold, tip[1] + w[1] * wide * half + n[1] * fold, tip[2] + w[2] * wide * half + n[2] * fold];
+      const hn = unit(cross([tip[0] - b[0], tip[1] - b[1], tip[2] - b[2]], [e0[0] - b[0], e0[1] - b[1], e0[2] - b[2]]).map((v) => v * -half));
+      const v = half < 0 ? 0.02 : 0.98;
+      quad([b, tip, e1, e0], [[0.02, 0.5], [0.98, 0.5], [0.98, v], [0.02, v]], colour, hn);
+    }
+  };
+  for (let t = 0; t < 3; t++) {
+    // A twig out from the middle, rising or falling out of the card's plane, and bending as it goes.
+    const az = (t / 3) * Math.PI * 2 + (r() - 0.5) * 0.9, lift = (r() - 0.5) * 0.9, reach = 0.36 + 0.12 * r();
+    const dir = unit([Math.cos(az) * Math.cos(lift), Math.sin(az) * Math.cos(lift), Math.sin(lift)]);
+    const bend = [(r() - 0.5) * 0.25, (r() - 0.5) * 0.25, (r() - 0.5) * 0.3];
+    const on = (f: number) => [dir[0] * reach * f + bend[0] * f * f, dir[1] * reach * f + bend[1] * f * f, dir[2] * reach * f + bend[2] * f * f];
+    // The twig itself: two thin strips crossed, dark, wearing the plain corner of the leaf's picture.
+    const side = unit(cross(dir, [0, 0, 1])), up = unit(cross(side, dir));
+    for (const q of [side, up]) {
+      const a0 = on(0.05), a1 = on(1), th = 0.006;
+      quad([[a0[0] - q[0] * th, a0[1] - q[1] * th, a0[2] - q[2] * th], [a0[0] + q[0] * th, a0[1] + q[1] * th, a0[2] + q[2] * th], [a1[0] + q[0] * th * 0.4, a1[1] + q[1] * th * 0.4, a1[2] + q[2] * th * 0.4], [a1[0] - q[0] * th * 0.4, a1[1] - q[1] * th * 0.4, a1[2] - q[2] * th * 0.4]],
+        [[0.02, 0.95], [0.03, 0.95], [0.03, 0.94], [0.02, 0.94]], [1.3, 0.42, 0.5], unit(cross(dir, q)));
+    }
+    for (let k = 0; k < 8; k++) {
+      // Leaves stand off the twig to either side by turns, pointing outward and forward, and the last one straight on.
+      const f = 0.18 + 0.82 * (k / 7), b = on(f), sgn = k % 2 ? 1 : -1, last = k === 7;
+      const out = last ? 0 : 0.75 + 0.5 * r();
+      const along = [dir[0] + side[0] * sgn * out + up[0] * (r() - 0.5) * 0.9, dir[1] + side[1] * sgn * out + up[1] * (r() - 0.5) * 0.9, dir[2] + side[2] * sgn * out + up[2] * (r() - 0.5) * 0.9];
+      // Its face is turned towards the card's own front, which the planting turns to the sky, and then tipped its own way.
+      const face = [(r() - 0.5) * 1.5, (r() - 0.5) * 1.5, 1];
+      leaf(b, along, face, 0.15 + 0.08 * r());
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(P, 3)); g.setAttribute('normal', new Float32BufferAttribute(Nn, 3));
+  g.setAttribute('color', new Float32BufferAttribute(C, 3)); g.setAttribute('uv', new Float32BufferAttribute(U, 2)); g.setIndex(I);
+  return g;
+}
+
 function shapeGeometry(shape: CardSet['shape'], folded = false): BufferGeometry {
   if (shape === 'card' && folded) {
     // A spray of leaves is not a flat sheet either: the card is creased down its middle, so that its two halves face different ways,
@@ -435,6 +533,10 @@ export const vegetationRange: { value: number } = uniform(75);
 export const bladeRange = 15;
 const bladeRangeUniform = uniform(bladeRange);
 
+/** How near the eye a tree's leaves are made one by one, in sprigs; beyond it they are painted sprays on cards. (`?sprigs=0` keeps the cards alone.) */
+export const sprigRange = 26;
+const sprigRangeUniform = uniform(sprigRange);
+
 /**
  * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
  * mesh to a block, so that blocks out of view are not drawn at all; blocks of grass and flowers
@@ -449,20 +551,22 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   // gets both, and which is drawn, and where one gives way to the other, is settled in `cullCards`
   // and by the cards themselves shrinking away over the hand-over. (`?blades=0` keeps the painted tufts alone.)
   const split = set.kind === 'grass' && new URLSearchParams(location.search).get('blades') !== '0';
+  // Leaves likewise: near the eye, sprigs of leaves made one by one; farther off, the painted sprays.
+  const sprigs = set.kind === 'leaf' && !!texture.userData.single && new URLSearchParams(location.search).get('sprigs') !== '0';
   const sway = whole ? 0.004 : ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
-  const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N;
+  const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N, uSprig = sprigRangeUniform as N;
   // Where each card stands, and how large it is.
   const at: N = attribute('aAt', 'vec4');
-  const materialFor = (layer: 'painted' | 'blades'): MeshStandardNodeMaterial => {
-    const real = layer === 'blades';
+  const materialFor = (layer: 'painted' | 'blades' | 'sprigs'): MeshStandardNodeMaterial => {
+    const real = layer === 'blades', sprig = layer === 'sprigs';
     const material = new MeshStandardNodeMaterial({
-      map: real ? null : texture, alphaTest: real ? 0 : 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: !real, vertexColors: real,
+      map: real ? null : sprig ? (texture.userData.single as Texture) : texture, alphaTest: real ? 0 : 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: !real, vertexColors: real || sprig,
     });
     // In the shadow map a crown's leaves are drawn smaller than they are (only the denser middle of
     // each card), so that some of the sun gets through the crown, as it does in life.
     if (set.kind === 'leaf' || set.kind === 'needle') {
       const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
-      if (cut > 0.42) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
+      if (cut > 0.42 && !sprig) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
     }
     // The sky lights leaves from all round, but as blue as it is it would turn them teal.
     material.envMapIntensity = 0.55;
@@ -472,7 +576,10 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       // not shrunk to meet them: that was tried, and it sent tufts far from where they stand.
       // Instead blocks are small, and a block straddling the range simply draws both.)
       const dist: N = distance(cameraPosition, at.xyz);
-      const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, dist)) : float(1);
+      // (Leaves the same: sprigs shrink to nothing as they pass the sprig range, and the painted sprays grow from nothing to meet them.)
+      const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, dist))
+        : sprig ? float(1).sub(smoothstep(uSprig.mul(0.82), uSprig, dist))
+        : sprigs ? smoothstep(uSprig.mul(0.78), uSprig.mul(0.96), dist) : float(1);
       // (By the time this runs each card's points are already where the card stands in the world, not about the card's own foot. So "shrink
       // to its foot" is "draw towards where it stands". Multiplying the point by the share left, as this did, drew every blade towards the
       // middle of the world instead: across the last few metres of the blade range whole tufts slid over the ground as the eye moved.)
@@ -481,6 +588,8 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
       p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
       p.z.addAssign(free.mul(cos(uTime.mul(1.7).add(at.z.mul(0.3)))).mul(uWind).mul(at.w).mul(sway * 0.6));
+      // Leaves made one by one tremble one by one.
+      if (sprig) p.addAssign(vec3(sin(uTime.mul(5.3).add(dot(positionLocal, vec3(31, 17, 23)))), sin(uTime.mul(4.1).add(dot(positionLocal, vec3(19, 29, 13)))), 0).mul(uWind).mul(at.w).mul(0.012).mul(handOver));
       const d: N = dist;
       if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d)));
       return p;
@@ -491,12 +600,17 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     // Leaves are lit both ways at once: as parts of the crown's rounded body, which gives the crown its light side and its dark, and each
     // as it lies on its twig, which gives one leaf a gleam and its neighbour none. And a leaf's skin is waxy: it throws the sun back.
     const relief = set.kind === 'leaf' ? (texture.userData.relief as Texture | undefined) : undefined;
-    material.normalNode = relief ? normalize(round.mul(0.6).add((normalMap(tex(relief, uv())) as N).mul(0.62))) : round;
+    // (A leaf made by itself is lit as it truly lies: by its own surface, whichever side of it is seen.)
+    material.normalNode = sprig ? normalize(round.mul(0.55).add(normalViewGeometry.mul(faceDirection).mul(0.68)))
+      : relief ? normalize(round.mul(0.6).add((normalMap(tex(relief, uv())) as N).mul(0.62))) : round;
     if (relief) { material.roughness = 0.58; material.color.setScalar(1.16); }
+    // A painted spray seen edge on is a streak across the crown. As a card turns its edge to the eye it thins away instead.
+    if (relief && !sprig) material.opacityNode = smoothstep(0.05, 0.32, abs(dot(positionViewDirection, normalViewGeometry)));
     (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1, relief ? 0.55 : 0.2);
     return material;
   };
-  const layers: { layer: 'painted' | 'blades'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
+  const layers: { layer: 'painted' | 'blades' | 'sprigs'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
+  if (sprigs) layers.push({ layer: 'sprigs', base: sprigClump(), material: materialFor('sprigs') });
   if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
   layers.push({ layer: 'painted', base: shapeGeometry(set.shape, set.kind === 'leaf'), material: materialFor('painted') });
 
@@ -536,7 +650,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       mesh.castShadow = set.shadow;
       mesh.matrixAutoUpdate = false;
       mesh.userData.ground = ground;
-      mesh.userData.layer = split ? layer : 'whole';
+      mesh.userData.layer = split ? layer : sprigs ? (layer === 'sprigs' ? 'sprigs' : 'sprays') : 'whole';
       meshes.push(mesh);
     }
   }
@@ -549,9 +663,12 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
  */
 export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; z: number }): void {
   for (const m of meshes) {
-    if (!m.userData.ground) continue;
     const s = m.boundingSphere!;
     const d = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z);
+    // Leaves: sprigs where any of the block is within their range, the painted sprays unless all of it is.
+    if (m.userData.layer === 'sprigs') { m.visible = d - s.radius < sprigRange; continue; }
+    if (m.userData.layer === 'sprays') { m.visible = d + s.radius > sprigRange * 0.78; continue; }
+    if (!m.userData.ground) continue;
     let show = d - s.radius < vegetationRange.value;
     if (m.userData.layer === 'blades') show = show && d - s.radius < bladeRange;
     else if (m.userData.layer === 'painted') show = show && d + s.radius > bladeRange * 0.85;
