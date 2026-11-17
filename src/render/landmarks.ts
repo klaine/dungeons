@@ -19,6 +19,8 @@ export function buildLandmark(
   scale?: number,
   /** A castle built bare: its curtain walls, towers and gate, and nothing within, where something else stands. */
   bare = false,
+  /** A castle's half breadth (across its gate) and half depth, before scaling, if not dealt here. */
+  size?: { W: number; D: number },
 ): void {
   const c = Math.cos(facing), s = Math.sin(facing);
   // From the landmark's own measures (`a` across its front, `b` back from it, `h` up) to the world.
@@ -101,7 +103,7 @@ export function buildLandmark(
     }
   } else if (kind === 'castle') {
     // A curtain wall about a court, a tower at each corner, a gate in its face between two more, and a great keep.
-    const W = rng.range(22, 30), D = rng.range(16, 22), wallH = rng.range(9, 12), t = 2.4;
+    const W0 = rng.range(22, 30), D0 = rng.range(16, 22), W = size?.W ?? W0, D = size?.D ?? D0, wallH = rng.range(9, 12), t = 2.4;
     for (const [a0, a1, b0, b1] of [[-W, W, -D - t / 2, -D + t / 2], [-W, W, D - t / 2, D + t / 2], [-W - t / 2, -W + t / 2, -D, D], [W - t / 2, W + t / 2, -D, D]]) {
       // (The face towards the valley is broken for the gate.)
       if (b0 < -D + 1 && b1 < -D + 2) {

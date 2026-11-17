@@ -553,24 +553,19 @@ export function meshSite(site: Site): SceneDescription {
       return beside * (1 - smooth((z - p.z0 - 0.7 - Math.max(0, wobble)) / 2.4));
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
-    // The bay below a keep: a ramp up from the valley floor over the first two-fifths of it, and a level shelf beyond.
-    const bay = vale?.bay;
-    const bayRise = (x: number, z: number): number => {
-      if (!bay) return 0;
-      const out = (x - bay.mouth) * (bay.side === 'w' ? -1 : 1), along = Math.abs(z - bay.z);
-      if (out < -5 || along > bay.half + 6) return 0;
-      return bay.rise * smooth((out + 3) / (bay.depth * 0.42)) * (1 - smooth((along - bay.half + 1) / 5));
-    };
+    const keepShelf = site.grounds ? (site.terraces ?? []).find((t) => t.keep) : undefined;
     const swells = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
-      // (Level on the bay's shelf, as a keep's ground would be; swelling elsewhere as it always did.)
-      const level = bay ? 1 - Math.min(1, bayRise(x, z) / bay.rise) : 1;
-      return p.floor - 0.03 + bayRise(x, z) + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
+      // (Level on the promontory a keep stands on, as a castle's court would be; swelling elsewhere as it always did.)
+      // (Fading in over some metres, so that the ledge coming up to it meets it without a step.)
+      const level = !keepShelf ? 1 : Math.max(smooth((Math.abs(z - (keepShelf.z0 + keepShelf.z1) / 2) - (keepShelf.z1 - keepShelf.z0) / 2 + 2) / 9), smooth((fromSide(keepShelf.side, x, z) - 4.7 - keepShelf.depth + 1) / 6));
+      return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
     };
     // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
     const lies = (site.features ?? []).map((f) => ({ ...f, base: swells(f.x, f.z) }));
     // A tower stands on ground that was levelled for it.
-    const towers = (site.grounds ? site.towers ?? [] : []).map((t) => ({ ...t, base: swells(t.x, t.z) }));
+    // (The keep's tower stands on its promontory: built at the shelf's height, though the ground under it is levelled before the shelf is raised.)
+    const towers = (site.grounds ? site.towers ?? [] : []).map((t, i) => { const lift = keepShelf && i === 0 && site.keep ? keepShelf.height : 0; return { ...t, base: swells(t.x, t.z) + lift, lift }; });
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
     const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
     // Whether a point is under a building, within its outer walls.
@@ -914,7 +909,7 @@ export function meshSite(site: Site): SceneDescription {
         const d = Math.max(Math.abs(x - t.x), Math.abs(z - t.z));
         if (d > t.half + 5) continue;
         const k = 1 - smooth((d - t.half - 1.9) / 2.8);
-        y += (t.base - y) * k;
+        y += (t.base - t.lift - y) * k;
         even = Math.min(even, 1 - k);
       }
       y += ((fbm2(x * 0.22 + s1, z * 0.22 + s2, 3) - 0.5) * 1.1 * rough + (fbm2(x * 0.9 + s2, z * 0.9 + s1, 2) - 0.5) * 0.16 * rough) * even;
@@ -1169,11 +1164,18 @@ export function meshSite(site: Site): SceneDescription {
           // The lowest beds are taken to be sound, so that the wall always starts with a face
           // too high to scramble up, whatever lies above it.
           const hard = y < foot.data[o] + 4.5 ? 0.92 : strata.hardness(Math.floor(strata.at(x, y, z)));
+          // (Nor does anything wear the way up to a terrace, or its shelf, into steps: whoever made the way chose rock that holds.)
+          for (const t of terraces) if (shelfAt(t, x, z) && (shelf.way > 0.05 || shelf.top)) return 8;
           return 0.7 + hard * hard * hard * 7;
         },
       });
       for (let o = 0; o < land.data.length; o++) {
         land.data[o] += loose.data[o];
+        // (The way up to a terrace and its shelf are left as they were made: no scree lies on them and nothing wore them down.)
+        if (terraces.length) {
+          const x = land.x0 + (o % land.nx) * CELL, z = land.z0 + Math.floor(o / land.nx) * CELL;
+          if (terraces.some((t) => shelfAt(t, x, z) && (shelf.way > 0.3 || shelf.top))) { land.data[o] = before[o]; loose.data[o] = 0; }
+        }
         wornBy.data[o] = land.data[o] - before[o];
       }
     }
@@ -1650,12 +1652,12 @@ export function meshSite(site: Site): SceneDescription {
     wild.group = 'soft';
     landmarkSpots.push(...landmarks.map((l) => ({ kind: l.kind, x: l.x, y: l.y, z: l.z })));
     landmarks.forEach((l, i) => buildLandmark(l.kind, l.x, l.y, l.z, Math.atan2(czA - l.z, cxA - l.x), (material) => wild.mesh(material), rng.fork(`landmark${i}`), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]]));
-    // The keep over a village: on the shelf of its bay, a castle's curtain walls round its tower (which is built with the towers), with
-    // the gate towards the valley; solid, since it can be walked to.
-    if (site.keep && vale?.bay && site.keep.kind === 'castle') {
-      const k = site.keep, was = wild.group;
+    // The keep over a village: on its promontory, a castle's curtain walls round its tower (which is built with the towers), with
+    // the gate towards the end the ledge comes up at; solid, since it can be walked to.
+    if (site.keep && keepShelf && site.keep.kind === 'castle') {
+      const k = site.keep, was = wild.group, size = { W: 12, D: 18 };
       wild.group = 'wild';
-      buildLandmark('castle', k.x, swells(k.x, k.z), k.z, vale.bay.side === 'w' ? Math.PI : 0, (material) => wild.mesh(material), rng.fork('keep'), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]], 0.5, true);
+      buildLandmark('castle', k.x, swells(k.x, k.z) + keepShelf.height, k.z, keepShelf.rise === 'n' ? Math.PI / 2 : -Math.PI / 2, (material) => wild.mesh(material), rng.fork('keep'), [0.82 * stoneTint[0], 0.78 * stoneTint[1], 0.7 * stoneTint[2]], 0.6, true, size);
       wild.group = was;
     }
     wild.group = 'wild';
@@ -1697,7 +1699,7 @@ export function meshSite(site: Site): SceneDescription {
     for (let tries = 0; tries < 400 && stones.length < 44; tries++) {
       const x = plant.range(g.x0 + 6, g.x1 - 6), z = plant.range(g.z0 + 6, g.z1 - 6);
       const size = plant.chance(0.2) ? plant.range(1.3, 2.4) : plant.range(0.45, 1.2);
-      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || inHouse(x, z, size + 2) || offTrack(x, z) < 2.5 + size || offFoot(x, z) < 1.4 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
+      if (!inGrounds(x, z, 6) || inMeadow(x, z, size + 1) || inHouse(x, z, size + 2) || (site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < 18) || offTrack(x, z) < 2.5 + size || offFoot(x, z) < 1.4 + size || !clearOfStones(x, z, size + 2) || slopeOf(ground, x, z, 0.6) > 0.5 || clearOfFeatures(x, z) < size + 2.5) continue;
       boulder(sceneryMesh('rock'), x, z, size, plant);
     }
     // Small stones are a dozen shapes carved once and set down again and again, each turned,
@@ -2442,6 +2444,7 @@ export function meshSite(site: Site): SceneDescription {
     });
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {
+      if (t.keep) continue;
       const inw = t.side === 'w' ? 1 : -1, z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4;
       const x = sideAt(t.side, z) + inw * (4.7 + t.depth * 0.62), y = ground(x, z);
       const pile = rng.fork('cairn');

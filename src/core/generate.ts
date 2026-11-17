@@ -255,8 +255,6 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   site.settlement = settle < 0.4 ? 'village' : settle < 0.6 ? 'hamlet' : settle < 0.78 ? 'manor' : undefined;
   if (!site.settlement) delete site.settlement;
   if (site.settlement === 'village' && !layOutVillage(site, meadow, fromTrack, rng.fork('village'))) site.settlement = 'hamlet';
-  // (The box that holds the valley takes in the bay, if a keep has opened one.)
-  if (v.bay) { const n = Math.round((v.mouth - v.z0) / v.step) + 1; g.x0 = round(Math.min(g.x0, ...v.west.slice(0, n))); g.x1 = round(Math.max(g.x1, ...v.east.slice(0, n))); }
   const features: Feature[] = [];
   const place = (kind: Feature['kind'], radius: [number, number], nearest: number, furthest: number) => {
     for (let tries = 0; tries < 200; tries++) {
@@ -512,9 +510,12 @@ function roomAt(site: Site, x: number, z: number, r: number): boolean {
 
 /** Whether a point is at least `r` metres from the ground of every building already in the valley. */
 function clearOfBuildings(site: Site, x: number, z: number, r: number): boolean {
-  // (Nothing else goes in the bay below a keep, nor at its mouth.)
-  const bay = site.valley?.bay;
-  if (bay && (x - bay.mouth) * (bay.side === 'w' ? -1 : 1) > -7 - r && Math.abs(z - bay.z) < bay.half + 3 + r) return false;
+  // (Nothing else goes on or before the promontory a keep stands on, nor on the way up to it.)
+  for (const t of site.terraces ?? []) if (t.keep && site.valley) {
+    const inside = (x - edgeAt(site.valley, t.side, z)) * (t.side === 'w' ? 1 : -1);
+    const zA = t.z0 - (t.rise === 'n' ? t.run : 0) - 4 - r, zB = t.z1 + (t.rise === 's' ? t.run : 0) + 4 + r;
+    if (z > zA && z < zB && inside < 4.7 + t.depth + 5 + r) return false;
+  }
   for (const b of site.buildings ?? []) {
     const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
     for (const q of footprintOf(b)) if (u > q.u0 - r && u < q.u1 + r && v > q.v0 - r - (b.style === 'imperial' ? 2 : 0.6) && v < q.v1 + r) return false;
@@ -688,30 +689,52 @@ function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: numb
   out.sort((p, q) => Math.abs(p.z - mid) - Math.abs(q.z - mid));
   for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
   site.buildings = out;
-  // The keep: in a bay opened in one side of the valley over the village, up a ramp from the valley floor, on a level shelf.
-  const side = rng.chance(0.5) ? 'w' : 'e', zk = round(mid + rng.range(-10, 10)), kind = rng.chance(0.45) ? 'castle' as const : 'tower' as const;
-  const dir = side === 'w' ? -1 : 1, half = kind === 'castle' ? 22 : 13, depth = kind === 'castle' ? 40 : 26, mouth = round(edgeAt(v, side, zk));
-  const line = side === 'w' ? v.west : v.east;
-  for (let i = 0; i < line.length; i++) {
-    const d = Math.abs(v.z0 + i * v.step - zk), t = Math.min(1, Math.max(0, (d - (half - 4)) / 6)), prof = 1 - t * t * (3 - 2 * t);
-    if (prof > 0) line[i] = round(side === 'w' ? Math.min(line[i], mouth - depth * prof) : Math.max(line[i], mouth + depth * prof));
+  // The keep: on a promontory over the village, a high shelf standing out from one side of the valley, sheer to the valley floor,
+  // with a ledge climbing along the side wall to its end; and the castle's gate faces that end. It is put where it fits nearest the village's middle.
+  // (A castle wants a broad promontory; where none fits, the keep is a tower alone on a smaller one.)
+  const wanted = rng.chance(0.6) ? 'castle' as const : 'tower' as const, height = round(rng.range(7, 10)), run = round(height / 0.34 + 1.5);
+  let kind: 'castle' | 'tower' = wanted;
+  const places: { t: Terrace; score: number }[] = [];
+  for (const tryKind of wanted === 'castle' ? ['castle', 'tower'] as const : ['tower'] as const) {
+    kind = tryKind;
+    const depth = kind === 'castle' ? 23 : 12, shelfLength = kind === 'castle' ? 28 : 14;
+    for (const side of ['w', 'e'] as const) for (const rise of ['n', 's'] as const) for (let start = meadow.z1 + 10; start <= v.mouth - 26 - shelfLength - run; start += 2) {
+      const z0 = round(rise === 'n' ? start + run : start), z1 = round(z0 + shelfLength), inward = side === 'w' ? 1 : -1;
+      let free = true;
+      for (let z = start - 2; z <= start + shelfLength + run + 2 && free; z += 1.5) {
+        if (Math.abs(slantAt(v, side, z)) > 0.9 || edgeAt(v, 'e', z) - edgeAt(v, 'w', z) < depth + 18) free = false;
+        for (let out = 3; out <= 4.7 + depth + 2 && free; out += 1.5) {
+          const x = edgeAt(v, side, z) + inward * out;
+          if (fromTrack(x, z) < 2.5 || !clearOfBuildings(site, x, z, 1.5)) free = false;
+        }
+      }
+      if (free) places.push({ t: { side, z0, z1, depth, height, rise, run, way: 'ledge', keep: true }, score: Math.abs((z0 + z1) / 2 - mid) + rng.range(0, 8) });
+    }
+    if (places.length) break;
   }
-  v.bay = { side, z: zk, half, depth, rise: round(rng.range(3.5, 6)), mouth };
-  const shelf = round(mouth + dir * depth * 0.66);
-  site.keep = { x: shelf, z: zk, kind };
-  // The keep's tower, at the back of the castle's court or alone on the shelf, its door towards the valley.
-  site.towers = [{ x: round(shelf + dir * (kind === 'castle' ? 3 : 0)), z: zk, half: 3.1, storeys: 4 + rng.fork('keeptall').int(0, 3), door: side === 'w' ? 'e' : 'w' }];
-  // And a footpath up to it: from the street, across to the mouth of the bay, up the ramp, through the gate.
-  const door = site.towers[0].x - dir * 4.4;
-  // (It leaves the street between two houses on that side: at the gap nearest the keep, with a stride to spare either side.)
-  const row = out.filter((b) => (b.x - trackX(b.z)) * dir > 0).map((b) => [b.z - b.w / 2 - 1.4, b.z + b.w / 2 + 1.4]);
-  let gz = zk;
-  for (let off = 0; off < 60; off += 0.5) {
-    const c = [zk + off, zk - off].find((q) => !row.some(([a, b2]) => q > a && q < b2));
-    if (c !== undefined) { gz = round(c); break; }
+  if (places.length) {
+    const t = places.sort((p, q) => p.score - q.score)[0].t, inward = t.side === 'w' ? 1 : -1, zc = round((t.z0 + t.z1) / 2), toward = t.rise === 'n' ? -1 : 1;
+    site.terraces = [t];
+    const cx = round(edgeAt(v, t.side, zc) + inward * (4.7 + t.depth * 0.5));
+    site.keep = { x: cx, z: zc, kind };
+    // The tower: alone in the middle of the shelf, or at the back of the castle's court, away from the gate. Its door faces the valley.
+    const tz = round(zc - toward * (kind === 'castle' ? 5.5 : 0));
+    site.towers = [{ x: cx, z: tz, half: 3.1, storeys: 4 + rng.fork('keeptall').int(0, 3), door: t.side === 'w' ? 'e' : 'w' }];
+    // The footpath: from the track, by the clearest line, to the foot of the ledge; up it; along the shelf to the gate; and to the tower's door.
+    const wayX = (z: number) => round(edgeAt(v, t.side, z) + inward * (4.7 + 1.45));
+    const footZ = round(t.rise === 'n' ? t.z0 - t.run - 1 : t.z1 + t.run + 1), topZ = t.rise === 'n' ? t.z0 + 1 : t.z1 - 1;
+    const clearLine = (tx: number, tz2: number) => {
+      const fx = wayX(footZ), len = Math.hypot(fx - tx, footZ - tz2);
+      for (let q = 2; q < len - 1; q += 1) if (!roomAt(site, tx + ((fx - tx) * q) / len, tz2 + ((footZ - tz2) * q) / len, 0.9)) return false;
+      return true;
+    };
+    const from = [...track].sort((p, q) => Math.hypot(p[0] - wayX(footZ), p[1] - footZ) - Math.hypot(q[0] - wayX(footZ), q[1] - footZ)).find(([tx, tz2]) => clearLine(tx, tz2));
+    const gateZ = round(zc + toward * (kind === 'castle' ? 7.5 : 6.5));
+    // (Across the end of the shelf to stand square before the gate, then in through it.)
+    const pts: [number, number][] = [[wayX(footZ), footZ], [wayX((footZ + topZ) / 2), round((footZ + topZ) / 2)], [wayX(topZ), round(topZ)], [cx, round(topZ + toward * 0.5)], [cx, gateZ], [round(cx + inward * 5.4), gateZ], [round(cx + inward * 5.4), tz], [round(cx + inward * 3.9), tz]];
+    if (from) pts.unshift([round(from[0]), round(from[1])]);
+    (site.paths ??= []).push({ to: 'keep', points: pts });
   }
-  const past = Math.max(...out.filter((b) => (b.x - trackX(b.z)) * dir > 0).map((b) => (b.x - trackX(b.z)) * dir + b.d / 2), 4) + 3;
-  (site.paths ??= []).push({ to: 'keep', points: [[round(trackX(gz)), gz], [round(trackX(gz) + dir * past), gz], [round(mouth - dir * 4), round((gz + zk) / 2)], [round(mouth + dir * depth * 0.25), round(zk + rng.range(-1.5, 1.5))], [round(door), zk]] });
   return true;
 }
 
@@ -760,7 +783,8 @@ function layOutHeights(site: Site, meadow: Place, fromTrack: (x: number, z: numb
   const features = site.features ?? [], streams = site.streams ?? [];
   const round = (v: number) => Math.round(v * 10) / 10;
   layOutGrotto(site, meadow, rng.fork('grotto'));
-  if (!rng.chance(0.7)) return;
+  // (A valley whose keep stands on a promontory has that for its height.)
+  if (!rng.chance(0.7) || site.terraces?.length) return;
   const v = site.valley!, lo = meadow.z1 + 8, hi = v.mouth - 24;
   // What it is to be is dealt first; then every place along both sides is looked at, and one of
   // those it fits is taken. If it fits nowhere, a smaller one is tried.

@@ -176,6 +176,8 @@ export interface Terrace {
   way: 'ledge' | 'steps';
   /** Whether the lookout at its far end is a shrine, which pilgrims climb to, with wayside crosses up the way to it; otherwise there is a cairn. */
   shrine?: boolean;
+  /** Whether this is the promontory a village's keep stands on; then it has no cairn or shrine. */
+  keep?: boolean;
 }
 
 /**
@@ -352,12 +354,6 @@ export interface Valley {
    * that side as an arm, which closes at its head where the side comes back to the ridge.
    */
   ridge?: { x0: number; x1: number; z: number };
-  /**
-   * A bay in one side, below a village's keep: centred at `z`, `half` along the valley either way,
-   * and reaching `depth` out beyond `mouth`, the line the side ran along before. Its floor rises
-   * `rise` over the first two-fifths of it, as a ramp, and is level beyond, a shelf for the keep.
-   */
-  bay?: { side: 'w' | 'e'; z: number; half: number; depth: number; rise: number; mouth: number };
 }
 
 export interface Site {
@@ -416,8 +412,9 @@ export interface Site {
   settlement?: 'village' | 'hamlet' | 'manor';
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
-   * the shelf of a bay in the valley's side (see `Valley.bay`), up a ramp from the village. The
-   * tower is in `towers`, and can be gone into and climbed. `x` and `z` are the middle of the castle.
+   * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,
+   * sheer to the valley, reached by its ledge. The tower is in `towers`, and can be gone into and
+   * climbed. `x` and `z` are the middle of the castle, whose gate faces the end the ledge comes up at.
    */
   keep?: { x: number; z: number; kind: 'tower' | 'castle' };
   /**
