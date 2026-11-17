@@ -197,7 +197,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
     if (a < -6 || a > cave.length + 6) return -9;
     const t = Math.min(1, Math.max(0, a / cave.length)), end = Math.exp(-(((a - cave.length * 0.85) / (cave.length * 0.22)) ** 2));
     const wobble = (fbm2(a * 0.25 + s1, y * 0.3, 2) - 0.5) * 1.2;
-    const half = 1.9 + 0.8 * t + 2.6 * end + wobble, floor = caveFloor + a * 0.02, roof = floor + 3.6 + 1.6 * t + 2.2 * end;
+    // (Its roof is kept a good thickness of rock under the ground above, wherever that is low.)
+    const half = 1.9 + 0.8 * t + 2.6 * end + wobble, floor = caveFloor + a * 0.02, roof = Math.min(floor + 3.6 + 1.6 * t + 2.2 * end, Math.max(floor + 2.6, land.at(x, z) - 3));
     const arch = roof - (c / half) ** 2 * 2.2;
     return Math.min(half - Math.abs(c), y - floor + 0.3, arch - y, cave.length + 1.5 - a + end * 3);
   } : null;
