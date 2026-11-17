@@ -958,7 +958,8 @@ async function start(): Promise<void> {
         hud.seed.textContent = `${seed} · ${here.name}`;
       } else if (!here && lastPlace !== -2) {
         lastPlace = -2;
-        hud.seed.textContent = `${seed} · valley`;
+        // (Out of doors: the valley, or the island.)
+        hud.seed.textContent = `${seed} · ${site.island ? 'island' : 'valley'}`;
       }
     }
 
