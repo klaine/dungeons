@@ -64,6 +64,10 @@ function frame(x: number, z: number, y: number, facing: number) {
 export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
   const { site, wild, rng } = c, o = site.island!, sea = o.sea;
   const mesh = (m: string) => wild.mesh(m);
+  // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
+  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'metal', 'lamp', 'thatch', 'slate'];
+  const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
+  const indoors: ((x: number, y: number, z: number) => number)[] = [];
   const { face, solid } = anyAngle(mesh);
   const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
   /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
@@ -104,23 +108,85 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const at = frame(h.x + Math.cos(h.faces) * h.d / 2, h.z + Math.sin(h.faces) * h.d / 2, h.y, h.faces);
     const W = h.w / 2, D = h.d, eaves = q.range(2.3, 2.8), ridge = eaves + D * q.range(0.55, 0.72), wash = h.wash, t = 0.6;
     const base = -0.5;
-    // The walls: whitewashed rubble, a plinth tarred dark at the foot, and a gable at each end.
-    box(at, 'plaster', -W, W, base, eaves, -D, 0, wash);
-    // (Each gable a closed wedge of wall, the thickness of the wall, up to the ridge.)
-    for (const side of [-1, 1]) solid('plaster', [at(side * W, eaves, -D), at(side * W, eaves, 0), at(side * (W - t), eaves, 0), at(side * (W - t), eaves, -D), at(side * W, ridge - 0.2, -D / 2), at(side * W, ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2)], wash);
-    box(at, 'plaster', -W - 0.03, W + 0.03, base, 0.32, -D - 0.03, 0.03, [0.09, 0.09, 0.09]);
-    // The door, and a window either side of it, set into the thickness of the wall with dark glass and white frames.
+    // The walls: whitewashed rubble two feet thick, a plinth tarred dark at the foot, and a gable at
+    // each end. The door stands open and the cottage can be gone into: one room, with a flagged
+    // floor, the hearth under the chimney at one gable, and a table, a bench, a box bed and a chest.
     const doorAt = q.range(-W * 0.25, W * 0.25), doorCol: Colour = q.pick([[0.12, 0.22, 0.32], [0.32, 0.1, 0.08], [0.12, 0.25, 0.14], [0.22, 0.2, 0.16]] as Colour[]);
-    box(at, 'wood', doorAt - 0.45, doorAt + 0.45, 0.32, 2.0, -0.02, 0.06, doorCol, 0.9);
-    box(at, 'stone', doorAt - 0.6, doorAt + 0.6, 0, 0.32, 0, 0.42, shade(stone, 0.95));
+    {
+      const x0 = h.x + Math.cos(h.faces) * h.d / 2, z0 = h.z + Math.sin(h.faces) * h.d / 2, fx = Math.cos(h.faces), fz = Math.sin(h.faces);
+      indoors.push((x, y, z) => {
+        const f = (x - x0) * fx + (z - z0) * fz, a = -(x - x0) * fz + (z - z0) * fx;
+        return Math.abs(a) < W - t + 0.06 && f > -D + t - 0.06 && f < -t + 0.06 && y > h.y - 0.5 && y < h.y + eaves - 0.01 ? 0.28 : 1;
+      });
+    }
+    const doorTop = 1.95, frontHoles: { a0: number; a1: number; y0: number; y1: number }[] = [{ a0: doorAt - 0.48, a1: doorAt + 0.48, y0: -1, y1: doorTop }];
+    const windowsAt: number[] = [];
     for (const side of [-1, 1]) {
       const wa = doorAt + side * q.range(1.4, Math.max(1.5, W - 0.9));
-      if (Math.abs(wa) > W - 0.6) continue;
-      box(at, 'glass', wa - 0.38, wa + 0.38, 0.95, 1.75, -0.02, 0.02, [0.03, 0.04, 0.05]);
-      box(at, 'wood', wa - 0.42, wa + 0.42, 0.9, 0.97, -0.02, 0.1, [0.85, 0.85, 0.82]);
-      box(at, 'wood', wa - 0.42, wa + 0.42, 1.73, 1.8, -0.02, 0.05, [0.85, 0.85, 0.82]);
-      box(at, 'wood', wa - 0.03, wa + 0.03, 0.97, 1.73, -0.02, 0.05, [0.85, 0.85, 0.82]);
+      if (Math.abs(wa) > W - 0.9) continue;
+      windowsAt.push(wa);
+      frontHoles.push({ a0: wa - 0.4, a1: wa + 0.4, y0: 0.9, y1: 1.8 });
     }
+    const backWindow = q.range(-W * 0.4, W * 0.4);
+    /** A length of wall from `a0` to `a1`, `f0` to `f1` deep, with holes cut in it: built as what is left, piers and the pieces over and under each hole. */
+    const pierced = (a0: number, a1: number, f0: number, f1: number, y0: number, y1: number, holes: { a0: number; a1: number; y0: number; y1: number }[]) => {
+      const cuts = [a0, a1, ...holes.flatMap((hh) => [hh.a0, hh.a1])].filter((v) => v >= a0 && v <= a1).sort((m, n) => m - n);
+      for (let k = 0; k < cuts.length - 1; k++) {
+        const u0 = cuts[k], u1 = cuts[k + 1];
+        if (u1 - u0 < 1e-3) continue;
+        const hole = holes.find((hh) => hh.a0 <= u0 + 1e-6 && hh.a1 >= u1 - 1e-6);
+        if (!hole) { box(at, 'plaster', u0, u1, y0, y1, f0, f1, wash); continue; }
+        if (hole.y0 > y0) box(at, 'plaster', u0, u1, y0, hole.y0, f0, f1, wash);
+        if (hole.y1 < y1) box(at, 'plaster', u0, u1, hole.y1, y1, f0, f1, wash);
+      }
+    };
+    pierced(-W, W, -t, 0, base, eaves, frontHoles);
+    pierced(-W, W, -D, -D + t, base, eaves, [{ a0: backWindow - 0.3, a1: backWindow + 0.3, y0: 1.0, y1: 1.6 }]);
+    for (const side of [-1, 1]) box(at, 'plaster', side > 0 ? W - t : -W, side > 0 ? W : -W + t, base, eaves, -D + t, -t, wash);
+    // (Each gable a closed wedge of wall, the thickness of the wall, up to the ridge.)
+    for (const side of [-1, 1]) solid('plaster', [at(side * W, eaves, -D), at(side * W, eaves, 0), at(side * (W - t), eaves, 0), at(side * (W - t), eaves, -D), at(side * W, ridge - 0.2, -D / 2), at(side * W, ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2), at(side * (W - t), ridge - 0.2, -D / 2)], wash);
+    // The tarred plinth, outside only, broken at the door.
+    pierced(-W - 0.03, W + 0.03, 0, 0.03, base, 0.32, [{ a0: doorAt - 0.48, a1: doorAt + 0.48, y0: -1, y1: 1 }]);
+    box(at, 'plaster', -W - 0.03, W + 0.03, base, 0.32, -D - 0.03, -D, [0.09, 0.09, 0.09]);
+    for (const side of [-1, 1]) box(at, 'plaster', side > 0 ? W : -W - 0.03, side > 0 ? W + 0.03 : -W, base, 0.32, -D, 0, [0.09, 0.09, 0.09]);
+    // The floor, of flags, a step up from the ground; and a stone at the door.
+    box(at, 'stone', -W + t, W - t, -0.4, 0.12, -D + t, -t, shade(stone, 0.8), 0.6);
+    box(at, 'stone', doorAt - 0.48, doorAt + 0.48, -0.4, 0.12, -t, 0, shade(stone, 0.9));
+    box(at, 'stone', doorAt - 0.6, doorAt + 0.6, -0.4, 0.06, 0, 0.42, shade(stone, 0.95));
+    // A lintel of timber over the door, and the door itself standing open into the room against the wall.
+    box(at, 'wood', doorAt - 0.62, doorAt + 0.62, doorTop, doorTop + 0.16, -t, 0.02, [0.22, 0.17, 0.12], 0.9);
+    box(at, 'wood', doorAt - 0.48, doorAt - 0.43, 0.14, doorTop - 0.04, -t - 0.9, -t, doorCol, 0.9);
+    // The windows: dark glass in the middle of the wall's thickness, white frames, and a deep sill inside.
+    for (const wa of windowsAt) {
+      box(at, 'glass', wa - 0.4, wa + 0.4, 0.9, 1.8, -t / 2 - 0.02, -t / 2 + 0.02, [0.03, 0.04, 0.05]);
+      box(at, 'wood', wa - 0.03, wa + 0.03, 0.9, 1.8, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
+      box(at, 'wood', wa - 0.4, wa + 0.4, 1.33, 1.38, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
+      box(at, 'stone', wa - 0.5, wa + 0.5, 0.84, 0.9, -0.02, 0.12, shade(stone, 1.05));
+    }
+    box(at, 'glass', backWindow - 0.3, backWindow + 0.3, 1.0, 1.6, -D + t / 2 - 0.02, -D + t / 2 + 0.02, [0.03, 0.04, 0.05]);
+    // A ceiling of boards on the tie beams, under the roof.
+    box(at, 'wood', -W + t, W - t, eaves - 0.12, eaves, -D + t, -t, [0.3, 0.24, 0.17], 0.9);
+    for (let a = -W + t + 0.6; a < W - t - 0.3; a += 1.1) box(at, 'wood', a - 0.08, a + 0.08, eaves - 0.3, eaves - 0.12, -D + t, -t, [0.22, 0.17, 0.12], 0.9);
+    // The hearth, at the chimney's gable: a raised stone hearth, a breast of whitewash up to the ceiling, and a black crook.
+    const end = q.chance(0.5) ? 1 : -1, ha = end * (W - t);
+    box(at, 'stone', ha - end * 1.0, ha, 0.12, 0.34, -D / 2 - 0.85, -D / 2 + 0.85, shade(stone, 0.7));
+    box(at, 'plaster', ha - end * 0.5, ha, 1.1, eaves - 0.12, -D / 2 - 0.85, -D / 2 + 0.85, wash);
+    box(at, 'stone', ha - end * 0.55, ha - end * 0.45, 1.0, 1.1, -D / 2 - 0.9, -D / 2 + 0.9, shade(stone, 0.9));
+    box(at, 'metal', ha - end * 0.35, ha - end * 0.3, 0.6, 1.05, -D / 2 - 0.02, -D / 2 + 0.02, [0.03, 0.03, 0.03]);
+    box(at, 'lamp', ha - end * 0.45, ha - end * 0.15, 0.34, 0.42, -D / 2 - 0.25, -D / 2 + 0.25, [0.5, 0.2, 0.05]);
+    // A table and a bench by the back wall, a box bed at the far end from the hearth, and a chest at its foot.
+    const oak: Colour = [0.3, 0.22, 0.14];
+    const tb = q.range(-0.6, 0.6) * Math.max(0, W - 2.8), tf = -D + t + 0.45;
+    box(at, 'wood', tb - 0.7, tb + 0.7, 0.72, 0.78, tf, tf + 0.75, oak, 0.9);
+    for (const [la, lf] of [[-0.62, 0.06], [0.58, 0.06], [-0.62, 0.65], [0.58, 0.65]]) box(at, 'wood', tb + la, tb + la + 0.06, 0.12, 0.72, tf + lf, tf + lf + 0.06, oak, 0.9);
+    box(at, 'wood', tb - 0.65, tb + 0.65, 0.42, 0.47, tf + 0.95, tf + 1.25, oak, 0.9);
+    for (const la of [-0.6, 0.55]) box(at, 'wood', tb + la, tb + la + 0.06, 0.12, 0.42, tf + 1.0, tf + 1.2, oak, 0.9);
+    const ba = -end * (W - t);
+    box(at, 'wood', ba, ba + end * 1.05, 0.12, 1.6, -D + t, -D + t + 2.0, [0.24, 0.18, 0.12], 0.9);
+    box(at, 'wood', ba + end * 0.05, ba + end * 1.0, 0.5, 0.62, -D + t + 0.05, -D + t + 1.95, [0.6, 0.55, 0.45], 0.9);
+    box(at, 'wood', ba + end * 0.1, ba + end * 0.75, 0.12, 0.62, -D + t + 2.15, -D + t + 2.6, [0.34, 0.2, 0.12], 0.9);
+    // A lamp burning on the table, low, so the room is not black inside.
+    box(at, 'lamp', tb - 0.06, tb + 0.06, 0.78, 0.98, tf + 0.3, tf + 0.42, [1, 0.8, 0.5]);
     // The roof: thatch, thick and rounded over the eaves and roped down against the wind; or slate, thin and dark.
     const over = h.roof === 'thatch' ? 0.45 : 0.25, thick = h.roof === 'thatch' ? 0.42 : 0.1;
     const roofCol: Colour = h.roof === 'thatch' ? [0.52, 0.42, 0.27] : [0.2, 0.21, 0.23];
@@ -137,8 +203,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
         box(at, 'stone', a - 0.2, a + 0.2, ye - 0.55, ye - 0.15, fe - 0.15 * side - 0.12, fe - 0.15 * side + 0.12, shade(stone, 0.8));
       }
     } else box(at, 'stone', -W - over, W + over, ridge + thick - 0.02, ridge + thick + 0.12, -D / 2 - 0.12, -D / 2 + 0.12, [0.25, 0.22, 0.2]);
-    // A chimney at one gable.
-    const end = q.chance(0.5) ? 1 : -1;
+    // The chimney, on the gable the hearth is against.
     box(at, 'plaster', end * (W - 0.75), end * (W - 0.05), ridge - 0.6, ridge + 1.0, -D / 2 - 0.4, -D / 2 + 0.4, wash);
     box(at, 'stone', end * (W - 0.85), end * (W + 0.05), ridge + 1.0, ridge + 1.12, -D / 2 - 0.5, -D / 2 + 0.5, shade(stone, 0.7));
     // Things about the door: lobster pots, a fish box, a barrel.
@@ -291,7 +356,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
       solid('lamp', [ring(a0, 0, top + 0.9), ring(a1, 0, top + 0.9), ring(a1, 0.5, top + 1.0), ring(a0, 0.5, top + 1.0), ring(a0, 0, top + 2.3), ring(a1, 0, top + 2.3), ring(a1, 0.48, top + 2.1), ring(a0, 0.48, top + 2.1)], [0.95, 0.88, 0.6]);
     }
     // Indoors the tower sees little sky: only what comes in at its door and windows.
-    for (const m of ['plaster', 'stone', 'metal', 'glass', 'lamp']) mesh(m).setOpenBy((x, y, z) => (Math.hypot(x - lh.x, z - lh.z) < radiusAt(y - base) - wallT + 0.06 && y > base - 0.65 && y < base + top + 0.1 ? 0.22 : 1));
+    indoors.push((x, y, z) => (Math.hypot(x - lh.x, z - lh.z) < radiusAt(y - base) - wallT + 0.06 && y > base - 0.65 && y < base + top + 0.1 ? 0.22 : 1));
     // A low wall round the yard at its foot, whitewashed, open towards the door.
     for (let k = 0; k < 56; k++) {
       const a0 = (k / 56) * Math.PI * 2, a1 = ((k + 1) / 56) * Math.PI * 2, am = (a0 + a1) / 2, R = r0 + 9;
@@ -372,6 +437,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const sc = o.seaCave, a = sc.length * 0.8;
     c.finds.push({ at: new Vector3(sc.x + Math.cos(sc.heading) * a, c.caveFloor + a * 0.02 + 0.3, sc.z + Math.sin(sc.heading) * a), what: 'a smuggler\'s lantern' });
   }
+  for (const [m, from] of begun) mesh(m).setOpenBy((x, y, z) => { let v = 1; for (const f of indoors) v = Math.min(v, f(x, y, z)); return v; }, from);
   return { deck, lamp: o.lighthouse ? { x: o.lighthouse.x, y: o.lighthouse.y + o.lighthouse.height + 1.6, z: o.lighthouse.z } : undefined };
 }
 
