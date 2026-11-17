@@ -404,7 +404,7 @@ export interface Island {
   /**
    * Fishermen's cottages on the slope above the beach: low, of whitewashed rubble, thatched or
    * slated, a chimney at one gable. `w` along the front and `d` deep, outside the walls; the front
-   * looks towards `faces` (radians); `y` is the ground levelled for it. Their doors are shut.
+   * looks towards `faces` (radians); `y` is the ground levelled for it. Each is one room, and its door stands open.
    */
   cottages: { x: number; z: number; y: number; w: number; d: number; faces: number; roof: 'thatch' | 'slate'; wash: [number, number, number] }[];
   /** Boats drawn up on the beach, or moored in the cove: where, which way the bow points, and how long. */
