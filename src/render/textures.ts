@@ -97,6 +97,61 @@ interface Recipe {
   normalStrength: number;
 }
 
+/**
+ * Bark. Every tree's is made the same way and no two kinds are alike, so there is one recipe and each kind is a set of numbers
+ * for it. Bark is plates parted by furrows; flakes on the plates, stepped and a little domed, with a crack round each; scales
+ * on the flakes; and grain along the trunk. What differs is how large each of those is, how deep the furrows go, and the colours:
+ *  - an oak's is long narrow ridges with furrows right through, grey-brown and lichened;
+ *  - an ash's is smooth, with a shallow net of fine cracks, pale grey;
+ *  - a pine's is broad plates like the pieces of a puzzle, built of thin flakes, in shallow furrows no darker than old wood;
+ *  - a spruce's is small round scales lifting at their edges, with no furrows to speak of.
+ * `plate`, `flake` and `scale` are how many of each lie across the picture and up it; `furrow` how wide the furrows are and `deep`
+ * how far down they go, 0 to 1; `rise` how unlike in height plates are; `flakes`, `scales` and `fibre` how strongly each stands out.
+ * (Everything in it comes round in the height of the picture as well as across it. Once one part did not, and drew a line round every trunk.)
+ */
+function barkRecipe(o: { plate: [number, number]; furrow: number; deep: number; rise: number; flake: [number, number]; flakes: number; scale: [number, number]; scales: number; fibre: number; dark: number[]; light: number[]; fresh: number[]; lichen: number; normal: number }): Recipe {
+  const n = (v: number) => v.toFixed(3), v2 = (v: number[]) => `vec2(${n(v[0])}, ${n(v[1])})`, v3 = (v: number[]) => `vec3(${n(v[0])}, ${n(v[1])}, ${n(v[2])})`;
+  return {
+    normalStrength: o.normal,
+    height: /* glsl */ `
+float heightFn(vec2 uv) {
+  float warp = fbm(uv, vec2(3., 2.), 3, .5);
+  float sway = fbm(uv + 4.1, vec2(4., 2.), 3, .5);
+  vec3 pl = worleyId(uv * ${v2(o.plate)} + vec2(warp * 1.5, sway * .6), ${v2(o.plate)});
+  float furrow = mix(${n(1 - o.deep)}, 1., smoothstep(.0, ${n(o.furrow)} * (1. + fbm(uv + 7.3, vec2(6., 3.), 2, .5)), pl.y - pl.x));
+  float plate = .42 + ${n(o.rise)} * (pl.z - .2);
+  vec3 fl = worleyId(uv * ${v2(o.flake)} + vec2(warp * 2.5 + 3., sway), ${v2(o.flake)});
+  float flake = ((fl.z - .5) + (.45 - fl.x) * .45 - (1. - smoothstep(.0, .1, fl.y - fl.x)) * .35) * ${n(o.flakes)};
+  vec3 sc = worleyId(uv * ${v2(o.scale)} + vec2(1.7, warp), ${v2(o.scale)});
+  float scale = ((sc.z - .5) * smoothstep(.0, .1, sc.y - sc.x) - (1. - smoothstep(.0, .07, sc.y - sc.x)) * .3) * ${n(o.scales)};
+  float fibre = gnoise(vec2(uv.x * 64., uv.y * 6.), vec2(64., 6.)) * .5 + gnoise(vec2(uv.x * 150., uv.y * 14.), vec2(150., 14.)) * .3;
+  float body = plate + flake + scale + fibre * ${n(o.fibre)} + fbm(uv + 3., vec2(5.), 3, .5) * .12;
+  return clamp(.04 + furrow * body, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float t = fbm(uv + 5.5, vec2(4., 3.), 4, .5);
+  vec3 base = mix(${v3(o.dark)}, ${v3(o.light)}, smoothstep(.12, .85, h + t * .3));
+  // Where a flake has come away the bark under it is fresher.
+  base = mix(base, ${v3(o.fresh)}, smoothstep(.5, .3, h) * smoothstep(.12, .28, h) * .55);
+  float warm = fbm(uv + 2.1, vec2(2., 2.), 3, .5);
+  base *= mix(vec3(1.08, .96, .84), vec3(.9, .98, 1.08), smoothstep(.3, .7, warm));
+  // Grey-green crust on the high parts, round pale lichens in colonies, and now and then a small yellow-orange one.
+  float lichen = ${n(o.lichen)};
+  base = mix(base, vec3(.4, .45, .34), smoothstep(.1, .4, fbm(uv + 8., vec2(5., 4.), 3, .5)) * smoothstep(.5, .8, h) * .5 * min(lichen, 1.));
+  vec2 w = worley(uv * vec2(9., 7.) + 4., vec2(9., 7.));
+  float colony = smoothstep(.45, .72, fbm(uv + 11., vec2(3., 3.), 3, .5));
+  float disc = (1. - smoothstep(.1, .3, w.x)) * colony * smoothstep(.4, .75, h) * min(lichen, 1.5);
+  base = mix(base, vec3(.62, .66, .5), min(disc * .6, 1.));
+  vec2 w2 = worley(uv * vec2(17., 13.) + 9., vec2(17., 13.));
+  float fleck = (1. - smoothstep(.05, .16, w2.x)) * smoothstep(.62, .8, fbm(uv + 21., vec2(4., 4.), 3, .5)) * smoothstep(.5, .8, h) * min(lichen, 1.);
+  base = mix(base, vec3(.62, .45, .14), fleck * .7);
+  albedo = base * (1. - cavity * ${n(0.3 + 0.4 * o.deep)});
+  rough = clamp(.9 + cavity * .08 - disc * .1, .6, 1.);
+}`,
+  };
+}
+
 const RECIPES: Record<string, Recipe> = {
   // Dressed limestone: broad undulation, pitting, fine tooling and grain. Pale, so vertex tint sets the colour.
   stone: {
@@ -155,56 +210,10 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = clamp(.78 + cavity * .15 - h * .1, .45, 1.);
 }`,
   },
-  // Bark, as an old trunk has it: plates several times as tall as they are wide, each standing at a height of its own, parted by
-  // deep narrow furrows that wander and fork; every plate built of thinner flakes, one overlapping the next, with a hair crack
-  // where they meet and here and there one lifting; and the whole fibrous along the grain. Mid-grey, so that the tint a tree gives
-  // makes it oak, ash or pine. (Everything in it comes round in the height of the picture as well as across it.)
-  bark: {
-    normalStrength: 9.,
-    height: /* glsl */ `
-float heightFn(vec2 uv) {
-  float warp = fbm(uv, vec2(3., 2.), 3, .5);
-  float sway = fbm(uv + 4.1, vec2(4., 2.), 3, .5);
-  // The plates, and the furrows between them: deepest where three plates meet, and not all the same width.
-  vec3 pl = worleyId(vec2(uv.x * 7. + warp * 1.5, uv.y * 2. + sway * .6), vec2(7., 2.));
-  float gap = pl.y - pl.x;
-  float furrow = smoothstep(.0, .1 + .1 * fbm(uv + 7.3, vec2(6., 3.), 2, .5), gap);
-  float plate = .4 + .26 * pl.z;
-  // Flakes on the plates: smaller, stepped one above another, with a crack round each.
-  vec3 fl = worleyId(vec2(uv.x * 17. + warp * 2.5 + 3., uv.y * 5. + sway), vec2(17., 5.));
-  float seam = fl.y - fl.x;
-  // (Each a little domed, and standing above or below its neighbours by a good part of the plate's own height.)
-  float flake = (fl.z - .5) * .34 + (.45 - fl.x) * .16 + (1. - smoothstep(.0, .1, seam)) * -.12;
-  // The smallest: scales lifting at their lower edge, and the grain.
-  vec3 sc = worleyId(vec2(uv.x * 41. + 1.7, uv.y * 11. + warp), vec2(41., 11.));
-  float scale = (sc.z - .5) * .14 * smoothstep(.0, .1, sc.y - sc.x) - (1. - smoothstep(.0, .07, sc.y - sc.x)) * .04;
-  float fibre = gnoise(vec2(uv.x * 64., uv.y * 6.), vec2(64., 6.)) * .5 + gnoise(vec2(uv.x * 150., uv.y * 14.), vec2(150., 14.)) * .3;
-  float body = plate + flake + scale + fibre * .13 + fbm(uv + 3., vec2(5.), 3, .5) * .12;
-  return clamp(.04 + furrow * body, 0., 1.);
-}`,
-    surface: /* glsl */ `
-void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
-  float t = fbm(uv + 5.5, vec2(4., 3.), 4, .5);
-  // Furrows nearly black, ridges lighter; and by patches the ridges run a little warmer (brown) or cooler (grey).
-  vec3 base = mix(vec3(.05, .04, .035), vec3(.5, .45, .39), smoothstep(.12, .85, h + t * .3));
-  // Where a flake has come away the bark under it is fresher and redder.
-  base = mix(base, vec3(.5, .34, .25), smoothstep(.5, .3, h) * smoothstep(.12, .28, h) * .55);
-  float warm = fbm(uv + 2.1, vec2(2., 2.), 3, .5);
-  base *= mix(vec3(1.08, .96, .84), vec3(.9, .98, 1.08), smoothstep(.3, .7, warm));
-  // Grey-green crust on the ridges, as there is on any old trunk.
-  base = mix(base, vec3(.4, .45, .34), smoothstep(.1, .4, fbm(uv + 8., vec2(5., 4.), 3, .5)) * smoothstep(.5, .8, h) * .5);
-  // Round pale lichens, in colonies, on the ridges; and now and then a small yellow-orange one.
-  vec2 w = worley(uv * vec2(9., 7.) + 4., vec2(9., 7.));
-  float colony = smoothstep(.45, .72, fbm(uv + 11., vec2(3., 3.), 3, .5));
-  float disc = (1. - smoothstep(.1, .3, w.x)) * colony * smoothstep(.4, .75, h);
-  base = mix(base, vec3(.62, .66, .5), disc * .6);
-  vec2 w2 = worley(uv * vec2(17., 13.) + 9., vec2(17., 13.));
-  float fleck = (1. - smoothstep(.05, .16, w2.x)) * smoothstep(.62, .8, fbm(uv + 21., vec2(4., 4.), 3, .5)) * smoothstep(.5, .8, h);
-  base = mix(base, vec3(.62, .45, .14), fleck * .7);
-  albedo = base * (1. - cavity * .7);
-  rough = clamp(.9 + cavity * .08 - disc * .1, .6, 1.);
-}`,
-  },
+  bark: barkRecipe({ plate: [10, 2], furrow: 0.12, deep: 1, rise: 0.26, flake: [16, 6], flakes: 0.24, scale: [41, 11], scales: 0.12, fibre: 0.13, dark: [0.05, 0.04, 0.035], light: [0.5, 0.45, 0.39], fresh: [0.46, 0.35, 0.27], lichen: 1, normal: 9 }),
+  barkAsh: barkRecipe({ plate: [9, 3], furrow: 0.06, deep: 0.3, rise: 0.07, flake: [21, 5], flakes: 0.05, scale: [47, 13], scales: 0.04, fibre: 0.1, dark: [0.17, 0.16, 0.15], light: [0.55, 0.54, 0.5], fresh: [0.5, 0.48, 0.44], lichen: 1.5, normal: 6 }),
+  barkPine: barkRecipe({ plate: [5, 2], furrow: 0.1, deep: 0.6, rise: 0.2, flake: [13, 7], flakes: 0.3, scale: [29, 17], scales: 0.1, fibre: 0.05, dark: [0.2, 0.12, 0.085], light: [0.6, 0.5, 0.42], fresh: [0.6, 0.38, 0.27], lichen: 0.15, normal: 8 }),
+  barkFir: barkRecipe({ plate: [13, 8], furrow: 0.1, deep: 0.4, rise: 0.3, flake: [27, 15], flakes: 0.14, scale: [53, 23], scales: 0.08, fibre: 0.06, dark: [0.1, 0.085, 0.08], light: [0.46, 0.42, 0.4], fresh: [0.42, 0.33, 0.3], lichen: 0.8, normal: 8 }),
   // Moss: soft clumps. Alpha (height) is used as the growth mask when blending over stone.
   moss: {
     normalStrength: 3.,

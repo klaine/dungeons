@@ -68,7 +68,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
   const spots: Record<string, [number, number, number]> = {};
   const meshes = new Map<string, MeshBuilder>();
   const mesh = (name: string): MeshBuilder => { let m = meshes.get(name); if (!m) meshes.set(name, (m = new MeshBuilder())); return m; };
-  const rock = mesh('rock'), turf = mesh('turf'), bark = mesh('bark');
+  const rock = mesh('rock'), turf = mesh('turf'), bark = mesh('bark'), barkAsh = mesh('barkAsh'), barkPine = mesh('barkPine'), barkFir = mesh('barkFir');
 
   // ---------------------------------------------------------------- the ground
   // Gently rolling, with a hollow that holds water after rain, and lower along the track.
@@ -250,7 +250,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     }
     {
       const x = -31, z = -7, tall = 10.5, y = stand('ash', x, z, tall);
-      const reach = growTree(planting, bark, x, y, z, tall, 0.26, { kind: 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: leafOf(greens[1]), bark: ashBark, shaded: true, soft: bark }, rng.fork('ash'));
+      const reach = growTree(planting, barkAsh, x, y, z, tall, 0.26, { kind: 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: leafOf(greens[1]), bark: ashBark, shaded: true, soft: barkAsh }, rng.fork('ash'));
       trees.push({ x, z, r: reach });
     }
     {
@@ -261,18 +261,18 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     }
     {
       const x = -30, z = 9, tall = 12, y = stand('spruce', x, z, tall);
-      const reach = growConifer(planting, bark, x, y, z, tall, 2.5, 0.22, { kind: 'spruce', detail: 1, needle: leafOf([0.045, 0.13, 0.04]), bark: firBark, shaded: true, soft: bark }, rng.fork('spruce'));
+      const reach = growConifer(planting, barkFir, x, y, z, tall, 2.5, 0.22, { kind: 'spruce', detail: 1, needle: leafOf([0.045, 0.13, 0.04]), bark: firBark, shaded: true, soft: barkFir }, rng.fork('spruce'));
       trees.push({ x, z, r: reach });
     }
     {
       const x = -19, z = 15, tall = 15, y = stand('pine', x, z, tall);
-      const reach = growConifer(planting, bark, x, y, z, tall, 2.8, 0.3, { kind: 'pine', detail: 1, needle: leafOf([0.07, 0.15, 0.07]), bark: pineBark, shaded: true, soft: bark }, rng.fork('pine'));
+      const reach = growConifer(planting, barkPine, x, y, z, tall, 2.8, 0.3, { kind: 'pine', detail: 1, needle: leafOf([0.07, 0.15, 0.07]), bark: pineBark, shaded: true, soft: barkPine }, rng.fork('pine'));
       trees.push({ x, z, r: reach * 0.6 });
     }
     {
       // A pine of the coast: leaning, bent, flat-topped.
       const x = -9, z = 30, tall = 11, y = stand('coast pine', x, z, tall * 0.6);
-      const reach = growConifer(planting, bark, x, y, z, tall, 2.6, 0.26, { kind: 'pine', coastal: true, detail: 1, needle: leafOf([0.08, 0.16, 0.06]), bark: [0.8, 0.62, 0.5], shaded: true, soft: bark }, rng.fork('coast-pine'));
+      const reach = growConifer(planting, barkPine, x, y, z, tall, 2.6, 0.26, { kind: 'pine', coastal: true, detail: 1, needle: leafOf([0.08, 0.16, 0.06]), bark: [0.8, 0.62, 0.5], shaded: true, soft: barkPine }, rng.fork('coast-pine'));
       trees.push({ x, z, r: reach * 0.5 });
     }
     {
@@ -280,7 +280,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
       const x = -12.5, z = 7.5, y = stand('bush', x, z, 1.6);
       growTree(planting, bark, x, y - 0.05, z, 2.3, 0.045, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, leaf: leafOf(greens[3 % greens.length]), bark: oakBark, shaded: true }, rng.fork('bush'));
     }
-    counts.wood = bark.triangleCount;
+    counts.wood = bark.triangleCount + barkAsh.triangleCount + barkPine.triangleCount + barkFir.triangleCount;
   });
 
   // ---------------------------------------------------------------- the sheet of ground

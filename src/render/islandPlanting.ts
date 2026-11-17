@@ -125,8 +125,9 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
   // ---- trees: only in shelter. Low, crooked broadleaves in the hollow; a row of pines beside the house to break the wind.
   const wood = c.wild.mesh('bark');
   c.wild.group = 'soft';
-  const soft = c.wild.mesh('bark');
+  const soft = c.wild.mesh('bark'), softPine = c.wild.mesh('barkPine');
   c.wild.group = 'wild';
+  const pineWood = c.wild.mesh('barkPine');
   const leafTint: Colour = season === 'autumn' ? [0.55, 0.38, 0.12] : season === 'summer' ? [0.17, 0.28, 0.08] : [0.24, 0.38, 0.1];
   const leaf = (r: Rng): Colour => green(leafTint, r.range(0.75, 1.2));
   const t = rng.fork('trees');
@@ -147,7 +148,7 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     for (let z = hz0 - 4; z < approach.z1; z += p.range(3.2, 4.6)) {
       const px = x + p.range(-1, 1);
       if (inland(o, px, z) < 6 || Math.abs(c.trackOff(px, z)) < 3) continue;
-      growConifer(planting, wood, px, c.ground(px, z) - 0.05, z, p.range(8, 13), p.range(1.6, 2.4), p.range(0.16, 0.26), { kind: 'pine', coastal: true, detail: 1, needle: (r) => green([0.06, 0.13, 0.06], r.range(0.8, 1.2)), bark: [0.55, 0.38, 0.28], soft }, p.fork(`pine${pines}`));
+      growConifer(planting, pineWood, px, c.ground(px, z) - 0.05, z, p.range(8, 13), p.range(1.6, 2.4), p.range(0.16, 0.26), { kind: 'pine', coastal: true, detail: 1, needle: (r) => green([0.06, 0.13, 0.06], r.range(0.8, 1.2)), bark: [0.8, 0.6, 0.48], soft: softPine }, p.fork(`pine${pines}`));
       pines++;
     }
     counts.pines = pines;

@@ -1718,6 +1718,9 @@ export function meshSite(site: Site): SceneDescription {
     // Roots, twigs, bushes and the low boughs of firs: wood that is drawn but stops nobody.
     wild.group = 'soft';
     const softBark = wild.mesh('bark');
+    // Each kind of tree wears its own bark, so its wood goes to a mesh of its own: an oak's to `bark`, as fallen logs and stumps do.
+    const BARK = { oak: 'bark', ash: 'barkAsh', pine: 'barkPine', fir: 'barkFir' } as const;
+    const woodOf = (kind: keyof typeof BARK, soft = false): MeshBuilder => { const was = wild.group; wild.group = soft ? 'soft' : 'wild'; const m = wild.mesh(BARK[kind]); wild.group = was; return m; };
     // And stones too small to stop anybody: the cobbles of a stream's bed.
     const softRock = wild.mesh('rock');
     wild.group = 'wild';
@@ -1848,7 +1851,7 @@ export function meshSite(site: Site): SceneDescription {
       kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
       const green = leafOf(plant.pick(greens));
       spent.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, green, plant, 0.72);
-      growTree(planting, kit.mesh('bark'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: green, bark: oak ? oakBark : ashBark, soft: softBark }, rng.fork(`tree${grown++}`));
+      growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true) }, rng.fork(`tree${grown++}`));
       trees.push([x, z]);
       planted++;
     }
@@ -2156,12 +2159,12 @@ export function meshSite(site: Site): SceneDescription {
         if (detail > 0.3) {
           // Pines stand in patches among the spruce, on the drier knolls.
           const pine = fbm2(x * 0.05 - s1, z * 0.05 + s2 * 2, 2) > 0.57;
-          growConifer(planting, barkMesh, x, y, z, height * (pine ? 1.25 : 1.2), radius * (pine ? 1.15 : 1), girth * (pine ? 1.15 : 1.05), {
-            kind: pine ? 'pine' : 'spruce', detail, needle: pine ? leafOf(pineGreen) : needle, bark: pine ? pineBark : firBark, shaded: true, soft: softBark,
+          growConifer(planting, woodOf(pine ? 'pine' : 'fir'), x, y, z, height * (pine ? 1.25 : 1.2), radius * (pine ? 1.15 : 1), girth * (pine ? 1.15 : 1.05), {
+            kind: pine ? 'pine' : 'spruce', detail, needle: pine ? leafOf(pineGreen) : needle, bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true),
           }, own);
         } else {
           // Far off, a trunk and tiers of boughs are enough.
-          layTrunk(barkMesh, x, y, z, height * 0.9, girth, firBark);
+          layTrunk(woodOf('fir'), x, y, z, height * 0.9, girth, firBark);
           planting.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), needle, own);
         }
         canopies.push([x, z, radius * 1.15, 1]);
@@ -2185,8 +2188,8 @@ export function meshSite(site: Site): SceneDescription {
         const epic = detail > 0.7 && (oak || mix) && roll >= 0.05 && roll < 0.075;
         const wide = epic ? age.range(2.0, 2.5) : 1;
         const tall = giant * young * (epic ? 0.95 : 1), stout = epic ? 2.6 : giant > 1 ? giant * 1.15 : young * young, leafy = epic ? 5 : giant > 1 ? giant * giant * 0.75 : young * 0.8;
-        const reach = growTree(planting, barkMesh, x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
-          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: softBark,
+        const reach = growTree(planting, woodOf(oak ? 'oak' : 'ash'), x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
+          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
@@ -2207,7 +2210,7 @@ export function meshSite(site: Site): SceneDescription {
     for (const f of ponds) {
       if (!f.isle) continue;
       const own = rng.fork(`isletree${f.x}`), y = ground(f.isle.x, f.isle.z), pine = own.chance(0.5);
-      growConifer(planting, barkMesh, f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: leafOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: softBark }, own);
+      growConifer(planting, woodOf(pine ? 'pine' : 'fir'), f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: leafOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true) }, own);
       canopies.push([f.isle.x, f.isle.z, 1.6, 1]);
     }
     // (Not where the keep stands.)
@@ -2506,7 +2509,7 @@ export function meshSite(site: Site): SceneDescription {
             const height = plant.range(2.2, 3.6);
             const green = leafOf(plant.pick(greens));
             spent.broadleaf(sx, ground(sx, sz), sz, height, plant.range(0.8, 1.2), 70, green, plant, 0.7);
-            growTree(planting, softBark, sx, ground(sx, sz), sz, height * 1.15, 0.055, { kind: 'ash', detail: 0.45, cards: 70, cardSize: 0.55, leaf: green, bark: ashBark, shaded: true }, rng.fork(`tree${grown++}`));
+            growTree(planting, woodOf('ash', true), sx, ground(sx, sz), sz, height * 1.15, 0.055, { kind: 'ash', detail: 0.45, cards: 70, cardSize: 0.55, leaf: green, bark: ashBark, shaded: true }, rng.fork(`tree${grown++}`));
             census.saplings++;
           }
         }

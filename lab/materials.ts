@@ -132,7 +132,7 @@ async function start(): Promise<void> {
     const size = state.tex;
     sets = {
       moss: TX.generateTextureSet('moss', size / 2, 9), rock: TX.generateTextureSet('rock', size, 13), ground: TX.generateTextureSet('ground', size, 17),
-      scree: TX.generateTextureSet('scree', size, 23), bark: TX.generateTextureSet('bark', size, 29), soil: TX.generateTextureSet('soil', size, 31),
+      scree: TX.generateTextureSet('scree', size, 23), bark: TX.generateTextureSet('bark', size, 29), barkAsh: TX.generateTextureSet('barkAsh', size, 59), barkPine: TX.generateTextureSet('barkPine', size, 61), barkFir: TX.generateTextureSet('barkFir', size, 67), soil: TX.generateTextureSet('soil', size, 31),
       litter: TX.generateTextureSet('litter', size, 37), thatch: TX.generateTextureSet('thatch', size, 47),
     };
     TX.doneGenerating();
@@ -146,6 +146,9 @@ async function start(): Promise<void> {
       rock: SM.makeRockMaterial(t.rock, t.moss),
       turf: SM.makeGroundMaterial(t.ground, t.soil, t.scree, t.litter, t.thatch, t.moss),
       bark: SM.makeSiteMaterial(t.bark, t.moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
+      barkAsh: SM.makeSiteMaterial(t.barkAsh, t.moss, { normalScale: 1.6, mossScale: 2.5, matt: true, deep: 0.02, hollow: 0.5 }),
+      barkPine: SM.makeSiteMaterial(t.barkPine, t.moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.04, hollow: 0.35 }),
+      barkFir: SM.makeSiteMaterial(t.barkFir, t.moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
     };
     dress();
     setUniforms();

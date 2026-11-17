@@ -126,7 +126,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, scree: 0.45, bark: 0.3, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -161,6 +161,7 @@ async function start(): Promise<void> {
   const ground = generateTextureSet('ground', texSize, 17);
   const scree = generateTextureSet('scree', texSize, 23);
   const bark = generateTextureSet('bark', texSize, 29);
+  const barkAsh = generateTextureSet('barkAsh', texSize, 59), barkPine = generateTextureSet('barkPine', texSize, 61), barkFir = generateTextureSet('barkFir', texSize, 67);
   const soil = generateTextureSet('soil', texSize, 31);
   const litter = generateTextureSet('litter', texSize, 37);
   const plaster = generateTextureSet('plaster', texSize, 41);
@@ -178,7 +179,11 @@ async function start(): Promise<void> {
     far: makeFarMaterial(),
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
     // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)
+    // Each kind of tree has its own: an oak's ridged, an ash's smooth, a pine's in plates, a spruce's in scales (see `barkRecipe`).
     bark: makeSiteMaterial(bark, moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
+    barkAsh: makeSiteMaterial(barkAsh, moss, { normalScale: 1.6, mossScale: 2.5, matt: true, deep: 0.02, hollow: 0.5 }),
+    barkPine: makeSiteMaterial(barkPine, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.04, hollow: 0.35 }),
+    barkFir: makeSiteMaterial(barkFir, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
     turf: makeGroundMaterial(ground, sand ?? soil, scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
@@ -658,7 +663,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, wood, turf: ground, leaf: moss, plaster, tile, metal: plaster, glass: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, metal: plaster, glass: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));

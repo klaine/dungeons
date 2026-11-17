@@ -110,7 +110,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * the height the texture has there, so that a plate of bark hides the furrow behind it, and more of the furrow shows as the eye
  * comes round: which is what tells the eye that a thing has depth and is not paint.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -141,7 +141,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
 }
 
 /** The same material as `makeSiteMaterial` makes, for a surface with depth (see `deep` there). */
-function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep: number }): MeshStandardNodeMaterial {
+function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep: number; hollow?: number }): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: o.roughness ?? 1, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
   // Which way the texture's two directions run across the surface, as the eye sees it: worked out from how the surface and the
@@ -171,7 +171,8 @@ function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?:
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
   // (The hollows are darker than the texture alone makes them: little light of any kind gets down a furrow.)
-  const hollow = mix(0.5, 1, smoothstep(0.05, 0.45, stone.a));
+  // (`hollow` is how much darker, 0 to 1: a pine's shallow furrows are hardly darker than its plates, an oak's are nearly black.)
+  const hollow = mix(1 - 0.5 * (o.hollow ?? 1), 1, smoothstep(0.05, 0.45, stone.a));
   let colour: N = stone.rgb.mul(vertexColor().rgb).mul(mix(1, 0.5, wet)).mul(hollow);
   colour = mix(colour, mossTex.rgb, mossy);
   colour = mix(colour, vec3(0.012), f.z.mul(0.9));
@@ -180,7 +181,7 @@ function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?:
   m.aoNode = orm.r;
   const tn: N = (texture(base.normalMap, at) as N).xyz.mul(2).sub(1);
   m.normalNode = normalMap(vec3(tn.xy.mul(o.normalScale ?? 1), tn.z).mul(0.5).add(0.5));
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk).mul(mix(0.6, 1, smoothstep(0.05, 0.5, stone.a))), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk).mul(mix(1 - 0.4 * (o.hollow ?? 1), 1, smoothstep(0.05, 0.5, stone.a))), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
   return m;
 }
 

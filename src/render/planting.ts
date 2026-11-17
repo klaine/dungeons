@@ -1,5 +1,5 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
-import { Rng } from '../core/rng';
+import { fbm3, Rng } from '../core/rng';
 import { MeshBuilder } from './geom/meshBuilder';
 import { CardSet } from './scene';
 
@@ -183,7 +183,7 @@ const UP = new Vector3(0, 1, 0);
  * A length of trunk or branch: a tube through the given points, round, tapering, closed at both
  * ends. Bark is wrapped round it a whole number of times, so it meets itself without a seam.
  */
-/** How a limb's cross-section departs from a circle: ridges and flutes that die away up it, and an oval. */
+/** How a limb's cross-section departs from a circle: ridges and flutes that die away up it, and an oval; and what has grown on it. */
 export interface LimbShape {
   /** Flutes round the foot: how many, how deep (a fraction of the radius), and where they start. */
   lobes: number;
@@ -192,32 +192,85 @@ export interface LimbShape {
   /** How much longer one way across than the other, and which way. */
   oval: number;
   ovalAt: number;
+  /** Lumpiness: swellings and hollows a hand or two across, all over it, as a fraction of the radius. No trunk is a turned post. */
+  lumps?: number;
+  /**
+   * Burrs and knots: where along it each is (0 at the foot, 1 at the top) and where round it, how far it stands out (a fraction of
+   * the radius) and how broad it is (in radii). A knot is where a branch was: a burr with a hollow in its middle.
+   */
+  burrs?: { at: number; around: number; size: number; spread: number; knot?: boolean }[];
+  seed?: number;
 }
 
 export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], sides: number, colour: Colour, along: number, open: ((y: number) => number) | null, shape?: LimbShape): void {
   const side = new Vector3(), fore = new Vector3(), dir = new Vector3();
-  const rows: number[][] = [];
-  let v = along;
-  const wraps = Math.max(1, Math.round((Math.PI * 2 * radii[0]) / 0.7));
-  for (let j = 0; j < points.length; j++) {
-    dir.subVectors(points[Math.min(points.length - 1, j + 1)], points[Math.max(0, j - 1)]).normalize();
+  const lumpy = !!shape && ((shape.lumps ?? 0) > 0 || (shape.burrs?.length ?? 0) > 0);
+  // A limb with lumps on it needs more rings than its bends do: one every hand or two, laid in between the ones given.
+  let pts = points, rad = radii;
+  if (lumpy) {
+    pts = []; rad = [];
+    for (let j = 0; j < points.length - 1; j++) {
+      const n = Math.max(1, Math.min(8, Math.round(points[j].distanceTo(points[j + 1]) / Math.max(0.16, radii[j] * 0.7))));
+      for (let k = 0; k < n; k++) { pts.push(points[j].clone().lerp(points[j + 1], k / n)); rad.push(radii[j] + (radii[j + 1] - radii[j]) * (k / n)); }
+    }
+    pts.push(points[points.length - 1]); rad.push(radii[radii.length - 1]);
+  }
+  const last = pts.length - 1;
+  let length = 0;
+  for (let j = 1; j <= last; j++) length += pts[j].distanceTo(pts[j - 1]);
+  const wraps = Math.max(1, Math.round((Math.PI * 2 * rad[0]) / 0.7));
+  // Where every point of it is, and which way a plain round limb would face there.
+  const at: number[][][] = [], out: number[][][] = [], vs: number[] = [];
+  let v = along, run = 0;
+  for (let j = 0; j <= last; j++) {
+    dir.subVectors(pts[Math.min(last, j + 1)], pts[Math.max(0, j - 1)]).normalize();
     // Any two directions square to the limb will do, so long as they turn little from ring to ring.
     if (j === 0) side.crossVectors(dir, Math.abs(dir.y) > 0.9 ? fore.set(1, 0, 0) : UP).normalize();
     else side.addScaledVector(dir, -side.dot(dir)).normalize();
     fore.crossVectors(dir, side);
-    if (j > 0) v += points[j].distanceTo(points[j - 1]);
-    const row: number[] = [], p = points[j], r = radii[j];
+    if (j > 0) { const step = pts[j].distanceTo(pts[j - 1]); v += step; run += step; }
+    vs.push(v);
+    const p = pts[j], r = rad[j], t = length > 0 ? run / length : 0;
+    const ringAt: number[][] = [], ringOut: number[][] = [];
     for (let i = 0; i <= sides; i++) {
-      const a = (i / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+      const a = ((i % sides) / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
       const nx = side.x * c + fore.x * s, ny = side.y * c + fore.y * s, nz = side.z * c + fore.z * s;
-      // (A little unlike from point to point, and only a little. The points of a trunk are half a metre apart; given very different shades,
-      // the bark between them ran from one to the other, and where that run changed, at every ring, the eye saw a sharp line round the trunk.)
-      const tone = 0.95 + 0.08 * (((i * 7 + j * 3) % 5) / 5);
       // Flutes are deepest at the foot and gone by the first third of the way up; the oval stays, easing off.
-      const fade = Math.max(0, 1 - j / Math.max(1, (points.length - 1) * 0.5));
-      const swell = shape ? 1 + shape.amp * fade * Math.cos(shape.lobes * a + shape.phase) + shape.oval * (1 - 0.5 * j / Math.max(1, points.length - 1)) * Math.cos(2 * (a - shape.ovalAt)) : 1;
-      const id = mesh.addVertex(p.x + nx * r * swell, p.y + ny * r * swell, p.z + nz * r * swell, nx, ny, nz, (i / sides) * wraps, v / 0.7, colour[0] * tone, colour[1] * tone, colour[2] * tone);
-      if (open) mesh.setOpen(id, open(p.y));
+      const fade = Math.max(0, 1 - t / 0.5);
+      let swell = shape ? 1 + shape.amp * fade * Math.cos(shape.lobes * a + shape.phase) + shape.oval * (1 - 0.5 * t) * Math.cos(2 * (a - shape.ovalAt)) : 1;
+      if (lumpy) {
+        const seed = shape!.seed ?? 1;
+        if (shape!.lumps) swell += shape!.lumps * 2 * (fbm3(c * 1.4 + seed, run / Math.max(0.2, rad[0] * 2.2), s * 1.4, 3, seed) - 0.5);
+        for (const b of shape!.burrs ?? []) {
+          let da = a - b.around;
+          da -= Math.round(da / (Math.PI * 2)) * Math.PI * 2;
+          const dl = ((t - b.at) * length) / Math.max(0.05, r), d2 = (da * da + dl * dl) / (b.spread * b.spread);
+          if (d2 < 9) swell += b.size * (Math.exp(-d2) - (b.knot ? 0.75 * Math.exp(-d2 * 7) : 0));
+        }
+      }
+      ringAt.push([p.x + nx * r * swell, p.y + ny * r * swell, p.z + nz * r * swell]);
+      ringOut.push([nx, ny, nz]);
+    }
+    at.push(ringAt); out.push(ringOut);
+  }
+  const rows: number[][] = [];
+  const A = new Vector3(), B = new Vector3(), Nn = new Vector3();
+  for (let j = 0; j <= last; j++) {
+    const row: number[] = [];
+    for (let i = 0; i <= sides; i++) {
+      const q = at[j][i], o = out[j][i];
+      let nx = o[0], ny = o[1], nz = o[2];
+      if (lumpy) {
+        // It faces as its own surface lies, lumps and all: found from the points to either side of it and above and below.
+        const e = at[j][(i + 1) % sides === 0 ? sides : (i + 1) % sides], w = at[j][(i + sides - 1) % sides], up = at[Math.min(last, j + 1)][i], dn = at[Math.max(0, j - 1)][i];
+        A.set(e[0] - w[0], e[1] - w[1], e[2] - w[2]); B.set(up[0] - dn[0], up[1] - dn[1], up[2] - dn[2]);
+        Nn.crossVectors(A, B);
+        if (Nn.lengthSq() > 1e-12) { Nn.normalize(); if (Nn.x * o[0] + Nn.y * o[1] + Nn.z * o[2] < 0) Nn.negate(); nx = Nn.x; ny = Nn.y; nz = Nn.z; }
+      }
+      // (A little unlike from point to point, and only a little: see the note on bark's texture, which is where the lines round trunks came from.)
+      const tone = lumpy ? 1 : 0.95 + 0.08 * (((i * 7 + j * 3) % 5) / 5);
+      const id = mesh.addVertex(q[0], q[1], q[2], nx, ny, nz, (i / sides) * wraps, vs[j] / 0.7, colour[0] * tone, colour[1] * tone, colour[2] * tone);
+      if (open) mesh.setOpen(id, open(pts[j].y));
       row.push(id);
     }
     rows.push(row);
@@ -229,16 +282,24 @@ export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], s
     mesh.addTriangle(rows[j][i], rows[j][i + 1], rows[j + 1][i + 1]);
   }
   // Closed at both ends: a point in the middle of each, joined to its ring.
-  for (const [j, flip] of [[0, true], [points.length - 1, false]] as const) {
-    dir.subVectors(points[Math.min(points.length - 1, j + 1)], points[Math.max(0, j - 1)]).normalize();
+  for (const [j, flip] of [[0, true], [last, false]] as const) {
+    dir.subVectors(pts[Math.min(last, j + 1)], pts[Math.max(0, j - 1)]).normalize();
     if (flip) dir.negate();
-    const p = points[j], tip = mesh.addVertex(p.x + dir.x * radii[j] * 0.5, p.y + dir.y * radii[j] * 0.5, p.z + dir.z * radii[j] * 0.5, dir.x, dir.y, dir.z, 0.5, v / 0.7, colour[0], colour[1], colour[2]);
+    const p = pts[j], tip = mesh.addVertex(p.x + dir.x * rad[j] * 0.5, p.y + dir.y * rad[j] * 0.5, p.z + dir.z * rad[j] * 0.5, dir.x, dir.y, dir.z, 0.5, v / 0.7, colour[0], colour[1], colour[2]);
     if (open) mesh.setOpen(tip, open(p.y));
     for (let i = 0; i < sides; i++) {
       if (flip) mesh.addTriangle(tip, rows[j][i + 1], rows[j][i]);
       else mesh.addTriangle(tip, rows[j][i], rows[j][i + 1]);
     }
   }
+}
+
+/** Burrs and knots for a trunk: a few of each, anywhere round it, the knots where branches once were. */
+function trunkGrowths(q: Rng, burrs: number, knots: number): NonNullable<LimbShape['burrs']> {
+  const list: NonNullable<LimbShape['burrs']> = [];
+  for (let k = 0; k < burrs; k++) list.push({ at: q.range(0.08, 0.85), around: q.range(0, Math.PI * 2), size: q.range(0.16, 0.42), spread: q.range(0.45, 0.95) });
+  for (let k = 0; k < knots; k++) list.push({ at: q.range(0.2, 0.92), around: q.range(0, Math.PI * 2), size: q.range(0.12, 0.24), spread: q.range(0.28, 0.5), knot: true });
+  return list;
 }
 
 /**
@@ -267,6 +328,10 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
   const bendAt = form.range(0, Math.PI * 2), bendBy = form.chance(0.4) ? form.range(0.12, 0.3) : form.range(0, 0.08);
   const bend = new Vector3(Math.cos(bendAt) * bendBy, 0, Math.sin(bendAt) * bendBy);
   const trunkShape: LimbShape = { lobes: form.int(3, 5), amp: form.range(0.04, 0.2) * (oak ? 1.3 : 0.8), phase: form.range(0, Math.PI * 2), oval: form.range(0.0, 0.11), ovalAt: form.range(0, Math.PI) };
+  // An oak is a lumpy tree, with burrs on it; an ash is cleaner. Both keep the scars of branches they have shed.
+  trunkShape.lumps = oak ? form.range(0.06, 0.11) : form.range(0.02, 0.05);
+  trunkShape.burrs = trunkGrowths(form, oak ? form.int(1, 4) : form.int(0, 1), form.int(1, 3));
+  trunkShape.seed = form.int(1, 9999);
   const branch = (from: Vector3, dir: Vector3, length: number, radius: number, level: number) => {
     const steps = level === 0 ? 4 : level >= levels - 1 ? 2 : 3;
     const points = [from.clone()], radii = [radius];
@@ -285,7 +350,7 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
       points.push(p.clone());
       radii.push(radius * (1 - (taper * s) / steps));
     }
-    const sides = level === 0 ? (o.detail > 0.5 ? 9 : 6) : level === 1 ? (o.detail > 0.5 ? 6 : 4) : level === 2 ? 4 : 3;
+    const sides = level === 0 ? (o.detail > 0.5 ? 14 : 6) : level === 1 ? (o.detail > 0.5 ? 6 : 4) : level === 2 ? 4 : 3;
     layLimb(wood, points, radii, sides, o.bark, rng.range(0, 3), open, level === 0 && o.detail > 0.4 ? trunkShape : undefined);
     const end = points[points.length - 1], endRadius = radii[radii.length - 1];
     spread = Math.max(spread, Math.hypot(end.x - x, end.z - z));
@@ -404,7 +469,9 @@ export function growConifer(planting: Planting, wood: MeshBuilder, x: number, ba
   const axis = (t: number): Vector3 => new Vector3(x + lean[0] * height * t + Math.cos(bowAt) * bow * Math.sin(t * Math.PI) * 0.5, base + height * t, z + lean[1] * height * t + Math.sin(bowAt) * bow * Math.sin(t * Math.PI) * 0.5);
   const stem: Vector3[] = [axis(0).setY(base - 0.4), axis(0.02)], radii = [girth * 1.5, girth * 1.12];
   for (let k = 1; k <= 6; k++) { stem.push(axis((k / 6) * 0.97)); radii.push(girth * (1 - 0.9 * (k / 6)) + 0.012); }
-  layLimb(wood, stem, radii, o.detail > 0.5 ? 8 : 5, o.bark, rng.range(0, 3), open);
+  // (A spruce's stem is the plainest of any, but not a post: a little lumpy, with the scars of its lowest boughs. Drawn from a stream of its own.)
+  const stemForm = rng.fork('stem-form');
+  layLimb(wood, stem, radii, o.detail > 0.5 ? 10 : 5, o.bark, rng.range(0, 3), open, o.detail > 0.5 ? { lobes: 3, amp: 0.03, phase: stemForm.range(0, 6), oval: 0.02, ovalAt: 0, lumps: stemForm.range(0.02, 0.04), burrs: trunkGrowths(stemForm, 0, stemForm.int(2, 4)), seed: stemForm.int(1, 9999) } : undefined);
 
   const crownFrom = pine ? rng.range(0.5, 0.62) : rng.range(0.08, 0.2);
   const spacing = (pine ? 0.6 : 0.42 + height * 0.012) / Math.max(0.45, o.detail);
@@ -493,7 +560,7 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
   const thickAt = (t: number) => girth * (coastal ? 1.25 : 1) * (1 - 0.8 * Math.pow(t, 1.15)) + 0.014;
   const stem: Vector3[] = [axis(0).setY(base - 0.4), axis(0.02)], radii = [thickAt(0) * 1.5, thickAt(0) * 1.12];
   for (let k = 1; k <= 8; k++) { stem.push(axis((k / 8) * 0.97)); radii.push(thickAt((k / 8) * 0.97)); }
-  layLimb(wood, stem, radii, rich ? 9 : 5, o.bark, rng.range(0, 3), open, rich ? { lobes: rng.int(3, 5), amp: rng.range(0.05, 0.14), phase: rng.range(0, 6), oval: rng.range(0, 0.08), ovalAt: rng.range(0, 3) } : undefined);
+  layLimb(wood, stem, radii, rich ? 12 : 5, o.bark, rng.range(0, 3), open, rich ? { lobes: rng.int(3, 5), amp: rng.range(0.05, 0.14), phase: rng.range(0, 6), oval: rng.range(0, 0.08), ovalAt: rng.range(0, 3), lumps: rng.range(0.03, 0.06), burrs: trunkGrowths(rng, rng.int(0, 1), rng.int(3, 6)), seed: rng.int(1, 9999) } : undefined);
 
   const crownFrom = coastal ? rng.range(0.4, 0.5) : rng.range(0.3, 0.4);
   const heart = axis(crownFrom + (0.97 - crownFrom) * 0.45);
