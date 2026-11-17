@@ -336,16 +336,17 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // The lantern: a low wall, a ring of glass in iron glazing bars, a domed roof with a vent and a vane.
     // A way out onto the gallery on the side away from the hatch.
     // (The way out is over the quarter of the floor that is not open for the stair.)
-    const outA = lastA + Math.PI / 4, rl = rT - 0.3, lw = 0.12;
+    // (Two panes of the lantern's sixteen are left out for it, either side of a glazing bar that is left out too.)
+    const doorK = ((Math.round(((lastA + Math.PI / 4) / (Math.PI * 2)) * 16 - 0.5) % 16) + 16) % 16, outA = ((doorK + 1) / 16) * Math.PI * 2, rl = rT - 0.3, lw = 0.12;
     for (let k = 0; k < 16; k++) {
       const a0 = (k / 16) * Math.PI * 2, a1 = ((k + 1) / 16) * Math.PI * 2, am = (a0 + a1) / 2;
-      const isDoor = Math.abs(((am - outA + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22;
+      const isDoor = k === doorK || k === (doorK + 1) % 16;
       if (!isDoor) {
         solid('metal', [ring(a0, rl - lw, top + 0.15), ring(a1, rl - lw, top + 0.15), ring(a1, rl, top + 0.15), ring(a0, rl, top + 0.15), ring(a0, rl - lw, top + 1.0), ring(a1, rl - lw, top + 1.0), ring(a1, rl, top + 1.0), ring(a0, rl, top + 1.0)], iron);
         solid('glass', [ring(a0, rl - 0.06, top + 1.0), ring(a1, rl - 0.06, top + 1.0), ring(a1, rl - 0.03, top + 1.0), ring(a0, rl - 0.03, top + 1.0), ring(a0, rl - 0.06, top + 3.0), ring(a1, rl - 0.06, top + 3.0), ring(a1, rl - 0.03, top + 3.0), ring(a0, rl - 0.03, top + 3.0)], [0.1, 0.12, 0.13]);
       }
       const b0 = ring(a0, rl - 0.05, top + 0.15);
-      solid('metal', [[b0[0] - 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] + 0.04]], iron);
+      if (k !== (doorK + 1) % 16) solid('metal', [[b0[0] - 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] - 0.04], [b0[0] + 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, b0[1], b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] - 0.04], [b0[0] + 0.04, top + 3.1, b0[2] + 0.04], [b0[0] - 0.04, top + 3.1, b0[2] + 0.04]], iron);
       // The dome, in two tiers.
       solid('metal', [ring(a0, 0, top + 3.0), ring(a1, 0, top + 3.0), ring(a1, rl + 0.2, top + 3.0), ring(a0, rl + 0.2, top + 3.0), ring(a0, 0, top + 3.95), ring(a1, 0, top + 3.95), ring(a1, rl * 0.55, top + 3.85), ring(a0, rl * 0.55, top + 3.85)], iron);
       solid('metal', [ring(a0, 0, top + 3.85), ring(a1, 0, top + 3.85), ring(a1, rl * 0.55, top + 3.85), ring(a0, rl * 0.55, top + 3.85), ring(a0, 0, top + 4.5), ring(a1, 0, top + 4.5), ring(a1, 0.2, top + 4.5), ring(a0, 0.2, top + 4.5)], iron);
