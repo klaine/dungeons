@@ -321,7 +321,9 @@ export class Atmosphere {
       const wide = u.tCloud.sample(vec3(xz.x.div(5300), 0.47, xz.y.div(5300)).add(u.uCloudDrift.mul(vec3(0.12, 0, 0.12)))).level(0).r;
       const ragged = u.tCloud.sample(vec3(xz.x.div(1250), 0.71, xz.y.div(1250)).add(u.uCloudDrift.mul(vec3(0.4, 0, 0.4)))).level(0).g;
       const out: N = length(xz.sub(u.uAirCentre.xz));
-      return smoothstep(u.uDeckGap.x, u.uDeckGap.x.add(0.07), wide.add(ragged.sub(0.5).mul(0.16))).mul(smoothstep(480, 900, out)).mul(one(smoothstep(4600, 6000, out))).mul(step(0.01, u.uDeck.w));
+      // (The further from the mountain, the more broken: the cloud lies thickest against the heights.)
+      const bar: N = u.uDeckGap.x.sub(smoothstep(700, 2800, out).mul(u.uDeckGap.z));
+      return smoothstep(bar, bar.add(0.07), wide.add(ragged.sub(0.5).mul(0.16))).mul(smoothstep(430, 640, out)).mul(one(smoothstep(4600, 6000, out))).mul(step(0.01, u.uDeck.w));
     };
     const deckHeight = (xz: N): N => deckWhole(xz).sub(deckOpen(xz).mul(u.uDeck.y).mul(u.uDeckGap.y));
     const deckWhole = (xz: N): N => {

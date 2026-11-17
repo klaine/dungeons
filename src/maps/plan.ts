@@ -1,4 +1,5 @@
 import { drawStorey } from './buildingPlan';
+import { rimAt } from '../core/mountain';
 import { footprintOf } from '../core/building';
 import { boxValley, edgeAt, hallOnward, joinLine } from '../core/valley';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
@@ -181,13 +182,17 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       // Beyond is cloud, left as paper.
       const ground = (grow: number) => {
         ctx.beginPath();
-        mtn.rim.forEach((r, k) => { const a = (k / mtn.rim.length) * Math.PI * 2, x = X(mtn.x + Math.cos(a) * (r + grow)), z = Z(mtn.z + Math.sin(a) * (r + grow)); if (k) ctx.lineTo(x, z); else ctx.moveTo(x, z); });
+        // (Its rim with the buttresses and gullies on it, which the ring of numbers alone does not hold.)
+        for (let k = 0; k < 480; k++) { const a = (k / 480) * Math.PI * 2, r = rimAt(mtn, a), x = X(mtn.x + Math.cos(a) * (r + grow)), z = Z(mtn.z + Math.sin(a) * (r + grow)); if (k) ctx.lineTo(x, z); else ctx.moveTo(x, z); }
         ctx.closePath();
         ctx.fill();
         ctx.lineCap = 'round';
         ctx.lineWidth = (mtn.spur.width * 0.86 + grow * 2) * scale;
         ctx.strokeStyle = ctx.fillStyle as string;
-        ctx.beginPath(); ctx.moveTo(X(mtn.spur.from[0]), Z(mtn.spur.from[1])); ctx.lineTo(X(mtn.spur.to[0]), Z(mtn.spur.to[1])); ctx.stroke();
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        (mtn.spur.crest ?? [mtn.spur.from, mtn.spur.to]).forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z))));
+        ctx.stroke();
         ctx.lineCap = 'butt';
       };
       ctx.fillStyle = INK;

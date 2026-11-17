@@ -332,6 +332,11 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const wetRim: N = smoothstep(0.45, 0.56, lowSpot).mul(rutFloor).toVar();
   ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
   ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
+  // On a mountain, where all the ground is stones, a path shows as what feet and hooves have made of them: a band a couple of strides
+  // broad, trodden fine and darker, with the dust of it paler along its middle.
+  const footWorn: N = onFoot.mul(one(smoothstep(0.38, 0.62, footOff.add(mid.sub(0.5).mul(0.12))))).mul((groundUniforms.uBare as N).w).toVar();
+  ground = mix(ground, ground.mul(vec3(0.66, 0.64, 0.62)).add(gSoil.rgb.mul(0.1)), footWorn.mul(0.85));
+  ground = mix(ground, ground.mul(1.22), footWorn.mul(one(smoothstep(0.05, 0.2, footOff))).mul(0.5));
   // Snow over all of it; trodden on the track and the paths, where it is packed and dirtied.
   const trodSnow: N = max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare).toVar();
   // (In summer, what is left of the snow does not lie on a path that is walked every day; in winter it is only thinner there.)
@@ -662,8 +667,12 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
   const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(0.5, 0.72, farN.y)).toVar();
   land = mix(land, vec3(1.3, 1.34, 1.42), snow);
-  m.colorNode = vec4(land.mul(mix(gullied, 1, snow.mul(0.7))), 1);
-  m.normalNode = transformNormalToView(farN);
-  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), gleam: mix(0.08, 0.5, snow) });
+  // Water, where the sheet says there is some (in the field other materials use for moss): a lake in a valley floor far below, dark,
+  // taking the sky's colour, and bright where the sun is on it.
+  const water: N = smoothstep(0.5, 0.9, f.x).toVar();
+  m.colorNode = vec4(mix(land.mul(mix(gullied, 1, snow.mul(0.7))), uFallback.mul(vec3(0.16, 0.24, 0.3)).add(vec3(0.012, 0.02, 0.028)), water), 1);
+  m.roughnessNode = mix(float(1), 0.16, water);
+  m.normalNode = transformNormalToView(normalize(mix(farN, vec3(0, 1, 0), water)));
+  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
   return m;
 }

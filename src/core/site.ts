@@ -482,6 +482,11 @@ export interface Mountain {
   z: number;
   rim: number[];
   drop: number[];
+  /**
+   * Buttresses and gullies too small for `rim`'s ring to hold: the rim is pushed out in fins and drawn in between them by rule
+   * (`rimAt` in `mountain.ts`), from this seed, `out` metres at the most, a fin every `apart` metres or so.
+   */
+  ribs?: { seed: number; out: number; apart: number };
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;
@@ -490,8 +495,10 @@ export interface Mountain {
   /**
    * The ridge the way comes up: its crest runs from `from`, on the rim, out to `to`, `width`
    * across its top, falling from `y0` there to `y1` at its far end, which is in or near the cloud.
+   * It does not run straight: `crest` is its line as points `[x, z, y]` from `from` to `to`, swinging one way and then the other,
+   * `y` the height of the crest at each, which falls unevenly, over knolls and through saddles. It is narrow, a crest with a drop on either hand; at `swell` of the way along it (0 to 1) it broadens into a shoulder, where the shelter stands.
    */
-  spur: { from: [number, number]; to: [number, number]; width: number; y0: number; y1: number };
+  spur: { from: [number, number]; to: [number, number]; width: number; y0: number; y1: number; swell?: number; crest?: [number, number, number][] };
   /** Summits, the highest first: rising `height` metres over the forecourt's floor about `x`, `z`, falling away over `r`, steep and broken. */
   peaks: { x: number; z: number; r: number; height: number }[];
   /** The ground about the house, kept level at the forecourt's floor. */
@@ -502,6 +509,8 @@ export interface Mountain {
   climb?: [number, number, number][];
   /** How far up the climb, in metres along it from where it leaves the level ground, its last stretch becomes a stair cut in the rock, if it does. */
   climbStair?: number;
+  /** A gateway of stone where the way comes off the ridge onto the top: two piers and an arch over the way, a cross on it, seen on the skyline from all down the ridge. The way goes through it towards `heading` (radians). */
+  gate?: { x: number; z: number; y: number; heading: number };
   /** A shelter of dry stone beside the way on the ridge, a little above the cloud, its door towards `facing` (radians), on ground levelled at `y`. */
   shelter?: { x: number; z: number; y: number; facing: number };
   /**
@@ -529,6 +538,11 @@ export interface Mountain {
   tors?: { x: number; z: number; r: number; height: number }[];
   /** Needles of rock standing out of the cloud close beside the mountain, off its precipices: where, how broad at the cloud's level, and how high their tops stand over the cloud. Seen and not reached. */
   needles?: { x: number; z: number; r: number; height: number }[];
+  /**
+   * Things standing in the country round about, to be seen from the top through the cloud's breaks and over it: a castle on a
+   * spur, a lone tower, the ruin of an abbey, a monument, each on a crest near the cloud's level, at `x`, `z`, on ground at `y`.
+   */
+  sights?: { kind: 'castle' | 'tower' | 'ruin' | 'monument'; x: number; z: number; y: number }[];
   /** Other mountains, seen standing out of the cloud and not reached: where, how far they spread at the foot, how high their tops stand over the cloud. */
   range: { x: number; z: number; r: number; height: number }[];
 }

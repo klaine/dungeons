@@ -27,7 +27,16 @@ function ringAt(table: number[], angle: number): number {
 }
 
 /** How far the top of the precipice lies from the middle at a bearing. */
-export const rimAt = (m: Mountain, angle: number) => ringAt(m.rim, angle);
+export function rimAt(m: Mountain, angle: number): number {
+  let r = ringAt(m.rim, angle);
+  // Buttresses and gullies: fins of rock standing out from the line, sharp-crested, with rounded bays between them, and lesser ribs on those.
+  if (m.ribs) {
+    const k = 120 / m.ribs.apart, c = Math.cos(angle), s = Math.sin(angle);
+    const fin = 1 - Math.abs(fbm2(c * k + m.ribs.seed, s * k - m.ribs.seed, 2, 37) * 2 - 1);
+    r += m.ribs.out * (fin * fin * 1.25 - 0.36) + m.ribs.out * 0.3 * (fbm2(c * k * 2.9 - m.ribs.seed, s * k * 2.9, 2, 41) - 0.5);
+  }
+  return r;
+}
 
 /** A soft maximum: the greater of two, with the corner where they meet rounded over `k`. */
 function softMax(a: number, b: number, k: number): number {
@@ -36,15 +45,57 @@ function softMax(a: number, b: number, k: number): number {
 }
 
 /** Where a point lies against the ridge: how far from its crest line, and how far along it (0 at the rim, 1 at its end; less or more beyond). */
-export function onSpur(m: Mountain, x: number, z: number): { off: number; t: number } {
-  const [ax, az] = m.spur.from, [bx, bz] = m.spur.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
-  const t = ((x - ax) * dx + (z - az) * dz) / l2, tc = clamp01(t);
-  return { off: Math.hypot(x - ax - dx * tc, z - az - dz * tc), t };
+export function onSpur(m: Mountain, x: number, z: number): { off: number; t: number; y: number } {
+  const crest = m.spur.crest;
+  if (!crest) {
+    // (Before its line is laid: straight from its head to its end.)
+    const [ax, az] = m.spur.from, [bx, bz] = m.spur.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+    const t = ((x - ax) * dx + (z - az) * dz) / l2, tc = clamp01(t);
+    return { off: Math.hypot(x - ax - dx * tc, z - az - dz * tc), t, y: m.spur.y0 + (m.spur.y1 - m.spur.y0) * tc };
+  }
+  // Its line is indexed once in squares of the ground, with how far along it each point is, so that only the lengths of it near a point are looked at.
+  let index = CRESTS.get(crest);
+  if (!index) {
+    const cells = new Map<number, number[]>(), C = 16, REACH = 96, along = [0];
+    for (let k = 1; k < crest.length; k++) along.push(along[k - 1] + Math.hypot(crest[k][0] - crest[k - 1][0], crest[k][1] - crest[k - 1][1]));
+    for (let k = 0; k < crest.length - 1; k++) {
+      const [ax, az] = crest[k], [bx, bz] = crest[k + 1];
+      for (let i = Math.floor((Math.min(ax, bx) - REACH) / C); i <= Math.floor((Math.max(ax, bx) + REACH) / C); i++) for (let j = Math.floor((Math.min(az, bz) - REACH) / C); j <= Math.floor((Math.max(az, bz) + REACH) / C); j++) {
+        const key = i * 100003 + j, list = cells.get(key);
+        if (list) list.push(k); else cells.set(key, [k]);
+      }
+    }
+    CRESTS.set(crest, (index = { cells, C, along, total: along[along.length - 1] || 1 }));
+  }
+  const near = index.cells.get(Math.floor(x / index.C) * 100003 + Math.floor(z / index.C));
+  // (Far from it, it is as if it were not there.)
+  if (!near) return { off: 1e4, t: 0, y: m.spur.y0 };
+  let off = Infinity, t = 0, y = 0;
+  for (const k of near) {
+    const [ax, az, ay] = crest[k], [bx, bz, by] = crest[k + 1];
+    const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, u = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
+    const d = Math.hypot(x - ax - dx * u, z - az - dz * u);
+    if (d < off) { off = d; y = ay + (by - ay) * u; t = (index.along[k] + (index.along[k + 1] - index.along[k]) * u) / index.total; }
+  }
+  return { off, t, y };
+}
+const CRESTS = new WeakMap<object, { cells: Map<number, number[]>; C: number; along: number[]; total: number }>();
+
+/** The point of the ridge's crest a share `t` of the way along it, 0 at its head to 1 at its end; and which way it runs there. */
+export function crestPoint(m: Mountain, t: number): { x: number; z: number; y: number; heading: number } {
+  const crest = m.spur.crest;
+  if (!crest) { const [ax, az] = m.spur.from, [bx, bz] = m.spur.to; return { x: ax + (bx - ax) * t, z: az + (bz - az) * t, y: m.spur.y0 + (m.spur.y1 - m.spur.y0) * t, heading: Math.atan2(bz - az, bx - ax) }; }
+  const f = clamp01(t) * (crest.length - 1), k = Math.min(crest.length - 2, Math.floor(f)), u = f - k, [ax, az, ay] = crest[k], [bx, bz, by] = crest[k + 1];
+  return { x: ax + (bx - ax) * u, z: az + (bz - az) * u, y: ay + (by - ay) * u, heading: Math.atan2(bz - az, bx - ax) };
 }
 
 /** Half the breadth of the ridge's top at a point along it: it narrows towards its end, and its sides are not straight. */
 function spurHalf(m: Mountain, x: number, z: number, t: number): number {
-  return (m.spur.width / 2) * (1 - 0.28 * clamp01(t)) + (fbm2(x / 21 + 7.3, z / 21 - 2.1, 2, 31) - 0.5) * 5;
+  // (And at one place along it it broadens into a shoulder some strides wider, where there is room to build.)
+  const shoulder = m.spur.swell === undefined ? 0 : 9 * Math.exp(-(((t - m.spur.swell) / 0.055) ** 2));
+  // (Nor is it one breadth all along: in one place a knife's edge a few strides across, in the next a shoulder with room to stand about.)
+  const breadth = 0.52 + 1.0 * fbm2(t * 4.6 + m.spur.from[0] * 0.013, m.spur.from[1] * 0.013, 2, 53);
+  return (m.spur.width / 2) * (1 - 0.2 * clamp01(t)) * breadth + (fbm2(x / 21 + 7.3, z / 21 - 2.1, 2, 31) - 0.5) * 3 + shoulder;
 }
 
 /** How far a point is inside the top (more than nothing on it, less beyond the precipice), measured from the middle's rim only. */
@@ -88,10 +139,50 @@ function summits(m: Mountain, x: number, z: number): number {
  * How far the ground falls below the edge of the top at `out` metres beyond it: first the
  * precipice, `drop` high, then a slope of broken rock and scree going on down into the cloud.
  */
-function fall(out: number, drop: number): number {
+function fall(out: number, drop: number, phase = 0.5): number {
   if (out <= 0) return 0;
   const w = 2.5 + drop * 0.2;
-  return drop * smooth(out / w) + Math.max(0, out - w * 0.5) * 1.25 + Math.max(0, out - 50) * 0.6;
+  // Below the precipice the mountain goes down in tiers, as bedded rock does: a wall, a ledge sloping outward, another wall. Where
+  // the tiers come differs from one side of the mountain to another (`phase`).
+  const BENCH = 15, tier = (t: number) => { const k = Math.floor(t), f = t - k; return k + smooth((f - 0.42) / 0.26); };
+  const s = Math.max(0, out - w * 0.5), stepped = (tier(s / BENCH + phase * 3) - tier(phase * 3)) * BENCH * 1.22 + s * 0.14;
+  return drop * smooth(out / w) + stepped + Math.max(0, out - 50) * 0.6;
+}
+
+const TORS = new WeakMap<object, { cells: Map<number, NonNullable<Mountain['tors']>>; C: number; count: number }>();
+/** How high the tors and the rock teeth stand at a point: knobs of bare rock, steep-sided, as frost leaves the harder beds. */
+function torsAt(m: Mountain, x: number, z: number): number {
+  if (!m.tors?.length) return 0;
+  // (They are looked up by the square of ground a point is in: there are scores of them, and this is asked millions of times.)
+  let grid = TORS.get(m.tors);
+  if (!grid || grid.count !== m.tors.length) {
+    const cells = new Map<number, NonNullable<Mountain['tors']>>(), C = 12;
+    for (const t of m.tors) {
+      const reach = t.r * 1.6;
+      for (let i = Math.floor((t.x - reach) / C); i <= Math.floor((t.x + reach) / C); i++) for (let j = Math.floor((t.z - reach) / C); j <= Math.floor((t.z + reach) / C); j++) {
+        const key = i * 100003 + j, list = cells.get(key);
+        if (list) list.push(t); else cells.set(key, [t]);
+      }
+    }
+    TORS.set(m.tors, (grid = { cells, C, count: m.tors.length }));
+  }
+  const near = grid.cells.get(Math.floor(x / grid.C) * 100003 + Math.floor(z / grid.C));
+  if (!near) return 0;
+  let h = 0;
+  for (const t of near) {
+    const d = Math.hypot(x - t.x, z - t.z);
+    if (d >= t.r * 1.6) continue;
+    // A tooth (taller than it is broad) is a fin: a blade of rock standing on edge, its crest notched. A tor is a knob. Either stands
+    // in beds: its height comes in steps the thickness of a bed, so its sides are ledges and little walls and not a smooth mound.
+    const tooth = t.height > t.r * 1.4, turn = (t.x * 12.9898 + t.z * 78.233) % Math.PI, c = Math.cos(turn), s = Math.sin(turn);
+    const along = (x - t.x) * c + (z - t.z) * s, across = -(x - t.x) * s + (z - t.z) * c, e = tooth ? Math.hypot(along / 1.3, across * 1.9) : d;
+    if (e >= t.r) continue;
+    const notch = tooth ? 0.5 + 0.75 * (1 - Math.abs(fbm2(along * 0.55 + t.x, t.z, 2, 47) * 2 - 1)) : 1;
+    const raw = t.height * Math.pow(1 - e / t.r, tooth ? 0.42 : 0.5) * (0.65 + 0.7 * fbm2(x / 2.7 + t.x, z / 2.7 - t.z, 2, 19)) * notch;
+    const BED = 1.05, k = Math.floor(raw / BED), f = raw / BED - k;
+    h += (k + smooth((f - 0.3) / 0.4)) * BED * 0.75 + raw * 0.25;
+  }
+  return h;
 }
 
 const outside = (r: { x0: number; x1: number; z0: number; z1: number }, x: number, z: number) => Math.hypot(Math.max(r.x0 - x, 0, x - r.x1), Math.max(r.z0 - z, 0, z - r.z1));
@@ -139,26 +230,26 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   // it rounds over a little towards the precipice before it falls.
   const dTop = insideTop(m, x, z);
   let top = floor + summits(m, x, z) + (fbm2(x / 40 + 3.1, z / 40 - 1.7, 3, 7) - 0.5) * 8 + (fbm2(x / 11, z / 11, 2, 9) - 0.5) * 1.3;
-  // Tors: knobs of bare rock standing out of the ground, steep-sided and flat-headed, as frost leaves the harder beds.
-  for (const t of m.tors ?? []) {
-    const d = Math.hypot(x - t.x, z - t.z);
-    if (d < t.r) top += t.height * Math.pow(1 - d / t.r, 0.5) * (0.65 + 0.7 * fbm2(x / 2.7 + t.x, z / 2.7 - t.z, 2, 19));
-  }
   top -= 9 * (1 - smooth(dTop / 45));
   top = floor + (top - floor) * smooth((outside(m.level, x, z) - 2) / 16);
-  const main = top - fall(-dTop, ringAt(m.drop, Math.atan2(z - m.z, x - m.x)));
+  const bearing = Math.atan2(z - m.z, x - m.x);
+  const main = top - fall(-dTop, ringAt(m.drop, bearing), fbm2(Math.cos(bearing) * 1.7 + m.x * 0.01, Math.sin(bearing) * 1.7 + m.z * 0.01, 2, 43));
   // The ridge: its crest falls from the rim to its end, and its sides fall away from the crest,
   // and then over its own lesser precipices.
   const s = onSpur(m, x, z), tc = clamp01(s.t), half = spurHalf(m, x, z, s.t);
-  const crest = m.spur.y0 + (m.spur.y1 - m.spur.y0) * Math.pow(tc, 1.1) + (fbm2(x / 17 + 1.3, z / 17, 2, 5) - 0.5) * 3 * smooth(s.t / 0.2);
-  const ridge = crest - 9 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - fall(s.off - half, 9 + 6 * tc);
+  const crest = s.y + (fbm2(x / 17 + 1.3, z / 17, 2, 5) - 0.5) * 2.4 * smooth(s.t / 0.2);
+  const ridge = crest - 4.5 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - fall(s.off - half, 14 + 12 * tc);
   let y = softMax(main, ridge, 4);
+  if (!levelled) y += torsAt(m, x, z);
   if (levelled) {
     // The way is cut and made up to its own level, across a mule's breadth and a little more, and eased into the land beside it.
     if (m.way) {
       const w = nearestOn(m.way, x, z, 9);
       if (w.off < 9) y += (w.y - y) * (1 - smooth((w.off - 2.3) / 6));
     }
+    // A little platform on the summit for the cairn and whoever stands by it. (Made before the climb, which comes up onto it: where
+    // the two meet, the climb's own level holds, or its last strides would end at a wall.)
+    if (m.cairn) { const w = 1 - smooth((Math.hypot(x - m.cairn.x, z - m.cairn.z) - 2.8) / 2.6); y += (m.cairn.y - y) * w; }
     // The climb goes up a ridge: the path is on its crest, a couple of strides broad, and the
     // ground falls away from it on both sides, built up where the land lies lower and cut back
     // where it stands higher. (Not beside the house, where the climb starts on the level ground.)
@@ -172,6 +263,8 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
         y += ((w.off < 1.5 ? w.y : crest) - y) * k;
       }
     }
+    // (The tors and the teeth of rock beside the ways stand as they are: the ways were laid clear of them.)
+    y += torsAt(m, x, z);
     // Level ground for the shelter on the ridge.
     if (m.shelter) { const w = 1 - smooth((Math.hypot(x - m.shelter.x, z - m.shelter.z) - 3.4) / 3); y += (m.shelter.y - y) * w; }
     // The landings on the climb: level ground at the bends, and a crag standing up beside each on the inner side.
@@ -185,8 +278,6 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
         y = Math.max(y, l.y - 1 + (l.height + 1) * Math.pow(t, 0.55) * rough);
       }
     }
-    // A little platform on the summit for the cairn and whoever stands by it.
-    if (m.cairn) { const w = 1 - smooth((Math.hypot(x - m.cairn.x, z - m.cairn.z) - 3.2) / 3); y += (m.cairn.y - y) * w; }
     // The gallery way, wherever it is open to the sky: a ledge three strides broad, cut into the face
     // and built out where the face falls away, to its own level, with the rock standing sheer behind it.
     // (Its tunnels are not the land's shape: the builder carves them.)
@@ -226,6 +317,37 @@ export function galleryRuns(g: NonNullable<Mountain['gallery']>): { open: [numbe
   return runs;
 }
 const RUNS = new WeakMap<object, { open: [number, number, number][][]; under: [number, number, number][][] }>();
+
+/**
+ * The country round about, far beyond where anyone walks: how high the land stands at a point, and whether it is water there.
+ * Valleys lie six or seven hundred metres under the cloud, with long lakes in their floors; between them run ridges for miles,
+ * their crests about the cloud's level and here and there above it; and out of them stand the mountains of `range`, each a horn
+ * with hollow flanks and three or four ridges running down from it. Close about this mountain nothing but itself stands as high
+ * as the cloud. It is the land's plain shape; whoever draws it decides what covers it.
+ */
+export function countryAt(m: Mountain, floor: number, x: number, z: number): { y: number; water: boolean } {
+  const deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
+  const ridge = (px: number, pz: number, s: number) => { const v = 1 - Math.abs(fbm2(px, pz, 3, s) * 2 - 1); return v * v; };
+  const lake = deck - 610;
+  let y = deck - 680 + 330 * ridge(x * 0.00075 + seed, z * 0.00075, 5) + 70 * ridge(x * 0.0035, z * 0.0035 + seed, 15);
+  // The long ridges: wooded, running for miles, standing up to the cloud and through it; lower and fewer close to this mountain.
+  const out = Math.hypot(x - m.x, z - m.z), free = smooth((out - 420) / 700);
+  const run = ridge(x * 0.00042 - seed, z * 0.00042 + seed * 0.7, 23), swell = 0.55 + 0.9 * fbm2(x * 0.00021 + seed, z * 0.00021, 2, 29);
+  y = Math.max(y, deck - 330 + (400 * Math.pow(run, 1.3) * swell + 55 * ridge(x * 0.0041 + seed, z * 0.0041, 31) * run) * (0.45 + 0.55 * free));
+  for (const q of m.range) {
+    const d = Math.hypot(x - q.x, z - q.z);
+    // (Below the cloud a mountain goes on down and out to the valley floor.)
+    if (d > q.r) { if (d < q.r + 520) y = Math.max(y, deck - 250 - (d - q.r) * 0.85); continue; }
+    const t = 1 - d / q.r, crest = ridge(x * 0.006 + q.x * 0.001, z * 0.006, 11), arete = ridge(x * 0.0025, z * 0.0025 + q.z * 0.001, 13);
+    const around = Math.atan2(z - q.z, x - q.x), ribs = 3 + (Math.abs(Math.round(q.x + q.z)) % 2);
+    const star = Math.pow(Math.abs(Math.cos((around * ribs) / 2 + q.x * 0.013 + 0.9 * fbm2(x * 0.0018 + q.z, z * 0.0018, 2, 7))), 0.7);
+    const horn = 0.55 * Math.pow(t, 1.25) + 0.45 * Math.pow(t, 3.2);
+    y = Math.max(y, deck - 250 + (q.height + 250) * horn * (0.62 + 0.2 * star * (1 - t * 0.5) + 0.16 * crest + 0.2 * arete));
+  }
+  // (This mountain's own slopes, as they go on down beyond the near ground.)
+  if (out < 900) y = Math.max(y, landAt(m, floor, x, z, false));
+  return y < lake ? { y: lake, water: true } : { y, water: false };
+}
 
 /**
  * A line from `a` to `b` that climbs `climb` metres no more steeply than `slope`: straight if
@@ -306,7 +428,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const m: Mountain = {
     x: middle.x, z: middle.z, rim: rimOf(1),
     // (In some stretches hardly a precipice at all, the top going over into a steep slope of scree; in others a wall the height of a church tower.)
-    drop: Array.from({ length: N }, (_, k) => { const a = (k / N) * TAU; return round(3 + 46 * smooth((fbm2(Math.cos(a) * 1.4 + dropSeed, Math.sin(a) * 1.4, 3) - 0.28) / 0.44)); }),
+    drop: Array.from({ length: N }, (_, k) => { const a = (k / N) * TAU; return round(6 + 48 * smooth((fbm2(Math.cos(a) * 1.4 + dropSeed, Math.sin(a) * 1.4, 3) - 0.28) / 0.44)); }),
+    ribs: { seed: round(shape.range(0, 90)), out: round(shape.range(5, 9)), apart: round(shape.range(17, 27)) },
     deck: 0, billow: 0, spur: { from: [0, 0], to: [0, 0], width: 40, y0: F, y1: F }, peaks: [], level, range: [],
   };
   // Grown until the house and its level ground lie well inside the rim.
@@ -321,21 +444,22 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // Where the rim lies south of the forecourt, more or less: the ridge leaves it there.
     const a = Math.atan2(exitZ - m.z, exitX - m.x) + q.range(-0.35, 0.35);
     const at = rimAt(m, a) - 2, fx = m.x + Math.cos(a) * at, fz = m.z + Math.sin(a) * at;
-    const dir = a + q.range(-0.3, 0.3), length = q.range(165, 225);
-    m.spur = { from: [round(fx), round(fz)], to: [round(fx + Math.cos(dir) * length), round(fz + Math.sin(dir) * length)], width: round(q.range(30, 40)), y0: 0, y1: 0 };
+    const dir = a + q.range(-0.3, 0.3), length = q.range(280, 350);
+    m.spur = { from: [round(fx), round(fz)], to: [round(fx + Math.cos(dir) * length), round(fz + Math.sin(dir) * length)], width: round(q.range(18, 25)), y0: 0, y1: 0 };
     const plainTop = landAt({ ...m, spur: { ...m.spur, y0: -1e4, y1: -1e4 } }, F, fx, fz, false);
     m.spur.y0 = round(plainTop);
     // (No steeper along its length than the way may go straight down it: a path on a ridge keeps to the crest, and zigzags across a crest would cut it to pieces.)
-    m.spur.y1 = round(plainTop - Math.min(q.range(46, 70), length * 0.31));
+    m.spur.y1 = round(plainTop - Math.min(q.range(82, 108), length * 0.26));
   }
   // Summits: the highest behind the house, on the north side; perhaps one or two lesser, anywhere clear of the house and the head of the ridge.
   {
     const q = rng.fork('peaks');
     for (let tries = 0; tries < 400 && m.peaks.length < 1; tries++) {
-      const a = -Math.PI / 2 + q.range(-0.9, 0.9), at = rimAt(m, a) * q.range(0.25, 0.7);
-      const r = q.range(42, 70), height = q.range(38, 75), x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
+      const a = -Math.PI / 2 + q.range(-0.9, 0.9), at = rimAt(m, a) * q.range(0.5, 0.74);
+      const r = q.range(42, 70), height = q.range(58, 108), x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
       // (Well back from the house: the way up to it is to be a walk, not a scramble behind the kitchen.)
-      if (outside(level, x, z) < r * 0.55 + 28 - tries * 0.05) continue;
+      // (And as far off across the top as the top allows, at first asking: the further, the longer and easier the way up, and the higher the summit may stand.)
+      if (outside(level, x, z) < Math.max(r * 0.55 + 28, 95 - tries * 0.3)) continue;
       m.peaks.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
     }
     const more = q.int(0, 2);
@@ -350,21 +474,66 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const plain = (x: number, z: number) => landAt(m, F, x, z, false);
   // (The head of the ridge stands at the height the land has there now the summits are on it.)
   m.spur.y0 = round(Math.min(F + 2, plain(m.spur.from[0], m.spur.from[1])));
+  // The ridge's line. A ridge does not run straight: it swings one way and then the other, in two or three long bends, as it
+  // goes out and down from the mountain; and it does not fall evenly, but over knolls and through saddles, steeply in one place
+  // and hardly at all in the next. (It must keep going out from the mountain, and never turn back along its foot.)
+  {
+    const q = rng.fork('crest'), [fx, fz] = m.spur.from, straight = Math.atan2(m.spur.to[1] - fz, m.spur.to[0] - fx), length = Math.hypot(m.spur.to[0] - fx, m.spur.to[1] - fz), STEP = 6;
+    let line: [number, number][] = [];
+    for (let tries = 0; tries < 240; tries++) {
+      const pts: [number, number][] = [[fx, fz]];
+      let h = straight + q.range(-0.25, 0.25), x = fx, z = fz, gone = 0, sign = q.chance(0.5) ? 1 : -1, ok = true;
+      // (Straight out for a little way first, clear of the rim.)
+      for (let k = 0; k < 3; k++) { x += Math.cos(h) * STEP; z += Math.sin(h) * STEP; gone += STEP; pts.push([x, z]); }
+      while (gone < length && ok) {
+        const r = q.range(60, 150), turn = q.range(0.45, 1.05), n = Math.max(2, Math.round((r * turn) / STEP));
+        for (let k = 0; k < n && gone < length && ok; k++) {
+          h += (sign * STEP) / r; x += Math.cos(h) * STEP; z += Math.sin(h) * STEP; gone += STEP;
+          pts.push([x, z]);
+          ok = insideTop(m, x, z) < -6 - 0.42 * (gone - 18) && Math.abs(turnBetween(straight, h)) < 1.25;
+        }
+        sign = -sign;
+      }
+      if (ok) { line = pts; break; }
+    }
+    if (!line.length) for (let d = 0; d <= length; d += STEP) line.push([fx + Math.cos(straight) * d, fz + Math.sin(straight) * d]);
+    const p1 = q.range(0, TAU), p2 = q.range(0, TAU), waves = q.range(1.8, 2.5);
+    // (Knolls and saddles deep enough that whoever comes up it walks downhill two or three times on the way: into a saddle, with the next rise seen across it.)
+    const fallen = (t: number) => Math.pow(t, 1.05) + 0.13 * Math.sin(t * waves * TAU + p1) * Math.sin(Math.PI * t) + 0.02 * Math.sin(t * 9.3 * TAU + p2) * smooth(t / 0.1);
+    const end = fallen(1);
+    m.spur.crest = line.map(([x, z], k) => [round(x), round(z), round(m.spur.y0 + (m.spur.y1 - m.spur.y0) * (fallen(k / (line.length - 1)) / end))]);
+    m.spur.to = [m.spur.crest[m.spur.crest.length - 1][0], m.spur.crest[m.spur.crest.length - 1][1]];
+  }
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.
   const track: [number, number][] = [[doorX, meadow.z0], [doorX, meadow.z1 - 4]];
   {
-    const along = (t: number): [number, number] => [m.spur.from[0] + (m.spur.to[0] - m.spur.from[0]) * t, m.spur.from[1] + (m.spur.to[1] - m.spur.from[1]) * t];
-    const head = along(0.07), foot = along(0.93);
+    const q = rng.fork('way'), hd = crestPoint(m, 0.07), ft = crestPoint(m, 0.93);
+    const head: [number, number] = [hd.x, hd.z], foot: [number, number] = [ft.x, ft.z];
     const [sx, sz] = track[1];
-    const first = zigzag([sx, sz], head, plain(head[0], head[1]) - F, 0.3, 0);
-    // (Down the crest; if it must wind at all, only a few strides to either side of it.)
-    const down = zigzag(head, foot, m.spur.y0 - plain(foot[0], foot[1]), 0.36, 4);
+    // From the forecourt to the head of the ridge: not ruled straight, but in one easy bow, as a path worn by feet goes.
+    const first: [number, number][] = [];
+    {
+      const d = Math.hypot(head[0] - sx, head[1] - sz) || 1, n = Math.max(2, Math.round(d / 2)), bow = q.range(-1, 1) * Math.min(7, d * 0.16);
+      for (let i = 0; i <= n; i++) { const t = i / n, off = bow * Math.sin(Math.PI * t) * smooth(t / 0.3); first.push([sx + (head[0] - sx) * t - ((head[1] - sz) / d) * off, sz + (head[1] - sz) * t + ((head[0] - sx) / d) * off]); }
+    }
+    // Down the ridge: along its crest as the crest swings, and wandering a little on it from one side to the other, round
+    // a knoll here and a tooth of rock there. A point every two metres.
+    const down: [number, number][] = [];
+    {
+      const total = (m.spur.crest ?? []).reduce((sum, p, k, all) => (k ? sum + Math.hypot(p[0] - all[k - 1][0], p[1] - all[k - 1][1]) : 0), 0) || 1;
+      const p1 = q.range(0, TAU), p2 = q.range(0, TAU), room = Math.max(0.6, m.spur.width / 2 - 7);
+      for (let d = 0.07 * total; d <= 0.93 * total; d += 2) {
+        const c = crestPoint(m, d / total), t = (d / total - 0.07) / 0.86, wander = (room * 0.8 * Math.sin(d / 17 + p1) + room * 0.35 * Math.sin(d / 6.3 + p2)) * smooth(t / 0.08) * smooth((1 - t) / 0.06);
+        down.push([c.x - Math.sin(c.heading) * wander, c.z + Math.cos(c.heading) * wander]);
+      }
+      down.push(foot);
+    }
     // (Kept on the ground: a point that would come near the edge is drawn in towards the crest or the middle.)
     const keep = (p: [number, number]): [number, number] => {
       let [x, z] = p;
-      for (let i = 0; i < 30 && inside(m, x, z) < 7; i++) {
+      for (let i = 0; i < 30 && inside(m, x, z) < 5.5; i++) {
         const gx = inside(m, x + 1, z) - inside(m, x - 1, z), gz = inside(m, x, z + 1) - inside(m, x, z - 1), gl = Math.hypot(gx, gz) || 1;
         x += (gx / gl) * 0.8; z += (gz / gl) * 0.8;
       }
@@ -374,15 +543,20 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     for (const p of pts) if (Math.hypot(p[0] - track[track.length - 1][0], p[1] - track[track.length - 1][1]) > 1.2) track.push(p);
     // The way's level line, from the forecourt to the arrival.
     const line: [number, number][] = track.slice(1);
-    m.way = levelLine(line, plain, F, plain(foot[0], foot[1]), 0.36);
+    m.way = levelLine(line, plain, F, plain(foot[0], foot[1]), 0.5);
+    // The gateway: where the way comes off the ridge onto the top.
+    {
+      const k = m.way.findIndex(([x, z]) => onSpur(m, x, z).t > 0.035 && onSpur(m, x, z).off < 30);
+      if (k > 1 && k < m.way.length - 2) m.gate = { x: m.way[k][0], z: m.way[k][1], y: m.way[k][2], heading: Math.round(Math.atan2(m.way[k + 1][1] - m.way[k - 1][1], m.way[k + 1][0] - m.way[k - 1][0]) * 1000) / 1000 };
+    }
   }
   site.track = track;
   // The cloud: its top lies about the foot of the ridge, so that the player comes up out of it, or is still in its top when they arrive.
   {
     const q = rng.fork('cloud'), arrive = m.way![m.way!.length - 1][2];
     m.billow = round(q.range(6, 11));
-    // (One day in four it is unbroken to the horizon; on the others it has breaks in it, few or many, with the valleys showing through.)
-    m.breaks = rng.fork('breaks').chance(0.25) ? 0 : Math.round(rng.fork('breaks amount').range(0.3, 0.85) * 100) / 100;
+    // (One day in eight it is unbroken to the horizon; on the others it has breaks in it, few or many, with the valleys showing through.)
+    m.breaks = rng.fork('breaks').chance(0.12) ? 0 : Math.round(rng.fork('breaks amount').range(0.4, 0.95) * 100) / 100;
     // (Above the arrival by about as much as its deepest troughs go below it, so that the player always starts in the cloud and climbs out of it.)
     m.deck = round(arrive + m.billow * 2.3 + q.range(0, 4));
   }
@@ -394,6 +568,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     for (let tries = 0; tries < 60 && !m.shelter; tries++) {
       const want = m.deck + q.range(5, 15), k = wy.findIndex((w) => w[2] < want);
       if (k < 2 || k > wy.length - 3) continue;
+      // (The ridge broadens there to hold it.)
+      m.spur.swell = Math.round(onSpur(m, wy[k][0], wy[k][1]).t * 1000) / 1000;
       const [x0, z0, y0] = wy[k], [x1, z1] = wy[k + 1], dir = Math.atan2(z1 - z0, x1 - x0), side = q.chance(0.5) ? 1 : -1, off = q.range(6, 7.5);
       const x = x0 + Math.cos(dir + (side * Math.PI) / 2) * off, z = z0 + Math.sin(dir + (side * Math.PI) / 2) * off;
       if (inside(m, x, z) < 7.5 || nearestOn(wy, x, z, 9).off < 5.4) continue;
@@ -427,7 +603,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // off the house and the way.
     const q0 = rng.fork('climb'), wy = m.way ?? [];
     const lengthOf = (pts: [number, number][]) => pts.reduce((sum, q, k) => (k ? sum + Math.hypot(q[0] - pts[k - 1][0], q[1] - pts[k - 1][1]) : 0), 0);
-    const fits = (pts: [number, number][]) => pts.every(([x, z]) => inside(m, x, z) > 5.5 && (Math.hypot(x - startX, z - startZ) < 16 || (outside(level, x, z) > 4 && (!wy.length || nearestOn(wy, x, z, 10).off > 9))));
+    const fits = (pts: [number, number][]) => pts.every(([x, z]) => inside(m, x, z) > 4.5 && (Math.hypot(x - startX, z - startZ) < 16 || (outside(level, x, z) > 4 && (!wy.length || nearestOn(wy, x, z, 10).off > 9))));
     /** A curve through points (Catmull and Rom's), every two metres or so. */
     const through = (ctrl: [number, number][]): [number, number][] => {
       const c = [ctrl[0], ...ctrl, ctrl[ctrl.length - 1]], out: [number, number][] = [];
@@ -486,16 +662,20 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // the way and up the last stretch onto the summit by a stair cut in the rock, no steeper than one in two and a half.
     const along = [0];
     for (let k = 1; k < rise.length; k++) along.push(along[k - 1] + Math.hypot(rise[k][0] - rise[k - 1][0], rise[k][1] - rise[k - 1][1]));
-    const total = along[along.length - 1] || 1, last = total * 0.3;
-    // (A summit higher than such a route can climb is a little lower: the top is only so broad.)
-    for (let pass = 0; pass < 3 && top - F > 0.36 * (total - last) + 0.6 * last; pass++) {
-      m.peaks[0].height = round(m.peaks[0].height * ((0.36 * (total - last) + 0.6 * last) / (top - F)));
+    // (An easy grade as far as it will take it; if the summit stands higher than that, the upper part of the route, up to nearly
+    // half of it, is a stair in the rock, as steep as a stair may be.)
+    const total = along[along.length - 1] || 1, last = total * 0.45, EASY = 0.4, STAIR = 0.6;
+    // (A summit higher than even such a route can climb is a little lower: the top is only so broad.)
+    for (let pass = 0; pass < 10 && top - F > (EASY * (total - last) + STAIR * last) * 0.985; pass++) {
+      m.peaks[0].height = round(m.peaks[0].height * (((EASY * (total - last) + STAIR * last) * 0.97) / (top - F)));
       top = plain(cx, cz);
     }
     const height = top - F;
-    const easy = Math.max(height / total, Math.min(0.36, (height - 0.6 * last) / (total - last)));
+    const easy = Math.min(EASY, height / total);
     const split = easy * total >= height - 0.01 ? total : total - last;
-    const levelAt = (d: number) => (d <= split ? easy * d : easy * split + ((height - easy * split) * (d - split)) / Math.max(1, total - split));
+    // (Not at one even grade either: the crest it follows rises in swells, and once or twice it goes down a little before it goes on up.)
+    const swell = Math.min(2.4, total * 0.011), sw = rng.fork('climb swell').range(0, TAU);
+    const levelAt = (d: number) => (d <= split ? easy * d : easy * split + ((height - easy * split) * (d - split)) / Math.max(1, total - split)) + (d < split ? swell * Math.sin((d / split) * 2.2 * TAU + sw) * Math.sin((Math.PI * d) / split) ** 2 : 0);
     m.climb = [
       ...kept.slice(0, 2).map(([x, z]) => [x, z, F] as [number, number, number]),
       ...rise.map(([x, z], k) => [round(x), round(z), round(F + levelAt(along[k]))] as [number, number, number]),
@@ -545,6 +725,31 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       if (m.tors.some((t) => Math.hypot(t.x - x, t.z - z) < (t.r + r) * 0.8)) continue;
       m.tors.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
     }
+    // And teeth of rock along the ridges, beside the way and the climb: taller than they are broad, now on one side and now on the
+    // other, so that the path goes between and past them and the ridge has a skyline.
+    const beside = (line: [number, number, number][], from: number, to: number, apart: [number, number]) => {
+      let since = q.range(8, apart[1]), side = q.chance(0.5) ? 1 : -1;
+      for (let k = Math.max(1, from); k < Math.min(line.length - 1, to); k++) {
+        since -= Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]);
+        if (since > 0) continue;
+        since = q.range(apart[0], apart[1]);
+        side = q.chance(0.7) ? -side : side;
+        const dx = line[k + 1][0] - line[k - 1][0], dz = line[k + 1][1] - line[k - 1][1], l = Math.hypot(dx, dz) || 1;
+        // (About one time in three there is one on either hand, close in: a gate of rock, with the way going through and what lies beyond framed in it.)
+        const gate = q.chance(0.34);
+        for (const sd of gate ? [side, -side] : [side]) {
+          const r = q.range(1.5, 3.1), off = r * 1.3 + (gate ? q.range(2.45, 2.9) : q.range(2.6, 4.2)), x = line[k][0] - (dz / l) * sd * off, z = line[k][1] + (dx / l) * sd * off;
+          if (inside(m, x, z) < 0.5 || outside(m.level, x, z) < r + 8) continue;
+          if (all.some(([px, pz]) => Math.hypot(px - x, pz - z) < r * 1.3 + 2.4)) continue;
+          if ((m.landings ?? []).some((ld) => Math.hypot(ld.x - x, ld.z - z) < ld.r + r + 1.5) || (m.cairn && Math.hypot(m.cairn.x - x, m.cairn.z - z) < r + 7)) continue;
+          if (m.shelter && Math.hypot(m.shelter.x - x, m.shelter.z - z) < r + 6) continue;
+          if (m.gate && Math.hypot(m.gate.x - x, m.gate.z - z) < r + 7) continue;
+          m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 2.2 : 1.6, 3.1)) });
+        }
+      }
+    };
+    if (m.way) beside(m.way, m.way.findIndex(([x, z]) => onSpur(m, x, z).t > 0.12), m.way.length - 6, [20, 38]);
+    if (m.climb) beside(m.climb, Math.round(m.climb.length * 0.25), m.climb.length - 8, [18, 34]);
   }
 
   // Other peaks, far off, standing out of the cloud: a few near enough to show their faces, more
@@ -588,6 +793,21 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       m.needles.push({ x: round(x), z: round(z), r: round(r), height: round(Math.max(20, (F - m.deck) * q.range(0.6, 1.3))) });
     }
   }
+  // Sights: on crests of the country round about that stand near the cloud's level, a castle, a tower, a ruin, a monument;
+  // far apart, and each where the ground falls away from it, so that it stands against the cloud or the sky.
+  {
+    const q = rng.fork('sights'), kinds = ['castle', 'tower', 'ruin', 'monument', 'castle', 'tower'] as const;
+    m.sights = [];
+    for (let tries = 0, want = q.int(4, 6); tries < 1500 && m.sights.length < want; tries++) {
+      const a = q.range(0, TAU), d = q.range(650, 2700), x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d, y = countryAt(m, F, x, z).y;
+      if (y < m.deck - 12 || y > m.deck + 110) continue;
+      // (A crest: higher than the ground forty metres off on every side, and not by so much that it is a needle's point.)
+      let top = true, fallen = 0;
+      for (let k = 0; k < 8 && top; k++) { const h = countryAt(m, F, x + Math.cos(k * 0.785) * 40, z + Math.sin(k * 0.785) * 40).y; top = h < y + 1; fallen = Math.max(fallen, y - h); }
+      if (!top || fallen > 55 || m.sights.some((p) => Math.hypot(p.x - x, p.z - z) < 520)) continue;
+      m.sights.push({ kind: kinds[m.sights.length % kinds.length], x: round(x), z: round(z), y: round(y) });
+    }
+  }
   site.mountain = m;
 
   // The box that holds the top and the ridge.
@@ -596,7 +816,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const a = (k / N) * TAU, x = m.x + Math.cos(a) * r, z = m.z + Math.sin(a) * r;
     x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z);
   });
-  for (const [x, z] of [m.spur.from, m.spur.to]) { x0 = Math.min(x0, x - m.spur.width); x1 = Math.max(x1, x + m.spur.width); z0 = Math.min(z0, z - m.spur.width); z1 = Math.max(z1, z + m.spur.width); }
+  for (const [x, z] of m.spur.crest ?? [m.spur.from, m.spur.to]) { x0 = Math.min(x0, x - m.spur.width); x1 = Math.max(x1, x + m.spur.width); z0 = Math.min(z0, z - m.spur.width); z1 = Math.max(z1, z + m.spur.width); }
   site.grounds = { x0: round(x0), x1: round(x1), z0: round(z0), z1: round(z1) };
 }
 
@@ -727,7 +947,11 @@ function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
   leg([pts[steps][0], pts[steps][1], levels[steps]], [ex, ez, out], false);
   {
     const [tx, tz, ty] = climb[joins], n = Math.max(2, Math.round(Math.hypot(tx - ex, tz - ez) / 2));
-    const over = Array.from({ length: n + 1 }, (_, i) => [ex + ((tx - ex) * i) / n, ez + ((tz - ez) * i) / n] as [number, number]);
+    // (Not ruled straight across the top: it bows to one side, whichever keeps it clear of the edge, the house, the way and the climb.)
+    const d = Math.hypot(tx - ex, tz - ez) || 1, lineOf = (bow: number) => Array.from({ length: n + 1 }, (_, i) => { const t = i / n, off = bow * Math.sin(Math.PI * t); return [ex + (tx - ex) * t - ((tz - ez) / d) * off, ez + (tz - ez) * t + ((tx - ex) / d) * off] as [number, number]; });
+    const clearOf = (pts: [number, number][]) => pts.every(([x, z], i) => inside(m, x, z) > 6 && outside(m.level, x, z) > 6 && nearestOn(way, x, z, 8).off > 7 && (i > n - 5 || nearestOn(climb, x, z, 8).off > 6));
+    const want = Math.min(20, d * 0.22) * (rng.fork('bow').chance(0.5) ? 1 : -1);
+    const over = [want, -want, want / 2, -want / 2].map(lineOf).find(clearOf) ?? lineOf(0);
     line.push(...levelLine(over, surf, out, ty, 0.34));
   }
   // Which of it is under the rock: wherever the land stands well over a man's height above it. (Not its first stretch, down from the way.)

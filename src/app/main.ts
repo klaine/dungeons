@@ -580,7 +580,8 @@ async function start(): Promise<void> {
     // Haze: thin enough that the valley is clear across, thick enough that each range of hills
     // is paler than the one in front of it. A low sun has more air to shine through.
     // (Above a sea of cloud the air is thin and clear: the haze of the low country is under the cloud.)
-    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1) * (desc.deck ? 0.45 : 1), 320, floor);
+    // (And it lies thickest in the valleys far below, which is what makes them blue.)
+    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1) * (desc.deck ? 0.75 : 1), 320, desc.deck ? floor - 420 : floor);
     // Mist: a few metres deep on the valley floor, from a veil to a fog.
     u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
     u.uMistLow.value = desc.groundLow !== undefined ? desc.groundLow - 0.5 : -1e6;
@@ -634,7 +635,7 @@ async function start(): Promise<void> {
     const u = atmosphere.uniforms;
     u.uDeck.value.set(desc.deck.level, desc.deck.billow, 1, num('breaks', desc.deck.breaks ?? 0));
     // (The more broken, the lower the bar a stretch of it must clear to open.)
-    u.uDeckGap.value.set(0.66 - 0.2 * u.uDeck.value.w, 7, 0, 0);
+    u.uDeckGap.value.set(0.5 - 0.22 * u.uDeck.value.w, 7, 0.08 * u.uDeck.value.w, 0);
     const sh = desc.deck.shade;
     if (sh) { u.uShadeBody.value.set(sh.x, sh.z, sh.rTop, sh.top); u.uShadeFoot.value = sh.rFoot; u.uShadePeak.value.set(sh.px, sh.pz, sh.pr, sh.py); }
     u.uDeckSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.27);

@@ -104,7 +104,7 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     const site = generateSite(seed, 'mountain'), m = site.mountain!;
     if (!solve(site).ok) throw new Error('cannot be completed');
     const tally3 = (k: string) => peaks.set(k, (peaks.get(k) ?? 0) + 1);
-    for (const [name, line, most] of [['way', m.way ?? [], 0.42], ['climb', m.climb ?? [], 0.64]] as const) {
+    for (const [name, line, most] of [['way', m.way ?? [], 0.56], ['climb', m.climb ?? [], 0.74]] as const) {
       if (line.length < 2) throw new Error(`no ${name}`);
       for (const [x, z] of line) if (inside(m, x, z) < 3) throw new Error(`the ${name} off the top at ${x}, ${z}`);
       let steepest = 0;
@@ -124,7 +124,7 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
       if (Math.hypot(last[0] - top[0], last[1] - top[1]) > 0.5 || Math.abs(last[2] - top[2]) > 0.3) throw new Error('the gallery way does not end on the climb');
       for (let k = 1; k < g.line.length; k++) {
         const run = Math.hypot(g.line[k][0] - g.line[k - 1][0], g.line[k][1] - g.line[k - 1][1]), rise = Math.abs(g.line[k][2] - g.line[k - 1][2]);
-        if (run > 5 || rise > run * 0.6 + 0.15) throw new Error(`the gallery way breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+        if (run > 6 || rise > run * 0.6 + 0.15) throw new Error(`the gallery way breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
       }
       for (const [x, z] of g.line) if (inside(m, x, z) < -9) throw new Error(`the gallery way out in the air at ${x}, ${z}`);
       const tunnelled = g.under.reduce((sum, [a, b]) => sum + b - a + 1, 0) / g.line.length;
@@ -134,6 +134,15 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     tally3(`gallery=${!!g}`);
     const arrive = m.way![m.way!.length - 1];
     if (arrive[2] + 1.7 > m.deck) throw new Error(`the arrival is above the cloud (${arrive[2]} against ${m.deck})`);
+    // The way up the ridge is never ruled straight, and it goes downhill somewhere on the way up.
+    {
+      const w = m.way!, a = w[Math.round(w.length * 0.25)], b = w[w.length - 1];
+      let off = 0, down = 0;
+      for (let k = Math.round(w.length * 0.25); k < w.length; k++) { const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; off = Math.max(off, Math.abs((w[k][0] - a[0]) * (b[1] - a[1]) - (w[k][1] - a[1]) * (b[0] - a[0])) / l); }
+      for (let k = w.length - 1; k > 0; k--) down += Math.max(0, w[k][2] - w[k - 1][2]);
+      if (off < 6) throw new Error(`the way down the ridge is nearly straight (${off.toFixed(1)} m out of line)`);
+      tally3(`ridge downhill=${Math.round(down / 5) * 5}m`);
+    }
     tally3(`season=${site.setting.season}`);
     tally3(`peaks=${m.peaks.length}`);
     tally3(`shelter=${!!m.shelter}`);
