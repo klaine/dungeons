@@ -19,7 +19,9 @@ const { chromium } = require('playwright');
         // Start somewhere inside, aim at a point well beyond the edge (or at the cliff by the house).
         // Start somewhere inside the valley: a place in its box is tried until one is found that is in the valley itself.
         let sx = 0, sz = 0;
-        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = (site.island ? g.z0 + 8 : a.z1 + 4) + rnd() * (g.z1 - (site.island ? g.z0 + 8 : a.z1) - 12); if (!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) break; }
+        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = (site.island ? g.z0 + 8 : a.z1 + 4) + rnd() * (g.z1 - (site.island ? g.z0 + 8 : a.z1) - 12); const gy = groundAt(sx, sz) + 1, fenced = player.blockers.some((b) => b.active && sx > b.min.x && sx < b.max.x && sz > b.min.z && sz < b.max.z && gy > b.min.y && gy < b.max.y);
+          // (Not inside one of the fences that keep the player off ground nobody can reach: nobody starts there.)
+          if ((!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) && !fenced) break; }
         const ang = (run / 36) * Math.PI * 2;
         // (An island is driven at from further: the coast may be two hundred metres from its middle.)
         const reach = site.island ? 320 : 140, tx = cx + Math.sin(ang) * reach, tz = cz + Math.cos(ang) * reach;
@@ -59,8 +61,8 @@ const { chromium } = require('playwright');
           // From the end of the beach, along the strand at the foot of the cliff, to the mouth, and in: as the builder lays the strand.
           const c = site.island.cove, o = site.island, head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(cave.z - c.z, cave.x - c.x);
           let turn = (at - head) % (Math.PI * 2); if (turn > Math.PI) turn -= Math.PI * 2; if (turn < -Math.PI) turn += Math.PI * 2;
-          const end = head + Math.sign(turn) * c.beach * 0.85, bx = c.x + Math.cos(end) * (c.r - 1), bz = c.z + Math.sin(end) * (c.r - 1);
-          player.place({ x: bx, y: groundAt(bx, bz) + 1.8, z: bz }, 0);
+          const end = head + Math.sign(turn) * c.beach * 0.85, stairway = o.landing === 'stair', bx = stairway ? o.jetty.from[0] : c.x + Math.cos(end) * (c.r - 1), bz = stairway ? o.jetty.from[1] : c.z + Math.sin(end) * (c.r - 1);
+          player.place({ x: bx, y: (stairway ? o.sea + 1.35 : groundAt(bx, bz)) + 1.8, z: bz }, 0);
           const legs = [[cave.x, cave.z], [f.at.x, f.at.z]];
           let leg = 0;
           for (let i = 0; i < 3000 && !f.taken; i++) {

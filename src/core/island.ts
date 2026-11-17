@@ -187,7 +187,8 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     const end = head + Math.sign(turnBetween(head, at)) * c.beach * 0.85;
     const [bx, bz] = o.landing === 'stair' ? o.jetty.from : [c.x + Math.cos(end) * (c.r - 1), c.z + Math.sin(end) * (c.r - 1)];
     const dx = sc.x - bx, dz = sc.z - bz, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - bx) * dx + (z - bz) * dz) / l2));
-    const off = Math.hypot(x - bx - dx * t, z - bz - dz * t), strand = o.sea + 0.55 + 0.25 * t;
+    // (From a quay it starts at the quay's own level, a step lower than its deck, and falls to the cave's floor.)
+    const off = Math.hypot(x - bx - dx * t, z - bz - dz * t), strand = o.landing === 'stair' ? o.sea + 1.2 - 0.4 * t : o.sea + 0.55 + 0.25 * t;
     if (off < 5.5 && y < strand) y += (strand - y) * (1 - smooth((off - 2.2) / 3.3));
   }
   // The stair: cut into the face and built out where the face falls away, to its own level, with the rock standing sheer behind it.
