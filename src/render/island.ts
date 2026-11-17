@@ -399,7 +399,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
     area, cell: SHEET, seed: s1, stone: tint, turfScale: 2.3, rockScale: 0.4, bare: 0.62,
     colour: (x, z) => { const y = ground(x, z), c = turfAt(x, z, y); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; },
     rock: (tone) => rockColour(tone * 0.8),
-    skip: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return carved(mx, mz) || insideOuter(mx, mz); },
+    // (Where the sea bed lies deeper than the rock is carved, under deep water, the sheet is laid there too, so there is no hole in the bottom of the sea.)
+    skip: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return (carved(mx, mz) && Math.max(ground(c.x0, c.z0), ground(c.x1, c.z0), ground(c.x0, c.z1), ground(c.x1, c.z1)) > sea - 4.6) || insideOuter(mx, mz); },
     // The ground is drawn to the outer walls of the house and goes no further, so no gap is left to look down.
     warp: (x, z) => {
       if (!insideOuter(x, z)) return [x, z];
@@ -465,7 +466,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && reach[jj * nx + ii]) touches = true; }
       if (!touches) continue;
       const x = gx0 + i * C, z = gz0 + j * C;
-      const floor = caveAir && caveAir(x, caveFloor + 1, z) > -1.5 ? caveFloor + 8 : sea - 8;
+      // (Over the cave, where the rock stands above its roof, the fence begins above the roof; anywhere else, out over the water included, it goes down below the sea bed.)
+      const floor = caveAir && caveAir(x, caveFloor + 1, z) > -1.5 && ground(x, z) > caveFloor + 7 ? caveFloor + 8 : Math.min(sea - 8, ground(x, z) - 4);
       b.fences.push({ min: V(x - C / 2, floor, z - C / 2), max: V(x + C / 2, F + 90, z + C / 2) });
     }
   }

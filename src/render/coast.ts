@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
+import { onStair } from '../core/island';
 import { Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
@@ -101,8 +102,9 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (const a of [-0.22, 0.22]) box(at, 'metal', a - 0.025, a + 0.025, sea - 1.2, deck + 0.9, len + 0.02, len + 0.07, [0.12, 0.07, 0.04]);
     for (let y = sea - 1; y < deck + 0.8; y += 0.3) box(at, 'metal', -0.22, 0.22, y, y + 0.03, len + 0.03, len + 0.06, [0.12, 0.07, 0.04]);
     // Nobody steps off the jetty into the water: the boxes nobody sees, along both sides beyond the beach and across the end.
-    const fence = (a: number, f: number) => { const p = at(a, 0, f); c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
-    for (let f = 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
+    const fence = (a: number, f: number) => { const p = at(a, 0, f); if (onStair(o, p[0], p[2]).off < 1.7) return; c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
+    // (From a beach the first strides are over sand; from the foot of a cliff the water is deep from the first.)
+    for (let f = o.landing === 'stair' ? 0.2 : 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
     for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
   }
 
