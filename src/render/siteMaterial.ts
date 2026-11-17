@@ -281,10 +281,11 @@ export function makePropMaterial(o: { color: Color; roughness: number; metalness
  * Shared by all rock. `uShaftTop`, `uShaftUp` and `uShaftSun` are a shaft of sunlight let down into a
  * hall under the hill: a point on its middle line and how broad it is, the way up it, and the
  * sun's light. Rock that was told it stands in that light draws its edge itself, point by point
- * of the picture, so the round of light on the floor is round.
+ * of the picture, so the round of light on the floor is round. `uRockFacet` is how far this stone
+ * breaks in flat faces, 0 to 1: it is how much each face is lit as the flat plane it is.
  */
-export const rockUniforms: { uRockBroad: { value: number }; uShaftTop: { value: Vector4 }; uShaftUp: { value: Vector3 }; uShaftSun: { value: Vector3 } } = {
-  uRockBroad: uniform(0.8) as N, uShaftTop: uniform(new Vector4()) as N, uShaftUp: uniform(new Vector3(0, 1, 0)) as N, uShaftSun: uniform(new Vector3()) as N,
+export const rockUniforms: { uRockBroad: { value: number }; uRockFacet: { value: number }; uShaftTop: { value: Vector4 }; uShaftUp: { value: Vector3 }; uShaftSun: { value: Vector3 } } = {
+  uRockBroad: uniform(0.8) as N, uRockFacet: uniform(0) as N, uShaftTop: uniform(new Vector4()) as N, uShaftUp: uniform(new Vector3(0, 1, 0)) as N, uShaftSun: uniform(new Vector3()) as N,
 };
 
 /**
@@ -301,6 +302,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const f = fieldOf(), bk = bakeOf();
   const P: N = positionWorld, rockN: N = normalize(normalWorldGeometry);
   const scale = o.scale ?? 0.3, bump = o.normalScale ?? 1.4, dip = o.dip ?? [0.05, 0.03];
+  const uFacet = rockUniforms.uRockFacet as N;
   const uBroad = rockUniforms.uRockBroad as N, uShaftTop = rockUniforms.uShaftTop as N, uShaftUp = rockUniforms.uShaftUp as N, uShaftSun = rockUniforms.uShaftSun as N;
   const w0: N = pow(abs(rockN), vec3(5));
   const w: N = w0.div(w0.x.add(w0.y).add(w0.z)).toVar();
@@ -313,6 +315,15 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const tex: N = read(base.map, ux).mul(w.x).add(read(base.map, uy).mul(w.y)).add(read(base.map, uz).mul(w.z)).toVar();
   // The same stone seen from far off: patches some metres across.
   const farTex: N = read(base.map, vec2(P.x.add(P.z.mul(0.71)), P.y.mul(0.9).add(P.z.mul(0.37))).mul(scale * 0.11), blur.mul(0.6)).toVar();
+  // Stone that breaks in flat faces is lit face by face. The plane of each face is read from how the
+  // surface slopes across the picture, turned to face outward, and mixed into the normal; where
+  // it parts company with the smooth normal there is an edge, and an edge catches the light. Both
+  // fade out with distance, where a pixel covers many faces and the plane it reads is only noise.
+  const flat0: N = normalize(dFdx(P).cross(dFdy(P)));
+  const flat: N = select(dot(flat0, rockN).lessThan(0), flat0.negate(), flat0);
+  const near: N = one(smoothstep(45, 120, length(positionView)));
+  const facetW: N = uFacet.mul(near);
+  const edge: N = one(dot(flat, rockN)).mul(facetW);
   const steep = one(smoothstep(0.4, 0.75, abs(rockN.y)));
   let rock: N = tex.rgb.mul(mix(vec3(0.8, 0.79, 0.8), vec3(1.2, 1.17, 1.1), smoothstep(0.25, 0.75, farTex.a)));
   // Thin beds within the thick ones: bands a hand or two deep, gathered into broader ones, each
@@ -336,6 +347,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const mossTex: N = mix(texture(moss.map, mossUv), texture(moss.map, uy.mul(5.5)), w.y);
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy: N = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(tex.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1)).toVar();
+  rock = rock.mul(edge.mul(0.7).add(1));
   m.colorNode = vec4(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), 1);
   const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
   m.roughnessNode = mix(rough, 0.97, mossy);
@@ -352,7 +364,8 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const bx: N = vec3(tx.xy.mul(lift).add(rockN.zy), abs(tx.z).mul(rockN.x));
   const by: N = vec3(ty.xy.mul(lift).add(rockN.xz), abs(ty.z).mul(rockN.y));
   const bz: N = vec3(tz.xy.mul(lift).add(rockN.xy), abs(tz.z).mul(rockN.z));
-  const bent: N = normalize(bx.zyx.mul(w.x).add(by.xzy.mul(w.y)).add(bz.xyz.mul(w.z))).toVar();
+  const bentSmooth: N = normalize(bx.zyx.mul(w.x).add(by.xzy.mul(w.y)).add(bz.xyz.mul(w.z)));
+  const bent: N = normalize(mix(bentSmooth, flat, facetW.mul(0.2))).toVar();
   m.normalNode = transformNormalToView(bent);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
