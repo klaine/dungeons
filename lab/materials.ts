@@ -497,6 +497,8 @@ async function start(): Promise<void> {
     const out = el('output', row);
     const show = () => { const v = get(); input.value = String(v); out.textContent = step >= 1 ? v.toFixed(0) : v.toFixed(2); };
     input.addEventListener('input', () => { set(Number(input.value)); remember(); show(); });
+    // (Let go of, a slider gives the keyboard back, so that the keys move the camera and not the slider.)
+    input.addEventListener('change', () => input.blur());
     refreshers.push(show);
     return show;
   };
@@ -505,7 +507,7 @@ async function start(): Promise<void> {
     el('label', row, label);
     const select = el('select', row);
     for (const o of options) el('option', select, o).value = o;
-    select.addEventListener('change', () => { set(select.value as T); remember(); reflectPanel(); });
+    select.addEventListener('change', () => { set(select.value as T); remember(); reflectPanel(); select.blur(); });
     refreshers.push(() => { select.value = get(); });
   };
   const checks = (items: [string, () => boolean, (v: boolean) => void, string?][]) => {
@@ -514,7 +516,7 @@ async function start(): Promise<void> {
       const l = el('label', row); if (title) l.title = title;
       const input = el('input', l); input.type = 'checkbox';
       l.appendChild(document.createTextNode(label));
-      input.addEventListener('change', () => { set(input.checked); remember(); reflectPanel(); });
+      input.addEventListener('change', () => { set(input.checked); remember(); reflectPanel(); input.blur(); });
       refreshers.push(() => { input.checked = get(); });
     }
   };
@@ -584,10 +586,30 @@ async function start(): Promise<void> {
 
   heading('Compare');
   buttons([['K Keep picture', keep, 'Keeps the picture as it is now, to wipe against the live one after a change'], ['X Let go', letGo], ['B Back to its view', backToKept]]);
-  el('p', panel, 'Saving siteMaterial.ts, vegetation.ts or textures.ts swaps the new materials in where they stand. Double click a point to turn about it. P hides this panel.').className = 'note';
+  el('p', panel, 'Saving siteMaterial.ts, vegetation.ts or textures.ts swaps the new materials in where they stand. W A S D fly, Space and Q rise and sink, Shift goes faster. Double click a point to turn about it. P hides this panel.').className = 'note';
 
+  // Moving about: W and S go the way the camera looks and back, A and D to either side, Space up and Q down; Shift goes four times
+  // as fast. The camera and what it turns about move together, so dragging afterwards turns about the same thing as before.
+  const held = new Set<string>();
+  const MOVES = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyQ'];
+  window.addEventListener('keyup', (e) => { if (held.delete(e.code) && !MOVES.some((c) => held.has(c))) keepCamera(); if (e.key === 'Shift') held.delete('Shift'); });
+  window.addEventListener('blur', () => held.clear());
+  const fly = (dt: number) => {
+    if (!MOVES.some((c) => held.has(c))) return;
+    const ahead = camera.getWorldDirection(new Vector3()), aside = new Vector3().crossVectors(ahead, camera.up).normalize();
+    const go = new Vector3()
+      .addScaledVector(ahead, (held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0))
+      .addScaledVector(aside, (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0));
+    go.y += (held.has('Space') ? 1 : 0) - (held.has('KeyQ') ? 1 : 0);
+    if (go.lengthSq() === 0) return;
+    go.normalize().multiplyScalar(7 * (held.has('Shift') ? 4 : 1) * dt);
+    camera.position.add(go);
+    controls.target.add(go);
+  };
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Shift') held.add('Shift');
+    if (MOVES.includes(e.code)) { held.add(e.code); e.preventDefault(); return; }
     const k = e.key.toLowerCase();
     if (view(k)) return;
     if (k === 'g') standUp();
@@ -659,6 +681,7 @@ async function start(): Promise<void> {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     fps += (1 / Math.max(dt, 1e-4) - fps) * 0.05;
+    fly(dt);
     controls.update();
     VG.vegetationUniforms.uTime.value = still ? 0 : now / 1000;
     VG.cullCards(cardMeshes, camera.position);
