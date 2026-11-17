@@ -488,9 +488,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
       level: sea, x: o.x, z: o.z, bed,
       // Where the swell breaks at the foot of a cliff, every few strides round the coast that is not beach, and round the stacks.
       spray: [
-        ...Array.from({ length: 150 }, (_, k) => {
-          const a = (k / 150) * Math.PI * 2, r = coastAt(o, a) + 3.5, x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
-          return { x, z, nx: Math.cos(a), nz: Math.sin(a), ok: beachness(o, x, z) < 0.2 && inland(o, x, z) < -1 && ground(x, z) < sea - 0.3 && ground(x - Math.cos(a) * 4, z - Math.sin(a) * 4) > sea + 2 };
+        ...Array.from({ length: 240 }, (_, k) => {
+          const a = (k / 240) * Math.PI * 2, r = coastAt(o, a) + (k % 2 ? 3 : 5.5), x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
+          return { x, z, nx: Math.cos(a), nz: Math.sin(a), ok: beachness(o, x, z) < 0.2 && inland(o, x, z) < -1 && ground(x, z) < sea - 0.2 && ground(x - Math.cos(a) * 5, z - Math.sin(a) * 5) > sea + 1.5 };
         }).filter((q) => q.ok).map(({ x, z, nx, nz }) => ({ x, z, nx, nz })),
         ...o.stacks.flatMap((q) => [0, 1, 2, 3].map((k) => ({ x: q.x + Math.cos(k * 1.57) * (q.r + 1.5), z: q.z + Math.sin(k * 1.57) * (q.r + 1.5), nx: Math.cos(k * 1.57), nz: Math.sin(k * 1.57) }))),
       ],
