@@ -187,6 +187,16 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       const toMiddle = Math.hypot(island.x - c.x, island.z - c.z) || 1;
       const headX = c.x + ((island.x - c.x) / toMiddle) * r, headZ = c.z + ((island.z - c.z) / toMiddle) * r;
       const room = outside(level, headX, headZ);
+      // Round its rim, except at its mouth, the rock between it and the open sea is never a thin fin: the cliffs would be carved through.
+      const half = Math.asin(Math.min(1, c.mouth / 2 / r)) + 0.45;
+      let thin = false;
+      for (let k = 0; k < 48 && !thin; k++) {
+        const t = (k / 48) * TAU;
+        if (Math.abs(turnBetween(t, out)) < half) continue;
+        const px = c.x + Math.cos(t) * (r + 14), pz = c.z + Math.sin(t) * (r + 14);
+        thin = coastAt(island, Math.atan2(pz - island.z, px - island.x)) < Math.hypot(px - island.x, pz - island.z);
+      }
+      if (thin) continue;
       if (room < 52 || back < r * 0.5 + 20 || coastAt(island, Math.atan2(headZ - island.z, headX - island.x)) - Math.hypot(headX - island.x, headZ - island.z) < 10) continue;
       island.cove = c;
       island.combe = round(Math.min(coving.range(55, 80), room - 10));
