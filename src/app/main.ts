@@ -219,6 +219,7 @@ async function start(): Promise<void> {
   // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
   if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
   if (site) rockUniforms.uRockFacet.value = ROCK[site.setting.stone].sharp ** 2;
+  if (site) rockUniforms.uRockWorn.value = ROCK[site.setting.stone].worn;
   // Sound starts with the first click or key, which is the earliest a browser allows.
   const sound = new Sound();
   const muteButton = document.getElementById('mute') as HTMLButtonElement;

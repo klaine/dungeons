@@ -39,7 +39,7 @@ interface State {
   /** Moss on rock and bark, as a multiple of what the geometry carries; damp added to rock and ground, 0 to 1. */
   moss: number; damp: number;
   /** How far rock is lit face by face, and how broad its faces are, if not what the stone itself gives. */
-  facet: number | null; broad: number | null;
+  facet: number | null; broad: number | null; worn: number | null;
   tex: number;
   clay: boolean;
   show: { rock: boolean; ground: boolean; wood: boolean; leaves: boolean; grass: boolean };
@@ -49,7 +49,7 @@ interface State {
 }
 const DEFAULTS: State = {
   stone: 'greystone', season: 'summer', hour: 'morning', bearing: null, height: null, exposure: null, air: true, haze: 0.5, wind: 1,
-  moss: 1, damp: 0, facet: null, broad: null, tex: 1024, clay: false, show: { rock: true, ground: true, wood: true, leaves: true, grass: true },
+  moss: 1, damp: 0, facet: null, broad: null, worn: null, tex: 1024, clay: false, show: { rock: true, ground: true, wood: true, leaves: true, grass: true },
   cam: null, fov: 55, panel: true,
 };
 const KEY = 'dungeons.lab.materials';
@@ -282,6 +282,7 @@ async function start(): Promise<void> {
     SM.siteUniforms.uBake.value = 1;
     SM.rockUniforms.uRockBroad.value = state.broad ?? 0.35 + 1.1 * sharp;
     SM.rockUniforms.uRockFacet.value = state.facet ?? sharp ** 2;
+    SM.rockUniforms.uRockWorn.value = state.worn ?? ROCK[state.stone].worn;
     SM.rockUniforms.uShaftTop.value.set(0, 0, 0, 0);
     VG.vegetationUniforms.uWind.value = state.wind;
     const S = SKIES[state.hour], mean = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
@@ -292,7 +293,8 @@ async function start(): Promise<void> {
     for (const s of solids) {
       const a = s.mesh.geometry.getAttribute('aField') as BufferAttribute, to = a.array as Float32Array;
       for (let i = 0; i < to.length; i += 4) {
-        if (s.name !== 'turf') to[i] = Math.min(1, s.field[i] * state.moss);
+        // (Not held to 1: out here, where nothing is baked, the material lets moss grow only a third as readily as the field asks, and the slider must be able to ask for more.)
+        if (s.name !== 'turf') to[i] = s.field[i] * state.moss;
         to[i + 1] = Math.min(1, s.field[i + 1] + state.damp);
       }
       a.needsUpdate = true;
@@ -302,9 +304,11 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ views
   const VIEWS: { key: string; name: string; at: () => { from: number[]; to: number[]; fov?: number } }[] = [
     { key: '1', name: 'Stage', at: () => ({ from: [6, 9, 40], to: [-4, 3.5, -4] }) },
-    { key: '2', name: 'Cliff', at: () => ({ from: [5, 4.5, 2], to: [-1, 5.2, -23] }) },
-    { key: '3', name: 'Rock close', at: () => ({ from: [-3.5, 1.9, -18.2], to: [0.5, 2.3, -22.5] }) },
-    { key: '4', name: 'Cliff far', at: () => ({ from: [60, 16, 230], to: [0, 5, -23], fov: 9 }) },
+    { key: 'm', name: 'Mountain', at: () => ({ from: [16, 3.2, 62], to: [4, 30, -100] }) },
+    { key: 'n', name: 'Face', at: () => ({ from: [34, 14, -70], to: [6, 50, -146] }) },
+    { key: '2', name: 'Cliff', at: () => ({ from: [7, 4, 9], to: [-1, 8, -23] }) },
+    { key: '3', name: 'Rock close', at: () => ({ from: [-7.5, 1.9, -17], to: [-3, 2.6, -23] }) },
+    { key: '4', name: 'Cliff far', at: () => ({ from: [60, 16, 230], to: [0, 8, -23], fov: 10 }) },
     { key: '5', name: 'Boulders', at: () => ({ from: [4.2, 1.7, -3.6], to: stage.spots.boulders }) },
     { key: '6', name: 'Track', at: () => { const [x, y, z] = stage.spots.track; return { from: [x + 0.3, y + 1.7, z + 9], to: [x - 0.4, y + 0.2, z - 2] }; } },
     { key: '7', name: 'Ground close', at: () => { const [x, y, z] = stage.spots.track; return { from: [x - 2.2, y + 1.15, z + 1.2], to: [x - 0.7, y, z - 0.6] }; } },
@@ -442,10 +446,11 @@ async function start(): Promise<void> {
   slider('Haze', 0, 1, 0.01, () => state.haze, (v) => { state.haze = v; light(); });
 
   heading('Rock');
-  choice<Stone>('Stone', Object.keys(ROCK) as Stone[], () => state.stone, (v) => { state.stone = v; state.facet = state.broad = null; redo('Stage carved again', () => { build(); lightFromSky(); setFields(); dress(); light(); setUniforms(); }); });
+  choice<Stone>('Stone', Object.keys(ROCK) as Stone[], () => state.stone, (v) => { state.stone = v; state.facet = state.broad = state.worn = null; redo('Stage carved again', () => { build(); lightFromSky(); setFields(); dress(); light(); setUniforms(); }); });
   slider('Flat faces', 0, 1, 0.01, () => SM.rockUniforms.uRockFacet.value, (v) => { state.facet = v; setUniforms(); }, 'uRockFacet: how far each face is lit as the flat plane it is. Each stone has its own; choosing a stone puts it back.');
   slider('Broad faces', 0, 2, 0.01, () => SM.rockUniforms.uRockBroad.value, (v) => { state.broad = v; setUniforms(); }, 'uRockBroad: the strength of the faces a stride across, from the normal map read large');
-  slider('Moss', 0, 2.5, 0.01, () => state.moss, (v) => { state.moss = v; setFields(); }, 'Multiplies the moss the rock and bark carry');
+  slider('Water-worn', 0, 1, 0.01, () => SM.rockUniforms.uRockWorn.value, (v) => { state.worn = v; setUniforms(); }, 'uRockWorn: grooves eaten back along the planes between beds, and runnels down the faces. Limestone has it; choosing a stone puts it back.');
+  slider('Moss', 0, 4, 0.01, () => state.moss, (v) => { state.moss = v; setFields(); }, 'Multiplies the moss the rock and bark carry');
   slider('Damp', 0, 1, 0.01, () => state.damp, (v) => { state.damp = v; setFields(); }, 'Added to the wet that rock and ground carry: after rain');
 
   heading('What grows');

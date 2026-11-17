@@ -23,7 +23,7 @@ import { TextureSet } from './textures';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, mix,
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
   normalMap, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
@@ -282,10 +282,11 @@ export function makePropMaterial(o: { color: Color; roughness: number; metalness
  * hall under the hill: a point on its middle line and how broad it is, the way up it, and the
  * sun's light. Rock that was told it stands in that light draws its edge itself, point by point
  * of the picture, so the round of light on the floor is round. `uRockFacet` is how far this stone
- * breaks in flat faces, 0 to 1: it is how much each face is lit as the flat plane it is.
+ * breaks in flat faces, 0 to 1: it is how much each face is lit as the flat plane it is. `uRockWorn`
+ * is how far water has worked it, 0 to 1: the planes between its beds eaten back, runnels down its faces.
  */
-export const rockUniforms: { uRockBroad: { value: number }; uRockFacet: { value: number }; uShaftTop: { value: Vector4 }; uShaftUp: { value: Vector3 }; uShaftSun: { value: Vector3 } } = {
-  uRockBroad: uniform(0.8) as N, uRockFacet: uniform(0) as N, uShaftTop: uniform(new Vector4()) as N, uShaftUp: uniform(new Vector3(0, 1, 0)) as N, uShaftSun: uniform(new Vector3()) as N,
+export const rockUniforms: { uRockBroad: { value: number }; uRockFacet: { value: number }; uRockWorn: { value: number }; uShaftTop: { value: Vector4 }; uShaftUp: { value: Vector3 }; uShaftSun: { value: Vector3 } } = {
+  uRockBroad: uniform(0.8) as N, uRockFacet: uniform(0) as N, uRockWorn: uniform(0) as N, uShaftTop: uniform(new Vector4()) as N, uShaftUp: uniform(new Vector3(0, 1, 0)) as N, uShaftSun: uniform(new Vector3()) as N,
 };
 
 /**
@@ -302,7 +303,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const f = fieldOf(), bk = bakeOf();
   const P: N = positionWorld, rockN: N = normalize(normalWorldGeometry);
   const scale = o.scale ?? 0.3, bump = o.normalScale ?? 1.4, dip = o.dip ?? [0.05, 0.03];
-  const uFacet = rockUniforms.uRockFacet as N;
+  const uFacet = rockUniforms.uRockFacet as N, uWorn = rockUniforms.uRockWorn as N;
   const uBroad = rockUniforms.uRockBroad as N, uShaftTop = rockUniforms.uShaftTop as N, uShaftUp = rockUniforms.uShaftUp as N, uShaftSun = rockUniforms.uShaftSun as N;
   const w0: N = pow(abs(rockN), vec3(5));
   const w: N = w0.div(w0.x.add(w0.y).add(w0.z)).toVar();
@@ -329,18 +330,48 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // Thin beds within the thick ones: bands a hand or two deep, gathered into broader ones, each
   // its own shade, with a dark line where one lies on the next. They fade out with distance,
   // before they could shimmer.
-  const bedAt: N = P.y.add(dot(P.xz, vec2(dip[0], dip[1]))).mul(3.3).add(farTex.r.sub(0.5).mul(4)).toVar();
-  const beds = f.w.mul(steep).mul(one(smoothstep(0.2, 0.55, fwidth(bedAt))));
-  const bedIn = fract(bedAt);
+  // No two are alike. Their thickness is unequal (the count of them runs ahead of the height in
+  // some stretches and falls behind in others, as in `Strata`); the plane between two is an open
+  // dark line here, a hair there, and often nothing at all; and a line that is open does not run
+  // on for ever, but closes and opens again along the face. Ruled lines are what gives a drawn cliff away.
+  // (They roll, slowly: by the same stone read from far off, and read blurred, or its grain would make every line between beds a scribble.)
+  const roll: N = (texture(base.map, vec2(P.x.add(P.z.mul(0.71)), P.y.mul(0.9).add(P.z.mul(0.37))).mul(scale * 0.11)) as N).bias(max(blur, 4.5)).toVar();
+  const bed0: N = P.y.add(dot(P.xz, vec2(dip[0], dip[1]))).mul(3.3).add(roll.r.sub(0.5).mul(5)).toVar();
+  const bedAt: N = bed0.add(sin(bed0.mul(1.9).add(roll.g.mul(5))).mul(0.3)).add(sin(bed0.mul(0.83).add(1.3)).mul(0.26)).toVar();
+  // (Water-worn stone is not bedded alike all over: stretches of it are massive, one pale face with hardly a line across it.)
+  const beds: N = f.w.mul(steep).mul(one(smoothstep(0.2, 0.55, fwidth(bedAt)))).mul(mix(1, smoothstep(0.3, 0.6, farTex.a), uWorn.mul(0.75))).toVar();
+  const bedIn: N = fract(bedAt).toVar();
   const bedTone = mix(0.72, 1.14, fract(sin(floor(bedAt).mul(91.7)).mul(43758.5))).mul(mix(0.86, 1.1, fract(sin(floor(bedAt.mul(0.27)).mul(57.3)).mul(24634.6))));
-  const bedLine = smoothstep(0, 0.14, bedIn).mul(sstep(1.0, 0.9, bedIn));
-  rock = rock.mul(mix(1, bedTone.mul(mix(0.62, 1, bedLine)), beds));
+  // The plane nearest this point, and three numbers of its own: how open it is, how wide, and where along the face it is shut.
+  const plane: N = floor(bedAt.add(0.5)).toVar();
+  const planeOpen: N = fract(sin(plane.mul(57.3)).mul(24634.6)).toVar();
+  const shut = farNoise(vec2(P.x.add(P.z.mul(0.6)).mul(0.3), plane.mul(7.13)));
+  const open: N = smoothstep(0.4, 0.8, planeOpen).mul(smoothstep(0.42, 0.6, shut)).toVar();
+  const planeWide: N = fract(planeOpen.mul(7.31)).toVar();
+  const fromPlane: N = min(bedIn, one(bedIn)).div(mix(0.1, 0.3, planeWide)).toVar();
+  const bedLine: N = mix(1, smoothstep(0, 1, fromPlane), open).toVar();
+  // Where water has worked the stone the open planes are eaten back into grooves a hand deep: darker, and with a lip above and below that the light catches.
+  rock = rock.mul(mix(1, bedTone.mul(mix(mix(0.62, mix(0.86, 0.5, planeWide), uWorn), 1, bedLine)), beds));
+  // How steeply the surface runs into the groove, signed: up above the plane, down below it.
+  const lip: N = fromPlane.mul(one(fromPlane)).mul(4).mul(step(fromPlane, 1)).mul(select(bedIn.lessThan(0.5), 1, -1)).mul(open).mul(beds).mul(uWorn).toVar();
   // The pits and cracks of the texture hold less of the sky's light.
-  const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(0.65, 1, bedLine), beds)).toVar();
+  const ao: N = mix(0.45, 1, smoothstep(0.08, 0.5, tex.a)).mul(mix(1, mix(mix(0.65, mix(0.9, 0.5, planeWide), uWorn), 1, bedLine), beds)).toVar();
   // Where water runs down a face it leaves dark streaks, long and narrow.
   const streak = (texture(base.map, vec2(P.z.mul(0.37), P.y.mul(0.03))) as N).a.mul(w.x).add((texture(base.map, vec2(P.x.mul(0.37), P.y.mul(0.03).add(0.5))) as N).a.mul(w.z));
   const stain: N = smoothstep(0.5, 0.72, streak).mul(steep).mul(f.w.mul(0.65).add(0.35)).toVar();
-  rock = rock.mul(mix(vec3(1), vec3(0.56, 0.53, 0.5), stain.mul(0.75)));
+  // (On pale water-worn stone the streaks are a grey film, not a dark one, and in places they run rust-coloured from iron in the rock.)
+  const rust: N = smoothstep(0.62, 0.8, farTex.r.add(farTex.a).mul(0.5).add(streak.sub(0.5).mul(0.5))).mul(steep).mul(uWorn).toVar();
+  rock = rock.mul(mix(vec3(1), mix(vec3(0.56, 0.53, 0.5), vec3(0.7, 0.7, 0.72), uWorn), stain.mul(mix(0.75, 0.6, uWorn))));
+  rock = rock.mul(mix(vec3(1), vec3(1.1, 0.83, 0.6), rust.mul(0.45)));
+  // Water-worn stone is also washed pale between the streaks, where the rain runs clean, and is
+  // cut into runnels: narrow flutes straight down the face, a hand or two apart. They are drawn
+  // as light and shade only, from the same texture read tall and narrow, and fade with distance.
+  rock = rock.mul(mix(1, 1.2, smoothstep(0.5, 0.28, streak).mul(steep).mul(uWorn)));
+  const fluteNear: N = one(smoothstep(25, 80, length(positionView))).mul(steep).mul(uWorn).toVar();
+  const flute = (s: N, shift: number): N => (texture(base.map, vec2(s.mul(0.55), P.y.mul(0.045).add(shift))) as N).a;
+  const fluteX: N = flute(P.z.add(0.05), 0).sub(flute(P.z.sub(0.05), 0)).mul(w.x).toVar(), fluteZ: N = flute(P.x.add(0.05), 0.5).sub(flute(P.x.sub(0.05), 0.5)).mul(w.z).toVar();
+  const runnel = flute(P.z, 0).mul(w.x).add(flute(P.x, 0.5).mul(w.z));
+  rock = rock.mul(mix(1, mix(0.86, 1.06, smoothstep(0.3, 0.7, runnel)), fluteNear.mul(w.x.add(w.z))));
   const wet: N = max(f.y, stain.mul(0.25)).toVar();
   // Moss: from above on what is level, from the side on what is not.
   const mossUv = select(w.x.greaterThan(w.z), ux, uz).mul(5.5);
@@ -355,17 +386,23 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // It is read twice: as it is, for the grain and the small breaks, and four times larger, for
   // faces a stride or two across, which the carved surface is too coarse to hold an edge on.
   const lift = one(mossy.mul(0.6)).mul(bump);
+  const closeTo: N = one(smoothstep(3, 13, length(positionView))).mul(0.8).toVar();
   const grain = (at: N, broad: N): N => {
     const t: N = read(base.normalMap, at).xyz.mul(2).sub(1);
     const wide: N = (texture(base.normalMap, at.mul(0.23).add(0.37)) as N).xy.mul(2).sub(1).mul(broad);
-    return vec3(t.xy.add(wide), t.z);
+    // And once more, much smaller, for whoever stands within reach of it: the pits and the grain of a hand's breadth of stone.
+    const fine: N = (texture(base.normalMap, at.mul(3.7).add(0.19)) as N).xy.mul(2).sub(1).mul(closeTo);
+    return vec3(t.xy.add(wide).add(fine), t.z);
   };
   const tx = grain(ux, uBroad), ty = grain(uy, uBroad.mul(0.5)), tz = grain(uz, uBroad);
   const bx: N = vec3(tx.xy.mul(lift).add(rockN.zy), abs(tx.z).mul(rockN.x));
   const by: N = vec3(ty.xy.mul(lift).add(rockN.xz), abs(ty.z).mul(rockN.y));
   const bz: N = vec3(tz.xy.mul(lift).add(rockN.xy), abs(tz.z).mul(rockN.z));
   const bentSmooth: N = normalize(bx.zyx.mul(w.x).add(by.xzy.mul(w.y)).add(bz.xyz.mul(w.z)));
-  const bent: N = normalize(mix(bentSmooth, flat, facetW.mul(0.2))).toVar();
+  // The grooves between beds and the runnels down the face bend the light as their slopes would.
+  const up: N = vec3(0, 1, 0).sub(rockN.mul(rockN.y));
+  const worn: N = up.mul(lip.mul(1.1)).add(vec3(fluteZ, 0, fluteX).mul(fluteNear).mul(1.6));
+  const bent: N = normalize(mix(bentSmooth, flat, facetW.mul(0.2)).sub(worn)).toVar();
   m.normalNode = transformNormalToView(bent);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
@@ -374,7 +411,9 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const aside = length(fromAxis.sub(uShaftUp.mul(dot(fromAxis, uShaftUp))));
   const shaft = uShaftSun.mul(max(dot(bent, uShaftUp), 0)).mul(inShaft).mul(one(smoothstep(uShaftTop.w.sub(0.3), uShaftTop.w.add(0.05), aside)));
   // Rough rock gleams little, and less where it is dry.
-  lit(m, { irradiance: irradianceOf(rockN, bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(0.3, 1, wet) });
+  // (The sky's light is reckoned for the surface as its grain turns it, not for the smooth surface under the grain: most of a cliff is in
+  // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
+  lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(0.3, 1, wet) });
   return m;
 }
 

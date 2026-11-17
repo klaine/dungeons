@@ -1628,6 +1628,11 @@ export function meshSite(site: Site): SceneDescription {
       carveRock(into('rock'), grottoes.length || portalAir || backWay ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9, backWay ? backWay.air(x, y, z) : -9, join ? join.air(x, y, z) : -9) : landAir, {
         min: V(c.x0, Math.floor((Math.min(lo - 2, join?.byCave(c) ? join.high - 2.6 : Infinity)) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
+        // (Stone that weathers round is shaded round: fewer of its edges are kept as edges.)
+        crease: 36 + 24 * rockKind.round,
+        // The way the face slopes is felt for half a sample to either side, not a finger's breadth: the roughness of the rock is finer than
+        // the carving, and slopes read from it point every way, which puts the carving's points anywhere in their cells and makes splinters.
+        normalReach: CELL * 0.5,
         // (Where a rim patch meets the sheet of ground, it is closed on the sheet's own edge, which runs on lines 1.2 metres apart.)
         edge: onSheet ? alongSheet(ground, 0, 0, 1.2) : undefined,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.

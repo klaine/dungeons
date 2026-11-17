@@ -5,7 +5,7 @@
 // sees here exactly what it sees in a valley. Only the arrangement is the lab's: everything
 // stands apart, in the open, a few strides from everything else.
 import { Vector3 } from 'three';
-import { fbm2, fbm3, Rng } from '../src/core/rng';
+import { cells3, fbm2, fbm3, Rng } from '../src/core/rng';
 import { Stone } from '../src/core/site';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { carveRock } from '../src/render/geom/rock';
@@ -36,7 +36,7 @@ const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
 const smooth = (t: number) => { const c = clamp01(t); return c * c * (3 - 2 * c); };
 
 // Where the cliff stands: its face looks south (towards +z), which every hour's sun lights.
-const FACE_Z = -22, CLIFF_HALF = 19, CLIFF_TOP = 10.5, CLIFF_BACK = -33;
+const FACE_Z = -22, CLIFF_HALF = 19, CLIFF_TOP = 20, CLIFF_BACK = -33;
 // The cart track runs north and south on the east side, wandering; the footpath leaves it westward.
 const trackX = (z: number) => 17 + Math.sin(z * 0.09) * 1.6 + Math.sin(z * 0.031 + 1) * 2.2;
 const FOOT: [number, number][] = [[17, 21], [9, 17], [1, 18.5], [-7, 14], [-14, 15.5], [-23, 11]];
@@ -58,6 +58,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
   const s1 = rng.fork('s1').int(1, 999), s2 = rng.fork('s2').int(1, 999);
   const times: Record<string, number> = {}, counts: Record<string, number> = {};
   const timed = <T>(name: string, work: () => T): T => { const t0 = performance.now(); const r = work(); times[name] = performance.now() - t0; return r; };
+  const spots: Record<string, [number, number, number]> = {};
   const meshes = new Map<string, MeshBuilder>();
   const mesh = (name: string): MeshBuilder => { let m = meshes.get(name); if (!m) meshes.set(name, (m = new MeshBuilder())); return m; };
   const rock = mesh('rock'), turf = mesh('turf'), bark = mesh('bark');
@@ -90,9 +91,10 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
   const strata = new Strata(kind, rng.fork('strata'), 0);
   const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
   const blotSeed = rng.fork('blot').int(1, 9999);
-  const shadeRock = (q: Vector3, n: Vector3, field: Float32Array, open: number): Colour => {
+  const shadeRock = (q: Vector3, n: Vector3, field: Float32Array, open: number, coarse = false): Colour => {
     const u = strata.at(q.x, q.y, q.z), i = Math.floor(u);
-    const t = strata.shade(i), soft = 1 - strata.hardness(i);
+    // (Carved coarsely, a point cannot say which bed it lies in: it takes the middle shade, and the material draws the beds.)
+    const t = coarse ? 0.55 : strata.shade(i), soft = coarse ? 0.3 : 1 - strata.hardness(i);
     const blot = fbm3(q.x * 0.3, q.y * 0.3, q.z * 0.3, 3, blotSeed);
     const rust = smooth((fbm3(q.x * 0.17 + 9, q.y * 0.4, q.z * 0.17, 3, blotSeed + 3) - 0.6) / 0.14);
     const c = rockColour((0.72 + 0.56 * blot) * (0.7 + 0.3 * open));
@@ -104,14 +106,25 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     field[3] = 0.25 + 0.75 * kind.bedded;
     return c;
   };
+  // The cliff is not a wall with a level top. It stands in towers of unequal height with clefts
+  // between them, one or two much taller than the rest; its foot runs in and out in bays; and
+  // towards its east end it lies back, so that there is rock at every slope to look at.
+  const tower = new Float32Array(5);
+  const topAt = (x: number, z: number): number => {
+    cells3(x / 5.5 + s1 * 0.13, 0.5, z / 5.5, s2, 0.7, tower, 0);
+    const h = 6 + 10.5 * tower[2] * tower[2] + 2.5 * smooth((12 - Math.abs(x + 4)) / 12);
+    return h - 2.6 * (1 - smooth((tower[4] * 5.5) / 1.3)) + (fbm2(x * 0.3 + s1, z * 0.3, 2) - 0.5) * 1.2;
+  };
+  const bay = (x: number): number => 2.2 * Math.sin(x * 0.19 + 0.7) + 1.2 * Math.sin(x * 0.43);
+  const lean = (x: number): number => 0.08 + 0.5 * smooth((x - 6) / 10);
   timed('cliff', () => {
     const CELL = 0.3;
     // Positive in air. A block of hill with a face that leans back a little, a top that rolls,
     // ends that fall away, and a back nobody looks at; the face is then broken as the valley's is.
     const air = (x: number, y: number, z: number): number => {
-      const top = CLIFF_TOP + (fbm2(x * 0.09 + s1, z * 0.09, 2) - 0.5) * 2.4;
+      const top = topAt(x, z);
       const end = (Math.abs(x) - CLIFF_HALF - (fbm2(y * 0.2 + s2, z * 0.2, 2) - 0.5) * 3) * 0.8;
-      const plain = z - (FACE_Z - 0.1 * y);
+      const plain = z - (FACE_Z + bay(x) - lean(x) * y);
       const rest = Math.max(y - top, end, CLIFF_BACK - z);
       if (plain > 4.4 || plain < -4.4) return Math.max(plain, rest);
       const out = Math.min(2.4, Math.max(-2.4, relief.broad(x, y, z))) + Math.min(1.5, Math.max(-1.5, relief.fine(x, y, z)));
@@ -119,15 +132,68 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     };
     const before = rock.triangleCount + turf.triangleCount;
     carveRock(rock, air, {
-      min: V(-CLIFF_HALF - 3.3, -1.2, CLIFF_BACK - 0.9), max: V(CLIFF_HALF + 3.3, CLIFF_TOP + 2.4, FACE_Z + 4.8),
-      cell: CELL, uvScale: 0.4, otherUvScale: 2.3, fromSamples: true, occlusion: [0.3, 0.75], sharp: true,
+      min: V(-CLIFF_HALF - 3.3, -1.2, CLIFF_BACK - 0.9), max: V(CLIFF_HALF + 3.3, CLIFF_TOP + 1.3, FACE_Z + 8.4),
+      cell: CELL, uvScale: 0.4, otherUvScale: 2.3, fromSamples: true, occlusion: [0.3, 0.75], sharp: true, crease: 36 + 24 * kind.round, normalReach: CELL * 0.5,
       keep: (c) => c.y > ground(c.x, c.z) - 0.5,
       // The level top of the hill is turf, as it is in the valley; a ledge on the face is still rock.
-      meshFor: (n, at) => (n.y > 0.74 && at.y > CLIFF_TOP - 2.2 ? turf : null),
+      meshFor: (n, at) => (n.y > 0.78 && at.y > topAt(at.x, at.z) - 0.9 ? turf : null),
       shade: (q, n, field, other, open) => (other ? turfColour(q.x, q.z, s1) : shadeRock(q, n, field, open)),
     });
     counts.cliff = rock.triangleCount + turf.triangleCount - before;
   });
+  // ---------------------------------------------------------------- the mountain
+  // Behind the cliff, a hundred and thirty metres off, a mass of the same stone some eighty-five metres
+  // high, to see the material at another scale beside the first: a summit with a great steep
+  // face to the south, a pinnacle standing off its western shoulder, a long ridge falling away
+  // east, and under the faces an apron of broken ground. It is carved five times as coarsely as
+  // the cliff, so only its great forms are shape: buttresses, gullies, clefts. Everything smaller
+  // on it is the material's doing, which is the point of having it.
+  timed('mountain', () => {
+    const CELL = 1.5, mSeed = rng.fork('mountain').int(1, 9999);
+    const KNOTS: [number, number][] = [[-92, 4], [-70, 16], [-52, 30], [-45, 44], [-40, 61], [-35, 57], [-30, 37], [-22, 52], [-8, 75], [4, 86], [14, 83], [40, 66], [68, 47], [90, 24], [104, 6]];
+    const crest = (x: number): number => {
+      let k = 0;
+      while (k < KNOTS.length - 2 && x > KNOTS[k + 1][0]) k++;
+      const [x0, h0] = KNOTS[k], [x1, h1] = KNOTS[k + 1];
+      return h0 + (h1 - h0) * smooth((x - x0) / (x1 - x0)) + (fbm2(x * 0.09 + mSeed, 3.1, 3) - 0.5) * 9;
+    };
+    const cleft = new Float32Array(5);
+    const height = (x: number, z: number): number => {
+      const c = crest(x), dz = z - (-152 + 9 * Math.sin(x * 0.03 + 1));
+      if (dz < 0) return c + dz * 0.95;
+      // How much of the height is face and how much apron changes along the mountain; so does how steep the face is.
+      const share = 0.1 + 0.26 * fbm2(x * 0.018 + mSeed, 7.7, 2), steep = 2.4 + 2.2 * fbm2(x * 0.03 + mSeed, 1.3, 2);
+      const apron = share * c + 3, foot = 6 + (c - 1.5 - apron) / steep + apron / 0.85;
+      return Math.max(Math.min(c - dz * 0.25, c - 1.5 - (dz - 6) * steep), 0.85 * (foot - dz));
+    };
+    const air = (x: number, y: number, z: number): number => {
+      const plain = (y - height(x, z)) / 1.8;
+      if (plain > 16 || plain < -16) return plain;
+      // The face is pushed out into buttresses and drawn back into gullies; and cleft from top to bottom along its great joints.
+      let out = (fbm3(x * 0.03, y * 0.012, z * 0.03, 3, mSeed) - 0.5) * 24 + (fbm3(x * 0.11, y * 0.05, z * 0.11, 2, mSeed + 3) - 0.5) * 8 + (fbm3(x * 0.2, y * 0.022, z * 0.2, 2, mSeed + 5) - 0.5) * 4;
+      cells3((x + y * 0.1) / 17 + mSeed * 0.21, 0.5, (z - y * 0.05) / 17, mSeed + 9, 0.8, cleft, 0);
+      const which = (cleft[2] + cleft[3]) * 5.3 % 1;
+      if (which > 0.45) out -= (3 + 9 * (which - 0.45)) * (1 - smooth((cleft[4] * 17) / 4));
+      // (Sideways for the faces, and downward for the tops and the apron, so that those are broken ground and not a ramp.)
+      return (y + out * 0.22 - height(x, z - out)) / 1.8;
+    };
+    const before = rock.triangleCount + turf.triangleCount;
+    carveRock(rock, air, {
+      min: V(-99, -3, -216), max: V(111, 99, -57),
+      cell: CELL, uvScale: 0.4, otherUvScale: 2.3, fromSamples: true, occlusion: [1.5, 4.5], sharp: true, crease: 36 + 24 * kind.round, normalReach: CELL * 0.5,
+      keep: (c) => c.y > ground(c.x, c.z) - 1.5,
+      // What lies back far enough to hold soil is green, in patches: as growth on the rock, which the material draws
+      // with soft edges. (Sent to the turf's mesh triangle by triangle, at this coarseness, it was a scatter of green spikes.)
+      shade: (q, n, field, _other, open) => {
+        const c = shadeRock(q, n, field, open, true);
+        field[0] = Math.max(field[0], 2.8 * smooth((n.y - 0.7) / 0.16) * smooth((fbm2(q.x * 0.07 + mSeed, q.z * 0.07, 3) - 0.38) / 0.2));
+        return c;
+      },
+    });
+    counts.mountain = rock.triangleCount + turf.triangleCount - before;
+  });
+  spots.mountain = [6, 44, -144];
+
   const stones: [number, number, number][] = [];
   timed('boulders', () => {
     const before = rock.triangleCount;
@@ -168,7 +234,6 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
   const parched = o.season === 'autumn' ? 0.55 : o.season === 'summer' ? 0.25 : 0;
   const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
   const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8], firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.85, 0.58, 0.42];
-  const spots: Record<string, [number, number, number]> = {};
   timed('trees', () => {
     const stand = (name: string, x: number, z: number, height: number): number => { const y = ground(x, z); spots[name] = [x, y + height * 0.6, z]; return y; };
     {
@@ -224,7 +289,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
       let bare = 0.9 * (1 - smooth((Math.hypot(x - HOLLOW.x, z - HOLLOW.z) - HOLLOW.r * 0.3) / (HOLLOW.r * 0.45)));
       for (const q of stones) bare = Math.max(bare, 0.5 * (1 - smooth((Math.hypot(q[0] - x, q[1] - z) - q[2] * 0.8) / 0.7)));
       // And along the foot of the cliff, where what falls from it lies.
-      bare = Math.max(bare, 0.6 * (1 - smooth((z - FACE_Z - 0.5) / 2.2)) * (Math.abs(x) < CLIFF_HALF + 1 ? 1 : 0));
+      bare = Math.max(bare, 0.6 * (1 - smooth((z - FACE_Z - bay(x) - 1.5) / 2.2)) * (Math.abs(x) < CLIFF_HALF + 1 ? 1 : 0));
       ids[j * n + i] = turf.addVertex(x, y, z, nx / l, (2 * e) / l, nz / l, x * 2.3, z * 2.3, c[0], c[1], c[2], track, wet, bare, smooth((canopy(x, z) - 0.3) / 0.45));
     }
     for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
@@ -277,11 +342,11 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     for (const set of planting.sets) counts[set.kind] = set.matrices.length / 16;
   });
 
-  spots.cliff = [0, 5.5, FACE_Z];
+  spots.cliff = [0, 7.5, FACE_Z];
   spots.boulders = [1.6, 1, -8.5];
   spots.track = [trackX(14), ground(trackX(14), 14), 14];
   spots.path = [1, ground(1, 18.5), 18.5];
   spots.hollow = [HOLLOW.x, ground(HOLLOW.x, HOLLOW.z), HOLLOW.z];
   spots.meadow = [-4, ground(-4, 24), 24];
-  return { meshes, cards: planting.sets, ground, near: { min: V(-44, -2, CLIFF_BACK - 2), max: V(36, 16, 46) }, spots, times, counts };
+  return { meshes, cards: planting.sets, ground, near: { min: V(-99, -3, -216), max: V(111, 99, 46) }, spots, times, counts };
 }

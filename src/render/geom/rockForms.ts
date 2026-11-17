@@ -26,6 +26,10 @@ export interface RockCharacter {
   column: number;
   /** How far it breaks in flat faces with sharp edges, 0 to 1: the opposite of weathering smooth. */
   sharp: number;
+  /** How unlike in thickness the beds are, 0 to 1: at 0 every bed is as thick as the next; at 1 a run of thin plates lies under a bed several times as thick. */
+  uneven: number;
+  /** How far water has worked the surface, 0 to 1: bedding planes eaten back into grooves, runnels down the faces. Drawn by the rock's material. */
+  worn: number;
   /** The tint of a pale bed and of a dark one, as multiples of the stone's own colour. */
   pale: [number, number, number];
   dark: [number, number, number];
@@ -33,13 +37,14 @@ export interface RockCharacter {
 
 export const ROCK: Record<Stone, RockCharacter> = {
   // Thick level beds split by upright joints into blocks: steps, ledges and square-cut faces.
-  limestone: { bed: 0.95, joint: 1.9, blocky: 0.9, round: 0.3, bedded: 0.75, column: 1, sharp: 0.6, pale: [1.12, 1.1, 1.02], dark: [0.8, 0.8, 0.82] },
+  // (Limestone in the open is karst: pale grey, its beds very unequal, their edges rounded and the planes between them eaten back by rain.)
+  limestone: { bed: 0.8, joint: 2.1, blocky: 0.85, round: 0.6, bedded: 0.85, column: 1, sharp: 0.3, uneven: 1, worn: 1, pale: [1.95, 1.95, 1.9], dark: [1.3, 1.32, 1.37] },
   // Thin beds of very different hardness, worn round: shelves and hollows in bands of colour.
-  sandstone: { bed: 0.6, joint: 2.8, blocky: 0.5, round: 0.8, bedded: 1, column: 2, sharp: 0.3, pale: [1.15, 1.02, 0.84], dark: [0.86, 0.6, 0.46] },
+  sandstone: { bed: 0.6, joint: 2.8, blocky: 0.5, round: 0.8, bedded: 1, column: 2, sharp: 0.3, uneven: 0, worn: 0, pale: [1.15, 1.02, 0.84], dark: [0.86, 0.6, 0.46] },
   // Massive: few beds, wide joints, and a face broken into flat planes with sharp edges, great and small.
-  greystone: { bed: 2.4, joint: 2.6, blocky: 0.75, round: 0.3, bedded: 0.3, column: 1, sharp: 1, pale: [1.08, 1.08, 1.1], dark: [0.74, 0.76, 0.82] },
+  greystone: { bed: 2.4, joint: 2.6, blocky: 0.75, round: 0.3, bedded: 0.3, column: 1, sharp: 1, uneven: 0, worn: 0, pale: [1.08, 1.08, 1.1], dark: [0.74, 0.76, 0.82] },
   // Columns: close upright joints and hardly a bed to be seen.
-  basalt: { bed: 3.2, joint: 0.85, blocky: 1, round: 0.1, bedded: 0.2, column: 1.4, sharp: 0.9, pale: [1.05, 1.04, 1.06], dark: [0.72, 0.72, 0.78] },
+  basalt: { bed: 3.2, joint: 0.85, blocky: 1, round: 0.1, bedded: 0.2, column: 1.4, sharp: 0.9, uneven: 0, worn: 0, pale: [1.05, 1.04, 1.06], dark: [0.72, 0.72, 0.78] },
 };
 
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
@@ -50,17 +55,30 @@ export class Strata {
   private dipX: number;
   private dipZ: number;
   readonly seed: number;
+  private uneven: number;
 
   constructor(readonly rock: RockCharacter, q: Rng, readonly datum: number) {
     this.dipX = q.range(-0.08, 0.08);
     this.dipZ = q.range(-0.05, 0.05);
     this.seed = q.int(1, 9999);
+    this.uneven = 0.55 * rock.uneven;
   }
 
   /** Where a point lies among the beds: whole numbers are the planes between them. Beds dip a little and roll. */
   at(x: number, y: number, z: number): number {
-    return (y - this.datum + this.dipX * x + this.dipZ * z + (fbm2(x * 0.021 + this.seed, z * 0.021, 2) - 0.5) * 1.8) / this.rock.bed;
+    const u = (y - this.datum + this.dipX * x + this.dipZ * z + (fbm2(x * 0.021 + this.seed, z * 0.021, 2) - 0.5) * 1.8) / this.rock.bed;
+    this.rate = 1;
+    if (this.uneven <= 0) return u;
+    // Beds of unequal thickness: the count of beds runs ahead of the height in some stretches and
+    // falls behind in others, so there the beds are thin and here thick. (Three waves that do not
+    // keep step; together they never turn the count back, so no bed is counted twice.)
+    const s = this.seed;
+    this.rate = 1 + this.uneven * (0.722 * Math.cos(u * 1.9 + s) + 0.249 * Math.cos(u * 0.83 + s * 1.7) + 0.516 * Math.cos(u * 4.3 + s * 2.3));
+    return u + this.uneven * (0.38 * Math.sin(u * 1.9 + s) + 0.3 * Math.sin(u * 0.83 + s * 1.7) + 0.12 * Math.sin(u * 4.3 + s * 2.3));
   }
+
+  /** How many beds there are to one bed's ordinary thickness at the point last asked about with `at`: more than 1 where they are thin. */
+  rate = 1;
 
   /**
    * How well bed `i` stands up to weather, 0 to 1. Beds come in runs: a few hard ones together
@@ -84,20 +102,34 @@ export class Strata {
  * How far the face of a cliff stands out from the plain slope at a point, in metres: negative
  * where it is cut back. Laid over the slope, this is what makes it rock. It comes in two parts,
  * the broad forms and the fine, to be added together.
+ *
+ * `grain` is how far apart whoever carves this will sample it. Nothing here changes faster than
+ * that can follow: a step from one block to the next, a joint, the cutting back of a bed are all
+ * eased over a sample or more, and a bed too thin to be carved is not cut back at all (the
+ * rock's material draws such beds). Asked for more than it can hold, a carving does not make
+ * fine detail; it makes splinters, and flat triangles lying at odd angles.
  */
-export function cliffRelief(strata: Strata, seed: number): { broad: Density; fine: Density } {
+export function cliffRelief(strata: Strata, seed: number, grain = 0.3): { broad: Density; fine: Density } {
   const c = strata.rock;
   const cell = new Float32Array(5);
   // A block that has dropped out leaves a hole; the rest stand a little in or out.
   const offset = (h: number) => (h < 0.07 ? -0.6 : (h - 0.54) * 1.0);
-  const blend = Math.min(0.45, 0.17 / c.bed);
-  const wall = 0.08 + 0.3 * c.round;
+  const wall = Math.max(0.08 + 0.3 * c.round, grain * 1.3), groove = Math.max(0.14, grain);
   const metres = Math.min(c.joint, c.bed * c.column);
   // Buttresses and gullies: broad forms that run up the face, and lumps a few paces across. In
   // stone that weathers round these are swellings; in stone that breaks sharp they are great
   // flat faces, taller than wide, as joints run, meeting in edges.
+  const column = new Float32Array(5);
   const broad: Density = (x, y, z) => {
-    const worn = (fbm3(x * 0.1, y * 0.028, z * 0.1, 3, seed) - 0.5) * 2.8 + (fbm3(x * 0.34, y * 0.34, z * 0.34, 2, seed + 5) - 0.5) * 0.9;
+    let worn = (fbm3(x * 0.1, y * 0.028, z * 0.1, 3, seed) - 0.5) * 2.8 + (fbm3(x * 0.34, y * 0.34, z * 0.34, 2, seed + 5) - 0.5) * 0.9;
+    // Stone that water works is cleft from top to bottom along its great joints, which rain has
+    // widened: the face stands in piers some paces across with deep shadowed clefts between
+    // them. Not every joint is open, and none is quite upright.
+    if (c.worn > 0) {
+      cells3((x + y * 0.07) / 4.6 + seed * 0.37, 0.5, (z - y * 0.04) / 4.6, seed + 41, 0.75, column, 0);
+      const which = (column[2] + column[3]) * 7.3 % 1;
+      if (which > 0.4) worn -= c.worn * (0.7 + 1.5 * (which - 0.4)) * (1 - smooth((column[4] * 4.6) / Math.max(0.75, grain * 2.5)));
+    }
     if (c.sharp <= 0) return worn;
     return worn * (1 - 0.3 * c.sharp) + (facets3(x / 2.6 + 7.1, y / 4.2, z / 2.6, seed + 17) - 0.3) * 2.6 * c.sharp;
   };
@@ -105,19 +137,27 @@ export function cliffRelief(strata: Strata, seed: number): { broad: Density; fin
     let r = 0;
     // Beds: soft ones are cut back under hard ones. The change is eased over a hand's breadth.
     const u = strata.at(x, y, z), i = Math.floor(u), t = u - i;
+    // (How thick this bed is, in metres; and how far into it, as a share of it, the change from its neighbour is eased.)
+    const thick = c.bed / strata.rate, blend = Math.min(0.5, Math.max(0.17, grain * 1.2) / thick);
     let hard = strata.hardness(i);
     if (t < blend) hard += (strata.hardness(i - 1) - hard) * 0.5 * (1 - t / blend);
     else if (t > 1 - blend) hard += (strata.hardness(i + 1) - hard) * 0.5 * (1 - (1 - t) / blend);
-    r -= (1 - hard) * 0.8;
+    // A soft bed is cut back no deeper than it is thick, or the slot under the bed above would be a knife's cut; and not at all if it is too thin to carve.
+    const carved = smooth((thick - grain * 1.2) / (grain * 1.5));
+    // (Stone that weathers round is cut back less sharply bed by bed, and instead every bed of it
+    // swells between the planes above and below it, which rain has eaten back: a stack of cushions.)
+    r -= (1 - hard) * Math.min(0.8, thick * 0.9) * carved * (1 - 0.5 * c.round);
+    const across = 2 * t - 1;
+    r += c.round * carved * Math.min(0.45, thick * 0.5) * (0.5 - across * across);
     // And every bed stands a little in front of or behind the one below, so the face goes up in steps.
-    r += (hash1(i, strata.seed + 31) - 0.5) * 0.3;
+    r += (hash1(i, strata.seed + 31) - 0.5) * 0.3 * carved;
     // Joints: the beds split into blocks, each standing a little differently, with the joints
     // between them opened by frost. Blocks lie in their beds, so the cells are kept in layers.
     cells3(x / c.joint + seed, u / c.column, z / c.joint, seed + 11, 0.6, cell, 0.15);
     const edge = cell[4] * metres;
     const a = offset(cell[2]), b = offset(cell[3]);
-    r += (a + (b - a) * 0.5 * (1 - smooth(edge / wall))) * c.blocky;
-    r -= (1 - smooth(edge / 0.14)) * 0.16;
+    r += (a + (b - a) * 0.5 * (1 - smooth(edge / wall))) * c.blocky * (1 - 0.4 * c.round);
+    r -= (1 - smooth(edge / groove)) * 0.16;
     // And a little plain roughness. The smaller breaks are left to the rock's texture, which can hold an edge.
     r += (fbm3(x * 2.3, y * 2.3, z * 2.3, 2, seed + 23) - 0.5) * 0.14;
     return r;
