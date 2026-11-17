@@ -271,12 +271,30 @@ export function meshSite(site: Site): SceneDescription {
       // (Where the cavern lies beyond the arm, all of the fall is inside the ridge, and the way crosses under the arm level and deep.)
       const fallOver = dp.join ? lens[0] + lens[1] - 0.5 : total - 3;
       for (let i = 0, run = 0; i < lens.length; run += lens[i], i++) for (let d = 0; d < lens[i]; d += 0.5) deepSamples.push({ x: line[i][0] + ((line[i + 1][0] - line[i][0]) * d) / lens[i], y: start - dp.drop * Math.min(1, (run + d) / fallOver), z: line[i][1] + ((line[i + 1][1] - line[i][1]) * d) / lens[i] });
-      const spikes = Array.from({ length: 7 }, () => { const a = seeds.range(0, Math.PI * 2), d = seeds.range(0.25, 0.8); return { x: dp.x + Math.cos(a) * d * dp.rx, z: dp.z + Math.sin(a) * d * dp.rz, r: seeds.range(0.35, 0.7), h: seeds.range(1.2, 2.6) }; })
-        // (None stands in the way in, nor between a way in and the middle of the cavern, where what was left there lies.)
-        .filter((q) => [[rim, dp.z], ...(jLine.length ? [jLine[jLine.length - 1]] : [])].every(([ex, ez]) => {
-          const bx = dp.x - ex, bz = dp.z - ez, t = Math.min(1, Math.max(0, ((q.x - ex) * bx + (q.z - ez) * bz) / (bx * bx + bz * bz)));
-          return Math.hypot(q.x - ex, q.z - ez) > 2.6 && Math.hypot(q.x - ex - bx * t, q.z - ez - bz * t) > q.r + 1;
-        }));
+      // What has grown in the cavern. Some big stalagmites, each with a stalactite over it, and now and then the two grown together
+      // into a column; smaller ones standing round their feet; and stalactites by themselves in the roof.
+      // (None stands in a way in, nor between a way in and the middle of the cavern, where what was left there lies.)
+      const clearOf = (q: { x: number; z: number; r: number }) => [[rim, dp.z], ...(jLine.length ? [jLine[jLine.length - 1]] : [])].every(([ex, ez]) => {
+        const bx = dp.x - ex, bz = dp.z - ez, t = Math.min(1, Math.max(0, ((q.x - ex) * bx + (q.z - ez) * bz) / (bx * bx + bz * bz)));
+        return Math.hypot(q.x - ex, q.z - ez) > 2.6 && Math.hypot(q.x - ex - bx * t, q.z - ez - bz * t) > q.r + 1;
+      });
+      const drip = rng.fork('dripstone');
+      type Spike = { x: number; z: number; r: number; h: number; kind: 'up' | 'down' | 'column'; lx: number; lz: number; ph: number };
+      const spikes: Spike[] = [];
+      for (const q of Array.from({ length: 7 }, () => { const a = seeds.range(0, Math.PI * 2), d = seeds.range(0.25, 0.8); return { x: dp.x + Math.cos(a) * d * dp.rx, z: dp.z + Math.sin(a) * d * dp.rz, r: seeds.range(0.35, 0.7), h: seeds.range(1.2, 2.6) }; })) {
+        const column = drip.chance(0.3), lean = () => drip.range(-0.12, 0.12), ph = drip.range(0, 6);
+        if (!clearOf(q)) continue;
+        spikes.push({ ...q, r: q.r * 1.2, h: q.h * 1.2, kind: column ? 'column' : 'up', lx: lean(), lz: lean(), ph });
+        if (!column) spikes.push({ ...q, r: q.r * 0.8, h: q.h * 0.85, kind: 'down', lx: 0, lz: 0, ph: ph + 2 });
+        for (let k = drip.int(1, 3); k > 0; k--) {
+          const a = drip.range(0, Math.PI * 2), d = q.r * 1.2 + drip.range(0.3, 0.8), small = { x: q.x + Math.cos(a) * d, z: q.z + Math.sin(a) * d, r: drip.range(0.3, 0.42), h: drip.range(0.5, 1.2) };
+          if (clearOf(small)) spikes.push({ ...small, kind: 'up', lx: lean(), lz: lean(), ph: drip.range(0, 6) });
+        }
+      }
+      for (let k = 0; k < 10; k++) {
+        const a = drip.range(0, Math.PI * 2), d = Math.sqrt(drip.range(0.02, 0.6));
+        spikes.push({ x: dp.x + Math.cos(a) * d * dp.rx, z: dp.z + Math.sin(a) * d * dp.rz, r: drip.range(0.3, 0.5), h: drip.range(0.8, 2.2), kind: 'down', lx: 0, lz: 0, ph: drip.range(0, 6) });
+      }
       deepAir = (x, y, z) => {
         // The tube: the nearest point of the line, how far along it that is, and how far off.
         let best = Infinity, sAt = 0, run = 0;
@@ -302,10 +320,16 @@ export function meshSite(site: Site): SceneDescription {
           const ceil = yC + 1.7 + (dp.height - 1.7) * Math.pow(Math.min(1, Math.max(0, e / rMin)), 0.5) + (fbm2(x * 0.65 + n1 + 9, z * 0.65 + n2, 3) - 0.5) * 0.9;
           let a = smin(smin(e, y - floor, 0.35), ceil - y, 0.5);
           for (const q of spikes) {
-            const d = Math.hypot(x - q.x, z - q.z);
-            if (d > q.r + 0.6) continue;
-            // (A stalagmite narrowing upward from the floor, and over it a shorter stalactite narrowing downward from the roof.)
-            a = Math.min(a, d - q.r * Math.max(0, 1 - (y - floor) / q.h), d - q.r * 0.7 * Math.max(0, 1 - (ceil - y) / (q.h * 0.7)));
+            if (Math.abs(x - q.x) > q.r * 1.5 + 0.7 || Math.abs(z - q.z) > q.r * 1.5 + 0.7) continue;
+            // (None is round or straight: each has ribs down it, swells and draws in as it goes, and leans a little. A stalagmite
+            // spreads at its foot; a column is thinnest at its middle; a stalactite by itself never hangs lower than leaves headroom.)
+            // (Where the roof is too low for one to hang at all it dwindles to nothing, and does not stop short: a thing that is there at one point and not at the next is carved as a shard.)
+            const room = q.kind === 'down' ? ceil - floor - 2.3 : 9, tall = q.kind === 'column' ? ceil - floor : q.kind === 'down' ? Math.max(0.3, Math.min(q.h, room)) : q.h, lim = Math.min(1, Math.max(0, room / 0.8)), thin = lim * lim * (3 - 2 * lim);
+            const t = Math.min(1, Math.max(0, q.kind === 'down' ? (ceil - y) / tall : (y - floor) / tall));
+            const ox = x - q.x - q.lx * t * tall, oz = z - q.z - q.lz * t * tall, ribs = 1 + 0.13 * Math.sin(Math.atan2(oz, ox) * 3 + q.ph + t * 2);
+            const shape = q.kind === 'column' ? 0.4 + 0.75 * Math.pow(Math.abs(2 * t - 1), 1.7) + 0.4 * Math.exp(-t * 7)
+              : Math.pow(1 - t, 1.2) * (0.84 + 0.16 * Math.sin(t * tall * 6.5 + q.ph)) + (q.kind === 'up' ? 0.4 * Math.exp(-t * 7) : 0.25 * Math.exp(-t * 9));
+            a = Math.min(a, Math.hypot(ox, oz) - q.r * shape * ribs * thin + (1 - thin) * 0.3);
           }
           air = Math.max(air, a);
         }
@@ -1348,7 +1372,7 @@ export function meshSite(site: Site): SceneDescription {
       for (let i = 0, run = 0; i < jw.lens.length; run += jw.lens[i], i++) for (let d = 0; d < jw.lens[i]; d += 0.5) samples.push({ x: jw.line[i][0] + ((jw.line[i + 1][0] - jw.line[i][0]) * d) / jw.lens[i], y: floorAt(run + d), z: jw.line[i][1] + ((jw.line[i + 1][1] - jw.line[i][1]) * d) / jw.lens[i] });
       const seam = q.z + s * (q.on ? q.on.end - 0.1 : 1.2 * q.r + 1.6);
       // (`own`: whether a point is past the seam, going from the cave, and so not the land's to carve. `byCave`: whether a patch of land holds the stretch before the seam.)
-      return { air, box, top, high: yS, hewn: !!q.hall, samples, back: s * (q.on ? 0.5 : 0.7), own: (z: number) => (z - seam) * s > 0, byCave: (c: { x0: number; x1: number; z0: number; z1: number }) => !q.hall && c.x1 > xs[0] - 5 && c.x0 < xs[0] + 5 && c.z1 > Math.min(q.z, seam) - 1 && c.z0 < Math.max(q.z, seam) + 1 };
+      return { air, box, top, high: yS, hewn: !!q.hall, samples, back: s * (q.on ? 0.5 : 1.3), inset: (z: number) => 0.07 * (1 - smooth(((z - seam) * s) / 0.8)), own: (z: number) => (z - seam) * s > 0, byCave: (c: { x0: number; x1: number; z0: number; z1: number }) => !q.hall && c.x1 > xs[0] - 5 && c.x0 < xs[0] + 5 && c.z1 > Math.min(q.z, seam) - 1 && c.z0 < Math.max(q.z, seam) + 1 };
     })();
     // Three things read off the worn heights: how steep the ground is, which turns a height
     // above it into a distance from it; which way is uphill; and how far the ground is rock,
@@ -1655,7 +1679,9 @@ export function meshSite(site: Site): SceneDescription {
       // (From a hall it is of the hall's kind, which is told that it sees no sky at all; from a cave it is of the house's, like the cavern.)
       let rockFor = kit.mesh('rock');
       if (jn.hewn) { wild.group = 'under'; rockFor = wild.mesh('rock'); wild.group = 'wild'; }
-      carveRock(rockFor, (x, y, z) => Math.max(deepAir(x, y, z), jn.air(x, y, z)), {
+      // (Where it overlaps the carving it takes over from, it is made a few fingers narrower all round, widening to its true size
+      // within a stride: so that there its rock stands wholly in front of the other's. Made the same size, the two came through each other in patches.)
+      carveRock(rockFor, (x, y, z) => Math.max(deepAir(x, y, z), jn.air(x, y, z)) - jn.inset(z), {
         min: V(snap(jn.box[0], from.x), from.y, snap(jn.box[2], from.z)), max: V(jn.box[1], jn.top + 0.3, jn.box[3]), cell: 0.28, uvScale: 0.45,
         // (It begins a little before the land's carving leaves off: the two are on different lattices, and where they only met there would be chinks.)
         keep: (at) => jn.own(at.z + jn.back) && bwy.joinOwn(at.x, at.z),

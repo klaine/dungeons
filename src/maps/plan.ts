@@ -1,5 +1,5 @@
 import { drawStorey } from './buildingPlan';
-import { boxValley, edgeAt } from '../core/valley';
+import { boxValley, edgeAt, hallOnward, joinLine } from '../core/valley';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
@@ -72,6 +72,9 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       const far = 3.9 + q.hall.drop / 0.5 + 1.6 + q.hall.length - 7 + 3;
       if (q.side === 'w') x0 = Math.min(x0, sideAt('w', q.z) - far); else x1 = Math.max(x1, sideAt('e', q.z) + far);
     }
+    // (And to show the cavern under the hill, if there is one.)
+    const cavern = opts.visited ? undefined : site.backWay?.deep;
+    if (cavern) { x0 = Math.min(x0, cavern.x - cavern.rx - 4); x1 = Math.max(x1, cavern.x + cavern.rx + 4); z0 = Math.min(z0, cavern.z - cavern.rz - 4); z1 = Math.max(z1, cavern.z + cavern.rz + 4); }
   }
   const pad = 10 * ratio;
   const scale = Math.min((canvas.width - 2 * pad) / (x1 - x0), (canvas.height - 2 * pad) / (z1 - z0));
@@ -218,6 +221,37 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.globalAlpha = 0.55;
       ctx.beginPath(); ctx.ellipse(X(edge - inw * (q.r - 0.3)), Z(q.z), q.r * scale, q.r * 1.2 * scale, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillRect(Math.min(X(edge + inw * 4.2), X(edge)), Z(q.z) - 0.9 * scale, Math.abs(X(edge + inw * 4.2) - X(edge)), 1.8 * scale);
+      ctx.globalAlpha = 1;
+    }
+    // What lies under the hill, in broken lines: the way through the hill from a cave of the house; the way down from it; the cavern;
+    // and the passage up from the cavern to the cave or the hall in the arm's wall. (Not on the map of someone who is finding the place out.)
+    const bw = opts.visited ? undefined : site.backWay, ridge = vale?.ridge;
+    if (bw && ridge && vale) {
+      const p = site.places[bw.place], dir = bw.side === 'w' ? 1 : -1, rEdge = bw.side === 'w' ? ridge.x0 : ridge.x1, at = (a: number) => rEdge + dir * a;
+      const stroke = (pts: [number, number][]) => { ctx.beginPath(); pts.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); };
+      ctx.strokeStyle = INK;
+      ctx.globalAlpha = 0.75;
+      ctx.lineCap = 'butt';
+      ctx.lineWidth = Math.max(1.4 * ratio, 1.2 * scale);
+      ctx.setLineDash([Math.max(2.5 * ratio, 1.4 * scale), Math.max(1.5 * ratio, 0.9 * scale)]);
+      stroke([[bw.side === 'w' ? p.x0 : p.x1, bw.z], [at(-1), bw.z]]);
+      const dp = bw.deep;
+      if (dp) {
+        const z1 = bw.z + dp.toward * dp.leg;
+        stroke([[at(dp.from), bw.z], [at(dp.from), z1], [at(-5), z1], [dp.x + dir * (dp.rx - 1.2), dp.z]]);
+        const cave = site.grottoes?.[0];
+        if (dp.join && cave) {
+          const line = joinLine(vale, cave, dp);
+          // (From a hall it begins at the hall's door onward, which is drawn as the hall is.)
+          if (cave.hall) { const on = hallOnward(vale, cave, dp.join.toward); line.unshift([on.x, cave.z + dp.join.toward * (cave.hall.width / 2 + (cave.hall.great ? 8 : 0))]); }
+          stroke(line);
+        }
+        ctx.setLineDash([]);
+        ctx.fillStyle = INK;
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath(); ctx.ellipse(X(dp.x), Z(dp.z), dp.rx * scale, dp.rz * scale, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.setLineDash([]);
       ctx.globalAlpha = 1;
     }
     // Streams, drawn before the ponds they run into and out of.

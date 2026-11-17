@@ -369,7 +369,8 @@ async function start(): Promise<void> {
   const glowLights: { pos: [number, number, number]; intensity: [number, number, number] }[] = [];
   {
     const cap = new SphereGeometry(1, 8, 6);
-    const lit = new MeshBasicMaterial({ color: new Color(0.6, 2.6, 1.9) });
+    // (No brighter than this: brighter, and in the dark, where the eye is wide open, they burn out to white and are not seen to be green.)
+    const lit = new MeshBasicMaterial({ color: new Color(0.1, 0.85, 0.5) });
     const spread = new Rng(`${seed}/glow`);
     for (const g of desc.glows ?? []) {
       const dir = g.position.clone().sub(g.from).normalize();
