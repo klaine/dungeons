@@ -23,7 +23,8 @@ export class Beacon {
       const fall = pow(near, 2.2).mul(smoothstep(1, 0.97, near));
       // Brighter along its middle as seen from the side: the edges of a cone are seen through less of it.
       const edge = abs(uv().x.mul(2).sub(1).fract().sub(0.5)).mul(2);
-      return vec4(float(1).mul(0.95), float(0.85), float(0.62), fall.mul(float(0.5).add(edge.mul(0.5))).mul(strength));
+      // (Soft along its length as well: the air it is seen in is not evenly thick.)
+      return vec4(float(1).mul(0.95), float(0.85), float(0.62), fall.mul(edge.mul(edge)).mul(strength));
     })();
     const length = 320;
     for (const turn of [0, Math.PI]) {

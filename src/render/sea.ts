@@ -118,7 +118,8 @@ export class Sea {
       const tall: N = at.y.div(max(burst, 0.05));
       const body = smoothstep(0, 0.6, across).mul(one(smoothstep(0.3, 1, tall))).mul(smoothstep(0, 0.06, at.y));
       const drift = texture(this.ripples, vec2(P.x.add(P.z), P.y).mul(0.08).add(vec2(0.02, -0.11).mul(t))).x.add(texture(this.ripples, vec2(P.x.sub(P.z), P.y).mul(0.19).add(vec2(-0.03, -0.17).mul(t))).y);
-      return vec4(white, body.mul(smoothstep(0.4, 1.6, drift)).mul(burst).mul(0.6));
+      // (Never a solid sheet: broken up into drifting wisps, and thin.)
+      return vec4(white, body.mul(smoothstep(0.7, 1.8, drift)).mul(burst).mul(0.32));
     })();
     const mesh = new Mesh(geometry, material);
     mesh.renderOrder = 3;
