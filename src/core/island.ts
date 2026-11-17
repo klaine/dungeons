@@ -414,7 +414,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
     const climb = Math.abs(F - (stairway ? stairway[stairway.length - 1][2] : plain(root[0], root[1]))), wanted = climb / 0.24;
     const wave = 28, swing = wanted > length * 1.02 ? Math.min(26, (wave / (Math.PI * 2)) * Math.sqrt((wanted / length) ** 2 - 1)) : 0;
     const many = Math.max(steps, Math.round(length / 3));
-    for (let k = 1; k <= many; k++) {
+    // (Its last point is the landing itself, put there exactly.)
+    for (let k = 1; k < many; k++) {
       const t = k / many;
       let bx = sx + (root[0] - sx) * t, bz = sz + (root[1] - sz) * t;
       const ax = -(root[1] - sz) / length, az = (root[0] - sx) / length;
@@ -438,6 +439,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       }
       track.push([round(x), round(z)]);
     }
+    track.push([round(root[0]), round(root[1])]);
   }
   // (No point is left that turns the track back on itself, as the pushing off the cliffs can: a hairpin a stride long is a step for whoever walks it.)
   for (let changed = true; changed;) {
