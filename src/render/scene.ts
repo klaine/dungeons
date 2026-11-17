@@ -44,7 +44,7 @@ export interface DoorDesc {
  */
 export interface CardSet {
   /** What is painted on the cards. */
-  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle' | 'fir' | 'tree' | 'thrift' | 'marram' | 'gorse' | 'bloom';
+  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle' | 'pine' | 'fir' | 'tree' | 'thrift' | 'marram' | 'gorse' | 'bloom';
   /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
   shape: 'tuft' | 'card';
   /** Whether the cards cast shadows. */

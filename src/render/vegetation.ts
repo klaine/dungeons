@@ -63,7 +63,7 @@ const grey = (v: number, a = 1) => `rgba(${Math.round(v * 255)},${Math.round(v *
 /** Paints the texture for one kind of card. Light and dark only: colour comes from the card. */
 export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
   // Leaves are looked at closely and are worth four times the paint.
-  const size = kind === 'leaf' ? 1024 : 256;
+  const size = kind === 'leaf' ? 1024 : kind === 'pine' ? 512 : 256;
   const [canvas, ctx] = canvasOf(size);
   const rng = new Rng(`cards/${kind}/${seed}`);
   ctx.clearRect(0, 0, size, size);
@@ -359,6 +359,24 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
     texture.anisotropy = 4;
     texture.userData.single = single;
     return texture;
+  } else if (kind === 'pine') {
+    // A pine's brush of needles, seen from the side: long needles fanning out from the end of a twig at the foot of the card, most of
+    // them forward and some out to the sides, dark where they leave the twig and pale at their tips, and the twig itself below them.
+    ctx.strokeStyle = grey(0.24);
+    ctx.lineWidth = size * 0.022;
+    ctx.beginPath(); ctx.moveTo(size / 2, size); ctx.lineTo(size / 2, size * 0.8); ctx.stroke();
+    for (let k = 0; k < 170; k++) {
+      const spread = (rng.next() - 0.5) * 2, a = spread * Math.abs(spread) * 1.25 + rng.range(-0.12, 0.12);
+      const from = size * (0.99 - 0.2 * rng.next()), len = size * rng.range(0.5, 0.86) * (1 - 0.3 * Math.abs(spread)), tone = rng.range(0.5, 1), wide = rng.range(2.6, 4.4) * (size / 512);
+      const droop = rng.range(-0.12, 0.2) * (a < 0 ? -1 : 1);
+      const steps = 5;
+      for (let st = 0; st < steps; st++) {
+        const f0 = st / steps, f1 = (st + 1) / steps, at = (f: number): [number, number] => [size / 2 + Math.sin(a + droop * f) * len * f, from - Math.cos(a + droop * f) * len * f];
+        ctx.strokeStyle = grey(tone * (0.42 + 0.58 * f1));
+        ctx.lineWidth = Math.max(1, wide * (1 - 0.6 * f0));
+        ctx.beginPath(); ctx.moveTo(...at(f0)); ctx.lineTo(...at(f1)); ctx.stroke();
+      }
+    }
   } else if (kind === 'fir') {
     // A whole fir: a spire of drooping tiers, widest near the foot, each lighter at its edge.
     // Painted solid, because it is only ever seen small, and what is thin would vanish.
@@ -627,7 +645,7 @@ const sprigRangeUniform = uniform(sprigRange);
 export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   // Whole trees stand far off, are never dropped for distance, and are drawn in large lots.
   const whole = set.kind === 'fir' || set.kind === 'tree';
-  const ground = set.kind !== 'leaf' && set.kind !== 'needle' && !whole;
+  const ground = set.kind !== 'leaf' && set.kind !== 'needle' && set.kind !== 'pine' && !whole;
   const block = whole ? 220 : ground ? (set.kind === 'grass' ? 12 : 24) : 48;
   // Grass is drawn two ways: near the eye as real blades, farther off as painted tufts. Each block
   // gets both, and which is drawn, and where one gives way to the other, is settled in `cullCards`
@@ -646,7 +664,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     });
     // In the shadow map a crown's leaves are drawn smaller than they are (only the denser middle of
     // each card), so that some of the sun gets through the crown, as it does in life.
-    if (set.kind === 'leaf' || set.kind === 'needle') {
+    if (set.kind === 'leaf' || set.kind === 'needle' || set.kind === 'pine') {
       const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
       if (cut > 0.42 && !sprig) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
     }

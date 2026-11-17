@@ -333,6 +333,7 @@ async function start(): Promise<void> {
     // Looking at the sun through the oak's crown, wherever the sun now is.
     { key: 'u', name: 'Into sun', at: () => { const [x, y, z] = stage.spots.oak, l = Math.hypot(sunDir.x, sunDir.z) || 1; return { from: [x - (sunDir.x / l) * 15, stage.ground(x, z) + 1.7, z - (sunDir.z / l) * 15], to: [x, y + 1, z] }; } },
     { key: 'h', name: 'Hollow', at: () => { const [x, y, z] = stage.spots.hollow; return { from: [x + 5.5, y + 2.1, z + 7.5], to: [x, y, z] }; } },
+    { key: 'e', name: 'Pines', at: () => { const [x, y, z] = stage.spots.pine; return { from: [x + 12, 4, z + 20], to: [x + 3, y - 1, z + 5] }; } },
     { key: 'f', name: 'Firs', at: () => { const [x, y, z] = stage.spots.spruce; return { from: [x + 16, 3, z + 15], to: [x + 5, y - 1.5, z + 3] }; } },
   ];
   const keepCamera = () => { state.cam = [...camera.position.toArray(), ...controls.target.toArray()]; state.fov = camera.fov; remember(); };

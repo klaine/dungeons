@@ -240,7 +240,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
   const parched = o.season === 'autumn' ? 0.55 : o.season === 'summer' ? 0.25 : 0;
   const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
-  const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8], firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.85, 0.58, 0.42];
+  const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8], firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [1.12, 0.62, 0.4];
   timed('trees', () => {
     const stand = (name: string, x: number, z: number, height: number): number => { const y = ground(x, z); spots[name] = [x, y + height * 0.6, z]; return y; };
     {
@@ -265,9 +265,15 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
       trees.push({ x, z, r: reach });
     }
     {
-      const x = -19, z = 15, tall = 11.5, y = stand('pine', x, z, tall);
-      const reach = growConifer(planting, bark, x, y, z, tall, 2.8, 0.23, { kind: 'pine', detail: 1, needle: leafOf([0.07, 0.15, 0.07]), bark: pineBark, shaded: true, soft: bark }, rng.fork('pine'));
+      const x = -19, z = 15, tall = 15, y = stand('pine', x, z, tall);
+      const reach = growConifer(planting, bark, x, y, z, tall, 2.8, 0.3, { kind: 'pine', detail: 1, needle: leafOf([0.07, 0.15, 0.07]), bark: pineBark, shaded: true, soft: bark }, rng.fork('pine'));
       trees.push({ x, z, r: reach * 0.6 });
+    }
+    {
+      // A pine of the coast: leaning, bent, flat-topped.
+      const x = -9, z = 30, tall = 11, y = stand('coast pine', x, z, tall * 0.6);
+      const reach = growConifer(planting, bark, x, y, z, tall, 2.6, 0.26, { kind: 'pine', coastal: true, detail: 1, needle: leafOf([0.08, 0.16, 0.06]), bark: [0.8, 0.62, 0.5], shaded: true, soft: bark }, rng.fork('coast-pine'));
+      trees.push({ x, z, r: reach * 0.5 });
     }
     {
       // A bush, which is a small oak: what the valley's thickets are made of.

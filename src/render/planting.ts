@@ -27,12 +27,14 @@ export class Planting {
   readonly reeds: CardSet = { kind: 'reed', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
   readonly leaves: CardSet = { kind: 'leaf', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
   readonly needles: CardSet = { kind: 'needle', shape: 'card', shadow: true, matrices: [], colours: [], centres: [] };
+  /** A pine's needles: brushes of them at the ends of its twigs, each three sheets crossed about the twig's line. */
+  readonly pines: CardSet = { kind: 'pine', shape: 'tuft', shadow: true, matrices: [], colours: [], centres: [] };
   /** Whole trees, each painted on one tuft of cards: for hillsides too far off for anything more. */
   readonly firs: CardSet = { kind: 'fir', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
   readonly farTrees: CardSet = { kind: 'tree', shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] };
 
   get sets(): CardSet[] {
-    return [this.grass, this.flowers, this.ferns, this.herbs, this.reeds, this.leaves, this.needles, this.firs, this.farTrees].filter((s) => s.matrices.length > 0);
+    return [this.grass, this.flowers, this.ferns, this.herbs, this.reeds, this.leaves, this.needles, this.pines, this.firs, this.farTrees].filter((s) => s.matrices.length > 0);
   }
 
   /** Adds a card whose place and size have just been composed, with its colour and the point its shading curves about. */
@@ -220,9 +222,11 @@ export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], s
     }
     rows.push(row);
   }
+  // (Wound so that each triangle faces outward. For a long time they were wound the other way: every trunk and branch was drawn as
+  // the inside of its far wall, seen through its near one. Being round and lit by normals that did point outward, it passed.)
   for (let j = 0; j < rows.length - 1; j++) for (let i = 0; i < sides; i++) {
-    mesh.addTriangle(rows[j][i], rows[j + 1][i], rows[j + 1][i + 1]);
-    mesh.addTriangle(rows[j][i], rows[j + 1][i + 1], rows[j][i + 1]);
+    mesh.addTriangle(rows[j][i], rows[j + 1][i + 1], rows[j + 1][i]);
+    mesh.addTriangle(rows[j][i], rows[j][i + 1], rows[j + 1][i + 1]);
   }
   // Closed at both ends: a point in the middle of each, joined to its ring.
   for (const [j, flip] of [[0, true], [points.length - 1, false]] as const) {
@@ -231,8 +235,8 @@ export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], s
     const p = points[j], tip = mesh.addVertex(p.x + dir.x * radii[j] * 0.5, p.y + dir.y * radii[j] * 0.5, p.z + dir.z * radii[j] * 0.5, dir.x, dir.y, dir.z, 0.5, v / 0.7, colour[0], colour[1], colour[2]);
     if (open) mesh.setOpen(tip, open(p.y));
     for (let i = 0; i < sides; i++) {
-      if (flip) mesh.addTriangle(tip, rows[j][i], rows[j][i + 1]);
-      else mesh.addTriangle(tip, rows[j][i + 1], rows[j][i]);
+      if (flip) mesh.addTriangle(tip, rows[j][i + 1], rows[j][i]);
+      else mesh.addTriangle(tip, rows[j][i], rows[j][i + 1]);
     }
   }
 }
@@ -377,6 +381,8 @@ export interface ConiferOptions {
   shaded?: boolean;
   /** Where branches go: wood that is drawn but stops nobody. */
   soft: MeshBuilder;
+  /** A pine that has stood in the sea wind: short, its trunk leaning and bent, its crown a flat-topped umbrella. */
+  coastal?: boolean;
 }
 
 const BX = new Vector3(), BY = new Vector3(), BZ = new Vector3();
@@ -391,6 +397,7 @@ const BX = new Vector3(), BY = new Vector3(), BZ = new Vector3();
  */
 export function growConifer(planting: Planting, wood: MeshBuilder, x: number, base: number, z: number, height: number, radius: number, girth: number, o: ConiferOptions, rng: Rng): number {
   const pine = o.kind === 'pine';
+  if (pine) return growPine(planting, wood, x, base, z, height, radius, girth, o, rng.fork('pine'));
   const open = o.shaded ? (y: number) => 0.9 - 0.45 * Math.min(1, Math.max(0, (y - base) / (height * 0.5))) : null;
   // The trunk, with a little sway in it.
   const lean = [rng.range(-0.02, 0.02), rng.range(-0.02, 0.02)], bow = rng.range(-0.25, 0.25), bowAt = rng.range(0, Math.PI * 2);
@@ -457,6 +464,127 @@ export function growConifer(planting: Planting, wood: MeshBuilder, x: number, ba
     const top = axis(0.985);
     M.compose(P.set(top.x, top.y, top.z), Q.setFromEuler(E.set(0, yaw + turn, 0)), S.set(radius * (pine ? 0.7 : 0.42), height * (pine ? 0.1 : 0.16), 1));
     planting.pushCard(planting.needles, o.needle(rng), x, base + height * 0.6, z);
+  }
+  return reach;
+}
+
+/**
+ * Grows a pine. A spruce is a spire of boughs; a pine is a tree of branches. Its trunk is bare for
+ * a third of its height or more, with the stubs and dead limbs of what it has shed; above that,
+ * limbs as thick as an arm leave it a few at a time, the lower ones level or sagging and the upper
+ * ones rising, and every one sweeps upward towards its end. Each limb bears branches to either
+ * side, each branch twigs, and the needles are not along the wood at all but in brushes at the
+ * ends of the twigs: so the crown is clumps of green on a frame of red wood that shows between
+ * them. A coastal pine is the same tree after a life in the wind: half as tall, the trunk leaning
+ * and bent, and the crown spread flat at the top like an umbrella. Returns how far it reaches.
+ */
+function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number, z: number, height: number, radius: number, girth: number, o: ConiferOptions, rng: Rng): number {
+  const coastal = !!o.coastal, rich = o.detail > 0.5;
+  // (Its limbs reach a quarter of its height or more, whatever radius was asked for: that was a spruce's measure.)
+  const H = coastal ? height * 0.62 : height, R = coastal ? Math.max(radius * 1.5, H * 0.5) : Math.max(radius * 1.25, H * 0.27);
+  const open = o.shaded ? (y: number) => 0.92 - 0.4 * Math.min(1, Math.max(0, (y - base) / (H * 0.6))) : null;
+  // The trunk: nearly straight inland, with a sway; on the coast it leans away from the wind and bends back up.
+  const leanAt = rng.range(0, Math.PI * 2), lean = coastal ? rng.range(0.3, 0.55) : rng.range(0, 0.05);
+  const bowAt = leanAt + rng.range(-1, 1), bow = coastal ? rng.range(0.5, 1.1) : rng.range(-0.3, 0.3);
+  const axis = (t: number): Vector3 => new Vector3(
+    x + Math.cos(leanAt) * lean * H * t + Math.cos(bowAt) * bow * Math.sin(t * Math.PI) * 0.5,
+    base + H * t * (coastal ? 1 - 0.12 * t : 1),
+    z + Math.sin(leanAt) * lean * H * t + Math.sin(bowAt) * bow * Math.sin(t * Math.PI) * 0.5);
+  const thickAt = (t: number) => girth * (coastal ? 1.25 : 1) * (1 - 0.8 * Math.pow(t, 1.15)) + 0.014;
+  const stem: Vector3[] = [axis(0).setY(base - 0.4), axis(0.02)], radii = [thickAt(0) * 1.5, thickAt(0) * 1.12];
+  for (let k = 1; k <= 8; k++) { stem.push(axis((k / 8) * 0.97)); radii.push(thickAt((k / 8) * 0.97)); }
+  layLimb(wood, stem, radii, rich ? 9 : 5, o.bark, rng.range(0, 3), open, rich ? { lobes: rng.int(3, 5), amp: rng.range(0.05, 0.14), phase: rng.range(0, 6), oval: rng.range(0, 0.08), ovalAt: rng.range(0, 3) } : undefined);
+
+  const crownFrom = coastal ? rng.range(0.4, 0.5) : rng.range(0.3, 0.4);
+  const heart = axis(crownFrom + (0.97 - crownFrom) * 0.45);
+  const limbBark: Colour = [o.bark[0] * 0.92, o.bark[1] * 0.9, o.bark[2] * 0.9];
+  let reach = 0;
+  const dir = new Vector3(), any = new Vector3();
+  /** A brush of needles at the end of a twig, pointing the way the twig does and a little skyward. */
+  const brush = (at: Vector3, way: Vector3, size: number, light: number) => {
+    BY.copy(way).multiplyScalar(0.7).add(UP).normalize();
+    BX.crossVectors(BY, Math.abs(BY.y) > 0.95 ? any.set(1, 0, 0) : UP).normalize();
+    BZ.crossVectors(BX, BY);
+    M.makeBasis(BX, BY, BZ);
+    Q.setFromRotationMatrix(M).multiply(Q2.setFromAxisAngle(UP, rng.range(0, Math.PI)));
+    M.compose(P.set(at.x - BY.x * size * 0.12, at.y - BY.y * size * 0.12, at.z - BY.z * size * 0.12), Q, S.set(size * 0.85, size, size * 0.85));
+    const c = o.needle(rng);
+    // Lit as part of the crown's whole body and, half and half, of its own clump: bright above and outward, dark within and beneath.
+    planting.pushCard(planting.pines, [c[0] * light, c[1] * light, c[2] * light], (at.x + heart.x) / 2, Math.min(at.y, heart.y) - 1.2, (at.z + heart.z) / 2);
+    reach = Math.max(reach, Math.hypot(at.x - x, at.z - z) + size * 0.4);
+  };
+  /** A limb, a branch or a twig: out from `from`, turning skyward as it goes, bearing lesser ones to either side and brushes at its end. */
+  const limb = (from: Vector3, az: number, rise: number, length: number, thick: number, level: number, f: number) => {
+    const steps = level === 0 ? 4 : level === 1 ? 3 : 2;
+    const points = [from.clone()], thicks = [thick];
+    const p = from.clone();
+    dir.set(Math.cos(az) * Math.cos(rise), Math.sin(rise), Math.sin(az) * Math.cos(rise));
+    const d = dir.clone(), ways: Vector3[] = [d.clone()];
+    for (let s = 1; s <= steps; s++) {
+      // It wanders, and sweeps upward: a little at first, strongly towards its end.
+      d.add(any.set(rng.range(-1, 1), rng.range(-0.5, 0.5), rng.range(-1, 1)).multiplyScalar(level === 0 ? 0.13 : 0.2));
+      d.y += (level === 0 ? 0.03 : 0.16) + (level === 0 ? 0.13 : 0.2) * (s / steps) * (coastal ? 0.6 : 1);
+      d.normalize();
+      p.addScaledVector(d, length / steps);
+      points.push(p.clone());
+      thicks.push(thick * (1 - 0.62 * (s / steps)));
+      ways.push(d.clone());
+    }
+    const sides = level === 0 ? (rich ? 6 : 4) : level === 1 ? 4 : 3;
+    layLimb(o.soft, points, thicks, sides, limbBark, rng.range(0, 3), open ? (y) => open(y) * (level === 0 ? 0.9 : 0.7) : null);
+    const end = points[points.length - 1], endWay = ways[ways.length - 1];
+    const at = (t: number): [Vector3, Vector3] => {
+      const g = Math.min(steps - 1e-4, t * steps), i = Math.floor(g);
+      return [points[i].clone().lerp(points[i + 1], g - i), ways[i + 1]];
+    };
+    const last = level >= (rich ? 2 : 1);
+    if (!last) {
+      // Lesser branches to either side by turns, from a third of the way out.
+      const n = level === 0 ? 4 + rng.int(0, 2) : 3 + rng.int(0, 1);
+      for (let k = 0; k < n; k++) {
+        const t = 0.34 + 0.6 * ((k + rng.range(0.1, 0.9)) / n), [bp, bw] = at(t);
+        const side = (k % 2 ? 1 : -1) * rng.range(0.55, 1.15);
+        limb(bp, Math.atan2(bw.z, bw.x) + side, Math.asin(Math.max(-0.9, Math.min(0.9, bw.y))) + rng.range(0.05, 0.35), length * rng.range(0.4, 0.58) * (1 - 0.3 * t), thick * (0.5 - 0.15 * t), level + 1, f);
+      }
+    }
+    // Needles: a brush at the end of everything, and on the last twigs two or three more just short of it.
+    const size = (coastal ? 0.8 : 0.95) * rng.range(0.85, 1.2) * (rich ? 1 : 1.5);
+    const depth = Math.min(1, end.distanceTo(heart) / (R * 1.1)), light = (0.55 + 0.5 * depth) * (end.y < heart.y ? 0.85 : 1) * (0.9 + 0.2 * f);
+    brush(end, endWay, size, light);
+    if (last) {
+      for (let k = 0; k < 3; k++) {
+        const [bp, bw] = at(rng.range(0.3, 0.9));
+        any.set(rng.range(-1, 1), rng.range(0, 0.8), rng.range(-1, 1)).normalize().multiplyScalar(0.8).add(bw);
+        brush(bp.addScaledVector(any, size * 0.2), any.normalize(), size * rng.range(0.75, 1), light * 0.9);
+      }
+    }
+  };
+  const spacing = (coastal ? 0.75 : 1.05) / Math.max(0.5, o.detail);
+  const whorls = Math.max(3, Math.round((H * (0.96 - crownFrom)) / spacing));
+  let turn = rng.range(0, Math.PI * 2);
+  for (let w = 0; w < whorls; w++) {
+    const f = (w + 0.5) / whorls, from = axis(crownFrom + (0.96 - crownFrom) * f);
+    const around = rng.int(2, 4);
+    turn += rng.range(0.9, 2.2);
+    for (let k = 0; k < around; k++) {
+      const az = turn + (k / around) * Math.PI * 2 + rng.range(-0.4, 0.4);
+      // Longest low in the crown and shortest at the top; on the coast the other way about, which is what makes the umbrella.
+      const len = R * (coastal ? 0.55 + 0.6 * f : 0.34 + 0.76 * Math.sin(Math.PI * (0.15 + 0.75 * f))) * rng.range(0.75, 1.15);
+      const rise = coastal ? rng.range(0.05, 0.4) : -0.12 + 0.6 * f + rng.range(-0.15, 0.15);
+      limb(from, az, rise, len, thickAt(crownFrom + (0.96 - crownFrom) * f) * rng.range(0.34, 0.5), 0, f);
+    }
+  }
+  // The leader: the trunk's own top, with its brushes.
+  { const top = axis(0.97); for (let k = 0; k < 3; k++) brush(top.clone().add(any.set(rng.range(-0.3, 0.3), rng.range(-0.1, 0.3), rng.range(-0.3, 0.3))), any.set(rng.range(-0.6, 0.6), 1, rng.range(-0.6, 0.6)).normalize(), 0.8, 1.05); }
+  // What it has shed: stubs on the bare trunk, and a dead limb or two still hanging, grey and bare.
+  if (o.detail > 0.6) {
+    const dead: Colour = [o.bark[0] * 0.5, o.bark[1] * 0.56, o.bark[2] * 0.62];
+    for (let k = 0, n = rng.int(4, 7); k < n; k++) {
+      const t = rng.range(0.14, crownFrom + 0.05), from = axis(t), az = rng.range(0, Math.PI * 2), long = rng.chance(0.3), len = long ? rng.range(1.2, 2.6) : rng.range(0.25, 0.8);
+      const out = new Vector3(Math.cos(az), rng.range(-0.25, 0.05), Math.sin(az)).normalize();
+      const mid = from.clone().addScaledVector(out, len * 0.55), end = mid.clone().addScaledVector(out, len * 0.45).add(any.set(rng.range(-0.2, 0.2), -len * rng.range(0.1, 0.3), rng.range(-0.2, 0.2)));
+      layLimb(o.soft, [from, mid, end], [thickAt(t) * (long ? 0.2 : 0.16), thickAt(t) * 0.1, 0.012], 3, dead, k, open);
+    }
   }
   return reach;
 }
