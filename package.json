@@ -4,6 +4,7 @@
   "description": "Generate and explore places for adventure",
   "scripts": {
     "dev": "vite",
+    "lab": "vite --port 5178 --strictPort --open /lab/materials.html",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

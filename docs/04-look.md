@@ -123,6 +123,8 @@ The band of ground that is carved as rock follows the lines. It is made of rows 
 
 ## Materials
 
+**Working on them.** Rock, ground and leaves are worked on in the material lab (`lab/materials.html`, `npm run lab`; see the README): a small stage with one of everything standing in the open, built in a second by the game's own code and drawn with these same materials, where saving a material's source puts the new one on at once and a kept picture can be wiped against the live one. Look there first, close, at walking distance and far, in more than one light and on more than one stone; then look in a valley.
+
 Every surface uses a physically based material: base colour, normal, roughness, ambient occlusion and height, with metalness and emission where relevant.
 
 **Where textures come from.** The primary source is a procedural material library: recipes that generate tiling texture sets on the GPU from noise and pattern functions, with normal maps derived from the generated height. This suits the project. Materials are seedable and can vary per site and per culture, nothing has to be licensed or downloaded, and the generator can ask for "this masonry, but older and wetter". The pipeline also accepts ordinary scanned texture sets, so openly licensed libraries can be dropped in where a recipe is not good enough.

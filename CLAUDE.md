@@ -21,6 +21,7 @@ Keep these up to date in the same commit as the change they describe.
 ## Running and checking
 
 - `npm install`, then `npm run dev` and open the address it prints. `?seed=<text>` picks the place; `?nointro` skips the opening card; `?nobake` skips the light bake. `?cam=x,y,z,yaw,pitch` puts the camera somewhere and leaves it flying there, for pictures; `V` toggles flying while walking about.
+- `npm run lab` opens the material lab (`lab/materials.html`) on port 5178: a small stage with a cliff, boulders, ground with a track, trees and grass, made by the game's code and drawn with the game's materials. Saving `siteMaterial.ts`, `vegetation.ts` or `textures.ts` swaps the new materials in where they stand (a small plugin in `vite.config.ts` sees to it); `K` keeps a picture to wipe against the live one. Work on rock, ground and leaf materials there first, then look in a valley. See the README.
 - `npm run typecheck` and `npm run build` must pass before a commit.
 - `npm run check` (`tools/sites.ts`): generates sites and confirms each is connected and completable. Run it after any change to `src/core`.
 - `npm run range`: regenerates `public/range.html`, the report of what the generator makes.

@@ -13,6 +13,17 @@
       "port": 5173
     },
     {
+      "name": "lab",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5178",
+        "--strictPort"
+      ],
+      "port": 5178
+    },
+    {
       "name": "dist",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
