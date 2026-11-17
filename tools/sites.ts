@@ -132,6 +132,19 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
       tally3(`gallery under=${Math.round(tunnelled * 10) * 10}%`);
     }
     tally3(`gallery=${!!g}`);
+    // The scramble, if there is one: it leaves the climb and comes out by the cairn; on the top all the way; no steeper than a stair.
+    const sc = m.scramble;
+    if (sc) {
+      const first = sc.line[0], last = sc.line[sc.line.length - 1], from = cl[sc.branch];
+      if (Math.hypot(first[0] - from[0], first[1] - from[1]) > 0.5) throw new Error('the scramble does not leave from the climb');
+      if (m.cairn && Math.hypot(last[0] - m.cairn.x, last[1] - m.cairn.z) > 4.5) throw new Error('the scramble does not come out by the cairn');
+      for (const [x, z] of sc.line) if (inside(m, x, z) < 3) throw new Error(`the scramble off the top at ${x}, ${z}`);
+      for (let k = 1; k < sc.line.length; k++) {
+        const run = Math.hypot(sc.line[k][0] - sc.line[k - 1][0], sc.line[k][1] - sc.line[k - 1][1]), rise = Math.abs(sc.line[k][2] - sc.line[k - 1][2]);
+        if (run > 4 || rise > run * 0.66 + 0.12) throw new Error(`the scramble breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+      }
+    }
+    tally3(`routes=${1 + (g ? 1 : 0) + (sc ? 1 : 0)}`);
     const arrive = m.way![m.way!.length - 1];
     if (arrive[2] + 1.7 > m.deck) throw new Error(`the arrival is above the cloud (${arrive[2]} against ${m.deck})`);
     // The way up the ridge is never ruled straight, and it goes downhill somewhere on the way up.

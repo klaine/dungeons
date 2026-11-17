@@ -518,7 +518,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   rock = rock.mul(edge.mul(0.7).add(1));
   // Snow, on ledges and whatever faces up; it lies first in the cracks and the pits of the stone.
   // (Not on rock that was told it is under a roof of rock: a tunnel's floor.)
-  const snowy: N = snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).mul(one(f.z)).toVar();
+  const snowy: N = max(snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).mul(one(max(f.z, 0))), smoothstep(-0.3, -0.8, f.z).mul(step(0.5, snowUniforms.uSnow as N))).toVar();
   m.colorNode = vec4(mix(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), vec3(...SNOW).mul(mix(0.9, 1.02, tex.a)), snowy), 1);
   const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
   m.roughnessNode = mix(mix(rough, 0.97, mossy), 0.66, snowy);

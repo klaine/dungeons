@@ -256,13 +256,17 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
     // The climb goes up a ridge: the path is on its crest, a couple of strides broad, and the
     // ground falls away from it on both sides, built up where the land lies lower and cut back
     // where it stands higher. (Not beside the house, where the climb starts on the level ground.)
-    if (m.climb) {
-      const w = nearestOn(m.climb, x, z, 16);
+    // (The scramble too, the more sharply: its ridge is an arête, falling away steeply on either hand.)
+    for (const [line, fall2] of [[m.climb, 0.5], [m.scramble?.line, 0.78]] as const) {
+      if (!line) continue;
+      const w = nearestOn(line, x, z, 16);
       if (w.off < 16) {
         const rising = smooth((w.y - floor - 1) / 6);
-        const crest = w.y - 0.5 * Math.pow(Math.max(0, w.off - 1.5), 1.3);
+        const crest = w.y - fall2 * Math.pow(Math.max(0, w.off - 1.4), 1.3);
         const near = 1 - smooth((w.off - 1.5) / 2.2), ridged = (1 - smooth((w.off - 1.5) / 13)) * rising;
-        const k = Math.max(near, crest > y ? ridged : ridged * 0.55);
+        let k = Math.max(near, crest > y ? ridged : ridged * 0.55);
+        // (Where the scramble leaves the climb, the climb's own ground is left as it is, or the fork would cut a step across it.)
+        if (line !== m.climb && m.climb) k *= smooth((nearestOn(m.climb, x, z, 8).off - 2.2) / 4);
         y += ((w.off < 1.5 ? w.y : crest) - y) * k;
       }
     }
@@ -350,6 +354,27 @@ export function countryAt(m: Mountain, floor: number, x: number, z: number): { y
   // (This mountain's own slopes, as they go on down beyond the near ground.)
   if (out < 900) y = Math.max(y, landAt(m, floor, x, z, false));
   return y < lake ? { y: lake, water: true } : { y, water: false };
+}
+
+/** A curve through points (Catmull and Rom's), a point every stride and a bit, no two nearer than that. */
+function curveThrough(ctrl: [number, number][]): [number, number][] {
+  const c = [ctrl[0], ...ctrl, ctrl[ctrl.length - 1]], out: [number, number][] = [];
+  for (let i = 1; i < c.length - 2; i++) {
+    const [p0, p1, p2, p3] = [c[i - 1], c[i], c[i + 1], c[i + 2]], n = Math.max(2, Math.round(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 2));
+    for (let k = 0; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      const f = (a: number, b: number, cc: number, d: number) => 0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
+      out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  out.push(ctrl[ctrl.length - 1]);
+  // (Levels are written to a tenth of a metre, and points closer than this would seem to jump.)
+  const spaced: [number, number][] = [out[0]];
+  for (const q of out.slice(1, -1)) { const p0 = spaced[spaced.length - 1]; if (Math.hypot(q[0] - p0[0], q[1] - p0[1]) > 1.2) spaced.push(q); }
+  const end = out[out.length - 1], p1 = spaced[spaced.length - 1];
+  if (spaced.length > 1 && Math.hypot(end[0] - p1[0], end[1] - p1[1]) < 1.2) spaced.pop();
+  spaced.push(end);
+  return spaced;
 }
 
 /**
@@ -637,25 +662,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const lengthOf = (pts: [number, number][]) => pts.reduce((sum, q, k) => (k ? sum + Math.hypot(q[0] - pts[k - 1][0], q[1] - pts[k - 1][1]) : 0), 0);
     const fits = (pts: [number, number][]) => pts.every(([x, z]) => inside(m, x, z) > 4.5 && (Math.hypot(x - startX, z - startZ) < 16 || (outside(level, x, z) > 4 && (!wy.length || nearestOn(wy, x, z, 10).off > 9))));
     /** A curve through points (Catmull and Rom's), every two metres or so. */
-    const through = (ctrl: [number, number][]): [number, number][] => {
-      const c = [ctrl[0], ...ctrl, ctrl[ctrl.length - 1]], out: [number, number][] = [];
-      for (let i = 1; i < c.length - 2; i++) {
-        const [p0, p1, p2, p3] = [c[i - 1], c[i], c[i + 1], c[i + 2]], n = Math.max(2, Math.round(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / 2));
-        for (let k = 0; k < n; k++) {
-          const t = k / n, t2 = t * t, t3 = t2 * t;
-          const f = (a: number, b: number, cc: number, d: number) => 0.5 * (2 * b + (-a + cc) * t + (2 * a - 5 * b + 4 * cc - d) * t2 + (-a + 3 * b - 3 * cc + d) * t3);
-          out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
-        }
-      }
-      out.push(ctrl[ctrl.length - 1]);
-      // (No two points nearer than a stride and a bit: levels are written to a tenth of a metre, and closer points would seem to jump.)
-      const spaced: [number, number][] = [out[0]];
-      for (const q of out.slice(1, -1)) { const p0 = spaced[spaced.length - 1]; if (Math.hypot(q[0] - p0[0], q[1] - p0[1]) > 1.2) spaced.push(q); }
-      const end = out[out.length - 1], p1 = spaced[spaced.length - 1];
-      if (spaced.length > 1 && Math.hypot(end[0] - p1[0], end[1] - p1[1]) < 1.2) spaced.pop();
-      spaced.push(end);
-      return spaced;
-    };
+    const through = curveThrough;
     /** The tightest bend along a line, as the radius of the circle through points ten metres apart. */
     const tightest = (pts: [number, number][]) => {
       let least = Infinity;
@@ -766,10 +773,12 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
 
   // The gallery way: on most mountains there is a second way up, along the mountainside.
   if (rng.fork('gallery?').chance(0.8)) layGallery(site, m, F, rng.fork('gallery'));
+  // The scramble: on most mountains a third way, short and steep, up the summit's far ridge.
+  if (rng.fork('scramble?').chance(0.85)) layScramble(site, m, F, rng.fork('scramble'));
 
   // Tors on the top: where the ground would otherwise lie open and even, knobs and low crags of rock, clear of everything made.
   {
-    const q = rng.fork('tors'), all = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? [])];
+    const q = rng.fork('tors'), all = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? []), ...(m.scramble?.line ?? [])];
     m.tors = [];
     for (let tries = 0, want = q.int(14, 24); tries < 600 && m.tors.length < want; tries++) {
       const a = q.range(0, TAU), d = rimAt(m, a) * Math.sqrt(q.next()) * 0.95, x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
@@ -1030,4 +1039,91 @@ function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
   }
   m.gallery = { line, under, windows, joins };
   for (const run of galleryRuns(m.gallery).open) (site.paths ??= []).push({ points: run.map(([x, z]) => [x, z] as [number, number]), to: 'gallery' });
+}
+
+/**
+ * Lays out the scramble: the third way to the summit, the shortest and the hardest. It leaves the climb low down, a little way
+ * out from the house, crosses the top to the summit's far side in one long curve, and goes straight up the summit's far ridge, an
+ * arête with a drop on either hand, to come out on the platform by the cairn from the side the climb does not come up. Its last
+ * part is as steep as a stair cut in the rock may be, and has a chain to hold.
+ */
+function layScramble(site: Site, m: Mountain, F: number, rng: Rng): void {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const climb = m.climb, way = m.way, c = m.cairn;
+  if (!climb || !way || !c || climb.length < 20) return;
+  const plain0 = (x: number, z: number) => landAt(m, F, x, z, false);
+  const gal = m.gallery?.line ?? [];
+  // The side the climb comes up onto the summit from; the scramble comes from the other side.
+  const arrive = Math.atan2(climb[climb.length - 5][1] - c.z, climb[climb.length - 5][0] - c.x);
+  let best: { line: [number, number][]; steepFrom: number; branch: number; yFoot: number; score: number } | null = null;
+  const why: Record<string, number> = {};
+  const no = (k: string) => { why[k] = (why[k] ?? 0) + 1; };
+  for (let tries = 0; tries < 1500; tries++) {
+    // Where it comes up: a bearing from the summit well round from the climb's.
+    const aEnd = arrive + (rng.chance(0.5) ? 1 : -1) * rng.range(1.0, Math.PI);
+    // How far out the arête's foot is: far enough that from there to the top is no steeper than a stair cut in the rock. The arête is
+    // built up as a ridge where the land under it is lower, and cut down where it is higher.
+    const rFoot = rng.range(40, 135), fx = c.x + Math.cos(aEnd) * rFoot, fz = c.z + Math.sin(aEnd) * rFoot;
+    if (inside(m, fx, fz) < 7) { no('foot at edge'); continue; }
+    const ground0 = plain0(fx, fz), lowest = Math.max(c.y - 0.58 * (rFoot - 3.4), ground0 - 8), highest = Math.min(ground0 + 5, c.y - 12);
+    if (lowest > highest) { no('arete steep'); continue; }
+    // Where it leaves the climb: low down, a fifth to two fifths of the way up, off the level ground.
+    const branch = Math.round(climb.length * rng.range(0.08, 0.45));
+    const [sx, sz, sy] = climb[branch];
+    if (outside(m.level, sx, sz) < 5) { no('branch on level'); continue; }
+    // Round the flank: one point out on the side of the summit, between where it starts and the arête's foot, going round the side the climb is not on.
+    const aStart = Math.atan2(sz - c.z, sx - c.x), side = rng.chance(0.5) ? 1 : -1;
+    let span = ((aEnd - aStart) * side % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    if (span > Math.PI * 1.6) { no('span'); continue; }
+    const aMid = aStart + side * span * rng.range(0.4, 0.6), rMid = Math.max(rFoot, Math.hypot(sx - c.x, sz - c.z)) * rng.range(0.85, 1.15);
+    const mid: [number, number] = [c.x + Math.cos(aMid) * rMid, c.z + Math.sin(aMid) * rMid];
+    const end: [number, number] = [c.x + Math.cos(aEnd) * 3.4, c.z + Math.sin(aEnd) * 3.4];
+    // (The approach and the arête are one curve: no corner at the arête's foot.)
+    const approachCtrl: [number, number][] = [[sx, sz], mid, [fx, fz]];
+    // (Not ruled straight either: an arête bends as the rock it is cut in bends, once or twice, and the path keeps to its crest.)
+    const ax = end[0] - fx, az = end[1] - fz, al = Math.hypot(ax, az) || 1, sway = rng.chance(0.5) ? 1 : -1, bendA = sway * rng.range(0.55, 1) * Math.min(22, al * 0.2), bendB = -sway * rng.range(0.35, 0.8) * Math.min(13, al * 0.12);
+    const areteCtrl: [number, number][] = [[fx + ax * 0.35 - (az / al) * bendA, fz + az * 0.35 + (ax / al) * bendA], [fx + ax * 0.72 - (az / al) * bendB, fz + az * 0.72 + (ax / al) * bendB], end];
+    // (Nor a hairpin there: the way into the foot and the way up the arête may not turn back on each other.)
+    const inH = Math.atan2(fz - mid[1], fx - mid[0]), outH = Math.atan2(areteCtrl[0][1] - fz, areteCtrl[0][0] - fx);
+    if (Math.abs(turnBetween(inH, outH)) > 1.75) { no('hairpin'); continue; }
+    const line = curveThrough([...approachCtrl, ...areteCtrl]);
+    let footAt = 0;
+    for (let k = 1; k < line.length; k++) if (Math.hypot(line[k][0] - fx, line[k][1] - fz) < Math.hypot(line[footAt][0] - fx, line[footAt][1] - fz)) footAt = k;
+    const approach = line.slice(0, footAt + 1), nA = line.length - footAt - 1;
+    // Clear of the edge, the house, the way, the gallery way, and of the climb except where it leaves it; and not across the summit early.
+    let fail = '';
+    for (let k = 0; k < line.length && !fail; k++) {
+      const [x, z] = line[k], onArete = k > line.length - nA - 1;
+      if (inside(m, x, z) < 4.5) fail = 'c-edge';
+      else if (outside(m.level, x, z) < 5) fail = 'c-house';
+      else if (nearestOn(way, x, z, 9).off < 8) fail = 'c-way';
+      else if (gal.length && nearestOn(gal, x, z, 9).off < 6) fail = 'c-gallery';
+      // (Where the arête comes up onto the summit it may come near the climb's last strides, which arrive at the same platform.)
+      else if (Math.hypot(x - sx, z - sz) > 14 && !(onArete && Math.hypot(x - c.x, z - c.z) < 12) && nearestOn(climb, x, z, 10).off < 9) fail = onArete ? 'c-climb-arete' : 'c-climb';
+      else if (!onArete && Math.hypot(x - c.x, z - c.z) < rFoot * 0.7) fail = 'c-summit';
+    }
+    if (fail) { no(fail); continue; }
+    const lenA = approach.reduce((sum, p, k) => (k ? sum + Math.hypot(p[0] - approach[k - 1][0], p[1] - approach[k - 1][1]) : 0), 0);
+    // The arête's foot stands at its own ground, or lower if the approach cannot climb so far at a path's grade.
+    // (The arête's foot at whatever level both its own climb and the approach's allow, as near the ground there as may be.)
+    const lo = Math.max(lowest, sy - lenA * 0.34), hi = Math.min(highest, sy + lenA * 0.34);
+    if (lo > hi) { no('levels'); continue; }
+    const yFoot = Math.min(hi, Math.max(lo, ground0));
+    // A long approach and a long arête make the better scramble; a steep arête is the point of it.
+    const score = Math.min(lenA, 220) * 0.08 + rFoot * 0.3 + ((c.y - yFoot) / (rFoot - 3.4)) * 20 + rng.range(0, 4);
+    if (!best || score > best.score) best = { line, steepFrom: approach.length - 1, branch, yFoot, score };
+  }
+  // (Why candidates were turned down, for tuning: `DBG_S=1` before a tool prints it.)
+  if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_S) console.log('scramble', JSON.stringify(why));
+  if (!best) return;
+  const { line, steepFrom, branch, yFoot } = best;
+  const sy = climb[branch][2];
+  // Levels: over the approach, from the climb's level to the arête's foot, by the land's own heights eased to a path's grade (it may go
+  // down as well as up); then up the arête at an even grade, as steep as it must be.
+  const approachLevels = levelLine(line.slice(0, steepFrom + 1), plain0, sy, yFoot, 0.36);
+  const lenArete = line.slice(steepFrom).reduce((sum, p, k, all) => (k ? sum + Math.hypot(p[0] - all[k - 1][0], p[1] - all[k - 1][1]) : 0), 0);
+  let run = 0;
+  const areteLevels = line.slice(steepFrom + 1).map((p, k) => { const prev = line[steepFrom + k]; run += Math.hypot(p[0] - prev[0], p[1] - prev[1]); return [round(p[0]), round(p[1]), round(yFoot + ((c.y - yFoot) * run) / lenArete)] as [number, number, number]; });
+  m.scramble = { line: [...approachLevels, ...areteLevels], branch, steep: steepFrom };
+  (site.paths ??= []).push({ points: m.scramble.line.map(([x, z]) => [x, z] as [number, number]), to: 'scramble' });
 }

@@ -546,6 +546,12 @@ export interface Mountain {
    * view: where on the tunnel's line, how high, the bearing out (radians), and how far out the face is.
    */
   gallery?: { line: [number, number, number][]; under: [number, number][]; windows: { x: number; z: number; y: number; out: number; reach: number }[]; joins: number };
+  /**
+   * A third way up, the scramble: it leaves the climb at the point of it numbered `branch`, goes round the summit's flank, and
+   * comes up the summit's far ridge straight to the top, from its point numbered `steep` on as a stair cut in the rock with an iron
+   * chain to hold. `line` is its points `[x, z, y]`, a couple of metres apart; it ends on the summit's platform.
+   */
+  scramble?: { line: [number, number, number][]; branch: number; steep: number };
   /** The cairn on the summit, with a cross of timber beside it, at the end of the climb. */
   cairn?: { x: number; z: number; y: number };
   /** Tors: knobs and low crags of bare rock standing out of the ground of the top, `height` high and `r` across the half. They are the land's own shape, and are carved as rock. */
@@ -602,7 +608,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */

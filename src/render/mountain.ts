@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
-import { countryAt, crestPoint, galleryRuns, inside, landAt, nearestOn } from '../core/mountain';
+import { countryAt, crestPoint, galleryRuns, inside, landAt, nearestOn, onSpur, rimAt } from '../core/mountain';
 import { buildLandmark } from './landmarks';
 import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
@@ -83,7 +83,9 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const insideOuter = (x: number, z: number, mg = 0) => b.outerRects.some((r) => x > r.x0 - mg && x < r.x1 + mg && z > r.z0 - mg && z < r.z1 + mg);
   const way = m.way ?? [], climb = m.climb ?? [];
   const nearWay = (x: number, z: number, reach: number) => (way.length ? nearestOn(way, x, z, reach).off : Infinity);
-  const nearClimb = (x: number, z: number, reach: number) => (climb.length ? nearestOn(climb, x, z, reach).off : Infinity);
+  // (The scramble is a climb too, for everything that keeps clear of a path or is kept off one.)
+  const scr = m.scramble?.line ?? [];
+  const nearClimb = (x: number, z: number, reach: number) => Math.min(climb.length ? nearestOn(climb, x, z, reach).off : Infinity, scr.length ? nearestOn(scr, x, z, reach).off : Infinity);
   // The gallery way, if there is one: its stretches open to the sky, which are part of the land's shape, and those under the rock, which are carved out of it.
   const gal = m.gallery, runs = gal ? galleryRuns(gal) : { open: [], under: [] };
   const nearOf = (lines: [number, number, number][][], x: number, z: number, reach: number) => {
@@ -269,7 +271,49 @@ export function buildMountain(b: MountainBuild): MountainResult {
     }
     return air;
   };
-  const density = runs.under.length ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), tunnelAir(x, y, z)) : landAir;
+  const bored = runs.under.length ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), tunnelAir(x, y, z)) : landAir;
+
+  // ---- cornices: in winter, along the rim on the side away from the wind, the snow is blown out over the edge into a lip that hangs
+  // in the air, its top rising a little to the brink and its underside curling back to the face; and it is broken where a path
+  // comes near the edge, where the precipice is low, and here and there. Carved with the rock, as solid snow.
+  const cornice = (() => {
+    if (!winter) return null;
+    const q = rng.fork('cornice'), lee = q.range(0, Math.PI * 2), seedC = q.range(0, 50), RING = 360;
+    const reach = new Float32Array(RING);
+    for (let k = 0; k < RING; k++) {
+      const a = (k / RING) * Math.PI * 2, r = rimAt(m, a), x = m.x + Math.cos(a) * r, z = m.z + Math.sin(a) * r;
+      const lee2 = smooth((Math.cos(a - lee) - 0.05) / 0.35), gaps = smooth((fbm2(Math.cos(a) * 3.1 + seedC, Math.sin(a) * 3.1, 2, 61) - 0.38) / 0.12);
+      if (lee2 * gaps < 0.05) continue;
+      if (onSpur(m, x, z).off < m.spur.width / 2 + 14 || nearWay(x, z, 12) < 10 || nearClimb(x, z, 12) < 10 || nearOpen(x, z, 12) < 10 || (runs.under.length && nearUnder(x, z, 14).off < 12)) continue;
+      if (Math.abs(plain(x - Math.cos(a) * 8, z - Math.sin(a) * 8) - plain(x + Math.cos(a) * 6, z + Math.sin(a) * 6)) < 14) continue;
+      reach[k] = (2.2 + 3.0 * fbm2(Math.cos(a) * 9 + seedC, Math.sin(a) * 9, 2, 67)) * lee2 * gaps;
+    }
+    // (Eased round the ring, so that a cornice grows out of nothing and goes back into it.)
+    const eased = reach.map((_, k) => { let sum = 0; for (let j = -3; j <= 3; j++) sum += reach[(k + j + RING) % RING]; return sum / 7; });
+    const col = { x: NaN, z: NaN, L: 0, d: 0, top0: 0 };
+    const solidAt = (x: number, y: number, z: number): number => {
+      if (x !== col.x || z !== col.z) {
+        col.x = x; col.z = z; col.L = 0;
+        const a = Math.atan2(z - m.z, x - m.x), f = (((a / (Math.PI * 2)) * RING) % RING + RING) % RING, k = Math.floor(f), t = f - k;
+        const L = eased[k] * (1 - t) + eased[(k + 1) % RING] * t;
+        if (L > 0.35) {
+          const d = rimAt(m, a) - Math.hypot(x - m.x, z - m.z);
+          if (d > -L && d < 4.5) {
+            // (Its brink is where the worn rock actually stands at the rim, a stride and a half in.)
+            const back = 1.5 - d, ix = x - Math.cos(a) * back, iz = z - Math.sin(a) * back;
+            col.L = L; col.d = d; col.top0 = land.holds(ix, iz) ? land.at(ix, iz) : plain(ix, iz);
+          }
+        }
+      }
+      if (col.L <= 0) return -9;
+      const L = col.L, d = col.d, swell = 0.4 + 0.3 * Math.min(1, L / 3.5);
+      if (d >= 0.5) return swell * (1 - smooth((d - 0.5) / 4)) + col.top0 - y;
+      const u = (0.5 - d) / (L + 0.5), top = col.top0 + swell - 0.7 * u * u, bottom = top - (0.35 + 1.9 * Math.min(1, L / 3.2)) * (1 - Math.pow(u, 1.3));
+      return Math.min(top - y, y - bottom, d + L);
+    };
+    return solidAt;
+  })();
+  const density = cornice ? (x: number, y: number, z: number) => Math.min(bored(x, y, z), -cornice(x, y, z)) : bored;
   /** How far inside a tunnel a point is from daylight, 0 at its mouths and by its windows, 1 deep in: for how dark the rock is there. */
   const shut = runs.under.map((run) => run.map(([x, z], k) => {
     let light = Math.min(k, run.length - 1 - k) * 2;
@@ -313,8 +357,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
     // (No moss; a little damp in what does not see the sky.)
     field[0] = 0;
     field[1] = 0.15 * soft * (1 - open);
-    // (What is under a roof of rock: no snow lies on it.)
-    field[2] = 0;
+    // (What is under a roof of rock: no snow lies on it. And what is a cornice is snow all over, underneath as well: it says so with less than nothing.)
+    field[2] = cornice && cornice(q.x, q.y, q.z) > -0.3 ? -1 : 0;
     field[3] = 0.25 + 0.75 * rockKind.bedded;
     // In a tunnel it is dark, the darker the further from its mouths and its windows; and a little damp.
     if (runs.under.length && tunnelAir(q.x, q.y, q.z) > -0.6) {
@@ -921,7 +965,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
         const [ax, az, ay] = line[k], [bx, bz, by] = line[k + 1], run = Math.hypot(bx - ax, bz - az);
         if (run < 0.3 || Math.abs(by - ay) / run < 0.38) continue;
         if (ground((ax + bx) / 2, (az + bz) / 2) < Math.min(ay, by) - 1.5) continue;
-        const heading = Math.atan2(bz - az, bx - ax), n = Math.max(1, Math.round(run / 0.6)), up = by > ay;
+        // (No riser higher than a body steps up without thinking: the treads are walked on, and a taller one stops the foot.)
+        const heading = Math.atan2(bz - az, bx - ax), n = Math.max(1, Math.round(run / 0.6), Math.ceil(Math.abs(by - ay) / 0.28)), up = by > ay;
         for (let j = 0; j < n; j++) {
           // Each tread a slab or two of the mountain's own stone, split and laid as it came: no two the same breadth or quite square to the way.
           const f = (j + 0.5) / n, top = ay + (by - ay) * (up ? (j + 1) / n : j / n);
@@ -935,6 +980,19 @@ export function buildMountain(b: MountainBuild): MountainResult {
     };
     if (way.length) stepsOn(way, 1.25, 2);
     if (climb.length) stepsOn(climb, 1.15, 2);
+    // (Not on the scramble: a staircase up an arête is a monument. There the rock is the path, with a foothold cut here and there where it steepens.)
+    if (scr.length) {
+      let since = 0;
+      for (let k = Math.max(1, (m.scramble?.steep ?? 0) - 4); k < scr.length - 2; k++) {
+        const [ax, az, ay] = scr[k - 1], [bx, bz, by] = scr[k], run = Math.hypot(bx - ax, bz - az);
+        since += run;
+        if (since < q.range(1.6, 3.4) || run < 0.3 || (by - ay) / run < 0.3) continue;
+        since = 0;
+        const heading = Math.atan2(bz - az, bx - ax), off = q.range(-0.45, 0.45), w = q.range(0.55, 1.2), tone = q.range(0.65, 0.95);
+        const x = bx - Math.sin(heading) * off, z = bz + Math.cos(heading) * off;
+        block('rock', x, by - 0.3, z, q.range(0.3, 0.5), w, 0.3 + q.range(0, 0.06), heading + q.range(-0.25, 0.25), rockColour(tone), [q.range(-0.04, 0.04), q.range(-0.04, 0.04)]);
+      }
+    }
     if (gal) stepsOn(gal.line, 1.3, 0);
     wild.group = was;
   }
@@ -953,6 +1011,63 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
   // And a fire burning on the floor of the shelter, for whoever comes up out of the cloud.
   if (m.shelter) torches.push({ position: V(m.shelter.x - Math.cos(m.shelter.facing) * 0.3, m.shelter.y + 0.05, m.shelter.z - Math.sin(m.shelter.facing) * 0.3), out: V(0, 0, 1), fire: 1.1 });
+
+  // The scramble's arête: iron stanchions let into the rock on the side the drop is steeper, every couple of strides, and a chain from
+  // each to the next, hanging a little; and where it leaves the climb, a cairn and a post with a board on it pointing the way.
+  if (m.scramble) {
+    const sc = m.scramble, line = sc.line, iron: Colour = [0.13, 0.12, 0.115], q = rng.fork('chain');
+    type P3 = [number, number, number];
+    const link = (a: P3, c: P3) => {
+      const dx = c[0] - a[0], dz = c[2] - a[2], l = Math.hypot(dx, dz) || 1, px = (-dz / l) * 0.018, pz = (dx / l) * 0.018, t = 0.018;
+      solid('metal', [[a[0] - px, a[1] - t, a[2] - pz], [a[0] + px, a[1] - t, a[2] + pz], [c[0] + px, c[1] - t, c[2] + pz], [c[0] - px, c[1] - t, c[2] - pz], [a[0] - px, a[1] + t, a[2] - pz], [a[0] + px, a[1] + t, a[2] + pz], [c[0] + px, c[1] + t, c[2] + pz], [c[0] - px, c[1] + t, c[2] - pz]], iron);
+    };
+    let last: P3 | null = null, since = 99;
+    // (On one hand all the way, whichever falls away the more over the arête as a whole: a chain that changed hands would cross the path.)
+    let leftLow = 0;
+    for (let k = Math.max(1, sc.steep); k < line.length - 1; k++) {
+      const [x, z] = line[k], dx = line[k + 1][0] - line[k - 1][0], dz = line[k + 1][1] - line[k - 1][1], l = Math.hypot(dx, dz) || 1;
+      leftLow += ground(x + (dz / l) * 3, z - (dx / l) * 3) - ground(x - (dz / l) * 3, z + (dx / l) * 3);
+    }
+    const hand = leftLow > 0 ? -1 : 1;
+    let lastHeading = NaN;
+    for (let k = Math.max(1, sc.steep + 1); k < line.length - 1; k++) {
+      since += Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]);
+      if (since < 2.4) continue;
+      since = 0;
+      const [x, z, y] = line[k], dx = line[k + 1][0] - line[k - 1][0], dz = line[k + 1][1] - line[k - 1][1], l = Math.hypot(dx, dz) || 1;
+      const side = hand;
+      const px = x + (dz / l) * side * 1.0, pz = z - (dx / l) * side * 1.0, top: P3 = [px, y + 0.95, pz];
+      block('metal', px, Math.min(y, ground(px, pz)) - 0.2, pz, 0.035, 0.035, y + 1.0 - Math.min(y, ground(px, pz)) + 0.2, Math.atan2(dz, dx), iron);
+      // (No chain from one post to the next across a bend so sharp that it would cross the path.)
+      const heading = Math.atan2(dz, dx), straightOn = Number.isNaN(lastHeading) || Math.abs(Math.atan2(Math.sin(heading - lastHeading), Math.cos(heading - lastHeading))) < 0.6;
+      lastHeading = heading;
+      if (last && straightOn && Math.hypot(top[0] - last[0], top[2] - last[2]) < 4.5) {
+        // The chain: four lengths, sagging in the middle.
+        let prev: P3 = last;
+        for (let s2 = 1; s2 <= 4; s2++) {
+          const f = s2 / 4, sag = 0.16 * Math.sin(Math.PI * f), p2: P3 = [last[0] + (top[0] - last[0]) * f, last[1] + (top[1] - last[1]) * f - sag, last[2] + (top[2] - last[2]) * f];
+          link(prev, p2); prev = p2;
+        }
+      }
+      last = top;
+    }
+    // The fork: a cairn beside it, and a post with a board pointing up the scramble.
+    if (sc.line.length > 4) {
+      // (Both in the angle between the two paths, a couple of strides off each: anywhere else one of them would stand on a path.)
+      const [x0, z0] = sc.line[0], [x1, z1] = sc.line[4], h = Math.atan2(z1 - z0, x1 - x0);
+      const spots: [number, number][] = [];
+      for (let r = 2.6; r <= 5 && spots.length < 2; r += 0.4) for (let k = 0; k < 24 && spots.length < 2; k++) {
+        const a = h + (k / 24) * Math.PI * 2, x = x0 + Math.cos(a) * r, z = z0 + Math.sin(a) * r;
+        if (nearClimb(x, z, 4) > 1.9 && nearWay(x, z, 4) > 2.4 && inside(m, x, z) > 2 && spots.every(([sx2, sz2]) => Math.hypot(sx2 - x, sz2 - z) > 2.2)) spots.push([x, z]);
+      }
+      if (spots[0]) {
+        const [px, pz] = spots[0], py = ground(px, pz);
+        block('wood', px, py - 0.3, pz, 0.1, 0.1, 2.2, h, timber);
+        block('wood', px + Math.cos(h) * 0.35, py + 1.55, pz + Math.sin(h) * 0.35, 0.8, 0.03, 0.2, h, [0.6, 0.12, 0.07]);
+      }
+      if (spots[1]) cairn(spots[1][0], spots[1][1], 1.4, q.fork('fork cairn'));
+    }
+  }
 
   // Young pines, here and there on ledges of the precipices and among the crags, where a seed has
   // lodged in a crack: low, leaning, bent by the wind. No older ones: what grows taller is blown down.
