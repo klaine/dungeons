@@ -156,6 +156,9 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
  * textures are read more and more blurred, until a far field is its colour and its broad
  * variation and nothing that could be seen repeating.
  */
+/** How far off grass is drawn in full, in metres (see `vegetationRange`): where it thins out, the ground begins to stand in for it. */
+export const groundUniforms: { uGrassRange: { value: number } } = { uGrassRange: uniform(80) as N };
+
 export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
@@ -229,6 +232,13 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35).add(onFoot.mul(one(smoothstep(0.4, 1.6, footOff))).mul(0.3));
   const dry: N = smoothstep(0.5, 0.72, wide.mul(0.7).add(mid.mul(0.45)).add(patch.sub(0.5).mul(0.35)).add(trodden).sub(wetV.mul(0.7)).sub(0.08).add(gThatch.a.sub(0.4).mul(0.3))).mul(one(leafy)).toVar();
   turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.2).add(0.24)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
+  // Far off there is no grass standing on the ground: the tufts thin out and then stop, because nothing so small can be drawn so far
+  // away. What stops must not leave bare turf behind it, which is another colour and lies flat: a meadow would end at a line. So where
+  // the tufts thin, the turf takes on what standing grass looks like from a distance: its colour, which is paler and yellower than
+  // the mat under it, and its unevenness, drifts some metres across. It costs nothing, and it has no farthest distance.
+  const swardFar: N = smoothstep((groundUniforms.uGrassRange as N).mul(0.55), (groundUniforms.uGrassRange as N).mul(2.2), far).toVar();
+  const sward = vertexColor().rgb.mul(vec3(0.21, 0.3, 0.07)).mul(1.45).mul(mix(0.78, 1.22, mid)).mul(mix(0.86, 1.12, macro));
+  turfed = mix(turfed, sward, swardFar.mul(0.85)).toVar();
   // And moss, low and dark, where it is damp or shaded.
   const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);
   const mossy: N = smoothstep(0.55, 0.78, (texture(turf.map, at0.div(7.3).add(0.53)) as N).a.add(wetV.mul(0.45)).add(litV.mul(0.25)).sub(dry.mul(0.4))).mul(one(leafy)).toVar();

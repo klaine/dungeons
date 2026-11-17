@@ -297,6 +297,7 @@ async function start(): Promise<void> {
     SM.rockUniforms.uRockWorn.value = state.worn ?? ROCK[state.stone].worn;
     SM.rockUniforms.uShaftTop.value.set(0, 0, 0, 0);
     VG.vegetationUniforms.uWind.value = state.wind;
+    SM.groundUniforms.uGrassRange.value = VG.vegetationRange.value;
     VG.vegetationUniforms.uGrassTall.value = state.grassTall;
     VG.vegetationUniforms.uGrassVary.value = state.grassVary;
     const S = SKIES[state.hour], mean = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);

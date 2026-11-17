@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -325,6 +325,7 @@ async function start(): Promise<void> {
   const cardMeshes: InstancedMesh[] = [];
   // Grass is drawn out to this distance, by the level of detail chosen.
   vegetationRange.value = num('grass', quality.grass);
+  groundUniforms.uGrassRange.value = vegetationRange.value;
   vegetationUniforms.uWind.value = num('wind', 1);
   // Trees carry more leaves than a modest machine wants to draw; at the lower levels of detail
   // a share of them is left off, evenly, so every crown thins and none goes bare.
