@@ -431,7 +431,17 @@ export interface Site {
    * `side`, at `z`. It leaves the chamber through its wall on that side. It is not one of
    * `ways`: it joins a place to the open valley, and no door hangs in it.
    */
-  backWay?: { place: number; side: 'w' | 'e'; z: number };
+  backWay?: {
+    place: number; side: 'w' | 'e'; z: number;
+    /**
+     * A way down from the tunnel: a branch that leaves it `from` metres short of the ridge's side
+     * (measured from that side into the ridge), runs `leg` metres along the ridge (towards lesser z
+     * if `toward` is -1), turns out under the arm, and comes down into a cavern whose middle is at
+     * `x`, `z`, `rx` and `rz` across the halves of it, `height` high, its floor `drop` metres
+     * below the tunnel's where the branch leaves it.
+     */
+    deep?: { from: number; leg: number; toward: -1 | 1; x: number; z: number; rx: number; rz: number; height: number; drop: number };
+  };
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

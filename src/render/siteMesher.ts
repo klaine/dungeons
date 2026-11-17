@@ -255,7 +255,55 @@ export function meshSite(site: Site): SceneDescription {
       return Math.min(smin(smin(wide - Math.abs(off), y - floor, 0.3), floor + high - y, 0.4), a + OUT, length + IN - a);
     };
     const top = Math.max(out, p.floor) + 4.2;
-    return { p, dir, edge, length, z: bw.z, along, air, top, low: Math.min(out, p.floor), x: (a: number) => edge + dir * a };
+    // The way down: a tube along a line of three legs from the tunnel to the cavern, falling evenly and level for its last three metres, so that it meets the cavern's floor and not a ledge above it; and the cavern, an
+    // uneven dome over a rough oval floor, with stalagmites standing on the floor and stalactites hanging over them.
+    const dp = bw.deep;
+    let deepAir: ((x: number, y: number, z: number) => number) | null = null, cavern: { x: number; z: number; floor: number; rx: number; rz: number; height: number; box: [number, number, number, number] } | null = null;
+    if (dp) {
+      const X = (a: number) => edge + dir * a, z1 = bw.z + dp.toward * dp.leg, start = floorAt(dp.from), yC = start - dp.drop;
+      const rim = dp.x + dir * (dp.rx - 1.2);
+      const line: [number, number][] = [[X(dp.from), bw.z], [X(dp.from), z1], [X(-5), z1], [rim, dp.z]];
+      const lens = line.slice(1).map((q, i) => Math.hypot(q[0] - line[i][0], q[1] - line[i][1])), total = lens.reduce((t, l) => t + l, 0);
+      const spikes = Array.from({ length: 7 }, () => { const a = seeds.range(0, Math.PI * 2), d = seeds.range(0.25, 0.8); return { x: dp.x + Math.cos(a) * d * dp.rx, z: dp.z + Math.sin(a) * d * dp.rz, r: seeds.range(0.35, 0.7), h: seeds.range(1.2, 2.6) }; })
+        .filter((q) => Math.hypot(q.x - rim, q.z - dp.z) > 2.6);
+      deepAir = (x, y, z) => {
+        // The tube: the nearest point of the line, how far along it that is, and how far off.
+        let best = Infinity, sAt = 0, run = 0;
+        for (let i = 0; i < 3; i++) {
+          const [ax, az] = line[i], bx = line[i + 1][0] - ax, bz = line[i + 1][1] - az, t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - az) * bz) / (lens[i] * lens[i])));
+          const d = Math.hypot(x - ax - bx * t, z - az - bz * t);
+          if (d < best) { best = d; sAt = run + t * lens[i]; }
+          run += lens[i];
+        }
+        let air = -9;
+        if (best < 2.4) {
+          const floor = start - dp.drop * Math.min(1, sAt / (total - 3)) + (fbm2(x * 1.1 + n2, z * 1.1, 2) - 0.5) * 0.08;
+          const wide = 0.9 + (fbm2(sAt * 0.8 + n2, y * 0.7, 2) - 0.5) * 0.4, high = 2.7 + (fbm2(x * 0.7 + n1, z * 0.7, 2) - 0.5) * 0.4;
+          // (Broadest at knee height and drawing in to the roof, as water and not a mason would have made it.)
+          const up = Math.min(1, Math.max(0, (y - floor - 0.5) / (high - 0.5)));
+          air = smin(smin(wide * (1.12 - 0.5 * up * up) - best, y - floor, 0.3), floor + high - y, 0.5);
+        }
+        const ex = (x - dp.x) / dp.rx, ez = (z - dp.z) / dp.rz;
+        if (Math.abs(ex) < 1.3 && Math.abs(ez) < 1.3 && y > yC - 1.5 && y < yC + dp.height + 2) {
+          const rMin = Math.min(dp.rx, dp.rz);
+          const e = (1 - Math.hypot(ex, ez)) * rMin + (fbm2(x * 0.5 + n1, z * 0.5 + n2, 3) - 0.5) * 1.6 + (fbm2(x * 1.9 + y * 1.1 + n1, z * 1.9 - y * 0.8 + n2, 3) - 0.5) * 0.5;
+          const floor = yC + (fbm2(x * 0.8 + n2, z * 0.8 + n1, 3) - 0.5) * 0.3;
+          const ceil = yC + 1.7 + (dp.height - 1.7) * Math.pow(Math.min(1, Math.max(0, e / rMin)), 0.5) + (fbm2(x * 0.65 + n1 + 9, z * 0.65 + n2, 3) - 0.5) * 0.9;
+          let a = smin(smin(e, y - floor, 0.35), ceil - y, 0.5);
+          for (const q of spikes) {
+            const d = Math.hypot(x - q.x, z - q.z);
+            if (d > q.r + 0.6) continue;
+            // (A stalagmite narrowing upward from the floor, and over it a shorter stalactite narrowing downward from the roof.)
+            a = Math.min(a, d - q.r * Math.max(0, 1 - (y - floor) / q.h), d - q.r * 0.7 * Math.max(0, 1 - (ceil - y) / (q.h * 0.7)));
+          }
+          air = Math.max(air, a);
+        }
+        return air;
+      };
+      cavern = { x: dp.x, z: dp.z, floor: yC, rx: dp.rx, rz: dp.rz, height: dp.height, box: [Math.min(X(dp.from) + 2, dp.x - dp.rx - 1.5), Math.max(X(dp.from) + 2, dp.x + dp.rx + 1.5) + 0, Math.min(bw.z - 3, dp.z - dp.rz - 1.5), Math.max(bw.z + 3, dp.z + dp.rz + 1.5)] };
+      cavern.box[0] = Math.min(X(dp.from) - 2, X(dp.from) + 2, dp.x - dp.rx - 1.5); cavern.box[1] = Math.max(X(dp.from) - 2, X(dp.from) + 2, dp.x + dp.rx + 1.5);
+    }
+    return { p, dir, edge, length, z: bw.z, along, air, top, low: Math.min(out, p.floor), x: (a: number) => edge + dir * a, deepAir, cavern, start: dp ? floorAt(dp.from) : 0 };
   })();
 
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
@@ -1445,7 +1493,9 @@ export function meshSite(site: Site): SceneDescription {
       for (let z = g.z0 - 4; z < fenceEnd; z += 1.5) {
         const xa = sideAt(sideOf, z), xb = sideAt(sideOf, z + 1.5), near = out < 0 ? Math.max(xa, xb) - 1.2 : Math.min(xa, xb) + 1.2, far = out < 0 ? Math.min(xa, xb) - 3 : Math.max(xa, xb) + 3;
         const cave = caves.find((q) => z + 1.5 > q.z - q.r * 1.25 - 2.4 && z < q.z + q.r * 1.25 + 2.4);
-        fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : p.floor - 6, z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
+        // (The cavern under an arm may reach beneath the valley's side: the barrier stops above its roof there.)
+        const cv = backWay?.cavern, over = !!cv && z + 1.5 > cv.z - cv.rz - 2 && z < cv.z + cv.rz + 2 && Math.max(near, far) > cv.x - cv.rx - 2 && Math.min(near, far) < cv.x + cv.rx + 2;
+        fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : over ? cv!.floor + cv!.height + 1.5 : p.floor - 6, z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
       }
     }
     fences.push({ min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) });
@@ -1457,10 +1507,15 @@ export function meshSite(site: Site): SceneDescription {
     // Up each side of the ridge that has an arm beside it, a fence a little way into the ridge, as along the valley's sides.
     if (vale?.ridge) for (const [arm, x0, x1] of [[armW, vale.ridge.x0 + 1.2, vale.ridge.x0 + 3], [armE, vale.ridge.x1 - 3, vale.ridge.x1 - 1.2]] as const) {
       if (!arm) continue;
-      // (With a gap where the way through the hill goes under it.)
-      const gap = backWay && Math.abs(backWay.edge - (x0 + x1) / 2) < 4 ? backWay : null;
-      if (!gap) fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, p.z0 - 1.2) });
-      else fences.push({ min: V(x0, p.floor - 6, vale.z0 - 4), max: V(x1, p.floor + 80, gap.z - 3) }, { min: V(x0, gap.top + 0.4, gap.z - 3), max: V(x1, p.floor + 80, gap.z + 3) }, { min: V(x0, p.floor - 6, gap.z + 3), max: V(x1, p.floor + 80, p.z0 - 1.2) });
+      // (With a gap where the way through the hill goes under it, and another where the way down from that does.)
+      const through = backWay && Math.abs(backWay.edge - (x0 + x1) / 2) < 4 ? backWay : null, dp = through ? site.backWay!.deep : undefined;
+      const gaps = !through ? [] : [{ z: through.z, bottom: through.top + 0.4 }, ...(dp ? [{ z: through.z + dp.toward * dp.leg, bottom: through.start + 0.3 }] : [])].sort((g1, g2) => g1.z - g2.z);
+      let from = vale.z0 - 4;
+      for (const gap of gaps) {
+        fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, gap.z - 3) }, { min: V(x0, gap.bottom, gap.z - 3), max: V(x1, p.floor + 80, gap.z + 3) });
+        from = gap.z + 3;
+      }
+      fences.push({ min: V(x0, p.floor - 6, from), max: V(x1, p.floor + 80, p.z0 - 1.2) });
     }
     // Solid rock beside the house, and under the meadow.
     // It stops well behind the face of the scarp, which is cut back in places by a stride or two.
@@ -1498,7 +1553,8 @@ export function meshSite(site: Site): SceneDescription {
     // (Where the stair of a hall goes down out of the land's reach, the land's rock is left out: the hall's own carving has it.)
     const underOwn = (at: Vector3) => grottoes.some((q) => q.hall && 7 - (at.x - q.edge) * q.inw > UNDER_FROM && Math.abs(at.z - q.z) < 2.6 && at.y < q.y0 + 4.2);
     // (Nor where the way through the hill has gone in under the ridge: from there its own carving has it.)
-    const backOwn = (at: Vector3) => !!backWay && backWay.along(at.x) > -0.3 && Math.abs(at.z - backWay.z) < 3 && at.y < backWay.top;
+    // (Nor anywhere near the way down from it, which passes under the foot of the land's rock.)
+    const backOwn = (at: Vector3) => !!backWay && ((backWay.along(at.x) > -0.3 && Math.abs(at.z - backWay.z) < 3 && at.y < backWay.top) || (!!backWay.deepAir && at.y < backWay.start - 0.5 && backWay.deepAir(at.x, at.y, at.z) > -1.3));
     for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, (at) => !underOwn(at) && !backOwn(at));
 
     const stones: [number, number, number][] = [];
@@ -2969,17 +3025,30 @@ export function meshSite(site: Site): SceneDescription {
             return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
           },
         });
-        // The stretch of the way through the hill between the chamber and the rock that is carved with the land.
+        // The stretch of the way through the hill between the chamber and the rock that is carved with the land; and with it, in one
+        // carving, the way down from it and the cavern at its foot. (None of it is kept where the land's carving or the chamber's has it.)
         if (through) {
-          const xa = through.x(-0.7), xb = through.x(through.length + 0.3), tone3 = rng.fork('backwaytone').range(0, 50);
-          carveRock(kit.mesh('rock'), through.air, {
-            min: V(Math.min(xa, xb), through.low - 1, through.z - 3), max: V(Math.max(xa, xb), through.top, through.z + 3), cell: 0.28, uvScale: 0.45,
+          const xa = through.x(-0.7), xb = through.x(through.length + 0.3), tone3 = rng.fork('backwaytone').range(0, 50), cv = through.cavern, deepAir = through.deepAir;
+          carveRock(kit.mesh('rock'), deepAir ? (x, y, z) => Math.max(through.air(x, y, z), deepAir(x, y, z)) : through.air, {
+            min: V(Math.min(xa, xb, cv ? cv.box[0] : Infinity), cv ? cv.floor - 1.5 : through.low - 1, Math.min(through.z - 3, cv ? cv.box[2] : Infinity)),
+            max: V(Math.max(xa, xb, cv ? cv.box[1] : -Infinity), through.top, Math.max(through.z + 3, cv ? cv.box[3] : -Infinity)), cell: 0.28, uvScale: 0.45,
+            keep: (at) => { const al = through.along(at.x); return al < through.length + 0.3 && !(al < -0.7 && at.y > through.start - 2.2 && Math.abs(at.z - through.z) < 3.2) && !(al < -0.7 && !cv); },
             shade: (c, n, field) => {
               wetField(c, n, field);
+              field[1] = Math.max(field[1], cv && c.y < cv.floor + 2 ? 0.6 : 0);
               const tone = 0.72 + 0.4 * fbm2((c.y + c.x * 0.18) * 2.6, c.z * 0.15 + tone3, 3) + 0.24 * fbm2(c.x * 0.9 + tone3, c.z * 0.9 + c.y * 0.7, 3);
               return [0.8 * tone * stoneTint[0], 0.74 * tone * stoneTint[1], 0.65 * tone * stoneTint[2]];
             },
           });
+          if (cv) {
+            // What glows in the cavern, round its walls; and what was left in the middle of it.
+            const gr = rng.fork('deepglow');
+            for (let k = 0; k < 6; k++) {
+              const a = (k / 6) * Math.PI * 2 + gr.range(-0.3, 0.3), y = cv.floor + gr.range(0.5, 2.2);
+              glows.push({ from: V(cv.x, y, cv.z), position: V(cv.x + Math.cos(a) * cv.rx * 2, y, cv.z + Math.sin(a) * cv.rz * 2), colour: [0.25, 1.0, 0.72], strength: gr.range(1.3, 2.1) });
+            }
+            finds.push({ at: V(cv.x, cv.floor + 0.4, cv.z), what: 'a miner\'s lamp and a bag of rough garnets, left in the cavern under the hill' });
+          }
         }
       }
       // Rock above the chamber; where a shaft goes up through it, rock all round the shaft.
@@ -3433,6 +3502,7 @@ export function meshSite(site: Site): SceneDescription {
     masses: kit.masses,
     torches: [...[...torchesByPlace.values()].flat(), ...hallTorches],
     unders,
+    ...(backWay?.cavern ? { lowest: backWay.cavern.floor } : {}),
     sunShafts,
     landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),

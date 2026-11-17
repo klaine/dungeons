@@ -463,7 +463,25 @@ function layOutBackWay(site: Site, meadow: Place, rng: Rng): void {
       fits.push({ place: p.id, side, z });
     }
   }
-  if (fits.length) site.backWay = rng.pick(fits);
+  if (!fits.length) return;
+  const bw = rng.pick(fits);
+  site.backWay = bw;
+  // And from the tunnel, more often than not, a way down: to a cavern under the arm, deep enough that the arm's floor lies well over its roof.
+  const deep = rng.fork('deep'), p = site.places[bw.place], round = (x: number) => Math.round(x * 10) / 10;
+  const dir = bw.side === 'w' ? 1 : -1, edge = bw.side === 'w' ? r.x0 : r.x1, length = (bw.side === 'w' ? p.x0 - r.x0 : r.x1 - p.x1);
+  if (!deep.chance(0.75) || p.floor - (meadow.floor + armRise(bw.z, meadow.z0)) > 0.8) return;
+  const from = round(Math.max(2.5, length - 3)), leg = 8, rx = round(deep.range(6, 8)), rz = round(deep.range(5, 6.5));
+  for (const toward of [-1, 1] as const) {
+    const z1 = bw.z + toward * leg, cz = z1 + toward * 1.5;
+    // (Not under the valley below the house front, where ponds lie in hollows; nor near a hall under the hill on that side.)
+    if (Math.max(z1, cz + rz) > meadow.z0 - 6) continue;
+    if ((site.grottoes ?? []).some((q) => q.side === bw.side && Math.abs(q.z - cz) < (q.hall ? 24 : 9))) continue;
+    // The branch runs along the ridge between its side and the house: no place may stand out into that strip.
+    const za = Math.min(bw.z, z1) - 2, zb = Math.max(bw.z, z1) + 2;
+    if (site.places.some((q) => q !== p && q.role !== 'approach' && q.z0 < zb && q.z1 > za && (bw.side === 'w' ? q.x0 < p.x0 - 1 : q.x1 > p.x1 + 1))) continue;
+    bw.deep = { from, leg, toward, x: round(edge - dir * (6 + rx)), z: round(cz), rx, rz, height: 5, drop: 8.5 };
+    return;
+  }
 }
 
 /**
