@@ -231,7 +231,11 @@ const snowOn = (P: N, up: N): N => {
 /** Snow's own colour: white, a little blue, and darker and greyer where it has been trodden. */
 const SNOW: [number, number, number] = [0.84, 0.87, 0.93];
 
-export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: Vector3 } } = { uGrassRange: uniform(80) as N, uSward: uniform(new Vector3(0.225, 0.3, 0.066)) as N };
+export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: Vector3 }; uBare: { value: Vector4 } } = {
+  uGrassRange: uniform(80) as N, uSward: uniform(new Vector3(0.225, 0.3, 0.066)) as N,
+  // What bare ground is: its tint (earth, where it is 1, 1, 1), and how far it is stones and not earth whatever the wet (0 in a valley; on a mountain top bare ground is scree of the mountain's own rock).
+  uBare: uniform(new Vector4(1, 1, 1, 0)) as N,
+};
 
 export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
@@ -258,7 +262,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
   const bareV: N = max(select(f.x.greaterThan(50).and(f.x.lessThan(150)), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z), footBare.mul(0.85)).toVar();
   const wetV = f.y, litV = f.w;
-  const stony: N = smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))).toVar();
+  const stony: N = max(smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))), (groundUniforms.uBare as N).w.mul(smoothstep(0.25, 0.6, mid.add(macro.sub(0.5).mul(0.6))).mul(0.6).add(0.4))).toVar();
   // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
   // line meets the height the texture has there, so stones stand up and hide what is behind them.
   const near = one(smoothstep(6, 14, far));
@@ -299,7 +303,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   turfed = mix(turfed, gSoil.rgb.mul(vec3(0.5, 0.46, 0.4)), sstep(0.4, 0.2, gTurf.a.add(patch.sub(0.5).mul(0.4))).mul(0.55)).toVar();
   // (Earth is darker where it is damp, which on a track is in broad patches, and darker in the hollows of the ground.)
   const damp = smoothstep(0.35, 0.7, wide.add(lowSpotOf(at0)).mul(0.6));
-  const earthy = mix(gSoil.rgb.mul(vec3(0.6, 0.57, 0.52)), gShingle.rgb.mul(0.62), stony).mul(mix(0.84, 1.14, macro)).mul(mix(1, 0.68, damp));
+  const earthy = mix(gSoil.rgb.mul(vec3(0.6, 0.57, 0.52)), gShingle.rgb.mul(0.62), stony).mul(mix(0.84, 1.14, macro)).mul(mix(1, 0.68, damp)).mul((groundUniforms.uBare as N).xyz);
   // Dead grass lying in the turf, in drifts some metres across: thickest where it is dry and trodden,
   // along the edges of the track and between its ruts, and least where the ground is wet.
   const gThatch: N = (texture(thatch.map, at.mul(1.15)) as N).bias(blur).toVar();
@@ -330,7 +334,8 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
   // Snow over all of it; trodden on the track and the paths, where it is packed and dirtied.
   const trodSnow: N = max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare).toVar();
-  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(0.25))).toVar();
+  // (In summer, what is left of the snow does not lie on a path that is walked every day; in winter it is only thinner there.)
+  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(mix(1, 0.25, smoothstep(0.4, 0.9, snowUniforms.uSnow as N))))).toVar();
   ground = mix(ground.mul(mix(1, 0.52, wetV)), mix(vec3(...SNOW).mul(mix(0.94, 1.04, macro)), vec3(0.5, 0.49, 0.47), trodSnow.mul(0.55)), snowy);
   m.colorNode = vec4(ground, 1);
   m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.04, puddle);
@@ -505,7 +510,8 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const mossy: N = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(tex.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1)).toVar();
   rock = rock.mul(edge.mul(0.7).add(1));
   // Snow, on ledges and whatever faces up; it lies first in the cracks and the pits of the stone.
-  const snowy: N = snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).toVar();
+  // (Not on rock that was told it is under a roof of rock: a tunnel's floor.)
+  const snowy: N = snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).mul(one(f.z)).toVar();
   m.colorNode = vec4(mix(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), vec3(...SNOW).mul(mix(0.9, 1.02, tex.a)), snowy), 1);
   const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
   m.roughnessNode = mix(mix(rough, 0.97, mossy), 0.66, snowy);

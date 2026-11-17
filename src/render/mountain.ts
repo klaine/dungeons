@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
-import { inside, landAt, nearestOn } from '../core/mountain';
+import { galleryRuns, inside, landAt, nearestOn } from '../core/mountain';
 import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
@@ -49,12 +49,14 @@ export interface MountainResult {
   spawn: Vector3;
   yaw: number;
   track: [number, number][];
-  far: { wood: [number, number, number]; grass: [number, number, number]; sward: [number, number, number] };
+  far: { wood: [number, number, number]; grass: [number, number, number]; sward: [number, number, number]; bare: [number, number, number, number] };
   /** The sea of cloud: the level of its top, how high its billows stand. */
   deck: { level: number; billow: number };
   planted: Record<string, number>;
   /** Where the summit's cairn stands, for whatever wants to know where the view is. */
   lookout: { x: number; y: number; z: number; height: number };
+  /** Lights: torches on the walls of the gallery way's tunnels, and the fire in the shelter. */
+  torches: { position: Vector3; out: Vector3; fire?: number }[];
 }
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
@@ -74,6 +76,15 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const way = m.way ?? [], climb = m.climb ?? [];
   const nearWay = (x: number, z: number, reach: number) => (way.length ? nearestOn(way, x, z, reach).off : Infinity);
   const nearClimb = (x: number, z: number, reach: number) => (climb.length ? nearestOn(climb, x, z, reach).off : Infinity);
+  // The gallery way, if there is one: its stretches open to the sky, which are part of the land's shape, and those under the rock, which are carved out of it.
+  const gal = m.gallery, runs = gal ? galleryRuns(gal) : { open: [], under: [] };
+  const nearOf = (lines: [number, number, number][][], x: number, z: number, reach: number) => {
+    let off = Infinity, y = 0;
+    for (const line of lines) { const n = nearestOn(line, x, z, reach); if (n.off < off) { off = n.off; y = n.y; } }
+    return { off, y };
+  };
+  const nearOpen = (x: number, z: number, reach: number) => nearOf(runs.open, x, z, reach).off;
+  const nearUnder = (x: number, z: number, reach: number) => nearOf(runs.under, x, z, reach);
   /** Nothing below this is drawn, or carved: it is deep enough in the cloud never to be seen. */
   const HIDDEN = deck - 34;
 
@@ -85,7 +96,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const inBand = (x: number, z: number) => {
     const d = inside(m, x, z);
     if (d < -OUT || plain(x, z) < HIDDEN) return false;
-    return d < IN || steepAt(x, z);
+    // (Wherever a tunnel runs, the rock over it is carved with it, however level the ground above.)
+    return d < IN || steepAt(x, z) || (runs.under.length > 0 && nearUnder(x, z, 6).off < 5);
   };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
@@ -124,7 +136,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
   const loose = land.like(), wornBy = land.like();
   // What has been built or made on the land is not worn: the way, the climb, the cairn's platform.
-  const made = (x: number, z: number) => nearWay(x, z, 5) < 4.5 || nearClimb(x, z, 4) < 3.2 || (!!m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7);
+  const made = (x: number, z: number) => nearWay(x, z, 5) < 4.5 || nearClimb(x, z, 4) < 3.2 || nearOpen(x, z, 4) < 3.4 || (runs.under.length > 0 && nearUnder(x, z, 5).off < 4.4) || (!!m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7);
   {
     const far = new Float32Array(land.data.length), nx = land.nx, nz = land.nz, D1 = CELL, D2 = CELL * Math.SQRT2;
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) far[j * nx + i] = i > 0 && j > 0 && i < nx - 1 && j < nz - 1 && within[j * nx + i] ? 1e6 : 0;
@@ -183,7 +195,9 @@ export function buildMountain(b: MountainBuild): MountainResult {
     for (let k = 0; k < H.length; k++) {
       rocky.data[k] = raw[k];
       // (The paths are cut clean: no broken rock on them.)
-      if (known[k] && raw[k] > 0) { const x = land.x0 + (k % nxL) * CELL, z = land.z0 + Math.floor(k / nxL) * CELL; if (nearWay(x, z, 3) < 2.4 || nearClimb(x, z, 3) < 1.7) rocky.data[k] = 0; }
+      if (known[k] && raw[k] > 0) { const x = land.x0 + (k % nxL) * CELL, z = land.z0 + Math.floor(k / nxL) * CELL; if (nearWay(x, z, 3) < 2.4 || nearClimb(x, z, 3) < 1.7 || nearOpen(x, z, 3) < 2.3) rocky.data[k] = 0;
+        // (And about a tunnel the rock is left nearly as the land has it: its breaks, which shift a face a stride or two, would open the tunnel's side or take its floor.)
+        else if (runs.under.length && nearUnder(x, z, 4).off < 3.2) rocky.data[k] = Math.min(rocky.data[k], 0.12); }
       const l = Math.hypot(upX.data[k], upZ.data[k]), f = l > 1e-6 ? smooth(l / 0.8) / l : 0;
       upX.data[k] *= f; upZ.data[k] *= f;
     }
@@ -193,7 +207,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   // ---- the land as a solid, as for the valley and the island
   const spot = { x: NaN, z: NaN, rocky: 0, h: 0, steep: 1, slope: 0, ux: 0, uz: 0 };
   const TREAD_MOST = 0.9, FINE_MOST = 1.5;
-  const density = (x: number, y: number, z: number): number => {
+  const landAir = (x: number, y: number, z: number): number => {
     if (x !== spot.x || z !== spot.z) {
       spot.x = x; spot.z = z;
       spot.rocky = rocky.at(x, z); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
@@ -212,6 +226,48 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const sx = x + out * spot.ux, sz = z + out * spot.uz;
     return (y - land.at(sx, sz)) / steepness.at(sx, sz);
   };
+
+  // ---- the tunnels of the gallery way: air under the rock, along the way's line, a stride and a half
+  // to either side and arched over a man's head, uneven as hewn rock is; and its windows, each a short
+  // passage out through the face from the height of a parapet up.
+  const tunnelBox = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+  for (const run of runs.under) for (const [x, z] of run) { tunnelBox.x0 = Math.min(tunnelBox.x0, x - 13); tunnelBox.x1 = Math.max(tunnelBox.x1, x + 13); tunnelBox.z0 = Math.min(tunnelBox.z0, z - 13); tunnelBox.z1 = Math.max(tunnelBox.z1, z + 13); }
+  const windows = gal?.windows ?? [];
+  const bore = { x: NaN, z: NaN, off: Infinity, floor: 0, wide: 1.35, high: 2.8, near: [] as typeof windows };
+  const tunnelAir = (x: number, y: number, z: number): number => {
+    if (x < tunnelBox.x0 || x > tunnelBox.x1 || z < tunnelBox.z0 || z > tunnelBox.z1) return -9;
+    if (x !== bore.x || z !== bore.z) {
+      bore.x = x; bore.z = z;
+      const n = nearUnder(x, z, 5);
+      // (Its floor is the way's own level there, taken from the whole of the way's line and not from the tunnel's stretch of it:
+      // at a mouth the way goes on climbing, and a floor held at the level of the tunnel's last point cut a pit across it.)
+      bore.off = n.off; bore.floor = n.off < 4 ? nearestOn(gal!.line, x, z, 5).y : n.y;
+      if (n.off < 4) { bore.wide = 1.3 + (fbm2(x * 0.31 + s1, z * 0.31, 2) - 0.5) * 0.5; bore.high = 2.75 + (fbm2(x * 0.27, z * 0.27 + s2, 2) - 0.5) * 0.7; }
+      bore.near = windows.filter((w) => Math.abs(x - w.x) < w.reach + 1.5 && Math.abs(z - w.z) < w.reach + 1.5);
+    }
+    let air = -9;
+    if (bore.off < 4) air = Math.min(bore.wide - bore.off, y - bore.floor, bore.floor + bore.high - (bore.off / bore.wide) ** 2 * 0.9 - y);
+    for (const w of bore.near) {
+      const ox = Math.cos(w.out), oz = Math.sin(w.out), t = Math.min(w.reach, Math.max(0, (x - w.x) * ox + (z - w.z) * oz));
+      const side = Math.hypot(x - w.x - ox * t, z - w.z - oz * t), up = (y - (w.y + 0.8)) / 0.85;
+      air = Math.max(air, 0.85 * (1 - Math.hypot(side / 0.85, up)));
+    }
+    return air;
+  };
+  const density = runs.under.length ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), tunnelAir(x, y, z)) : landAir;
+  /** How far inside a tunnel a point is from daylight, 0 at its mouths and by its windows, 1 deep in: for how dark the rock is there. */
+  const shut = runs.under.map((run) => run.map(([x, z], k) => {
+    let light = Math.min(k, run.length - 1 - k) * 2;
+    for (const w of windows) light = Math.min(light, Math.hypot(x - w.x, z - w.z));
+    return [x, z, smooth((light - 1.5) / 9)] as [number, number, number];
+  }));
+  // (Per tile of the carving: how low the tunnels under it go, so that the piece is made deep enough to hold them.)
+  const tileLow = new Float32Array(tilesX * tilesZ).fill(Infinity);
+  for (const run of runs.under) for (const [x, z, y] of run) {
+    for (let j = Math.floor((z - 4.5 - area.z0) / TILE); j <= Math.floor((z + 4.5 - area.z0) / TILE); j++) for (let i = Math.floor((x - 4.5 - area.x0) / TILE); i <= Math.floor((x + 4.5 - area.x0) / TILE); i++) {
+      if (i >= 0 && j >= 0 && i < tilesX && j < tilesZ) tileLow[j * tilesX + i] = Math.min(tileLow[j * tilesX + i], y - 1.6);
+    }
+  }
 
   // ---- colours: of rock high up, and of what ground there is on the top
   const tint = b.stoneTint;
@@ -242,7 +298,15 @@ export function buildMountain(b: MountainBuild): MountainResult {
     // (No moss; a little damp in what does not see the sky.)
     field[0] = 0;
     field[1] = 0.15 * soft * (1 - open);
+    // (What is under a roof of rock: no snow lies on it.)
+    field[2] = 0;
     field[3] = 0.25 + 0.75 * rockKind.bedded;
+    // In a tunnel it is dark, the darker the further from its mouths and its windows; and a little damp.
+    if (runs.under.length && tunnelAir(q.x, q.y, q.z) > -0.6) {
+      const dim = 1 - 0.8 * nearOf(shut, q.x, q.z, 5).y;
+      c[0] *= dim; c[1] *= dim; c[2] *= dim;
+      field[1] = Math.max(field[1], 0.3); field[2] = 1;
+    }
     return c;
   };
 
@@ -297,7 +361,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     lay.track = Math.min(Math.abs(off) * 0.42, f) < 3 ? 200 + Math.min(Math.abs(off) * 0.42, f) : 0;
     const c = turfColour(x, z, s1);
     // Thin turf, browned by sun and wind: less green than a valley's by a good deal.
-    return [c[0] * 1.02, c[1] * 0.84, c[2] * 0.74];
+    return [c[0] * 1.0, c[1] * 0.78, c[2] * 0.68];
   };
   const earth = (x: number, z: number): Colour => {
     const t = 0.66 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);
@@ -315,11 +379,13 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const REACH = 4.5;
     for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
     if (hi < HIDDEN) continue;
+    lo = Math.min(lo, tileLow[j * tilesX + i]);
     carveRock(rockMesh, density, {
       // (Not below what the cloud hides: there the rock is closed off flat.)
       min: V(c.x0, Math.floor(Math.max(lo - 2, HIDDEN) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
       cell: CELL, uvScale: 0.4, otherUvScale: (mm) => (mm === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
-      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.25 ? screeMesh : turfMesh) : null),
+      // (A tunnel's floor is the rock it was cut in, whatever the ground is over it.)
+      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(runs.under.length && tunnelAir(at.x, at.y + 0.6, at.z) > 0) ? (loose.at(at.x, at.z) > 0.25 ? screeMesh : turfMesh) : null),
       shade: (q, n, field, other, open) => {
         if (other === turfMesh) { const col = turfAt(q.x, q.z); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return col; }
         if (other === screeMesh) return earth(q.x, q.z);
@@ -356,7 +422,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     for (let tries = 0; tries < 1400 && lying.length < 70; tries++) {
       const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1), d = inside(m, x, z);
       if (d < 2 || insideOuter(x, z, 4) || x > m.level.x0 - 2 && x < m.level.x1 + 2 && z > m.level.z0 - 2 && z < m.level.z1 + 2) continue;
-      if (nearWay(x, z, 6) < 4 || nearClimb(x, z, 5) < 3 || (m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7)) continue;
+      if (nearWay(x, z, 6) < 4 || nearClimb(x, z, 5) < 3 || nearOpen(x, z, 5) < 3.5 || (m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7)) continue;
       // (More under the crags, where they fall, than out on the open top.)
       const under = rocky.holds(x, z) ? rocky.at(x, z) : 0;
       if (under > 0.5 || (under < 0.05 && !q.chance(0.35))) continue;
@@ -551,6 +617,98 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
 
   // ---- what grows, which is little
+  // Along the gallery way, wherever the ground falls away beside it: iron posts let into the rock, and a rail from post to post.
+  if (gal) {
+    const iron: Colour = [0.15, 0.14, 0.13];
+    type P3 = [number, number, number];
+    const bar = (a: P3, c: P3, t: number) => {
+      const dx = c[0] - a[0], dz = c[2] - a[2], l = Math.hypot(dx, dz) || 1, px = (-dz / l) * t, pz = (dx / l) * t;
+      solid('metal', [[a[0] - px, a[1] - t, a[2] - pz], [a[0] + px, a[1] - t, a[2] + pz], [c[0] + px, c[1] - t, c[2] + pz], [c[0] - px, c[1] - t, c[2] - pz], [a[0] - px, a[1] + t, a[2] - pz], [a[0] + px, a[1] + t, a[2] + pz], [c[0] + px, c[1] + t, c[2] + pz], [c[0] - px, c[1] + t, c[2] - pz]], iron);
+    };
+    for (const run of runs.open) for (const side of [1, -1]) {
+      let last: P3 | null = null;
+      for (let k = 1; k < run.length - 1; k++) {
+        const [x, z, y] = run[k], dx = run[k + 1][0] - run[k - 1][0], dz = run[k + 1][1] - run[k - 1][1], l = Math.hypot(dx, dz) || 1, nx = (-dz / l) * side, nz = (dx / l) * side;
+        // (Only where there is a drop on this side, and not where another path comes in.)
+        const px = x + nx * 1.38, pz = z + nz * 1.38;
+        if (ground(x + nx * 2.7, z + nz * 2.7) > y - 2.2 || nearWay(px, pz, 3) < 2.2 || nearClimb(px, pz, 3) < 2 || nearUnder(px, pz, 3).off < 1.2) { last = null; continue; }
+        const top: P3 = [px, y + 1.02, pz];
+        block('metal', px, y - 0.25, pz, 0.045, 0.045, 1.3, Math.atan2(dz, dx), iron);
+        if (last) { bar(last, top, 0.016); bar([last[0], last[1] - 0.5, last[2]], [top[0], top[1] - 0.5, top[2]], 0.012); }
+        last = top;
+      }
+    }
+  }
+
+  // Stones: frost splits the rock and leaves it lying, angular and sharp, all over the top, thickest under the crags and
+  // where nothing grows. Each is a rough block of a few faces, no bigger than can be kicked or sat on; nobody trips on them.
+  {
+    const q = rng.fork('stones'), was = wild.group;
+    wild.group = 'soft';
+    type P3 = [number, number, number];
+    let laid = 0;
+    for (let tries = 0; tries < 26000 && laid < 4200; tries++) {
+      const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1), d = inside(m, x, z);
+      if (d < 0.5 || insideOuter(x, z, 1.5) || (x > m.level.x0 && x < m.level.x1 && z > m.level.z0 && z < m.level.z1)) continue;
+      if (nearWay(x, z, 3) < 1.7 || nearClimb(x, z, 3) < 1.5 || nearOpen(x, z, 3) < 1.6) continue;
+      const rk = rocky.holds(x, z) ? rocky.at(x, z) : 0;
+      if (rk > 0.6) continue;
+      turfAt(x, z);
+      // (In drifts: many together, then few.)
+      const drift = fbm2(x * 0.11 + s2, z * 0.11 - s1, 3);
+      if (!q.chance(Math.min(1, 0.08 + 0.5 * lay.bare * smooth((drift - 0.42) / 0.2) + 1.2 * rk))) continue;
+      const y = ground(x, z), size = q.range(0.1, 0.34) * (q.chance(0.08) ? 2.2 : 1), yaw = q.range(0, Math.PI), c = Math.cos(yaw), sn = Math.sin(yaw);
+      const w = size * q.range(0.7, 1.4), dd = size * q.range(0.6, 1.1), h = size * q.range(0.35, 0.8), tw = q.range(0.45, 0.85), tx = q.range(-0.25, 0.25) * w, tz = q.range(-0.25, 0.25) * dd;
+      const at = (a: number, f: number, up: number): P3 => [x + c * a - sn * f, y - 0.05 + up, z + sn * a + c * f];
+      const tone = q.range(0.75, 1.25);
+      solid('rock', [at(-w, -dd, 0), at(w, -dd, 0), at(w, dd, 0), at(-w, dd, 0),
+        at(-w * tw + tx, -dd * tw + tz, h * q.range(0.7, 1)), at(w * tw + tx, -dd * tw + tz, h), at(w * tw + tx, dd * tw + tz, h * q.range(0.6, 1)), at(-w * tw + tx, dd * tw + tz, h * q.range(0.8, 1))], rockColour(tone * 1.3), 0.4);
+      laid++;
+    }
+    wild.group = was;
+  }
+  // Steps, wherever a path climbs as a stair does: the top of the climb, and the gallery way where it comes up through the rock.
+  // A block of stone at every half stride, set into the slope. They are for the eye, as the island's are: what is walked on is the
+  // slope, so no foot catches on a riser.
+  {
+    const q = rng.fork('steps'), was = wild.group;
+    wild.group = 'soft';
+    const stepsOn = (line: [number, number, number][], halfWidth: number, from: number) => {
+      for (let k = Math.max(0, from); k < line.length - 1; k++) {
+        const [ax, az, ay] = line[k], [bx, bz, by] = line[k + 1], run = Math.hypot(bx - ax, bz - az);
+        if (run < 0.3 || Math.abs(by - ay) / run < 0.38) continue;
+        const heading = Math.atan2(bz - az, bx - ax), n = Math.max(1, Math.round(run / 0.6)), up = by > ay;
+        for (let j = 0; j < n; j++) {
+          // Each tread a slab or two of the mountain's own stone, split and laid as it came: no two the same breadth or quite square to the way.
+          const f = (j + 0.5) / n, top = ay + (by - ay) * (up ? (j + 1) / n : j / n);
+          const px = -(bz - az) / run, pz = (bx - ax) / run, split = q.chance(0.55) ? q.range(-0.4, 0.4) * halfWidth : null;
+          for (const [c0, c1] of split === null ? [[-halfWidth, halfWidth]] : [[-halfWidth, split - 0.02], [split + 0.02, halfWidth]]) {
+            const mid = (c0 + c1) / 2 + q.range(-0.06, 0.06), tone = q.range(0.62, 0.95);
+            block('rock', ax + (bx - ax) * f + px * mid, top - 0.36 + q.range(-0.03, 0.02), az + (bz - az) * f + pz * mid, run / n * q.range(0.9, 1.04), (c1 - c0) * q.range(0.9, 1.06), 0.38, heading + q.range(-0.07, 0.07), rockColour(tone), [q.range(-0.05, 0.05), q.range(-0.05, 0.05)]);
+          }
+        }
+      }
+    };
+    if (climb.length) stepsOn(climb, 1.15, 2);
+    if (gal) stepsOn(gal.line, 1.3, 0);
+    wild.group = was;
+  }
+  // Light in the tunnels: a torch in an iron bracket on the inner wall every dozen strides, so that nobody walks them blind.
+  const torches: MountainResult['torches'] = [];
+  if (gal) for (const [a, e] of gal.under) {
+    for (let k = a + 3; k <= e - 2; k += 6) {
+      const [x, z, y] = gal.line[k], [nx2, nz2] = gal.line[Math.min(gal.line.length - 1, k + 1)], dx = nx2 - x, dz = nz2 - z, l = Math.hypot(dx, dz) || 1;
+      // (The inner wall: the side away from the face, which is the side towards the middle of the mountain; unless a window is cut on the other.)
+      let px = -dz / l, pz = dx / l;
+      if (px * (m.x - x) + pz * (m.z - z) < 0) { px = -px; pz = -pz; }
+      const at = V(x + px * 1.05, y + 1.85, z + pz * 1.05);
+      torches.push({ position: at, out: V(-px, 0, -pz) });
+      block('metal', at.x + px * 0.12, at.y - 0.28, at.z + pz * 0.12, 0.05, 0.3, 0.05, Math.atan2(pz, px), [0.14, 0.13, 0.12]);
+    }
+  }
+  // And a fire burning on the floor of the shelter, for whoever comes up out of the cloud.
+  if (m.shelter) torches.push({ position: V(m.shelter.x - Math.cos(m.shelter.facing) * 0.3, m.shelter.y + 0.05, m.shelter.z - Math.sin(m.shelter.facing) * 0.3), out: V(0, 0, 1), fire: 1.1 });
+
   // Young pines, here and there on ledges of the precipices and among the crags, where a seed has
   // lodged in a crack: low, leaning, bent by the wind. No older ones: what grows taller is blown down.
   const pines = (() => {
@@ -561,7 +719,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const stood: [number, number][] = [];
     for (let tries = 0; tries < 2500 && stood.length < 22; tries++) {
       const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1), d = inside(m, x, z);
-      if (d < -9 || d > 4 || nearWay(x, z, 6) < 3.5 || nearClimb(x, z, 6) < 3 || insideOuter(x, z, 6)) continue;
+      if (d < -9 || d > 4 || nearWay(x, z, 6) < 3.5 || nearClimb(x, z, 6) < 3 || nearOpen(x, z, 6) < 3.2 || insideOuter(x, z, 6)) continue;
       const y = ground(x, z);
       if (y < deck + 4 || !rocky.holds(x, z) || rocky.at(x, z) > 0.45) continue;
       // (On a ledge: the ground there nearly level, and rock close by.)
@@ -581,7 +739,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const arrive = way.length ? way[way.length - 1] : [m.spur.to[0], m.spur.to[1], m.spur.y1];
   {
     const C = 1.2, gx0 = snap(g.x0 - 12, false, C), gz0 = snap(g.z0 - 12, false, C), nx = Math.round((g.x1 - g.x0 + 24) / C) + 1, nz = Math.round((g.z1 - g.z0 + 24) / C) + 1;
-    const ok = new Uint8Array(nx * nz), floorY = arrive[2] - 2.5;
+    const ok = new Uint8Array(nx * nz), floorY = arrive[2] - 2.5, bored = new Float32Array(nx * nz).fill(NaN);
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
       const x = gx0 + i * C, z = gz0 + j * C, y = ground(x, z);
       let lo = y, hi = y;
@@ -589,7 +747,9 @@ export function buildMountain(b: MountainBuild): MountainResult {
       // Ground that can be stood on: not a drop, and not below the foot of the way, where the ridge goes on down into the cloud.
       // (Nor more than a few strides out beyond the edge, on the scree below a low stretch of it: the slope goes on down from there.)
       // (The way and the climb are always ground, as broad as they are cut, so that the fences beside them leave room to turn at a bend.)
-      ok[j * nx + i] = (hi - lo < 1.7 && y > floorY && inside(m, x, z) > -6) || nearWay(x, z, 3) < 2.4 || nearClimb(x, z, 3) < 1.9 ? 1 : 0;
+      ok[j * nx + i] = (hi - lo < 1.7 && y > floorY && inside(m, x, z) > -6) || nearWay(x, z, 3) < 2.4 || nearClimb(x, z, 3) < 1.9 || nearOpen(x, z, 3) < 1.7 ? 1 : 0;
+      // (And where a tunnel of the gallery way runs under a place, whatever the ground over it: its floor's level there.)
+      if (runs.under.length) { const u = nearUnder(x, z, 3); if (u.off < 1.9) bored[j * nx + i] = u.y; }
     }
     const reach = new Uint8Array(nx * nz), queue: number[] = [];
     const start = Math.round((p.z1 - 2 - gz0) / C) * nx + Math.round(((p.x0 + p.x1) / 2 - gx0) / C);
@@ -598,12 +758,15 @@ export function buildMountain(b: MountainBuild): MountainResult {
       const k = queue.pop()!, i = k % nx, j = Math.floor(k / nx);
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const ii = i + di, jj = j + dj, q = jj * nx + ii;
-        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz || reach[q] || !ok[q]) continue;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz || reach[q] || !(ok[q] || bored[q] === bored[q])) continue;
         reach[q] = 1; queue.push(q);
       }
     }
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
       const k = j * nx + i;
+      // Over a tunnel, where the ground above is not ground anyone may stand on (the brink of the precipice, mostly), the fence
+      // begins above the tunnel's roof: whoever is in the tunnel walks under it, and nobody above steps off the edge there.
+      if (reach[k] && !ok[k] && bored[k] === bored[k]) { const x = gx0 + i * C, z = gz0 + j * C; b.fences.push({ min: V(x - C / 2, bored[k] + 3.5, z - C / 2), max: V(x + C / 2, F + 160, z + C / 2) }); }
       if (reach[k]) continue;
       let touches = false;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && reach[jj * nx + ii]) touches = true; }
@@ -616,6 +779,50 @@ export function buildMountain(b: MountainBuild): MountainResult {
   // ---- the other peaks, far off over the cloud, and the mountain's own lower slopes beyond the near ground
   wild.group = 'soft';
   layRange(wild.mesh('far'), site, F, tint, area, winter);
+  // The needles: each a tower drawn as rock, with the mountain's own beds, joints and colour, rising out of the cloud. Made as a
+  // skin about its axis, ring upon ring, broken into buttresses and ledges; nobody goes near them, so they are not carved.
+  {
+    const softRock = wild.mesh('rock');
+    (m.needles ?? []).forEach((nd, i) => {
+      const q = rng.fork(`needle${i}`), base = deck - 40, top = deck + nd.height, tall = top - base, sA = q.range(0, 50), sB = q.range(0, 50);
+      const lean = [q.range(-0.06, 0.06), q.range(-0.06, 0.06)], AROUND = 40, UP = Math.max(24, Math.round(tall / 1.6));
+      const radius = (a: number, h: number) => {
+        const t = h / tall;
+        // Broad at the foot, drawn in towards the top, which is a blunt broken head; buttresses up its height; ledges where a bed is hard.
+        const body = nd.r * (1.5 - 0.95 * Math.pow(t, 0.8)) * (1 - smooth((t - 0.9) / 0.1) * 0.75);
+        const buttress = 0.72 + 0.5 * fbm2(Math.cos(a) * 1.7 + sA, Math.sin(a) * 1.7 + h * 0.012, 3, 3);
+        const ledge = 1 + 0.1 * Math.sign(Math.sin(h * 0.9 + 3 * fbm2(h * 0.07, sB, 2, 5))) * rockKind.bedded;
+        const rough = 1 + (fbm2(Math.cos(a) * 6 + sB, Math.sin(a) * 6 + h * 0.2, 2, 9) - 0.5) * 0.3;
+        return body * buttress * ledge * rough;
+      };
+      const at = (ia: number, ih: number): [number, number, number] => {
+        const a = (ia / AROUND) * Math.PI * 2, h = (ih / UP) * tall, r = radius(a, h);
+        return [nd.x + lean[0] * h + Math.cos(a) * r, base + h, nd.z + lean[1] * h + Math.sin(a) * r];
+      };
+      const ids: number[] = [];
+      for (let ih = 0; ih <= UP; ih++) for (let ia = 0; ia < AROUND; ia++) {
+        const p0 = at(ia, ih), pa = at(ia + 1, ih), pb = at(ia - 1, ih), pu = at(ia, Math.min(UP, ih + 1)), pd = at(ia, Math.max(0, ih - 1));
+        const ax = pa[0] - pb[0], ay = pa[1] - pb[1], az = pa[2] - pb[2], ux = pu[0] - pd[0], uy = pu[1] - pd[1], uz = pu[2] - pd[2];
+        let nx = ay * uz - az * uy, ny = az * ux - ax * uz, nz = ax * uy - ay * ux;
+        const l = Math.hypot(nx, ny, nz) || 1;
+        nx /= l; ny /= l; nz /= l;
+        // (Facing out from the axis.)
+        if (nx * (p0[0] - nd.x - lean[0] * (p0[1] - base)) + nz * (p0[2] - nd.z - lean[1] * (p0[1] - base)) < 0) { nx = -nx; ny = -ny; nz = -nz; }
+        const field = new Float32Array(4), c = shadeRock(V(p0[0], p0[1], p0[2]), V(nx, ny, nz), field, 1);
+        ids.push(softRock.addVertex(p0[0], p0[1], p0[2], nx, ny, nz, ((ia / AROUND) * nd.r * 6) * 0.4, p0[1] * 0.4, c[0], c[1], c[2], field[0], field[1], field[2], field[3]));
+      }
+      for (let ih = 0; ih < UP; ih++) for (let ia = 0; ia < AROUND; ia++) {
+        const a0 = ih * AROUND + ia, a1 = ih * AROUND + ((ia + 1) % AROUND), b0 = a0 + AROUND, b1 = a1 + AROUND;
+        softRock.addTriangle(ids[a0], ids[b0], ids[a1]);
+        softRock.addTriangle(ids[a1], ids[b0], ids[b1]);
+      }
+      // Its head: closed over.
+      const [hx, hy, hz] = [nd.x + lean[0] * tall, top + 0.4, nd.z + lean[1] * tall];
+      const fieldT = new Float32Array(4), cT = shadeRock(V(hx, hy, hz), V(0, 1, 0), fieldT, 1);
+      const cap = softRock.addVertex(hx, hy, hz, 0, 1, 0, 0, hy * 0.4, cT[0], cT[1], cT[2], fieldT[0], fieldT[1], fieldT[2], fieldT[3]);
+      for (let ia = 0; ia < AROUND; ia++) softRock.addTriangle(ids[UP * AROUND + ia], cap, ids[UP * AROUND + ((ia + 1) % AROUND)]);
+    });
+  }
   wild.group = 'wild';
 
   // Where the player comes in: at the foot of the way, facing up it.
@@ -627,10 +834,13 @@ export function buildMountain(b: MountainBuild): MountainResult {
     yaw: Math.atan2(-(back[0] - arrive[0]), -(back[1] - arrive[1])),
     track: [...track].reverse().slice(1, -1) as [number, number][],
     // (Turf seen from far off takes the colour of what stands on it: up here thin, dry and brown.)
-    far: { wood: [0.05, 0.08, 0.035], grass: winter ? [0.2, 0.2, 0.17] : [0.2, 0.19, 0.1], sward: [0.26, 0.25, 0.13] },
+    far: { wood: [0.05, 0.08, 0.035], grass: winter ? [0.2, 0.2, 0.17] : [0.2, 0.19, 0.1], sward: [0.25, 0.225, 0.125],
+      // (And bare ground is scree: stones of the mountain's own rock, its colour and as pale.)
+      bare: [0.42 * (rockKind.dark[0] + rockKind.pale[0]) * outcrop[0], 0.42 * (rockKind.dark[1] + rockKind.pale[1]) * outcrop[1], 0.43 * (rockKind.dark[2] + rockKind.pale[2]) * outcrop[2], 1] },
     deck: { level: deck, billow: m.billow },
     planted: { ...planted, pines },
     lookout,
+    torches,
   };
 }
 
@@ -710,7 +920,7 @@ function plantMountain(c: MountainPlanting): Record<string, number> {
 function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean): void {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
   const around = 640, radii: number[] = [];
-  for (let r = 60; r <= 3450; r += 3 + r * 0.02) radii.push(r);
+  for (let r = 60; r <= 6900; r += 3 + r * 0.02) radii.push(r);
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(fbm2(x, z, 3, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
     // The country under the cloud: ridges and valleys that are never seen, but must be there for the peaks to stand on.
@@ -719,7 +929,12 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
       const d = Math.hypot(x - q.x, z - q.z);
       if (d > q.r) continue;
       const t = 1 - d / q.r, crest = ridge(x * 0.006 + q.x * 0.001, z * 0.006, 11), arete = ridge(x * 0.0025, z * 0.0025 + q.z * 0.001, 13);
-      y = Math.max(y, deck - 250 + (q.height + 250) * Math.pow(t, 1.5) * (0.7 + 0.22 * crest + 0.25 * arete));
+      // A horn: hollow-flanked, steepening to its top, with three or four ridges running down from it and faces between them;
+      // the ridges and the faces broken by lesser ribs and gullies.
+      const around = Math.atan2(z - q.z, x - q.x), ribs = 3 + (Math.abs(Math.round(q.x + q.z)) % 2);
+      const star = Math.pow(Math.abs(Math.cos((around * ribs) / 2 + q.x * 0.013 + 0.9 * fbm2(x * 0.0018 + q.z, z * 0.0018, 2, 7))), 0.7);
+      const horn = 0.55 * Math.pow(t, 1.25) + 0.45 * Math.pow(t, 3.2);
+      y = Math.max(y, deck - 250 + (q.height + 250) * horn * (0.62 + 0.2 * star * (1 - t * 0.5) + 0.16 * crest + 0.2 * arete));
     }
     // (This mountain's own slopes, as they go on down beyond the near ground.)
     return Math.max(y, landAt(m, F, x, z, false));

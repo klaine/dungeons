@@ -115,6 +115,23 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     const cl = m.climb ?? [];
     if (m.cairn && cl.some(([x, z], k) => k < cl.length - 10 && Math.hypot(x - m.cairn!.x, z - m.cairn!.z) < 15)) throw new Error('the climb crosses the summit before it reaches it');
     if (m.shelter && inside(m, m.shelter.x, m.shelter.z) < 5) throw new Error('the shelter at the edge');
+    // The gallery way, if there is one: no steeper anywhere than a stair cut in rock; it starts on the way and ends on the climb;
+    // its tunnels have rock over them and its ledges do not stand out in the air beyond the face.
+    const g = m.gallery;
+    if (g) {
+      const first = g.line[0], last = g.line[g.line.length - 1], top = cl[g.joins];
+      if (!m.way!.some(([x, z]) => Math.hypot(x - first[0], z - first[1]) < 0.5)) throw new Error('the gallery way does not start on the way');
+      if (Math.hypot(last[0] - top[0], last[1] - top[1]) > 0.5 || Math.abs(last[2] - top[2]) > 0.3) throw new Error('the gallery way does not end on the climb');
+      for (let k = 1; k < g.line.length; k++) {
+        const run = Math.hypot(g.line[k][0] - g.line[k - 1][0], g.line[k][1] - g.line[k - 1][1]), rise = Math.abs(g.line[k][2] - g.line[k - 1][2]);
+        if (run > 5 || rise > run * 0.6 + 0.15) throw new Error(`the gallery way breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+      }
+      for (const [x, z] of g.line) if (inside(m, x, z) < -9) throw new Error(`the gallery way out in the air at ${x}, ${z}`);
+      const tunnelled = g.under.reduce((sum, [a, b]) => sum + b - a + 1, 0) / g.line.length;
+      tally3(`gallery tunnels=${g.under.length}`);
+      tally3(`gallery under=${Math.round(tunnelled * 10) * 10}%`);
+    }
+    tally3(`gallery=${!!g}`);
     const arrive = m.way![m.way!.length - 1];
     if (arrive[2] + 1.7 > m.deck) throw new Error(`the arrival is above the cloud (${arrive[2]} against ${m.deck})`);
     tally3(`season=${site.setting.season}`);

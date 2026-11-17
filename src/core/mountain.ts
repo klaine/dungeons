@@ -139,6 +139,11 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   // it rounds over a little towards the precipice before it falls.
   const dTop = insideTop(m, x, z);
   let top = floor + summits(m, x, z) + (fbm2(x / 40 + 3.1, z / 40 - 1.7, 3, 7) - 0.5) * 8 + (fbm2(x / 11, z / 11, 2, 9) - 0.5) * 1.3;
+  // Tors: knobs of bare rock standing out of the ground, steep-sided and flat-headed, as frost leaves the harder beds.
+  for (const t of m.tors ?? []) {
+    const d = Math.hypot(x - t.x, z - t.z);
+    if (d < t.r) top += t.height * Math.pow(1 - d / t.r, 0.5) * (0.65 + 0.7 * fbm2(x / 2.7 + t.x, z / 2.7 - t.z, 2, 19));
+  }
   top -= 9 * (1 - smooth(dTop / 45));
   top = floor + (top - floor) * smooth((outside(m.level, x, z) - 2) / 16);
   const main = top - fall(-dTop, ringAt(m.drop, Math.atan2(z - m.z, x - m.x)));
@@ -182,9 +187,45 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
     }
     // A little platform on the summit for the cairn and whoever stands by it.
     if (m.cairn) { const w = 1 - smooth((Math.hypot(x - m.cairn.x, z - m.cairn.z) - 3.2) / 3); y += (m.cairn.y - y) * w; }
+    // The gallery way, wherever it is open to the sky: a ledge three strides broad, cut into the face
+    // and built out where the face falls away, to its own level, with the rock standing sheer behind it.
+    // (Its tunnels are not the land's shape: the builder carves them.)
+    if (m.gallery) for (const run of galleryRuns(m.gallery).open) {
+      const w = nearestOn(run, x, z, 4);
+      if (w.off < 2.5) y += (w.y - y) * (1 - smooth((w.off - 1.5) / 0.9));
+    }
+    // (But where a tunnel runs close behind the face, the rock on its outer side may stand lower than its floor: there the
+    // land is made up to the floor's level, never cut down to it, so that the floor is whole and the rock over it is left.)
+    if (m.gallery) for (const run of galleryRuns(m.gallery).under) {
+      const w = nearestOn(run, x, z, 4);
+      if (w.off < 2.5 && y < w.y) y += (w.y - y) * (1 - smooth((w.off - 1.5) / 0.9));
+    }
   }
   return y;
 }
+
+/**
+ * The gallery way as stretches: those open to the sky and those under the rock, each a line of its
+ * own points, running one point on into its neighbours at either end so that the two kinds meet.
+ */
+export function galleryRuns(g: NonNullable<Mountain['gallery']>): { open: [number, number, number][][]; under: [number, number, number][][] } {
+  let runs = RUNS.get(g);
+  if (!runs) {
+    const n = g.line.length, open: [number, number, number][][] = [], under: [number, number, number][][] = [];
+    const covered = new Uint8Array(n);
+    for (const [a, b] of g.under) { for (let k = a; k <= b; k++) covered[k] = 1; under.push(g.line.slice(Math.max(0, a - 1), Math.min(n, b + 2))); }
+    for (let k = 0; k < n; k++) {
+      if (covered[k]) continue;
+      let e = k;
+      while (e + 1 < n && !covered[e + 1]) e++;
+      if (e > k || n === 1) open.push(g.line.slice(Math.max(0, k - 1), Math.min(n, e + 2)));
+      k = e;
+    }
+    RUNS.set(g, (runs = { open, under }));
+  }
+  return runs;
+}
+const RUNS = new WeakMap<object, { open: [number, number, number][][]; under: [number, number, number][][] }>();
 
 /**
  * A line from `a` to `b` that climbs `climb` metres no more steeply than `slope`: straight if
@@ -485,18 +526,64 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     }
   }
 
+  // The gallery way: on most mountains there is a second way up, along the mountainside.
+  if (rng.fork('gallery?').chance(0.8)) layGallery(site, m, F, rng.fork('gallery'));
+
+  // Tors on the top: where the ground would otherwise lie open and even, knobs and low crags of rock, clear of everything made.
+  {
+    const q = rng.fork('tors'), all = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? [])];
+    m.tors = [];
+    for (let tries = 0, want = q.int(14, 24); tries < 600 && m.tors.length < want; tries++) {
+      const a = q.range(0, TAU), d = rimAt(m, a) * Math.sqrt(q.next()) * 0.95, x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
+      const r = q.range(2.2, 6.5), height = r * q.range(0.45, 0.95);
+      if (inside(m, x, z) < r + 2 || outside(m.level, x, z) < r + 9) continue;
+      if (all.some(([px, pz]) => Math.hypot(px - x, pz - z) < r + 5.5)) continue;
+      if ((m.landings ?? []).some((l) => Math.hypot(l.x - x, l.z - z) < l.r + r + 4) || (m.cairn && Math.hypot(m.cairn.x - x, m.cairn.z - z) < r + 9)) continue;
+      if (m.shelter && Math.hypot(m.shelter.x - x, m.shelter.z - z) < r + 8) continue;
+      if (m.tors.some((t) => Math.hypot(t.x - x, t.z - z) < (t.r + r) * 0.8)) continue;
+      m.tors.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
+    }
+  }
+
   // Other peaks, far off, standing out of the cloud: a few near enough to show their faces, more
   // beyond, and one or two great ones; none near, so the top stands alone over the cloud.
   {
-    const q = rng.fork('range'), want = q.int(16, 24);
-    for (let tries = 0; tries < 600 && m.range.length < want; tries++) {
-      const a = q.range(0, TAU), d = q.range(700, 3300);
+    const q = rng.fork('range'), want = q.int(30, 42);
+    // (Far off, beyond them all, a few giants: the great range this mountain is an outlier of.)
+    for (let k = 0, n = q.int(5, 8), a0 = q.range(0, TAU); k < n; k++) {
+      const a = a0 + q.range(-0.5, 0.5) + (k / n) * q.range(2.2, 3.6), d = q.range(3700, 6200);
+      m.range.push({ x: round(m.x + Math.cos(a) * d), z: round(m.z + Math.sin(a) * d), r: round(q.range(1000, 1700)), height: round(q.range(480, 1050)) });
+    }
+    for (let tries = 0; tries < 900 && m.range.length < want; tries++) {
+      const a = q.range(0, TAU), d = q.range(520, 3300);
       const big = q.chance(0.2 + 0.25 * smooth((d - 1400) / 1500));
-      const height = round(big ? q.range(260, 650) : q.range(-20, 200) * (0.6 + 0.4 * smooth((d - 700) / 1500)));
-      const r = round(q.range(320, 700) * (big ? 1.6 : 1));
+      const height = round(big ? q.range(260, 650) : q.range(25, 230) * (0.55 + 0.45 * smooth((d - 520) / 1500)));
+      const r = round(q.range(300, 700) * (big ? 1.6 : 1) * (0.7 + 0.3 * smooth((d - 520) / 900)));
       const x = round(m.x + Math.cos(a) * d), z = round(m.z + Math.sin(a) * d);
       if (m.range.some((p) => Math.hypot(p.x - x, p.z - z) < (p.r + r) * 0.45)) continue;
       m.range.push({ x, z, r, height });
+    }
+    // A great mountain does not stand alone: it has lesser summits on its ridges, a shoulder or two and a fore-peak, so that
+    // what is seen is a massif with a skyline, not a cone.
+    for (const p of [...m.range]) {
+      if (p.height < 120) continue;
+      for (let k = 0, n = q.int(2, 4); k < n; k++) {
+        const a = q.range(0, TAU), d = p.r * q.range(0.28, 0.6);
+        m.range.push({ x: round(p.x + Math.cos(a) * d), z: round(p.z + Math.sin(a) * d), r: round(p.r * q.range(0.45, 0.7)), height: round(p.height * q.range(0.5, 0.86)) });
+      }
+    }
+  }
+  // Needles: two to five towers of rock standing out of the cloud off the precipices, where a buttress has been cut off from the mountain.
+  {
+    const q = rng.fork('needles');
+    m.needles = [];
+    for (let tries = 0, want = q.int(2, 5); tries < 80 && m.needles.length < want; tries++) {
+      const a = q.range(0, TAU), r = q.range(8, 17), d = rimAt(m, a) + q.range(30, 95) + r;
+      const x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
+      // (Not off the ridge, where they would stand in the way of the view down it, nor one upon another.)
+      if (inside(m, x, z) > -22 - r || m.needles.some((n) => Math.hypot(n.x - x, n.z - z) < n.r + r + 14)) continue;
+      // Their tops below the top of the mountain, some only a little: from the rim one looks down on them, or across at them.
+      m.needles.push({ x: round(x), z: round(z), r: round(r), height: round(Math.max(20, (F - m.deck) * q.range(0.6, 1.3))) });
     }
   }
   site.mountain = m;
@@ -509,4 +596,155 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   });
   for (const [x, z] of [m.spur.from, m.spur.to]) { x0 = Math.min(x0, x - m.spur.width); x1 = Math.max(x1, x + m.spur.width); z0 = Math.min(z0, z - m.spur.width); z1 = Math.max(z1, z + m.spur.width); }
   site.grounds = { x0: round(x0), x1: round(x1), z0: round(z0), z1: round(z1) };
+}
+
+/**
+ * Lays out the gallery way, if the mountain will hold one. It is found in terms of bearings from
+ * the top's middle: it starts beside the head of the ridge, goes round one side of the mountain
+ * to the bearing of a point on the climb that lies near the rim, and there turns in and comes up
+ * to that point. Round the mountain it keeps to the face at its own level: at each bearing it
+ * stands where the rock is as high as it is, a little cut in; but it does not follow the face
+ * out round a buttress or far into a gully. It keeps near a line drawn smoothly round the top,
+ * and where the face stands out beyond that line, it goes through the rock.
+ */
+function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const way = m.way, climb = m.climb;
+  if (!way || !climb || climb.length < 12) return;
+  // The land as it is with the way and the climb made, which the gallery must fit.
+  const surf = (x: number, z: number) => landAt(m, F, x, z, true);
+  // A line round the top that does not go out round its spurs or in up its gullies: the rim, evened out.
+  const even = m.rim.map((_, k) => { let sum = 0; for (let j = -3; j <= 3; j++) sum += m.rim[(k + j + N) % N]; return sum / 7; });
+  const refAt = (a: number) => Math.min(ringAt(even, a), rimAt(m, a) + 4);
+  const at = (a: number, r: number): [number, number] => [m.x + Math.cos(a) * r, m.z + Math.sin(a) * r];
+  const spurAt = Math.atan2(m.spur.from[1] - m.z, m.spur.from[0] - m.x);
+  const clear = (m.spur.width / 2 + 12) / rimAt(m, spurAt);
+  /** Where the face stands at a level, along a bearing: how far out the rock is still that high (and a little more), near the even line. */
+  const faceAt = (a: number, y: number): { r: number; through: boolean } => {
+    const ref = refAt(a);
+    let r = ref - 14;
+    for (let t = ref + 12; t > ref - 14; t -= 0.5) { const [x, z] = at(a, t); if (surf(x, z) >= y + 1.2) { r = t; break; } }
+    return { r: Math.min(ref + 2.5, r + 0.4), through: r + 0.4 > ref + 2.5 };
+  };
+  // Where it ends: at a point of the climb's upper part. On that point's bearing it turns in from the
+  // face, comes up through the rock by a stair onto the top a little way in from the rim, and goes on
+  // over the open top to the climb.
+  const climbLen = [0];
+  for (let k = 1; k < climb.length; k++) climbLen.push(climbLen[k - 1] + Math.hypot(climb[k][0] - climb[k - 1][0], climb[k][1] - climb[k - 1][1]));
+  const total = climbLen[climbLen.length - 1], IN = 13;
+  let best: { dir: number; span: number; start: number; k: number; yP: number; yE: number; rE: number; y1: number; w: number } | null = null, bestScore = -Infinity;
+  for (let k = 3; k < climb.length - 4; k += 2) {
+    const share = climbLen[k] / total;
+    if (share < 0.35 || share > 0.9) continue;
+    const [tx, tz, ty] = climb[k], aT = Math.atan2(tz - m.z, tx - m.x), rT = Math.hypot(tx - m.x, tz - m.z), d = refAt(aT) - rT;
+    if (d < IN + 12 || d > 150) continue;
+    // Where the face stands on that bearing a few metres under the top; where the way comes out on the top, a stair's length in
+    // from there; and how steeply the path from there must climb to the climb.
+    const [ux, uz] = at(aT, refAt(aT) - 5), rP = faceAt(aT, surf(ux, uz) - 5).r, rE = rP - IN;
+    const [ex, ez] = at(aT, rE), yE = surf(ex, ez);
+    if (rE - rT < 10 || Math.abs(ty - yE) / (rE - rT) > 0.33 || outside(m.level, ex, ez) < 10) continue;
+    // (The path over the top must not cross the climb lower down, the way, or the ground about the house, before it gets there.)
+    let crosses = false;
+    for (let t = 0; t < rE - rT - 9 && !crosses; t += 3) { const [qx, qz] = at(aT, rE - t); crosses = nearestOn(climb, qx, qz, 8).off < 7 || nearestOn(way, qx, qz, 8).off < 7 || outside(m.level, qx, qz) < 6; }
+    if (crosses) continue;
+    for (const dir of [1, -1]) {
+      const start = spurAt + dir * clear;
+      const span = ((((aT - start) * dir) % TAU) + TAU) % TAU;
+      if (span < 0.7 || span > TAU - 2 * clear - 0.5) continue;
+      // Where it leaves the way: the point of the way on the ridge nearest where it starts on the face.
+      const [sx, sz] = at(start, refAt(start));
+      let w = 0, near = Infinity;
+      for (let i = 0; i < way.length; i++) { const dd = Math.hypot(way[i][0] - sx, way[i][1] - sz); if (dd < near) { near = dd; w = i; } }
+      // Its level where it starts on the face: below the top there by some metres, and no further below the way than its first stretch can go down.
+      const [fx, fz] = at(start, refAt(start) - 5), y1 = Math.max(way[w][2] - 0.3 * near, Math.min(way[w][2] - 1, surf(fx, fz) - 5.5));
+      // Its level where it turns in: far enough under the top for a roof of rock, and no further than its stair can come up.
+      const [px, pz] = at(aT, rP - 4), yP = Math.max(yE - 0.46 * IN, Math.min(yE - 0.3 * IN, surf(px, pz) - 4.5));
+      const length = span * (refAt(start) + refAt(aT)) / 2, grade = (yP - y1) / length;
+      if (Math.abs(grade) > 0.24 || length < 90) continue;
+      // The longer round the better, to a point; and the higher up the climb it comes in.
+      const score = -Math.abs(length - 240) * 0.08 + share * 25 - Math.abs(grade) * 60 - d * 0.1 + rng.range(0, 8);
+      if (score > bestScore) { bestScore = score; best = { dir, span, start, k, yP, yE, rE, y1, w }; }
+    }
+  }
+  if (!best) return;
+  const { dir, span, start, k: joins, yP, yE, rE, y1, w } = best;
+  const aT = start + dir * span;
+  const steps = Math.max(8, Math.round((span * (refAt(start) + refAt(aT)) / 2) / 2));
+  // Round the mountain: twice over, since where it stands depends on its level, and its level on how far it has come.
+  // Its galleries: two to four stretches where it leaves the face on purpose and runs some strides inside
+  // the rock, alongside the face, lit by windows cut out to it. (As well as wherever a buttress makes it.)
+  const inset = new Float32Array(steps + 1);
+  {
+    const q = rng.fork('through');
+    for (let made = 0, tries = 0, want = q.int(2, 4); made < want && tries < 60; tries++) {
+      const len = q.int(8, 17), a = q.int(5, Math.max(6, steps - len - 7));
+      if (a + len > steps - 6) continue;
+      let free = true;
+      for (let i = a - 8; i <= a + len + 8 && free; i++) free = i < 0 || i > steps || inset[i] === 0;
+      if (!free) continue;
+      for (let i = a; i <= a + len; i++) inset[i] = 6.5 * smooth((Math.min(i - a, a + len - i) + 1) / 4);
+      made++;
+    }
+  }
+  let levels = Array.from({ length: steps + 1 }, (_, i) => y1 + ((yP - y1) * i) / steps);
+  let pts: [number, number][] = [];
+  for (let pass = 0; pass < 2; pass++) {
+    const radii: number[] = [];
+    for (let i = 0; i <= steps; i++) radii.push(faceAt(start + (dir * span * i) / steps, levels[i]).r);
+    // (Evened a little along its length, so that it does not jink at every ledge of the face.)
+    const ease = (from: number[]) => from.map((_, i) => { let sum = 0, n = 0; for (let j = i - 2; j <= i + 2; j++) if (j >= 0 && j <= steps) { sum += from[j]; n++; } return sum / n; });
+    const eased = ease(ease(radii));
+    pts = eased.map((r, i) => at(start + (dir * span * i) / steps, r - inset[i]));
+    const along = [0];
+    for (let i = 1; i <= steps; i++) along.push(along[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    // (It sags a little between its ends, to keep well under the top.)
+    levels = along.map((dd) => y1 + ((yP - y1) * dd) / (along[steps] || 1) - 3 * Math.sin((Math.PI * dd) / (along[steps] || 1)));
+  }
+  // Straight stretches, a point every two metres: from the way to its start on the face; from where it
+  // turns in, up through the rock to the top; and from there over the top to the climb, at the land's own
+  // heights eased to a path's grade.
+  const line: [number, number, number][] = [];
+  const leg = (a: [number, number, number], b: [number, number, number], ends: boolean) => {
+    const n = Math.max(2, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+    for (let i = ends ? 0 : 1; i < n; i++) line.push([round(a[0] + ((b[0] - a[0]) * i) / n), round(a[1] + ((b[1] - a[1]) * i) / n), round(a[2] + ((b[2] - a[2]) * i) / n)]);
+  };
+  // (Where it comes out on the top is reckoned again from where the face has turned out to stand: a stair's length in
+  // from there, or further if the top is too high over it for a stair so short.)
+  const rLast = Math.hypot(pts[steps][0] - m.x, pts[steps][1] - m.z), rT = Math.hypot(climb[joins][0] - m.x, climb[joins][1] - m.z);
+  let ex = 0, ez = 0, out = NaN;
+  for (let len = IN; len <= 30 && rLast - len - rT > 6 && Number.isNaN(out); len++) {
+    [ex, ez] = at(aT, rLast - len);
+    const y = surf(ex, ez);
+    if (y - yP <= 0.5 * len && y - yP > -1) out = y;
+  }
+  if (Number.isNaN(out)) return;
+  void yE; void rE;
+  leg(way[w], [pts[0][0], pts[0][1], levels[0]], true);
+  const linkEnd = line.length;
+  for (let i = 0; i <= steps; i++) line.push([round(pts[i][0]), round(pts[i][1]), round(levels[i])]);
+  leg([pts[steps][0], pts[steps][1], levels[steps]], [ex, ez, out], false);
+  {
+    const [tx, tz, ty] = climb[joins], n = Math.max(2, Math.round(Math.hypot(tx - ex, tz - ez) / 2));
+    const over = Array.from({ length: n + 1 }, (_, i) => [ex + ((tx - ex) * i) / n, ez + ((tz - ez) * i) / n] as [number, number]);
+    line.push(...levelLine(over, surf, out, ty, 0.34));
+  }
+  // Which of it is under the rock: wherever the land stands well over a man's height above it. (Not its first stretch, down from the way.)
+  const deep = line.map(([x, z, y], i) => i >= linkEnd && surf(x, z) - y > 3.3);
+  // (A tunnel shorter than a few strides is a cutting; a gap in one shorter than that is not opened.)
+  const runsOf = (flags: boolean[], want: boolean) => { const out: [number, number][] = []; for (let i = 0; i < flags.length; i++) { if (flags[i] !== want) continue; let e = i; while (e + 1 < flags.length && flags[e + 1] === want) e++; out.push([i, e]); i = e; } return out; };
+  for (const [a, b] of runsOf(deep, false)) if (a > linkEnd && b < line.length - 3 && b - a < 1) for (let i = a; i <= b; i++) deep[i] = true;
+  for (const [a, b] of runsOf(deep, true)) if (b - a < 2) for (let i = a; i <= b; i++) deep[i] = false;
+  const under = runsOf(deep, true);
+  // Windows: where a tunnel runs near the face, an opening is cut out to it every few strides.
+  const windows: NonNullable<Mountain['gallery']>['windows'] = [];
+  for (const [a, b] of under) for (let i = a + 2; i <= b - 2; i += 3) {
+    const [x, z, y] = line[i], out = Math.atan2(z - m.z, x - m.x);
+    for (let t = 1.5; t <= 9; t += 0.5) {
+      if (surf(x + Math.cos(out) * t, z + Math.sin(out) * t) > y + 0.9) continue;
+      windows.push({ x, z, y: round(y + 1), out: Math.round(out * 1000) / 1000, reach: round(t + 1.5) });
+      break;
+    }
+  }
+  m.gallery = { line, under, windows, joins };
+  for (const run of galleryRuns(m.gallery).open) (site.paths ??= []).push({ points: run.map(([x, z]) => [x, z] as [number, number]), to: 'gallery' });
 }

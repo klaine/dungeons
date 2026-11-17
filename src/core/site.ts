@@ -510,8 +510,23 @@ export interface Mountain {
    * stone seat, a cairn, a wayside cross, or nothing but the view.
    */
   landings?: { x: number; z: number; y: number; r: number; out: number; cx: number; cz: number; cr: number; height: number; what: 'seat' | 'cairn' | 'cross' | 'view' }[];
+  /**
+   * Another way up, if there is one: the gallery way, along the mountainside. It leaves the way on
+   * the ridge near its head, goes round the mountain below the rim on a ledge cut in the face,
+   * rising, through tunnels where a buttress stands in its way, and comes up through the rock onto
+   * the climb, which it joins at the point of the climb numbered `joins`. `line` is its points
+   * `[x, z, y]`, a couple of metres apart. `under` says which stretches of it are tunnels, as pairs
+   * of the first and last point of each; everywhere else it is open to the sky, a ledge or a
+   * cutting. `windows` are openings cut from a tunnel out through the face, for light and the
+   * view: where on the tunnel's line, how high, the bearing out (radians), and how far out the face is.
+   */
+  gallery?: { line: [number, number, number][]; under: [number, number][]; windows: { x: number; z: number; y: number; out: number; reach: number }[]; joins: number };
   /** The cairn on the summit, with a cross of timber beside it, at the end of the climb. */
   cairn?: { x: number; z: number; y: number };
+  /** Tors: knobs and low crags of bare rock standing out of the ground of the top, `height` high and `r` across the half. They are the land's own shape, and are carved as rock. */
+  tors?: { x: number; z: number; r: number; height: number }[];
+  /** Needles of rock standing out of the cloud close beside the mountain, off its precipices: where, how broad at the cloud's level, and how high their tops stand over the cloud. Seen and not reached. */
+  needles?: { x: number; z: number; r: number; height: number }[];
   /** Other mountains, seen standing out of the cloud and not reached: where, how far they spread at the foot, how high their tops stand over the cloud. */
   range: { x: number; z: number; r: number; height: number }[];
 }
@@ -557,7 +572,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */

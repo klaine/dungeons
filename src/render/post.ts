@@ -313,13 +313,17 @@ export class Atmosphere {
       const vast = u.tCloud.sample(vec3(xz.x.div(3400), 0.13, xz.y.div(3400)).add(u.uCloudDrift.mul(vec3(0.3, 0, 0.3)))).level(0).r;
       const big = u.tCloud.sample(vec3(xz.x.div(900), 0.31, xz.y.div(900)).add(u.uCloudDrift.mul(vec3(0.6, 0, 0.6)))).level(0).r;
       const small = u.tCloud.sample(vec3(xz.x.div(210), 0.67, xz.y.div(210)).add(u.uCloudDrift.mul(vec3(1.7, 0, 1.7)))).level(0).r;
-      return u.uDeck.x.add(smoothstep(0.3, 0.72, vast).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, big).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, small).mul(2).sub(1).mul(u.uDeck.y.mul(0.45)));
+      // And here and there, where a great swell and a heap coincide, the cloud towers up: heads standing well over the rest.
+      const tower = pow(smoothstep(0.5, 0.78, big), 2).mul(smoothstep(0.38, 0.7, vast)).mul(u.uDeck.y.mul(2.6));
+      return u.uDeck.x.add(smoothstep(0.3, 0.72, vast).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, big).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, small).mul(2).sub(1).mul(u.uDeck.y.mul(0.62))).add(tower);
     };
+    // (The same with its smallest knobs on, for how it is lit where it is looked at: too fine to matter to where a line of sight meets it.)
+    const deckFine = (xz: N): N => deckHeight(xz).add(u.tCloud.sample(vec3(xz.x.div(64), 0.87, xz.y.div(64)).add(u.uCloudDrift.mul(vec3(3.1, 0, 3.1)))).level(0).g.sub(0.5).mul(u.uDeck.y.mul(0.5)));
     // (Built where it is called, inside the program of the picture: it gives back two things.)
     const deckOver = (ro: N, rd: N, reach: N, jitter: N): { out: N; far: N } => {
       // x, y, z: the colour of what is seen of the cloud; w: how much of what lies behind is hidden. And how far off it is.
       const out: N = vec4(0, 0, 0, 0).toVar(), far: N = float(0).toVar();
-      const amp: N = u.uDeck.y.mul(2.5).toVar();
+      const amp: N = u.uDeck.y.mul(2.7).toVar();
       const here: N = deckHeight(ro.xz).toVar();
       If(ro.y.lessThan(here), () => {
         // Inside it: it thins towards its top; and a line of sight that goes up out of it leaves it.
@@ -331,16 +335,16 @@ export class Atmosphere {
         out.assign(vec4(u.uDeckAir.mul(1.1).add(u.uDeckSun.mul(0.35)).mul(lightness), one(exp(through.mul(thick).negate()))));
         far.assign(0);
       }).ElseIf(rd.y.lessThan(-0.0004), () => {
-        const top: N = u.uDeck.x.add(amp), bottom: N = u.uDeck.x.sub(amp);
+        const top: N = u.uDeck.x.add(amp.mul(2.05)), bottom: N = u.uDeck.x.sub(amp);
         const t0: N = max(top.sub(ro.y).div(rd.y), 0).toVar();
         const tBottom: N = bottom.sub(ro.y).div(rd.y).toVar();
         const t1: N = min(min(tBottom, reach), 40000).toVar();
         If(t1.greaterThan(t0), () => {
           // Walked from where the line of sight comes down past the highest billows to where it passes the lowest, or meets the land.
-          const dt: N = t1.sub(t0).div(20).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
+          const dt: N = t1.sub(t0).div(26).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
           const prev: N = ro.y.add(rd.y.mul(t)).sub(deckHeight(ro.xz.add(rd.xz.mul(t)))).toVar();
           const hit: N = float(-1).toVar();
-          Loop(20, () => {
+          Loop(26, () => {
             t.addAssign(dt);
             const p: N = ro.add(rd.mul(t)).toVar();
             const d: N = p.y.sub(deckHeight(p.xz)).toVar();
@@ -354,15 +358,22 @@ export class Atmosphere {
           If(hit.lessThan(0).and(tBottom.lessThan(reach)), () => { hit.assign(min(tBottom, 40000)); });
           If(hit.greaterThan(0), () => {
             const p: N = ro.add(rd.mul(hit)).toVar();
-            const e = 18;
-            const hx: N = deckHeight(p.xz.add(vec2(e, 0))).sub(deckHeight(p.xz.sub(vec2(e, 0)))), hz: N = deckHeight(p.xz.add(vec2(0, e))).sub(deckHeight(p.xz.sub(vec2(0, e))));
-            const n: N = normalize(vec3(hx.negate(), 2 * e, hz.negate())).toVar();
-            const hh: N = deckHeight(p.xz).sub(u.uDeck.x).div(max(u.uDeck.y, 0.1)).toVar();
+            // (Near the eye its knobs are seen; far off they are smaller than a point of the picture, and left out.)
+            const e: N = mix(7, 22, smoothstep(150, 1200, hit)).toVar(), knobs: N = one(smoothstep(300, 1500, hit)).toVar();
+            const hAt = (q: N): N => mix(deckHeight(q), deckFine(q), knobs);
+            const hx: N = hAt(p.xz.add(vec2(e, 0))).sub(hAt(p.xz.sub(vec2(e, 0)))), hz: N = hAt(p.xz.add(vec2(0, e))).sub(hAt(p.xz.sub(vec2(0, e))));
+            const n: N = normalize(vec3(hx.negate(), e.mul(2), hz.negate())).toVar();
+            const here2: N = deckHeight(p.xz).toVar();
+            const hh: N = here2.sub(u.uDeck.x).div(max(u.uDeck.y, 0.1)).toVar();
+            // The heaps shade one another: towards the sun, a little way off and further, is the cloud higher than the sun's light comes in at?
+            const sunFlat: N = max(length(u.uSunDir.xz), 0.05), sunWay: N = u.uSunDir.xz.div(sunFlat), rise: N = u.uSunDir.y.div(sunFlat);
+            let shaded: N = float(0);
+            for (const d of [38, 130, 380]) shaded = max(shaded, smoothstep(0, u.uDeck.y.mul(0.7), deckHeight(p.xz.add(sunWay.mul(d))).sub(here2.add(rise.mul(d)))));
             // Lit as cloud is: much of the sun's light comes through and round it, so even what faces away is not dark; the troughs hold shadow.
-            const sun: N = max(dot(n, u.uSunDir), 0).mul(0.7).add(0.3).mul(smoothstep(-0.05, 0.08, u.uSunDir.y));
-            const hollow: N = smoothstep(-1.3, 1.1, hh).mul(0.45).add(0.55);
+            const sun: N = max(dot(n, u.uSunDir), 0).mul(0.75).add(0.25).mul(smoothstep(-0.05, 0.08, u.uSunDir.y)).mul(one(shaded.mul(0.72)));
+            const hollow: N = smoothstep(-1.5, 1.4, hh).mul(0.62).add(0.38);
             const edge: N = sky.phaseHG(dot(rd, u.uSunDir), float(0.6)).mul(0.6);
-            const colour: N = u.uDeckSun.mul(sun.mul(hollow).add(edge.mul(0.25))).add(u.uDeckAir.mul(n.y.mul(0.35).add(0.6)).mul(hollow));
+            const colour: N = u.uDeckSun.mul(sun.mul(hollow).add(edge.mul(0.25))).add(u.uDeckAir.mul(n.y.mul(0.3).add(0.42)).mul(hollow));
             out.assign(vec4(colour, one(exp(reach.sub(hit).div(-16)))));
             far.assign(hit);
           });

@@ -224,6 +224,7 @@ async function start(): Promise<void> {
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
+  if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
   // Snow, on a mountain: all over in winter, and in summer only what is left of it in the hollows.
   snowUniforms.uSnow.value = num('snow', desc.snow ?? 0);
   if (desc.snowLine) snowUniforms.uSnowLine.value.set(desc.snowLine[0], desc.snowLine[1]);
@@ -486,6 +487,8 @@ async function start(): Promise<void> {
   if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
   // (On a mountain, deep under the cloud.)
   if (desc.deck) under.position.y = Math.min(under.position.y, desc.deck.level - 120);
+  // (And from a mountain top the eye is let see twice as far: the great range beyond the nearer peaks is some miles off.)
+  if (desc.deck) { camera.far = 7400; camera.updateProjectionMatrix(); }
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -575,12 +578,15 @@ async function start(): Promise<void> {
     u.uCloudCover.value = w.cloud;
     // Haze: thin enough that the valley is clear across, thick enough that each range of hills
     // is paler than the one in front of it. A low sun has more air to shine through.
-    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
+    // (Above a sea of cloud the air is thin and clear: the haze of the low country is under the cloud.)
+    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1) * (desc.deck ? 0.45 : 1), 320, floor);
     // Mist: a few metres deep on the valley floor, from a veil to a fog.
     u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
     u.uMistLow.value = desc.groundLow !== undefined ? desc.groundLow - 0.5 : -1e6;
     // And in the country beyond the valley, on its own higher ground, from some way out.
     u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
+    // (On a mountain top the cloud below is the mist, and there is no other: a veil over the cloud made a grey sea of it.)
+    if (desc.deck) { u.uMist.value.x = 0; u.uMistFar.value.x = 0; }
     // The haze is alight towards the sun only while the sun is up.
     if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
     // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat

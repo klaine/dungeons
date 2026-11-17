@@ -3176,7 +3176,7 @@ export function meshSite(site: Site): SceneDescription {
     scenery.cards.push(...planting.sets);
   };
   const planting = new Planting();
-  let farCover: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number] } | undefined;
+  let farCover: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number] } | undefined;
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
   let underDeep: { min: Vector3; max: Vector3 } | undefined;
@@ -3358,6 +3358,7 @@ export function meshSite(site: Site): SceneDescription {
     cloudDeck = made.deck;
     censuses.push(made.planted);
     lookouts.push(made.lookout);
+    hallTorches.push(...made.torches);
     scenery.cards.push(...planting.sets);
   };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
