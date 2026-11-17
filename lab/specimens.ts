@@ -313,7 +313,8 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
     const fernGreen: Colour = o.season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
     const rutted = (x: number, z: number): boolean => { const off = Math.abs(trackOff(x, z)); return Math.abs(off - 0.58) < 0.3; };
-    for (let gz = -21; gz < 44; gz += 0.42) for (let gx = -42; gx < 34; gx += 0.42) {
+    // (A long meadow southward, so that grass can be looked at from a hundred metres off across grass.)
+    for (let gz = -21; gz < 104; gz += 0.42) for (let gx = -42; gx < 34; gx += 0.42) {
       const x = gx + plant.range(0, 0.42), z = gz + plant.range(0, 0.42);
       const off = Math.abs(trackOff(x, z)), foot = footOff(x, z);
       if (rutted(x, z) || foot < 0.3 || !clearOfStones(x, z, -0.15)) continue;

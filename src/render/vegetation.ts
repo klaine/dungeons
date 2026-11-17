@@ -530,7 +530,12 @@ function shapeGeometry(shape: CardSet['shape'], folded = false): BufferGeometry 
   return mergeGeometries(sheets);
 }
 
-/** How far off grass and flowers are still drawn. They shrink into the ground over the last third. */
+/**
+ * How far off grass and flowers are still drawn in full. They shrink into the ground over the last third. Grass does not stop there:
+ * beyond it one tuft in four is still drawn, made broader to stand for the other three, out to two and a half times as far (`FAR_GRASS`).
+ * A meadow seen from across a valley is then still grass, and costs a quarter of what it would to draw whole.
+ */
+const FAR_GRASS = 2.5;
 export const vegetationRange: { value: number } = uniform(75);
 
 /** How near the eye grass is drawn as real blades, in metres; beyond it, as painted tufts. */
@@ -561,8 +566,8 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N, uSprig = sprigRangeUniform as N;
   // Where each card stands, and how large it is.
   const at: N = attribute('aAt', 'vec4');
-  const materialFor = (layer: 'painted' | 'blades' | 'sprigs'): MeshStandardNodeMaterial => {
-    const real = layer === 'blades', sprig = layer === 'sprigs';
+  const materialFor = (layer: 'painted' | 'blades' | 'sprigs' | 'far'): MeshStandardNodeMaterial => {
+    const real = layer === 'blades', sprig = layer === 'sprigs', far = layer === 'far';
     const material = new MeshStandardNodeMaterial({
       map: real ? null : sprig ? (texture.userData.single as Texture) : texture, alphaTest: real ? 0 : 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: !real, vertexColors: real || sprig,
     });
@@ -589,6 +594,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       const turn: N = dist.add(own.sub(0.5).mul(uBlade).mul(0.3));
       // (Leaves the same: sprigs shrink to nothing as they pass the sprig range, and the painted sprays grow from nothing to meet them.)
       const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.5), uBlade, turn))
+        : far ? smoothstep(uRange.mul(0.5), uRange.mul(0.8), dist.add(own.sub(0.5).mul(uRange).mul(0.2)))
         : split ? smoothstep(uBlade.mul(0.4), uBlade.mul(0.9), turn)
         : sprig ? float(1).sub(smoothstep(uSprig.mul(0.82), uSprig, dist))
         : sprigs ? smoothstep(uSprig.mul(0.78), uSprig.mul(0.96), dist) : float(1);
@@ -609,7 +615,11 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       // Leaves made one by one tremble one by one.
       if (sprig) p.addAssign(vec3(sin(uTime.mul(5.3).add(dot(positionLocal, vec3(31, 17, 23)))), sin(uTime.mul(4.1).add(dot(positionLocal, vec3(19, 29, 13)))), 0).mul(uWind).mul(at.w).mul(0.012).mul(handOver));
       const d: N = dist;
-      if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d)));
+      if (far) {
+        // One for four: broader, a little taller, and gone at last where even that is too small to see.
+        p.assign(vec3(at.x.add(p.x.sub(at.x).mul(1.9)), at.y.add(p.y.sub(at.y).mul(1.2)), at.z.add(p.z.sub(at.z).mul(1.9))));
+        p.assign(mix(p, at.xyz, smoothstep(uRange.mul(FAR_GRASS * 0.75), uRange.mul(FAR_GRASS), d)));
+      } else if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d.add(own.sub(0.5).mul(uRange).mul(0.15)))));
       return p;
     })();
     // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
@@ -627,10 +637,11 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1, relief ? 0.55 : 0.2);
     return material;
   };
-  const layers: { layer: 'painted' | 'blades' | 'sprigs'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
+  const layers: { layer: 'painted' | 'blades' | 'sprigs' | 'far'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
   if (sprigs) layers.push({ layer: 'sprigs', base: sprigClump(), material: materialFor('sprigs') });
   if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
   layers.push({ layer: 'painted', base: shapeGeometry(set.shape, set.kind === 'leaf'), material: materialFor('painted') });
+  if (set.kind === 'grass') layers.push({ layer: 'far', base: shapeGeometry(set.shape), material: materialFor('far') });
 
   // Which block each card falls in.
   const count = set.matrices.length / 16;
@@ -656,19 +667,27 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       const geometry = new BufferGeometry();
       geometry.setIndex(base.getIndex());
       for (const name of ['position', 'normal', 'uv', 'color']) if (base.getAttribute(name)) geometry.setAttribute(name, base.getAttribute(name));
-      geometry.setAttribute('aCentre', new InstancedBufferAttribute(centres, 3));
-      geometry.setAttribute('aAt', new InstancedBufferAttribute(stands, 4));
-      const mesh = new InstancedMesh(geometry, material, n);
+      // (Every card of the block; or, for grass far off, every fourth.)
+      const every = layer === 'far' ? 4 : 1, m = Math.ceil(n / every);
+      const pick = (from: Float32Array, size: number): Float32Array => {
+        if (every === 1) return from;
+        const to = new Float32Array(m * size);
+        for (let k = 0; k < m; k++) for (let c = 0; c < size; c++) to[k * size + c] = from[k * every * size + c];
+        return to;
+      };
+      geometry.setAttribute('aCentre', new InstancedBufferAttribute(pick(centres, 3), 3));
+      geometry.setAttribute('aAt', new InstancedBufferAttribute(pick(stands, 4), 4));
+      const mesh = new InstancedMesh(geometry, material, m);
       mesh.instanceMatrix.setUsage(StaticDrawUsage);
-      (mesh.instanceMatrix.array as Float32Array).set(matrices);
-      mesh.instanceColor = new InstancedBufferAttribute(colours, 3);
+      (mesh.instanceMatrix.array as Float32Array).set(pick(matrices, 16));
+      mesh.instanceColor = new InstancedBufferAttribute(pick(colours, 3), 3);
       mesh.name = `cards:${set.kind}`;
       mesh.computeBoundingSphere();
       mesh.receiveShadow = true;
       mesh.castShadow = set.shadow;
       mesh.matrixAutoUpdate = false;
       mesh.userData.ground = ground;
-      mesh.userData.layer = split ? layer : sprigs ? (layer === 'sprigs' ? 'sprigs' : 'sprays') : 'whole';
+      mesh.userData.layer = layer === 'far' ? 'far' : split ? layer : sprigs ? (layer === 'sprigs' ? 'sprigs' : 'sprays') : 'whole';
       meshes.push(mesh);
     }
   }
@@ -686,6 +705,7 @@ export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; 
     // Leaves: sprigs where any of the block is within their range, the painted sprays unless all of it is.
     if (m.userData.layer === 'sprigs') { m.visible = d - s.radius < sprigRange; continue; }
     if (m.userData.layer === 'sprays') { m.visible = d + s.radius > sprigRange * 0.78; continue; }
+    if (m.userData.layer === 'far') { m.visible = d + s.radius > vegetationRange.value * 0.4 && d - s.radius < vegetationRange.value * FAR_GRASS; continue; }
     if (!m.userData.ground) continue;
     let show = d - s.radius < vegetationRange.value;
     // (With room for the belt in which the two give way to each other, tuft by tuft.)
