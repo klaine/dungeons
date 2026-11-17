@@ -284,6 +284,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   layOutFootpaths(site, rng.fork('footpaths'));
   if (site.settlement && site.settlement !== 'village') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
   layOutMill(site, fromTrack, rng.fork('mill'));
+  layOutCamp(site, meadow, fromTrack, rng.fork('camp'));
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
   {
     const far = rng.fork('landmarks'), count = far.pick([0, 1, 1, 2, 2, 3]), taken: number[] = [];
@@ -589,6 +590,68 @@ function layOutFootpaths(site: Site, rng: Rng): void {
     else if (f.kind === 'pond') { const [tx, tz] = nearestOnTrack(f.x, f.z); lead(f.x, f.z, shoreOf(f, tx - f.x, tz - f.z) * 0.98, 'pond'); }
   }
   if (!site.keep) for (const t of site.towers ?? []) lead(t.x + (t.door === 'e' ? t.half + 1.2 : -t.half - 1.2), t.z, 0, 'tower');
+}
+
+/**
+ * A camp of charcoal burners, in about one valley in four that has no village: in a clearing some way off the track, where
+ * nothing else is, with a footpath to it. What stands in it is set out round the way in, which is on the side towards the track:
+ * the clamp that is burning nearest the middle, where it can be watched from the hut's door; the hut at the back; the one being
+ * built and the one raked out to either side; the cordwood by the way in, where it was carted to.
+ */
+function layOutCamp(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const v = site.valley, g = site.grounds, track = site.track ?? [];
+  if (!v || !g || track.length < 2 || site.settlement === 'village' || !rng.chance(0.45)) return;
+  const round = (x: number) => Math.round(x * 10) / 10;
+  for (let tries = 0; tries < 200; tries++) {
+    const r = round(rng.range(7.5, 9)), x = round(rng.range(g.x0 + 12, g.x1 - 12)), z = round(rng.range(meadow.z1 + 10, v.mouth - 16));
+    if (!walkable(v, x, z, r + 6) || !roomAt(site, x, z, r + 5)) continue;
+    const off = fromTrack(x, z);
+    if (off < r + 7 || off > r + 34) continue;
+    // (Not under a terrace or the way up to one, nor across a footpath, nor before a cave's mouth.)
+    if ((site.terraces ?? []).some((t) => z > t.z0 - t.run - r - 3 && z < t.z1 + t.run + r + 3 && (t.side === 'w' ? x - edgeAt(v, 'w', z) : edgeAt(v, 'e', z) - x) < t.depth + r + 4)) continue;
+    if ((site.paths ?? []).some((p) => p.points.some(([px, pz]) => Math.hypot(px - x, pz - z) < r + 3))) continue;
+    if ((site.grottoes ?? []).some((q) => Math.abs(q.z - z) < r + 6 && (q.side === 'w' ? x - edgeAt(v, 'w', z) : edgeAt(v, 'e', z) - x) < r + 14)) continue;
+    // The nearest point of the track: the way in is on that side, and the footpath comes from there.
+    let tx = track[0][0], tz = track[0][1], bd = Infinity;
+    for (let k = 0; k < track.length - 1; k++) {
+      const [ax, az] = track[k], [bx, bz] = track[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+      const t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2)), px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
+      if (Math.hypot(x - px, z - pz) < bd) { bd = Math.hypot(x - px, z - pz); tx = px; tz = pz; }
+    }
+    const a0 = Math.atan2(tz - z, tx - x), at = (a: number, d: number): [number, number] => [round(x + Math.cos(a0 + a) * d * r), round(z + Math.sin(a0 + a) * d * r)];
+    const turn = (a: number) => round(a0 + a);
+    const [hx, hz] = at(Math.PI + 0.55, 0.66), [bx, bz] = at(1.2, 0.4), [nx, nz] = at(-1.6, 0.5), [sx, sz] = at(Math.PI - 0.75, 0.7);
+    const camp: NonNullable<Site['camp']> = {
+      x, z, r,
+      clamps: [
+        { x: bx, z: bz, r: round(rng.range(1.9, 2.2)), state: 'burning' },
+        { x: nx, z: nz, r: round(rng.range(1.6, 1.8)), state: 'building' },
+        { x: sx, z: sz, r: round(rng.range(1.8, 2.1)), state: 'spent' },
+      ],
+      hut: { x: hx, z: hz, r: 2.4, facing: round(Math.atan2(bz - hz, bx - hx)) },
+      stacks: [
+        { x: at(0.85, 0.88)[0], z: at(0.85, 0.88)[1], turn: turn(0.85 + Math.PI / 2), length: round(rng.range(2.6, 3.4)) },
+        { x: at(-0.8, 0.88)[0], z: at(-0.8, 0.88)[1], turn: turn(-0.8 + Math.PI / 2), length: round(rng.range(2.4, 3.2)) },
+        { x: at(2.95, 0.9)[0], z: at(2.95, 0.9)[1], turn: turn(2.95 + Math.PI / 2), length: round(rng.range(2.0, 2.8)) },
+      ],
+      props: [
+        { kind: 'block', x: at(0.5, 0.62)[0], z: at(0.5, 0.62)[1], turn: turn(rng.range(0, 6)) },
+        { kind: 'sledge', x: at(-0.3, 0.6)[0], z: at(-0.3, 0.6)[1], turn: turn(-0.3 + 0.4) },
+        { kind: 'barrel', x: round(hx + Math.cos(Math.atan2(bz - hz, bx - hx) + 0.9) * 2.5), z: round(hz + Math.sin(Math.atan2(bz - hz, bx - hx) + 0.9) * 2.5), turn: 0 },
+        { kind: 'sacks', x: round(sx + Math.cos(a0 + 0.5) * 2.6), z: round(sz + Math.sin(a0 + 0.5) * 2.6), turn: turn(rng.range(0, 6)) },
+        { kind: 'hearth', x: at(Math.PI - 0.35, 0.3)[0], z: at(Math.PI - 0.35, 0.3)[1], turn: 0 },
+      ],
+    };
+    site.camp = camp;
+    // The footpath, from the track to the edge of the clearing, wandering a little.
+    const d = Math.hypot(x - tx, z - tz), ux = (x - tx) / d, uz = (z - tz) / d, n = Math.max(2, Math.round((d - r) / 4)), points: [number, number][] = [];
+    for (let k = 0; k <= n; k++) {
+      const t = ((d - r * 0.8) * k) / n, w = k === 0 || k === n ? 0 : Math.sin((k / n) * Math.PI) * rng.range(-1.2, 1.2);
+      points.push([round(tx + ux * t - uz * w), round(tz + uz * t + ux * w)]);
+    }
+    (site.paths ??= []).push({ points, to: 'camp' });
+    return;
+  }
 }
 
 /**

@@ -223,6 +223,19 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.fillRect(Math.min(X(edge + inw * 4.2), X(edge)), Z(q.z) - 0.9 * scale, Math.abs(X(edge + inw * 4.2) - X(edge)), 1.8 * scale);
       ctx.globalAlpha = 1;
     }
+    // The charcoal burners' camp: its clearing as a paler round, the clamps as rings (the one that burns filled), the hut as a dot.
+    if (site.camp) {
+      const c = site.camp;
+      ctx.fillStyle = PAPER;
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.arc(X(c.x), Z(c.z), c.r * scale, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = INK;
+      ctx.fillStyle = INK;
+      ctx.lineWidth = Math.max(1, 0.5 * ratio);
+      for (const k of c.clamps) { ctx.beginPath(); ctx.arc(X(k.x), Z(k.z), k.r * scale, 0, Math.PI * 2); if (k.state === 'burning') ctx.fill(); else ctx.stroke(); }
+      ctx.beginPath(); ctx.arc(X(c.hut.x), Z(c.hut.z), c.hut.r * 0.8 * scale, 0, Math.PI * 2); ctx.fill();
+    }
     // What lies under the hill, in broken lines: the way through the hill from a cave of the house; the way down from it; the cavern;
     // and the passage up from the cavern to the cave or the hall in the arm's wall. (Not on the map of someone who is finding the place out.)
     const bw = opts.visited ? undefined : site.backWay, ridge = vale?.ridge;

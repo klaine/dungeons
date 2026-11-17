@@ -38,7 +38,7 @@ export class Torch {
   private readonly uTime: { value: number } = uniform(0);
   private readonly uGain: { value: number } = uniform(1);
 
-  constructor(position: Vector3, out: Vector3, phase: number) {
+  constructor(position: Vector3, out: Vector3, phase: number, fire = 0) {
     this.phase = phase;
 
     const iron = makePropMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9 });
@@ -59,12 +59,14 @@ export class Torch {
     const arm = new Mesh(new CylinderGeometry(0.014, 0.014, 0.3, 6), iron);
     arm.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), out);
     arm.position.copy(ring.position).addScaledVector(out, -0.13);
-    for (const m of [brand, head, ring, arm]) {
+    // (An open fire has none of that: only the flame, standing on whatever was built for it to burn on.)
+    if (!fire) for (const m of [brand, head, ring, arm]) {
       m.castShadow = false;
       this.group.add(m);
     }
 
-    this.flamePosition.copy(position).addScaledVector(axis, 0.16);
+    if (fire) this.flamePosition.copy(position).add(new Vector3(0, 0.3 * fire, 0));
+    else this.flamePosition.copy(position).addScaledVector(axis, 0.16);
     // The flame is a sheet that turns to face whoever looks at it, staying upright, with fire drawn on it.
     const flame = (this.flame = new NodeMaterial());
     flame.transparent = true;
@@ -92,12 +94,13 @@ export class Torch {
       const col = mix(vec3(1, 0.16, 0.01), vec3(1, 0.55, 0.12), body).mul(body).mul(2.2).add(vec3(1, 0.85, 0.55).mul(core).mul(4));
       return vec4(col.mul(this.uGain as N), body);
     })();
-    const quad = new Mesh(new PlaneGeometry(0.4, 0.7), this.flame);
+    const quad = new Mesh(new PlaneGeometry(0.4 * (fire || 1), 0.7 * (fire || 1)), this.flame);
     quad.position.copy(this.flamePosition);
     quad.frustumCulled = false;
     this.group.add(quad);
 
-    this.lightPosition.copy(position).addScaledVector(out, 0.36).add(new Vector3(0, 0.26, 0));
+    if (fire) this.lightPosition.copy(position).add(new Vector3(0, 0.55, 0));
+    else this.lightPosition.copy(position).addScaledVector(out, 0.36).add(new Vector3(0, 0.26, 0));
   }
 
   update(time: number): void {

@@ -318,6 +318,7 @@ async function start(): Promise<void> {
     mirror: Math.round(num('mirror', quality.mirror)),
     zenith: SKY.zenith, horizon: SKY.horizon,
     falls: desc.falls,
+    smokes: desc.smokes,
     // Banks and trees with the light behind them; and foam, which is white, in the light there is.
     land: SKY.ground.map((v) => v * 0.45),
     foam: [0, 1, 2].map((c) => 0.6 * SKY.horizon[c] + 0.12 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
@@ -460,7 +461,7 @@ async function start(): Promise<void> {
   scene.environmentIntensity = 0.5;
 
   // ------------------------------------------------------------------ torches
-  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1));
+  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire));
   for (const t of torches) scene.add(t.group);
   // Four real lights serve however many torches there are; see TorchLights.
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);

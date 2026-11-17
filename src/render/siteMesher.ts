@@ -7,6 +7,7 @@ import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { carveRock, smin } from './geom/rock';
+import { buildCamp } from './camp';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
 import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
@@ -1011,6 +1012,7 @@ export function meshSite(site: Site): SceneDescription {
     };
     const rings = lies.filter((f) => f.kind === 'stones');
     const ruins = lies.filter((f) => f.kind === 'ruin');
+    const campBase = site.camp ? swells(site.camp.x, site.camp.z) : 0;
     const groundBase = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
@@ -1042,6 +1044,11 @@ export function meshSite(site: Site): SceneDescription {
           y += (f.base - y) * k;
           even = Math.min(even, 1 - k);
         }
+      }
+      // The charcoal burners levelled their pitch: a clamp built on a slope burns unevenly, and the hut wants a floor.
+      if (site.camp) {
+        const d = Math.hypot(x - site.camp.x, z - site.camp.z), r = site.camp.r;
+        if (d < r * 1.7) { const k = 1 - smooth((d - r * 0.9) / (r * 0.75)); y += (campBase - y) * k; even = Math.min(even, 1 - 0.9 * k); }
       }
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
@@ -1914,7 +1921,8 @@ export function meshSite(site: Site): SceneDescription {
     farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
 
     // ---- what lies and grows in the valley
-    const inHouse = (x: number, z: number, m: number) => x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4;
+    // (The floor of the charcoal burners' camp counts as within doors for whatever asks this: nothing grows on it and nothing is strewn on it.)
+    const inHouse = (x: number, z: number, m: number) => (x > houseX0 - m && x < houseX1 + m && z > houseZ0 - m && z < frontZ + 0.4) || (!!site.camp && Math.hypot(x - site.camp.x, z - site.camp.z) < site.camp.r * 0.9 + Math.min(m, 1));
     const inMeadow = (x: number, z: number, m: number) => x > p.x0 - m && x < p.x1 + m && z > frontZ && z < p.z1 + m;
     // (In the valley: between its sides, and no further down than a few strides past the gap, where whoever walks it is stopped.)
     const inGrounds = (x: number, z: number, m: number) => (vale ? z > g.z0 && z < vale.mouth + 6 - m && insideAt(x, z) > m : x > g.x0 + m && x < g.x1 - m && z > g.z0 && z < g.z1 - m);
@@ -1925,6 +1933,8 @@ export function meshSite(site: Site): SceneDescription {
       for (const c of channels) if (along(c, x, z, 12)) clear = Math.min(clear, nearest.d - nearest.half - 0.4);
       // A tower has clear ground about it.
       for (const t of towers) clear = Math.min(clear, Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) - t.half - 2.6);
+      // The charcoal burners felled their clearing.
+      if (site.camp) clear = Math.min(clear, Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 1.08);
       // (More of it about a large building than a cottage: it is meant to be seen.)
       for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' ? 4 : 1.8));
       // Nor before the mouth of the way through the hill.
@@ -2181,6 +2191,8 @@ export function meshSite(site: Site): SceneDescription {
         if (f.kind === 'stones') w = Math.max(w, 0.6 * (1 - smooth((d - f.r * 0.9) / 2.5)));
         if (f.kind === 'ruin') w = Math.max(w, 0.45 * (1 - smooth((d - f.r * 0.5) / 2)));
       }
+      // The floor of the burners' camp is trodden and scorched bare, nearly to its edge.
+      if (site.camp) w = Math.max(w, 0.95 * (1 - smooth((Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 0.78) / 2.4)));
       return w;
     };
     const thinAt = (x: number, z: number): number => {
@@ -2253,6 +2265,7 @@ export function meshSite(site: Site): SceneDescription {
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
       const want = (0.25 + 0.75 * smooth((wet - 0.25) / 0.35)) * (1 - smooth((wear - 0.15) / 0.3)) * (1 - 0.75 * smooth((shade - 0.45) / 0.4));
       if (t > want || offTrack(x, z) < 0.7 || !clearOfStones(x, z, 0)) continue;
+      if (site.camp && Math.hypot(x - site.camp.x, z - site.camp.z) < site.camp.r * 0.9) continue;
       // Not inside the ring of stones or the walls of the hut.
       if (lies.some((f) => f.kind !== 'pond' && Math.hypot(x - f.x, z - f.z) < f.r * (f.kind === 'stones' ? 1.4 : 1.1))) continue;
       // Nor on rock: the cliffs are carved out from where the heights put them, and grass set by the heights would hang in the air.
@@ -2436,6 +2449,13 @@ export function meshSite(site: Site): SceneDescription {
     censuses.push(census);
 
     // ---- what has been built or set up out here
+    if (site.camp) {
+      const way = (site.paths ?? []).find((q) => q.to === 'camp'), made = buildCamp(site.camp, ground, sceneryMesh, rng.fork('campbuild'), way ? way.points[way.points.length - 1] : null, (x, z) => turfColour(x, z, s1));
+      smokes.push(...made.smokes);
+      finds.push(...made.finds);
+      // (The burners' own fire is a light, as a torch is: one of the few out of doors.)
+      for (const at of made.fires) hallTorches.push({ position: at, out: V(0, 0, 1), fire: 1.9 });
+    }
     const timber: Colour = [0.5, 0.42, 0.33];
     const beams = sceneryMesh('wood');
     let grain = 0;
@@ -2946,6 +2966,8 @@ export function meshSite(site: Site): SceneDescription {
   const fences: { min: Vector3; max: Vector3 }[] = [];
   let underDeep: { min: Vector3; max: Vector3 } | undefined;
   let groundLow = Infinity;
+  // Where smoke rises out of doors.
+  const smokes: { x: number; y: number; z: number; height: number }[] = [];
   /**
    * Whether a point lies outside what the sun's shadow and the open sky are reckoned over (the box of the house and the valley: see
    * the scene's `bounds`). Rock out there that is under the hill cannot be shadowed, and would stand in full sun; so it is made of
@@ -3698,6 +3720,7 @@ export function meshSite(site: Site): SceneDescription {
     ...(backWay?.cavern ? { lowest: backWay.cavern.floor } : {}),
     ...(underDeep ? { underDeep } : {}),
     ...(groundLow < Infinity ? { groundLow } : {}),
+    smokes,
     sunShafts,
     landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),

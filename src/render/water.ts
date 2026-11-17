@@ -48,7 +48,7 @@ function rippleMap(size = 256): Texture {
 type N = any;
 const {
   Fn, If, abs, attribute, cameraPosition, cameraProjectionMatrix, cameraViewMatrix, distance, dot, exp, float, getViewPosition, length, max, min, mix, normalize,
-  positionWorld, pow, reflect, reflector, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4,
+  positionWorld, pow, reflect, reflector, select, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
 /** `smoothstep`, which may also be asked to fall instead of rise (the first edge above the second). */
@@ -145,7 +145,7 @@ export class Water {
      * `deep` is the colour of deep water in this light. The rest is for running water where it has no picture to
      * mirror: the sky overhead and at the horizon, land in shade, and something white in this light.
      */
-    o: { mirror?: number; deep?: [number, number, number]; zenith?: number[]; horizon?: number[]; land?: number[]; foam?: number[]; falls?: { x: number; y: number; z: number; height: number; width: number }[] } = {},
+    o: { mirror?: number; deep?: [number, number, number]; zenith?: number[]; horizon?: number[]; land?: number[]; foam?: number[]; falls?: { x: number; y: number; z: number; height: number; width: number }[]; smokes?: { x: number; y: number; z: number; height: number }[] } = {},
   ) {
     const vec = (v: number[] | undefined, x: number, y: number, z: number): N => uniform(new Vector3(v?.[0] ?? x, v?.[1] ?? y, v?.[2] ?? z));
     this.look = { deep: vec(o.deep, 0.02, 0.05, 0.045), zenith: vec(o.zenith, 0.14, 0.28, 0.66), horizon: vec(o.horizon, 0.6, 0.72, 0.88), land: vec(o.land, 0.02, 0.03, 0.015), foam: vec(o.foam, 0.8, 0.8, 0.8) };
@@ -276,6 +276,7 @@ export class Water {
       this.meshes.push(mesh);
     }
     this.mist(o.falls ?? []);
+    this.smoke(o.smokes ?? []);
   }
 
   /**
@@ -308,6 +309,39 @@ export class Water {
         sheet.layers.set(1);
         this.meshes.push(sheet);
       }
+    }
+  }
+
+  /**
+   * Smoke, where something smoulders out of doors: made as the spray of a fall is, of a few upright
+   * sheets crossed through one line, but tall, narrow at the foot and spreading as it rises, grey,
+   * climbing slowly and leaning one way and then the other. (It is here because the means are here.)
+   */
+  private smoke(smokes: { x: number; y: number; z: number; height: number }[]): void {
+    if (!smokes.length) return;
+    const material = new NodeMaterial();
+    material.transparent = true;
+    material.depthWrite = false;
+    material.side = DoubleSide;
+    material.fragmentNode = Fn(() => {
+      const at: N = uv(), P: N = positionWorld, t = this.uTime;
+      // How far from the column's middle line, which leans more the higher it is; and how broad the column is there.
+      const lean = at.y.mul(at.y).mul(sin(t.mul(0.23)).mul(0.1).add(0.08));
+      const across = one(abs(at.x.sub(0.5).sub(lean)).div(mix(0.07, 0.42, at.y)));
+      const body = smoothstep(0, 0.75, across).mul(smoothstep(0, 0.05, at.y)).mul(sstep(1.0, 0.35, at.y));
+      const drift = texture(this.ripples, vec2(P.x.add(P.z).mul(0.09), P.y.mul(0.05)).add(vec2(0.01, -0.035).mul(t))).x.add(texture(this.ripples, vec2(P.x.sub(P.z).mul(0.17), P.y.mul(0.11)).add(vec2(-0.015, -0.06).mul(t))).y);
+      // (Grey, whatever the light: wood smoke takes little colour from the sun.)
+      const grey: N = dot(this.look.foam, vec3(0.33, 0.34, 0.33)).mul(0.5);
+      return vec4(mix(vec3(grey), this.look.foam.mul(0.5), 0.2), body.mul(smoothstep(0.25, 1.5, drift)).mul(mix(0.42, 0.16, at.y)));
+    })();
+    for (const s of smokes) for (let k = 0; k < 3; k++) {
+      const sheet = new Mesh(new PlaneGeometry(s.height * 0.55, s.height), material);
+      sheet.position.set(s.x, s.y + s.height / 2 - 0.1, s.z);
+      sheet.rotation.y = (k * Math.PI) / 3 + 0.2;
+      sheet.renderOrder = 3;
+      sheet.name = 'water';
+      sheet.layers.set(1);
+      this.meshes.push(sheet);
     }
   }
 

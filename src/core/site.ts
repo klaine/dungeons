@@ -160,6 +160,22 @@ export interface Feature {
  * ledge that rises along the wall from the valley floor, beginning beyond one end of it. From
  * the top the whole valley can be seen, and something has been left at its far end.
  */
+/**
+ * A camp of charcoal burners: a clearing `r` metres across the half of it, off the track, with a footpath to it.
+ * In it stand clamps (round stacks of wood covered with earth and turf, in which the wood is charred): one
+ * `burning`, which smokes; one `building`, the wood stacked on end and not yet covered; and one `spent`, opened
+ * and raked out, a ring of earth with charcoal lying in it. The burners' `hut` is a cone of poles covered with
+ * turf, its door looking `facing` (radians, 0 towards greater x); they must watch a clamp night and day.
+ * `stacks` are cordwood, `turn` being the way each runs. `props` are the smaller things of the trade.
+ */
+export interface Camp {
+  x: number; z: number; r: number;
+  clamps: { x: number; z: number; r: number; state: 'burning' | 'building' | 'spent' }[];
+  hut: { x: number; z: number; r: number; facing: number };
+  stacks: { x: number; z: number; turn: number; length: number }[];
+  props: { kind: 'block' | 'barrel' | 'sacks' | 'sledge' | 'hearth'; x: number; z: number; turn: number }[];
+}
+
 export interface Terrace {
   /** Which side wall it stands against: `w` is the side of lesser x. */
   side: 'w' | 'e';
@@ -393,7 +409,9 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' }[];
+  /** A camp of charcoal burners in the valley's woods: see `Camp`. */
+  camp?: Camp;
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */
