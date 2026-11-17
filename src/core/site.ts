@@ -487,6 +487,11 @@ export interface Mountain {
    * (`rimAt` in `mountain.ts`), from this seed, `out` metres at the most, a fin every `apart` metres or so.
    */
   ribs?: { seed: number; out: number; apart: number };
+  /**
+   * If present, the land is not the plain shape alone but that shape given fractal detail and worn by water and frost on a lattice
+   * `cell` metres fine, from the stream `seed` (see `terrain.ts`). Recorded so that whoever builds the place makes the same land.
+   */
+  terrain?: { seed: number; cell: number };
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;

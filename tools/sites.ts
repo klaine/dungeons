@@ -95,15 +95,18 @@ for (const k of [...isles.keys()].sort()) console.log(' ', k.padEnd(14), isles.g
 
 // Mountain tops: the same houses as hospices above the cloud. Each must be completable; the way and
 // the climb stay on the top and climb no more steeply than a path can; the summit's cairn, the shelter
-// and the arrival stand on the top; and the arrival is in the cloud.
+// and the arrival stand on the top; and the arrival is in the cloud. (And a few with their land worn,
+// `?terrain=eroded`, held to the same: they take some seconds each to make.)
 const peaks = new Map<string, number>();
 let peakFailures = 0;
-for (let n = 0; n < Math.ceil(count / 4); n++) {
-  const seed = `peak-check-${n}`;
+const plainPeaks = Math.ceil(count / 4), wornPeaks = Math.ceil(count / 20);
+for (let n = 0; n < plainPeaks + wornPeaks; n++) {
+  const worn = n >= plainPeaks, seed = worn ? `worn-check-${n - plainPeaks}` : `peak-check-${n}`;
   try {
-    const site = generateSite(seed, 'mountain'), m = site.mountain!;
+    const site = generateSite(seed, 'mountain', { terrain: worn ? 'eroded' : undefined }), m = site.mountain!;
+    if (worn && !m.terrain) throw new Error('its land is not worn');
     if (!solve(site).ok) throw new Error('cannot be completed');
-    const tally3 = (k: string) => peaks.set(k, (peaks.get(k) ?? 0) + 1);
+    const tally3 = (k: string) => peaks.set(worn ? `worn ${k}` : k, (peaks.get(worn ? `worn ${k}` : k) ?? 0) + 1);
     for (const [name, line, most] of [['way', m.way ?? [], 0.56], ['climb', m.climb ?? [], 0.74]] as const) {
       if (line.length < 2) throw new Error(`no ${name}`);
       for (const [x, z] of line) if (inside(m, x, z) < 3) throw new Error(`the ${name} off the top at ${x}, ${z}`);
@@ -165,6 +168,6 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     console.log(seed, 'FAILED', (e as Error).message);
   }
 }
-console.log(`${Math.ceil(count / 4)} mountain tops, ${peakFailures} failures`);
+console.log(`${plainPeaks} mountain tops and ${wornPeaks} worn, ${peakFailures} failures`);
 for (const k of [...peaks.keys()].sort()) console.log(' ', k.padEnd(14), peaks.get(k));
 if (failures || isleFailures || peakFailures) process.exitCode = 1;

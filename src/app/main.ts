@@ -207,7 +207,7 @@ async function start(): Promise<void> {
   await nextFrame();
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place);
+  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'eroded' ? 'eroded' : undefined });
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;

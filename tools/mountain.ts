@@ -3,16 +3,18 @@
  * wrong with what was carved: numbers that are not numbers, rock standing in the doorway of the
  * house, and how long the building took. Run it after any change to the rock or the ground.
  *
- *   npx tsx tools/mountain.ts [count] [prefix]
+ *   npx tsx tools/mountain.ts [count] [prefix] [eroded]
+ *
+ * With `eroded`, the mountains are made with their land worn (`?terrain=eroded`).
  */
 import { generateSite } from '../src/core/generate';
 import { meshSite } from '../src/render/siteMesher';
 
-const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'peak';
+const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'peak', terrain = process.argv[4] === 'eroded' ? 'eroded' : undefined;
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
-  const site = generateSite(seed, 'mountain');
+  const site = generateSite(seed, 'mountain', { terrain });
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;

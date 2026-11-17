@@ -162,7 +162,13 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
 /** What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, or a hospice on a mountain top above the cloud. */
 export type PlaceKind = 'valley' | 'island' | 'mountain';
 
-export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
+/** Choices that are not part of the seed: trials of other ways of making a place, to be compared with the usual way. */
+export interface MakeOptions {
+  /** A mountain top's land given fractal detail and worn by water and frost (`terrain.ts`), rather than its plain shape alone. */
+  terrain?: 'eroded';
+}
+
+export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: MakeOptions = {}): Site {
   const base = new Rng(seed);
   const pickFrom = base.fork('setting');
   const setting: Setting = {
@@ -205,7 +211,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
   const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);
-  let best: Site | null = null;
+  let best: Site | null = null, bestAttempt = -1;
   let bestScore = -Infinity;
   for (let attempt = 0; attempt < CANDIDATES; attempt++) {
     let site: Site;
@@ -215,9 +221,13 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
       continue;
     }
     const s = score(site, size);
-    if (s > bestScore) { bestScore = s; best = site; }
+    if (s > bestScore) { bestScore = s; best = site; bestAttempt = attempt; }
   }
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
+  // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
+  if (opts.terrain) {
+    try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, opts); } catch { /* the plain draft stands */ }
+  }
   return best;
 }
 
@@ -1270,7 +1280,7 @@ export function score(site: Site, size = 9): number {
     - 0.5 * Math.abs(rooms - size);
 }
 
-function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, kind: PlaceKind = 'valley'): Site {
+function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, kind: PlaceKind = 'valley', opts: MakeOptions = {}): Site {
   const pick = rng.next();
   const draft = pick < 0.34 ? draftRing(rng) : pick < 0.58 ? draftDouble(rng) : pick < 0.8 ? draftStack(rng) : draftSpine(rng);
   const court = draft.court;
@@ -1667,7 +1677,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   };
   // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
   if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'));
-  else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'));
+  else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded');
   else layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);

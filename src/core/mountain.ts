@@ -1,6 +1,7 @@
 import { fbm2, Rng } from './rng';
 import { Mountain, Place, Site } from './site';
 import { turnBetween } from './island';
+import { erodedFbmLod, fbmd, HeightField, landDetail, ridgedFbm, wearByFrost, wearByWater } from './terrain';
 
 /**
  * The top of a mountain above a sea of cloud. Where an island is land inside a coast that falls
@@ -164,6 +165,23 @@ function fall(out: number, drop: number, phase = 0.5): number {
   return drop * smooth(out / w) + stepped + Math.max(0, out - 50) * 0.6;
 }
 
+/**
+ * How far the land has fallen at a distance `out` beyond an edge, for a mountain whose land is worn: the precipice, as `fall` has it,
+ * and under it not tiers going down at one slope for ever, but a flank steep at first and easing out towards the valleys, as a
+ * mountain's flanks do. How far out it reaches differs from bearing to bearing and from place to place: far out along a spur,
+ * close in at the head of a bay; so the mountain's foot is not a ring. The water and the frost do the rest.
+ */
+function wornFall(m: Mountain, out: number, drop: number, x: number, z: number): number {
+  if (out <= 0) return 0;
+  const seed = m.terrain!.seed, w = 2.5 + drop * 0.2, b = Math.atan2(z - m.z, x - m.x);
+  // (Some eight hundred metres from the top to the valleys, over one to three kilometres: as steep as two in one under the precipice
+  // at the head of a bay, as one in one on a spur, and easing out below.)
+  const spurs = fbmd(Math.cos(b) * 1.6 + 5.1, Math.sin(b) * 1.6 - 2.7, 3, seed + 51), wander = fbmd(x / 520, z / 520, 3, seed + 53);
+  const reach = 560 * Math.min(1.9, Math.max(0.45, 1 + 1.6 * spurs + 0.7 * wander));
+  const below = Math.max(0, out - w * 0.5);
+  return drop * smooth(out / w) + 820 * (1 - Math.exp(-below / reach)) + below * 0.04;
+}
+
 const TORS = new WeakMap<object, { cells: Map<number, NonNullable<Mountain['tors']>>; C: number; count: number }>();
 /** How high the tors and the rock teeth stand at a point: knobs of bare rock, steep-sided, as frost leaves the harder beds. */
 function torsAt(m: Mountain, x: number, z: number): number {
@@ -241,6 +259,30 @@ const INDEXES = new WeakMap<[number, number, number][], { cells: Map<number, num
  * cairn's platform) is to be counted; while it is being laid out, it is not yet.
  */
 export function landAt(m: Mountain, floor: number, x: number, z: number, levelled = true): number {
+  // The land's own shape: the plain shape below, or, if this mountain's land is worn, the worn lattice made from it (blended back
+  // into the plain shape at the lattice's edge, which is far out and deep in the cloud).
+  // Beyond that lattice, once the country round about has been laid out, the mountain's lower flanks are the country's: worn with
+  // it, on its finer lattice. (Before then, while the top is being laid out, its plain shape stands for them.)
+  const field = m.terrain ? fieldOf(m, floor) : null;
+  const below = (bx: number, bz: number) => (field && m.range.length ? nearCountryOf(m, floor).smoothAt(bx, bz) : baseLand(m, floor, bx, bz));
+  let y: number;
+  if (field && field.holds(x, z)) {
+    const edge = Math.min(x - field.x0, z - field.z0, field.x0 + (field.nx - 1) * field.cell - x, field.z0 + (field.nz - 1) * field.cell - z);
+    y = edge > 60 ? field.at(x, z) : below(x, z) + (field.at(x, z) - below(x, z)) * smooth(edge / 60);
+    // (Deep under the cloud, where nothing has been laid out, the mountain's lattice is joined to the country it stands in: else, in
+    // the corners of that lattice, it would go down below the valley floors about it.)
+    if (m.range.length && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
+  } else y = below(x, z);
+  // The cleft across the ridge: a gap cut clean across it, steep-walled, where a band of weaker rock has gone; the bridge is over it.
+  const notch = m.spur.notch;
+  let cleft = 0;
+  if (notch) { const s = onSpur(m, x, z); if (s.off < 60) cleft = notch.deep * (1 - smooth((Math.abs(s.d - notch.at) - notch.wide * 0.28) / (notch.wide * 0.24))); }
+  y -= cleft;
+  return made(m, floor, x, z, y, levelled, cleft);
+}
+
+/** The plain shape of the land, without the cleft and without what is made on it. */
+function baseLand(m: Mountain, floor: number, x: number, z: number): number {
   // The top: rolling, broken ground, more roughly the higher it stands, with the summits on it;
   // it rounds over a little towards the precipice before it falls.
   const dTop = insideTop(m, x, z);
@@ -248,15 +290,18 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   top -= 9 * (1 - smooth(dTop / 45));
   top = floor + (top - floor) * smooth((outside(m.level, x, z) - 2) / 16);
   const bearing = Math.atan2(z - m.z, x - m.x);
-  const main = top - fall(-dTop, ringAt(m.drop, bearing), fbm2(Math.cos(bearing) * 1.7 + m.x * 0.01, Math.sin(bearing) * 1.7 + m.z * 0.01, 2, 43));
+  const main = top - (m.terrain ? wornFall(m, -dTop, ringAt(m.drop, bearing), x, z) : fall(-dTop, ringAt(m.drop, bearing), fbm2(Math.cos(bearing) * 1.7 + m.x * 0.01, Math.sin(bearing) * 1.7 + m.z * 0.01, 2, 43)));
   // The ridge: its crest falls from the rim to its end, and its sides fall away from the crest,
   // and then over its own lesser precipices.
   const s = onSpur(m, x, z), tc = clamp01(s.t), half = spurHalf(m, x, z, s.t);
   const crest = s.y + (fbm2(x / 17 + 1.3, z / 17, 2, 5) - 0.5) * 2.4 * smooth(s.t / 0.2);
-  // The cleft: a gap cut clean across the ridge, steep-walled, where a band of weaker rock has gone; the bridge is over it.
-  const notch = m.spur.notch, cleft = notch && s.off < 60 ? notch.deep * (1 - smooth((Math.abs(s.d - notch.at) - notch.wide * 0.28) / (notch.wide * 0.24))) : 0;
-  const ridge = crest - cleft - 4.5 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - fall(s.off - half, 14 + 12 * tc);
-  let y = softMax(main, ridge, 4);
+  const ridge = crest - 4.5 * Math.min(1, s.off / Math.max(half, 1)) ** 1.6 - (m.terrain ? wornFall(m, s.off - half, 14 + 12 * tc, x, z) : fall(s.off - half, 14 + 12 * tc));
+  return softMax(main, ridge, 4);
+}
+
+/** The land with the tors on it, and, if `levelled`, with what has been made on it: the ways cut and made up, the platforms levelled. */
+function made(m: Mountain, floor: number, x: number, z: number, y: number, levelled: boolean, cleft: number): number {
+  const notch = m.spur.notch;
   if (!levelled) y += torsAt(m, x, z);
   if (levelled) {
     // The way is cut and made up to its own level, across a mule's breadth and a little more, and eased into the land beside it.
@@ -303,9 +348,11 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
     // The gallery way, wherever it is open to the sky: a ledge three strides broad, cut into the face
     // and built out where the face falls away, to its own level, with the rock standing sheer behind it.
     // (Its tunnels are not the land's shape: the builder carves them.)
+    // (Where it comes in to the climb, alongside it for a few strides, the climb's level holds: the two meet at one level where they
+    // join, and a ledge cut to the gallery's level beside the rising climb would leave a step across it.)
     if (m.gallery) for (const run of galleryRuns(m.gallery).open) {
       const w = nearestOn(run, x, z, 4);
-      if (w.off < 2.5) y += (w.y - y) * (1 - smooth((w.off - 1.5) / 0.9));
+      if (w.off < 2.5) y += (w.y - y) * (1 - smooth((w.off - 1.5) / 0.9)) * (m.climb ? smooth((nearestOn(m.climb, x, z, 6).off - 1.6) / 1.6) : 1);
     }
     // (But where a tunnel runs close behind the face, the rock on its outer side may stand lower than its floor: there the
     // land is made up to the floor's level, never cut down to it, so that the floor is whole and the rock over it is left.)
@@ -348,6 +395,7 @@ const RUNS = new WeakMap<object, { open: [number, number, number][][]; under: [n
  * as the cloud. It is the land's plain shape; whoever draws it decides what covers it.
  */
 export function countryAt(m: Mountain, floor: number, x: number, z: number): { y: number; water: boolean } {
+  if (m.terrain) return wornCountryAt(m, floor, x, z);
   const deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
   const ridge = (px: number, pz: number, s: number) => { const v = 1 - Math.abs(fbm2(px, pz, 3, s) * 2 - 1); return v * v; };
   const lake = deck - 610;
@@ -369,6 +417,127 @@ export function countryAt(m: Mountain, floor: number, x: number, z: number): { y
   // (This mountain's own slopes, as they go on down beyond the near ground.)
   if (out < 900) y = Math.max(y, landAt(m, floor, x, z, false));
   return y < lake ? { y: lake, water: true } : { y, water: false };
+}
+
+/**
+ * The country round about as worn land, for a mountain whose land is worn. Its large shape is the
+ * plain country's: valley floors under the cloud, the long ridges, and a mass under each mountain of
+ * the range, so the landmarks stand where they did. Ridged noise breaks each mass into arêtes and
+ * horns; a coarse lattice of it, fourteen kilometres across, is worn by water and frost, so that
+ * valleys drain and branch; and on that, fine detail is laid, in fewer octaves the further a point
+ * lies from this mountain, where whoever sees it stands.
+ */
+function wornCountryAt(m: Mountain, floor: number, x: number, z: number): { y: number; water: boolean } {
+  // (Near this mountain, from a finer lattice worn at its own scale, so that the faces nearest have their gullies and ribs; beyond
+  // it, from the coarse one with the detail laid on. This mountain's own flanks are in them, its top on a lattice of its own.)
+  const near = nearCountryOf(m, floor), top = fieldOf(m, floor);
+  const y = top.holds(x, z) ? landAt(m, floor, x, z, false) : near.holds(x, z) ? near.smoothAt(x, z) : countryDetailed(m, floor, x, z);
+  const lake = m.deck - 610;
+  return y < lake ? { y: lake, water: true } : { y, water: false };
+}
+
+/** The coarse worn country with its detail laid on: in fewer octaves the further a point lies from this mountain. */
+function countryDetailed(m: Mountain, floor: number, x: number, z: number): number {
+  const field = countryOf(m, floor), seed = m.terrain!.seed;
+  const base = field.holds(x, z) ? field.smoothAt(x, z) : countryShape(m, floor, x, z);
+  const out = Math.hypot(x - m.x, z - m.z);
+  // (Seven octaves near, down to a finest of ten metres; two and a half far off, where the mesh is a hundred metres coarse.)
+  const octaves = Math.min(7, Math.max(2.5, 7 - Math.log2(Math.max(out, 300) / 300)));
+  const rel = Math.max(0, base - (m.deck - 690));
+  return base + (12 + 0.05 * rel) * erodedFbmLod(x / 620 + 3.3, z / 620 - 1.1, octaves, seed + 77);
+}
+
+/**
+ * The country's shape before it is worn. Two parts: how high the land is lifted, a smooth thing, and
+ * ridged noise, which makes of it crests, arêtes and horns with hollows between, as mountains are.
+ * The lift is low over the valley floors, long and narrow over the long ridges, and high and broad
+ * under each mountain of the range; so the range's mountains stand about where the plan has them,
+ * and the summits are where the noise puts them.
+ */
+function countryShape(m: Mountain, floor: number, x: number, z: number): number {
+  const deck = m.deck, seed = m.terrain!.seed, s = (m.x * 7.31 + m.z * 3.17) % 97;
+  const fl = deck - 690;
+  // The floors, rolling a little over the miles.
+  let lift = 150 + 110 * fbmd(x / 2600 + s, z / 2600, 3, seed + 5);
+  // The long ridges, lower and fewer close to this mountain.
+  const out = Math.hypot(x - m.x, z - m.z), free = smooth((out - 420) / 700);
+  const wx = x / 2300 + 0.4 * fbmd(x / 3100, z / 3100 + s, 2, seed + 9), wz = z / 2300 + 0.4 * fbmd(x / 3100 - s, z / 3100, 2, seed + 10);
+  const run = smooth(1 - Math.abs(fbmd(wx, wz, 3, seed + 11) * 2.4)), swell = 0.6 + 0.8 * (0.5 + fbmd(x / 4800 + s, z / 4800, 2, seed + 12));
+  lift = softMax(lift, (300 + 330 * swell) * run * (0.45 + 0.55 * free), 120);
+  // Under the range, broad and high, its outline not a circle; and at the middle of each a horn, which the noise's crests run up
+  // into as arêtes, so that each mountain has its summit where the plan has it, as high as the plan has it.
+  let horn = 0;
+  for (let k = 0; k < m.range.length; k++) {
+    const q = m.range[k], d = Math.hypot(x - q.x, z - q.z), reach = q.r * 1.15;
+    if (d > reach * 2.6) continue;
+    const t = (d / reach) * (1 + 0.35 * fbmd(x / 700 + k * 1.7, z / 700, 2, seed + 31));
+    // (The noise's crests stand at about 1.1 times the lift, and its hollows at half: so the crests, not the mass, reach the height planned.)
+    lift = softMax(lift, ((q.height + 690) / 1.1) * Math.exp(-t * t), 150);
+    // (A horn is a pyramid of three or four faces, a little hollowed by the ice that cut them, with arêtes on its edges: not a cone,
+    // and not a needle either, its faces at forty-five degrees and more but not much more. Only the
+    // mountains that stand well over the cloud have one; the rest are what the noise makes of them.)
+    if (q.height < 180 || d > reach * 1.6) continue;
+    const faces = 3 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
+    const off = ((((Math.atan2(z - q.z, x - q.x) - turn) % sector) + sector) % sector) - sector / 2;
+    const th = (d * Math.cos(off)) / (reach * 0.95 * Math.cos(sector / 2));
+    if (th < 1) horn = Math.max(horn, 0.97 * Math.pow(1 - th, 1.1) * (0.85 + 0.15 * ridgedFbm(x / 380 + k, z / 380, 3, seed + 43)));
+  }
+  // The ridged noise, its coordinates warped so that its crests wander and branch.
+  const u = x / 1300 + 0.3 * fbmd(x / 1000, z / 1000, 3, seed + 21), v = z / 1300 + 0.3 * fbmd(x / 1000 + 7, z / 1000, 3, seed + 22);
+  const r = softMax(ridgedFbm(u, v, 6, seed + 23), horn, 0.12);
+  const land = fl + lift * (0.32 + 0.82 * r);
+  // And this mountain, its flanks going down into the country and joined to it: below its top, broken by the same noise as the
+  // country, so that its spurs have crests and its bays go deeper.
+  if (out >= 2600) return land;
+  const home = baseLand(m, floor, x, z);
+  return softMax(land, home + 170 * smooth((floor - home - 120) / 260) * (r - 0.4), 60);
+}
+
+/** How the country round about is worn: tried and tuned with the relief tool, as `WEAR` is. */
+export const COUNTRY_WEAR = {
+  cell: 32, half: 7200, cut: 110, fill: 45,
+  water: { drops: 1.0, life: 90, inertia: 0.15, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.012, gravity: 4, radius: 2, most: 4 },
+  frost: { passes: 2, repose: 1.9, rate: 0.4 },
+};
+/** The finer lattice about this mountain: made from the coarse one with its detail, and worn again at its own scale. */
+export const NEAR_WEAR = {
+  cell: 12, half: 2600, cut: 45, fill: 20,
+  water: { drops: 1.0, life: 70, inertia: 0.1, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.015, gravity: 4, radius: 2, most: 1.6 },
+  frost: { passes: 2, repose: 1.9, rate: 0.4 },
+};
+const NEARS = new WeakMap<Mountain, { sig: number[]; field: HeightField }>();
+function nearCountryOf(m: Mountain, floor: number): HeightField {
+  const had = NEARS.get(m);
+  if (had && had.sig[0] === m.deck && had.sig[1] === m.range.length && had.sig[2] === floor && had.sig[3] === m.peaks[0]?.height) return had.field;
+  const W = NEAR_WEAR, cell = W.cell, n = Math.ceil((2 * W.half) / cell) + 1;
+  const f = new HeightField(m.x - W.half, m.z - W.half, cell, n, n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = countryDetailed(m, floor, f.x0 + i * cell, f.z0 + j * cell);
+  const shaped = f.data.slice();
+  wearByWater(f, new Rng(`country-near/${m.terrain!.seed}`), W.water);
+  for (let k = 0; k < f.data.length; k++) f.data[k] = Math.max(shaped[k] - W.cut, Math.min(shaped[k] + W.fill, f.data[k]));
+  wearByFrost(f, W.frost.passes, W.frost.repose, W.frost.rate);
+  // (Blended back to the coarse land at the lattice's edge, over the last three hundred metres, so that no seam shows where it ends.)
+  const edge = Math.round(300 / cell);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const k = j * n + i, e = smooth(Math.min(i, j, n - 1 - i, n - 1 - j) / edge); f.data[k] = shaped[k] + (f.data[k] - shaped[k]) * e; }
+  NEARS.set(m, { sig: [m.deck, m.range.length, floor, m.peaks[0]?.height], field: f });
+  return f;
+}
+
+const COUNTRIES = new WeakMap<Mountain, { sig: number[]; field: HeightField }>();
+function countryOf(m: Mountain, floor: number): HeightField {
+  const had = COUNTRIES.get(m);
+  if (had && had.sig[0] === m.deck && had.sig[1] === m.range.length && had.sig[2] === floor && had.sig[3] === m.peaks[0]?.height) return had.field;
+  const W = COUNTRY_WEAR, cell = W.cell, n = Math.ceil((2 * W.half) / cell) + 1;
+  const f = new HeightField(m.x - W.half, m.z - W.half, cell, n, n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = countryShape(m, floor, f.x0 + i * cell, f.z0 + j * cell);
+  const shaped = f.data.slice();
+  wearByWater(f, new Rng(`country/${m.terrain!.seed}`), W.water);
+  for (let k = 0; k < f.data.length; k++) f.data[k] = Math.max(shaped[k] - W.cut, Math.min(shaped[k] + W.fill, f.data[k]));
+  wearByFrost(f, W.frost.passes, W.frost.repose, W.frost.rate);
+  // (Blended back to the shape unworn at the lattice's edge, beyond which the land is reckoned without it.)
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const k = j * n + i, e = smooth(Math.min(i, j, n - 1 - i, n - 1 - j) / 12); f.data[k] = shaped[k] + (f.data[k] - shaped[k]) * e; }
+  COUNTRIES.set(m, { sig: [m.deck, m.range.length, floor, m.peaks[0]?.height], field: f });
+  return f;
 }
 
 /** A curve through points (Catmull and Rom's), a point every stride and a bit, no two nearer than that. */
@@ -443,7 +612,7 @@ function levelLine(pts: [number, number][], height: (x: number, z: number) => nu
  * Lays out a mountain top round a house whose forecourt is `meadow` and whose door is at `doorX`
  * in the forecourt's north side. Fills in the site's `mountain`, `grounds`, `track` and `paths`.
  */
-export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng): void {
+export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
   const round = (v: number) => Math.round(v * 10) / 10, T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   const house = { x0: Math.min(...others.map((q) => q.x0)) - T, x1: Math.max(...others.map((q) => q.x1)) + T, z0: Math.min(...others.map((q) => q.z0)) - T, z1: meadow.z1 };
@@ -558,6 +727,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       m.spur.notch = { at: round(at), wide: round(q.range(7.5, 10.5)), deep: round(q.range(11, 17)) };
     }
   }
+  // (If the land is to be worn, it is worn now that its large shape is decided, so that every way and platform after is laid on the worn land.)
+  if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 2 };
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.
@@ -1015,7 +1186,7 @@ function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
   // from there, or further if the top is too high over it for a stair so short.)
   const rLast = Math.hypot(pts[steps][0] - m.x, pts[steps][1] - m.z), rT = Math.hypot(climb[joins][0] - m.x, climb[joins][1] - m.z);
   let ex = 0, ez = 0, out = NaN;
-  for (let len = IN; len <= 30 && rLast - len - rT > 6 && Number.isNaN(out); len++) {
+  for (let len = IN; len <= (m.terrain ? 44 : 30) && rLast - len - rT > 6 && Number.isNaN(out); len++) {
     [ex, ez] = at(aT, rLast - len);
     const y = surf(ex, ez);
     if (y - yP <= 0.5 * len && y - yP > -1) out = y;
@@ -1141,4 +1312,69 @@ function layScramble(site: Site, m: Mountain, F: number, rng: Rng): void {
   const areteLevels = line.slice(steepFrom + 1).map((p, k) => { const prev = line[steepFrom + k]; run += Math.hypot(p[0] - prev[0], p[1] - prev[1]); return [round(p[0]), round(p[1]), round(yFoot + ((c.y - yFoot) * run) / lenArete)] as [number, number, number]; });
   m.scramble = { line: [...approachLevels, ...areteLevels], branch, steep: steepFrom };
   (site.paths ??= []).push({ points: m.scramble.line.map(([x, z]) => [x, z] as [number, number]), to: 'scramble' });
+}
+
+/**
+ * The worn land of a mountain whose land is worn: the plain shape on a lattice, given detail and worn
+ * by water and frost. Made when first asked for, and made again if the shape it was made from has
+ * changed since (a summit lowered to fit the climb). The ground levelled for the house is left as it is.
+ */
+const FIELDS = new WeakMap<Mountain, { sig: number[]; field: HeightField }>();
+function fieldOf(m: Mountain, floor: number): HeightField {
+  // (What the plain shape was made from, compared number by number: this is asked for at every point of the land, and must be quick.)
+  const had = FIELDS.get(m), crest = m.spur.crest?.length ?? 0;
+  if (had) {
+    const s = had.sig;
+    let same = s[0] === floor && s[1] === crest && s[2] === m.spur.y0 && s[3] === m.spur.y1 && s.length === 4 + m.peaks.length;
+    for (let k = 0; same && k < m.peaks.length; k++) same = s[4 + k] === m.peaks[k].height;
+    if (same) return had.field;
+  }
+  const field = wornLand(m, floor);
+  FIELDS.set(m, { sig: [floor, crest, m.spur.y0, m.spur.y1, ...m.peaks.map((p) => p.height)], field });
+  return field;
+}
+
+/** How the land is worn; kept here, and open, so that the relief tool (`tools/terrain.ts`) can try others. */
+export const WEAR = {
+  /** Detail on the top and on the slopes below it, in metres, and the breadth of its broadest wave. */
+  topDetail: 4, slopeDetail: 16, detailScale: 150,
+  /** How much of the wear the walkable top and the ridge are spared, 0 to 1. */
+  spare: 0.85,
+  /** How deep the water may cut below the detailed land, and how high it may build, in metres. */
+  cut: 26, fill: 12,
+  water: { drops: 1.2, life: 60, inertia: 0.1, capacity: 0.6, erode: 0.12, deposit: 0.2, evaporate: 0.015, gravity: 4, radius: 4, most: 0.6 },
+  frost: { passes: 2, repose: 2.4, rate: 0.35 },
+};
+
+function wornLand(m: Mountain, floor: number): HeightField {
+  const t = m.terrain!, rng = new Rng(`terrain/${t.seed}`);
+  // Over the top and the ridge, and far enough out that the slopes have gone down into the cloud.
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let k = 0; k < N; k++) { const a = (k / N) * TAU, r = rimAt(m, a), x = m.x + Math.cos(a) * r, z = m.z + Math.sin(a) * r; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  for (const [x, z] of m.spur.crest ?? [m.spur.from, m.spur.to]) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+  const M = 150, cell = t.cell;
+  const f = new HeightField(Math.floor((x0 - M) / cell) * cell, Math.floor((z0 - M) / cell) * cell, cell, Math.ceil((x1 - x0 + 2 * M) / cell) + 2, Math.ceil((z1 - z0 + 2 * M) / cell) + 2);
+  const plainShape = new Float32Array(f.data.length), detailed = new Float32Array(f.data.length), keep = new Float32Array(f.data.length), pads = new Float32Array(f.data.length);
+  for (let j = 0; j < f.nz; j++) for (let i = 0; i < f.nx; i++) {
+    const x = f.x0 + i * cell, z = f.z0 + j * cell, k = j * f.nx + i;
+    const y = baseLand(m, floor, x, z), within = inside(m, x, z);
+    plainShape[k] = y;
+    // The house's ground is not to be touched at all; the walkable top and the ridge's crest are mostly spared, so the water
+    // notches their edges but does not cut back into them.
+    const pad = 1 - smooth((outside(m.level, x, z) - 4) / 14);
+    pads[k] = pad;
+    keep[k] = Math.max(pad, WEAR.spare * smooth((within + 1) / 5));
+    // Detail: a few metres on the top, more on the slopes below the rim and the ridge, where the rock is.
+    const below = smooth(-within / 22);
+    detailed[k] = y + (WEAR.topDetail + (WEAR.slopeDetail - WEAR.topDetail) * below) * landDetail(x, z, WEAR.detailScale, t.seed) * (1 - pad);
+  }
+  f.data.set(detailed);
+  wearByWater(f, rng.fork('water'), { ...WEAR.water, keep });
+  // (However long the water has been at it, it has not cut the mountain away: its depth is bounded, so the shape decided stays;
+  // and on the walkable top and the ridge's crest bounded by how far they are spared, so that a gully notches the edge but does not
+  // cut back into the top, where the carved rock would stand over it and the fences, laid by the land, would miss the drop.)
+  for (let k = 0; k < f.data.length; k++) { const free = 1 - keep[k]; f.data[k] = Math.max(detailed[k] - WEAR.cut * free, Math.min(detailed[k] + WEAR.fill * free, f.data[k])); }
+  wearByFrost(f, WEAR.frost.passes, WEAR.frost.repose, WEAR.frost.rate, keep);
+  for (let k = 0; k < f.data.length; k++) f.data[k] += (plainShape[k] - f.data[k]) * pads[k];
+  return f;
 }

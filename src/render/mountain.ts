@@ -1215,20 +1215,33 @@ export function buildMountain(b: MountainBuild): MountainResult {
     buildLandmark(sg.kind, sg.x, sg.y - 2, sg.z, Math.atan2(m.z - sg.z, m.x - sg.x), (material) => wild.mesh(material), rng.fork(`sight${i}`), [0.82 * tint[0], 0.78 * tint[1], 0.7 * tint[2]], 1.1 + far / 900);
   });
   // The needles: each a tower drawn as rock, with the mountain's own beds, joints and colour, rising out of the cloud. Made as a
-  // skin about its axis, ring upon ring, broken into buttresses and ledges; nobody goes near them, so they are not carved.
+  // skin about its axis, ring upon ring, broken into jointed faces, buttresses and fallen blocks; nobody goes near them, so they
+  // are not carved.
   {
     const softRock = wild.mesh('rock');
     (m.needles ?? []).forEach((nd, i) => {
       const q = rng.fork(`needle${i}`), base = deck - 40, top = deck + nd.height, tall = top - base, sA = q.range(0, 50), sB = q.range(0, 50);
-      const lean = [q.range(-0.06, 0.06), q.range(-0.06, 0.06)], AROUND = 40, UP = Math.max(24, Math.round(tall / 1.6));
+      const lean = [q.range(-0.06, 0.06), q.range(-0.06, 0.06)], AROUND = 48, UP = Math.max(24, Math.round(tall / 1.6));
+      // Its cross-section is a prism of five to seven faces, the joints the rock split along, turning a little as it rises. Where
+      // blocks have fallen from it, it steps in: at a few heights, not evenly spaced, each on one side only. (Not rings all round at
+      // every bed: that is a pagoda.)
+      const faces = 5 + (i % 3), sector = (Math.PI * 2) / faces;
+      const falls = Array.from({ length: q.int(2, 5) }, () => ({ h: q.range(0.15, 0.85) * tall, a: q.range(0, Math.PI * 2), deep: q.range(0.07, 0.17), wide: q.range(0.2, 0.75) }));
       const radius = (a: number, h: number) => {
         const t = h / tall;
-        // Broad at the foot, drawn in towards the top, which is a blunt broken head; buttresses up its height; ledges where a bed is hard.
-        const body = nd.r * (1.5 - 0.95 * Math.pow(t, 0.8)) * (1 - smooth((t - 0.9) / 0.1) * 0.75);
-        const buttress = 0.72 + 0.5 * fbm2(Math.cos(a) * 1.7 + sA, Math.sin(a) * 1.7 + h * 0.012, 3, 3);
-        const ledge = 1 + 0.1 * Math.sign(Math.sin(h * 0.9 + 3 * fbm2(h * 0.07, sB, 2, 5))) * rockKind.bedded;
-        const rough = 1 + (fbm2(Math.cos(a) * 6 + sB, Math.sin(a) * 6 + h * 0.2, 2, 9) - 0.5) * 0.3;
-        return body * buttress * ledge * rough;
+        const turn = sA + (fbm2(h * 0.012, sB, 2, 7) - 0.5);
+        const off = ((((a - turn) % sector) + sector) % sector) - sector / 2;
+        const prism = Math.cos(sector / 2) / Math.cos(off);
+        // Broad at the foot, drawn in towards the head; and the head broken into two or three points, some faces going higher than others.
+        const crown = 0.08 + 0.2 * fbm2(Math.cos(a) * 1.3 + sB, Math.sin(a) * 1.3, 2, 13);
+        const body = nd.r * (1.35 - 0.75 * Math.pow(t, 0.9)) * (0.25 + 0.75 * smooth((1 - t) / crown));
+        // Buttresses and gullies running up it, a little wandering.
+        const rib = 1 + (fbm2(Math.cos(a) * 3.2 + sA, Math.sin(a) * 3.2 + h * 0.01, 3, 3) - 0.5) * 0.36 + (fbm2(Math.cos(a) * 9 + sB, Math.sin(a) * 9 + h * 0.04, 2, 9) - 0.5) * 0.16;
+        let stepped = 1;
+        for (const f of falls) if (h > f.h) stepped -= f.deep * smooth((h - f.h) / 1.2) * smooth((Math.cos(a - f.a) - (1 - f.wide)) / 0.25);
+        // The beds, faint: a groove here and there, not a ledge all round.
+        const bed = 1 - 0.035 * rockKind.bedded * smooth((Math.sin(h * 1.7 + 4 * fbm2(h * 0.05, sB, 2, 5)) - 0.6) / 0.3) * fbm2(Math.cos(a) * 2 + h * 0.02, Math.sin(a) * 2, 2, 17);
+        return body * prism * rib * stepped * bed;
       };
       const at = (ia: number, ih: number): [number, number, number] => {
         const a = (ia / AROUND) * Math.PI * 2, h = (ih / UP) * tall, r = radius(a, h);

@@ -1,0 +1,258 @@
+import { Rng } from './rng';
+
+/**
+ * Land made as land is made: a lattice of heights, given its detail by fractal noise and then
+ * worn by water and frost. For places whose large shape is decided first (a mountain's top, its
+ * ridge, its summit) and whose surface should then look as if weather had been at it for an age.
+ *
+ * The noise is Inigo Quilez's (iquilezles.org: "fBM", and "value noise derivatives"): value noise
+ * whose slope is known exactly at every point, summed in octaves each twice as fine and half as
+ * strong as the last (a Hurst exponent of one, as terrain has), each turned against the last so no
+ * lattice lines up, and each damped by how steep the octaves above have already made the ground.
+ * That damping is what makes it read as eroded: on the steep the fine octaves are lost, so slopes
+ * run smooth into sharp ridges, and the small roughness is left on the flats and the crests.
+ *
+ * The wear is a simulation. Water: drops fall one at a time anywhere on the land and run downhill,
+ * picking up as much as their speed and water let them carry where the ground falls away, and
+ * putting it down where it levels out or rises, until they have dried up; tens of thousands of them
+ * cut gullies that join and branch, and leave fans where the gullies come out. Frost: wherever one
+ * point stands over its neighbour more steeply than broken rock can lie, some of it comes down.
+ */
+
+/** Heights on a square lattice, `cell` metres apart, from (`x0`, `z0`). */
+export class HeightField {
+  readonly data: Float32Array;
+  constructor(readonly x0: number, readonly z0: number, readonly cell: number, readonly nx: number, readonly nz: number) {
+    this.data = new Float32Array(nx * nz);
+  }
+  /** Whether a point lies within the lattice. */
+  holds(x: number, z: number): boolean {
+    const fx = (x - this.x0) / this.cell, fz = (z - this.z0) / this.cell;
+    return fx >= 0 && fz >= 0 && fx <= this.nx - 1 && fz <= this.nz - 1;
+  }
+  /** The height at a point, on a smooth curve through the sixteen lattice points about it (Catmull and Rom's): no creases at the lattice lines, for land seen from far off on a coarse lattice. */
+  smoothAt(x: number, z: number): number {
+    const fx = Math.min(this.nx - 2.0001, Math.max(1, (x - this.x0) / this.cell)), fz = Math.min(this.nz - 2.0001, Math.max(1, (z - this.z0) / this.cell));
+    const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, d = this.data, nx = this.nx;
+    const cr = (a: number, b: number, c: number, e: number, t: number) => b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - e + t * (3 * (b - c) + e - a)));
+    const row = (jj: number) => { const k = jj * nx + i; return cr(d[k - 1], d[k], d[k + 1], d[k + 2], tx); };
+    return cr(row(j - 1), row(j), row(j + 1), row(j + 2), tz);
+  }
+  /** The height at a point, blended between the four lattice points about it. */
+  at(x: number, z: number): number {
+    const fx = Math.min(this.nx - 1.0001, Math.max(0, (x - this.x0) / this.cell)), fz = Math.min(this.nz - 1.0001, Math.max(0, (z - this.z0) / this.cell));
+    const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, k = j * this.nx + i, d = this.data;
+    return d[k] * (1 - tx) * (1 - tz) + d[k + 1] * tx * (1 - tz) + d[k + this.nx] * (1 - tx) * tz + d[k + this.nx + 1] * tx * tz;
+  }
+}
+
+/** A number from 0 to 1 belonging to a lattice point. */
+function hash2(ix: number, iz: number, seed: number): number {
+  let h = Math.imul(ix, 374761393) ^ Math.imul(iz, 668265263) ^ Math.imul(seed, 2147483647);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * Value noise and its slope: from -1 to 1, with how fast it changes along x and along z. (The
+ * blend between lattice points is quintic, so the slope is smooth too.)
+ */
+export function noised(x: number, z: number, seed: number, out: Float64Array): void {
+  const ix = Math.floor(x), iz = Math.floor(z), wx = x - ix, wz = z - iz;
+  const ux = wx * wx * wx * (wx * (wx * 6 - 15) + 10), uz = wz * wz * wz * (wz * (wz * 6 - 15) + 10);
+  const dux = 30 * wx * wx * (wx * (wx - 2) + 1), duz = 30 * wz * wz * (wz * (wz - 2) + 1);
+  const a = hash2(ix, iz, seed), b = hash2(ix + 1, iz, seed), c = hash2(ix, iz + 1, seed), d = hash2(ix + 1, iz + 1, seed);
+  const k1 = b - a, k2 = c - a, k4 = a - b - c + d;
+  out[0] = -1 + 2 * (a + k1 * ux + k2 * uz + k4 * ux * uz);
+  out[1] = 2 * dux * (k1 + k4 * uz);
+  out[2] = 2 * duz * (k2 + k4 * ux);
+}
+
+const N3 = new Float64Array(3);
+/**
+ * Quilez's eroded fBM, at a point given in noise units: about -1 to 1. Each octave is twice as fine
+ * and half as strong as the last, turned by a fixed rotation, and divided by one plus the square of
+ * the slope the octaves before it have built up.
+ */
+export function erodedFbm(x: number, z: number, octaves: number, seed: number): number {
+  let a = 0, b = 1, dx = 0, dz = 0, px = x, pz = z;
+  for (let i = 0; i < octaves; i++) {
+    noised(px, pz, seed + i * 31, N3);
+    dx += N3[1]; dz += N3[2];
+    a += (b * N3[0]) / (1 + dx * dx + dz * dz);
+    b *= 0.5;
+    const qx = 1.6 * px - 1.2 * pz, qz = 1.2 * px + 1.6 * pz;
+    px = qx; pz = qz;
+  }
+  return a;
+}
+
+/**
+ * Quilez's eroded fBM with a number of octaves that need not be whole: the last is weighed by the
+ * fraction. For land that has less detail the further it lies from whoever sees it, without a seam
+ * where one octave fewer begins.
+ */
+export function erodedFbmLod(x: number, z: number, octaves: number, seed: number): number {
+  let a = 0, b = 1, dx = 0, dz = 0, px = x, pz = z;
+  for (let i = 0; i < Math.ceil(octaves); i++) {
+    noised(px, pz, seed + i * 31, N3);
+    const w = Math.min(1, octaves - i);
+    dx += N3[1] * w; dz += N3[2] * w;
+    a += (w * b * N3[0]) / (1 + dx * dx + dz * dz);
+    b *= 0.5;
+    const qx = 1.6 * px - 1.2 * pz, qz = 1.2 * px + 1.6 * pz;
+    px = qx; pz = qz;
+  }
+  return a;
+}
+
+/**
+ * Ridged fBM (Musgrave's ridged multifractal): each octave folded about its middle so that its
+ * crests are sharp, and weighed by the octave above, so that the finer crests run along the coarser
+ * ones and die out in the hollows between. From 0 to about 1: high on the crests and the horns.
+ */
+export function ridgedFbm(x: number, z: number, octaves: number, seed: number): number {
+  let sum = 0, norm = 0, amp = 0.5, w = 1, px = x, pz = z;
+  for (let i = 0; i < octaves; i++) {
+    noised(px, pz, seed + i * 13, N3);
+    let r = 1 - Math.abs(N3[0]);
+    r *= r * w;
+    w = Math.min(1, Math.max(0, r * 2));
+    sum += r * amp; norm += amp;
+    amp *= 0.5;
+    const qx = 1.6 * px - 1.2 * pz, qz = 1.2 * px + 1.6 * pz;
+    px = qx; pz = qz;
+  }
+  return sum / norm;
+}
+
+/** Plain fBM of the same noise, for warping with: about -1 to 1. */
+export function fbmd(x: number, z: number, octaves: number, seed: number): number {
+  let a = 0, b = 0.5, px = x, pz = z;
+  for (let i = 0; i < octaves; i++) {
+    noised(px, pz, seed + i * 17, N3);
+    a += b * N3[0];
+    b *= 0.5;
+    const qx = 1.6 * px - 1.2 * pz, qz = 1.2 * px + 1.6 * pz;
+    px = qx; pz = qz;
+  }
+  return a;
+}
+
+/**
+ * Detail for a piece of land, in metres, at a point in metres: the eroded fBM read through a warp
+ * (its coordinates pushed about by plain fBM of their own, so its ridges wander and branch), at
+ * `scale` metres to its broadest octave.
+ */
+export function landDetail(x: number, z: number, scale: number, seed: number): number {
+  const u = x / scale, v = z / scale;
+  const wu = u + 0.55 * fbmd(u * 0.7 + 3.1, v * 0.7 - 1.7, 3, seed + 1000), wv = v + 0.55 * fbmd(u * 0.7 - 5.2, v * 0.7 + 2.9, 3, seed + 2000);
+  return erodedFbm(wu, wv, 6, seed);
+}
+
+export interface WaterWear {
+  /** How many drops fall, per lattice point. */
+  drops: number;
+  /** How many steps a drop takes at most before it has dried up. */
+  life: number;
+  /** How far a drop keeps its way when the ground turns it, 0 to 1. */
+  inertia: number;
+  /** How much a drop can carry, for its speed, its water and the fall of the ground. */
+  capacity: number;
+  /** How much of what it could carry and does not, it takes up at a step; and how much of what it carries over that, it puts down. */
+  erode: number;
+  deposit: number;
+  /** How much of its water it loses at a step. */
+  evaporate: number;
+  /** How hard the fall of the ground speeds it. */
+  gravity: number;
+  /** How far about its place a drop wears the ground, in lattice points. */
+  radius: number;
+  /** The most a drop may take up at one step, in metres: on a precipice the ground falls metres in a step, and a drop would otherwise take it all. */
+  most: number;
+  /** Where, if anywhere, the ground may not be worn or built on: 0 to 1 at each lattice point, 1 for untouched. */
+  keep?: Float32Array;
+}
+
+/** Wears a heightfield with water, drop by drop (as Hans Beyer described it, and as many have made it since). */
+export function wearByWater(f: HeightField, rng: Rng, o: WaterWear): void {
+  const { nx, nz, data: h, cell } = f;
+  // The brush a drop wears with: the points within its reach, the nearer the more.
+  const brushI: number[] = [], brushJ: number[] = [], brushW: number[] = [];
+  let sum = 0;
+  for (let j = -o.radius; j <= o.radius; j++) for (let i = -o.radius; i <= o.radius; i++) {
+    const d = Math.hypot(i, j);
+    if (d > o.radius) continue;
+    brushI.push(i); brushJ.push(j); brushW.push(o.radius - d); sum += o.radius - d;
+  }
+  for (let k = 0; k < brushW.length; k++) brushW[k] /= sum;
+  const keep = o.keep;
+  // (Heights and slopes are taken in metres per metre: the lattice's size does not change how the water behaves.)
+  const sample = (x: number, z: number, out: Float64Array) => {
+    const i = Math.floor(x), j = Math.floor(z), tx = x - i, tz = z - j, k = j * nx + i;
+    const a = h[k], b = h[k + 1], c = h[k + nx], d = h[k + nx + 1];
+    out[0] = a * (1 - tx) * (1 - tz) + b * tx * (1 - tz) + c * (1 - tx) * tz + d * tx * tz;
+    out[1] = ((b - a) * (1 - tz) + (d - c) * tz) / cell;
+    out[2] = ((c - a) * (1 - tx) + (d - b) * tx) / cell;
+  };
+  const here = new Float64Array(3), there = new Float64Array(3);
+  const count = Math.round(nx * nz * o.drops);
+  for (let n = 0; n < count; n++) {
+    let x = rng.range(1, nx - 2), z = rng.range(1, nz - 2), dx = 0, dz = 0, speed = 1, water = 1, carried = 0;
+    for (let life = 0; life < o.life; life++) {
+      const i = Math.floor(x), j = Math.floor(z), k = j * nx + i, tx = x - i, tz = z - j;
+      sample(x, z, here);
+      // It goes downhill, keeping some of the way it was going.
+      dx = dx * o.inertia - here[1] * (1 - o.inertia);
+      dz = dz * o.inertia - here[2] * (1 - o.inertia);
+      const len = Math.hypot(dx, dz);
+      if (len < 1e-9) break;
+      dx /= len; dz /= len;
+      x += dx; z += dz;
+      if (x < 1 || z < 1 || x >= nx - 2 || z >= nz - 2) break;
+      sample(x, z, there);
+      // (How far the ground fell or rose over the step, in metres.)
+      const fall = there[0] - here[0];
+      const can = Math.max(-fall * speed * water * o.capacity, 0.01);
+      const kept = keep ? keep[k] : 0;
+      if (carried > can || fall > 0) {
+        // It puts down: all it can into a hollow it has run up into, or what it carries over what it can.
+        const put = (fall > 0 ? Math.min(fall, carried) : (carried - can) * o.deposit) * (1 - kept);
+        carried -= put;
+        h[k] += put * (1 - tx) * (1 - tz);
+        h[k + 1] += put * tx * (1 - tz);
+        h[k + nx] += put * (1 - tx) * tz;
+        h[k + nx + 1] += put * tx * tz;
+      } else {
+        // It takes up: never more than the ground fell, or it would dig a pit.
+        const take = Math.min((can - carried) * o.erode, -fall, o.most) * (1 - kept);
+        for (let b = 0; b < brushW.length; b++) {
+          const ii = i + brushI[b], jj = j + brushJ[b];
+          if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+          h[jj * nx + ii] -= take * brushW[b];
+        }
+        carried += take;
+      }
+      speed = Math.min(6, Math.sqrt(Math.max(0, speed * speed - fall * o.gravity)));
+      water *= 1 - o.evaporate;
+    }
+  }
+}
+
+/** Wears a heightfield with frost: wherever ground stands over its neighbour more steeply than `repose`, a share `rate` of the excess comes down. */
+export function wearByFrost(f: HeightField, passes: number, repose: number, rate: number, keep?: Float32Array): void {
+  const { nx, nz, data: h, cell } = f;
+  const steps = [[1, 0, 1], [0, 1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2]];
+  for (let pass = 0; pass < passes; pass++) {
+    for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
+      const k = j * nx + i;
+      for (const [di, dj, dist] of steps) {
+        const n = (j + dj) * nx + i + di, most = repose * dist * cell, diff = h[k] - h[n];
+        if (Math.abs(diff) <= most) continue;
+        const from = diff > 0 ? k : n, to = diff > 0 ? n : k;
+        const move = (Math.abs(diff) - most) * 0.5 * rate * (1 - (keep ? Math.max(keep[from], keep[to]) : 0));
+        h[from] -= move; h[to] += move;
+      }
+    }
+  }
+}
