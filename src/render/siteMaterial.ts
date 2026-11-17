@@ -237,7 +237,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // the tufts thin, the turf takes on what standing grass looks like from a distance: its colour, which is paler and yellower than
   // the mat under it, and its unevenness, drifts some metres across. It costs nothing, and it has no farthest distance.
   const swardFar: N = smoothstep((groundUniforms.uGrassRange as N).mul(0.55), (groundUniforms.uGrassRange as N).mul(2.2), far).toVar();
-  const sward = vertexColor().rgb.mul(vec3(0.21, 0.3, 0.07)).mul(1.45).mul(mix(0.78, 1.22, mid)).mul(mix(0.86, 1.12, macro));
+  const sward = vertexColor().rgb.mul(vec3(0.225, 0.3, 0.066)).mul(1.68).mul(mix(0.9, 1.1, mid)).mul(mix(0.86, 1.12, macro));
   turfed = mix(turfed, sward, swardFar.mul(0.85)).toVar();
   // And moss, low and dark, where it is damp or shaded.
   const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);

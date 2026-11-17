@@ -618,7 +618,9 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       if (far) {
         // One for four: broader, a little taller, and gone at last where even that is too small to see.
         p.assign(vec3(at.x.add(p.x.sub(at.x).mul(1.9)), at.y.add(p.y.sub(at.y).mul(1.2)), at.z.add(p.z.sub(at.z).mul(1.9))));
-        p.assign(mix(p, at.xyz, smoothstep(uRange.mul(FAR_GRASS * 0.75), uRange.mul(FAR_GRASS), d)));
+        // (It sinks into the ground over the whole of its reach, not over the last of it, and each tuft at its own pace: so the far edge
+        // of the grass is not a step down onto the ground but grass getting shorter and thinner until none is left.)
+        p.assign(mix(p, at.xyz, smoothstep(uRange.mul(FAR_GRASS * 0.3), uRange.mul(FAR_GRASS), d.add(own.sub(0.5).mul(uRange).mul(0.9))).pow(1.5)));
       } else if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d.add(own.sub(0.5).mul(uRange).mul(0.15)))));
       return p;
     })();
