@@ -11,7 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
 import { Atmosphere } from '../render/post';
-import { edgeAt, insideOf } from '../core/valley';
+import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { farUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
@@ -218,6 +218,7 @@ async function start(): Promise<void> {
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
   // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
   if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
+  if (site) rockUniforms.uRockFacet.value = ROCK[site.setting.stone].sharp ** 2;
   // Sound starts with the first click or key, which is the earliest a browser allows.
   const sound = new Sound();
   const muteButton = document.getElementById('mute') as HTMLButtonElement;
@@ -353,6 +354,7 @@ async function start(): Promise<void> {
     mirror: Math.round(num('mirror', quality.mirror)),
     zenith: SKY.zenith, horizon: SKY.horizon,
     falls: desc.falls,
+    smokes: desc.smokes,
     // Banks and trees with the light behind them; and foam, which is white, in the light there is.
     land: SKY.ground.map((v) => v * 0.45),
     foam: [0, 1, 2].map((c) => 0.6 * SKY.horizon[c] + 0.12 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
@@ -420,7 +422,8 @@ async function start(): Promise<void> {
   const glowLights: { pos: [number, number, number]; intensity: [number, number, number] }[] = [];
   {
     const cap = new SphereGeometry(1, 8, 6);
-    const lit = new MeshBasicMaterial({ color: new Color(0.6, 2.6, 1.9) });
+    // (No brighter than this: brighter, and in the dark, where the eye is wide open, they burn out to white and are not seen to be green.)
+    const lit = new MeshBasicMaterial({ color: new Color(0.1, 0.85, 0.5) });
     const spread = new Rng(`${seed}/glow`);
     for (const g of desc.glows ?? []) {
       const dir = g.position.clone().sub(g.from).normalize();
@@ -464,7 +467,7 @@ async function start(): Promise<void> {
   const under = new Mesh(new PlaneGeometry(400, 400), new MeshBasicMaterial({ color: 0x050505, side: DoubleSide }));
   under.rotation.x = -Math.PI / 2;
   // (Below the lowest floor there is, which in a cave may be some way down.)
-  under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5));
+  under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5), ...(desc.lowest !== undefined ? [desc.lowest - 1.5] : []));
   // (Round an island it is below the sea bed, out of sight under deep water.)
   if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
   scene.add(under);
@@ -511,7 +514,7 @@ async function start(): Promise<void> {
   scene.environmentIntensity = 0.5;
 
   // ------------------------------------------------------------------ torches
-  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1));
+  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire));
   for (const t of torches) scene.add(t.group);
   // Four real lights serve however many torches there are; see TorchLights.
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);
@@ -559,6 +562,7 @@ async function start(): Promise<void> {
     u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1), 320, floor);
     // Mist: a few metres deep on the valley floor, from a veil to a fog.
     u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
+    u.uMistLow.value = desc.groundLow !== undefined ? desc.groundLow - 0.5 : -1e6;
     // And in the country beyond the valley, on its own higher ground, from some way out.
     u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
     // The haze is alight towards the sun only while the sun is up.
@@ -602,6 +606,8 @@ async function start(): Promise<void> {
     u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
     applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
   }
+  if (desc.underDeep) { atmosphere.uniforms.uUnder2Min.value.copy(desc.underDeep.min); atmosphere.uniforms.uUnder2Max.value.copy(desc.underDeep.max); }
+  else { atmosphere.uniforms.uUnder2Min.value.set(1, 1, 1); atmosphere.uniforms.uUnder2Max.value.set(0, 0, 0); }
   if (desc.unders?.length) {
     // One box about everything that is under the hill out of doors.
     const lowest = atmosphere.uniforms.uUnderMin.value.set(Infinity, Infinity, Infinity), highest = atmosphere.uniforms.uUnderMax.value.set(-Infinity, -Infinity, -Infinity);
@@ -1142,6 +1148,19 @@ async function start(): Promise<void> {
     const v = site?.valley;
     if (!v) return -1;
     if ((site.grottoes ?? []).some((q) => Math.abs(z - q.z) < (q.hall ? q.hall.width / 2 + 12 : q.r * 1.25 + 4) && (q.side === 'w' ? edgeAt(v, 'w', q.z) - x : x - edgeAt(v, 'e', q.z)) < (q.hall ? q.hall.length + 30 : q.r + 6))) return -1;
+    // (Nor has whoever is in the way through the hill.)
+    const bw = site.backWay;
+    if (bw && v.ridge && Math.abs(z - bw.z) < 4 && x > Math.min(v.ridge.x0, site.places[bw.place].x0) - 1 && x < Math.max(v.ridge.x1, site.places[bw.place].x1) + 1) return -1;
+    // (Nor whoever is in the cavern under the arm, or in the passage up from it to the cave in the arm's wall, which runs behind the valley's side.)
+    const dp = bw?.deep, cave = site.grottoes?.[0];
+    if (dp && Math.hypot((x - dp.x) / (dp.rx + 2), (z - dp.z) / (dp.rz + 2)) < 1) return -1;
+    if (dp?.join && cave) {
+      const line = joinLine(v, cave, dp);
+      for (let i = 0; i + 1 < line.length; i++) {
+        const [ax, az] = line[i], bx = line[i + 1][0] - ax, bz = line[i + 1][1] - az, f = Math.min(1, Math.max(0, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz)));
+        if (Math.hypot(x - ax - bx * f, z - az - bz * f) < 3.5) return -1;
+      }
+    }
     return Math.max(-insideOf(v, x, z), z - v.mouth - 8.5, v.z0 - 2.5 - z);
   };
   (window as any).__dbg.walk = (points: [number, number][], reach = 0.35) => {

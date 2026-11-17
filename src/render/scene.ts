@@ -8,6 +8,8 @@ export interface TorchSpec {
   position: Vector3;
   /** Unit vector from the wall towards the room. */
   out: Vector3;
+  /** If given, this is no torch on a wall but an open fire on the ground at `position`, its flame this many times a torch's. */
+  fire?: number;
 }
 
 /** A door leaf to hang: where its hinge is, how it swings, and what it blocks while shut. */
@@ -126,6 +128,14 @@ export interface SceneDescription {
   falls?: { x: number; y: number; z: number; height: number; width: number }[];
   /** Boxes of space that are underground though outside the house: no mist lies in them and no daylight reaches them. */
   unders?: { min: Vector3; max: Vector3 }[];
+  /** A box about the cavern under the hill and the passage to it: no sky and no mist in it, as in `unders`, but kept apart from them so that the two are not made one box with open air between. */
+  underDeep?: { min: Vector3; max: Vector3 };
+  /** Where smoke rises out of doors, from what height, and how high it is drawn. */
+  smokes?: { x: number; y: number; z: number; height: number }[];
+  /** The lowest open ground of the valley: mist lies no lower than a little under this. */
+  groundLow?: number;
+  /** The lowest floor there is anywhere, if it is lower than the places' own floors and the halls under the hill: nobody has fallen out of the world who is above it. */
+  lowest?: number;
   /** What stands on the far hills, and where: for checks and pictures. */
   landmarks?: { kind: string; x: number; y: number; z: number }[];
   /** Shafts of daylight coming down into a hall under the hill: where each begins, which way it goes, how far, and how broad. The air in them is lit. */

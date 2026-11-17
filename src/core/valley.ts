@@ -145,3 +145,45 @@ export function armsOf(v: Valley): { side: 'w' | 'e'; head: number; middle: (z: 
   }
   return out;
 }
+
+/** How much the floor of an arm of the valley has risen, at `z`, above the ground before the house front (which is at `front`). */
+export const armRise = (z: number, front: number): number => 4.5 * smooth((front - 3.35 - z) / 45);
+
+/**
+ * Where a hall under the hill has its door onward, if it is given one: `u` metres along the hall
+ * from its near end, in the side wall on the side of `s` (greater z if 1), cut through to `end`
+ * metres from the hall's middle line. `x` is where that is in the world. In a plain hall it is a
+ * doorway in the side wall, between two pillars near the middle of its length; in a great one it
+ * is in the far wall of the room over the upper bridge, which was made for it.
+ */
+export function hallOnward(v: Valley, q: { side: 'w' | 'e'; z: number; hall?: { length: number; width: number; drop: number; great?: { chasm: { at: number; width: number } } } }, s: -1 | 1): { u: number; x: number; end: number } {
+  const h = q.hall!, inw = q.side === 'w' ? 1 : -1, hall0 = 3.9 + h.drop / 0.5 + 1.6;
+  const u = h.great ? h.great.chasm.at + h.great.chasm.width / 2 : 3.4 + 4.4 * Math.max(0, Math.round((0.45 * h.length - 5.6) / 4.4)) + 2.2;
+  return { u, x: edgeAt(v, q.side, q.z) + inw * (7 - hall0 - u), end: h.width / 2 + (h.great ? 9.6 : 1.9) };
+}
+
+/**
+ * The line of the passage that joins a cave in an arm's wall to the cavern: from inside the
+ * cave's chamber out through its side, along the foot of the wall three strides behind it (so that
+ * the crag stands over it while it is still shallow), and in to the cavern's rim. From a hall it
+ * is simpler: out of the hall's door onward and straight on, with one slight turn, to the cavern.
+ */
+export function joinLine(v: Valley, cave: { side: 'w' | 'e'; z: number; r: number; hall?: { length: number; width: number; drop: number; great?: { chasm: { at: number; width: number } } } }, cavern: { x: number; z: number; rx: number; rz: number; join?: { toward: -1 | 1; run: number } }): [number, number][] {
+  const inw = cave.side === 'w' ? 1 : -1, s = cavern.join?.toward ?? 1, run = cavern.join?.run ?? 0;
+  const line: [number, number][] = [];
+  if (cave.hall) {
+    const on = hallOnward(v, cave, s), z0 = cave.z + s * (on.end - 0.6);
+    line.push([on.x, z0], [on.x - inw * 1.3, z0 + s * run * 0.5], [on.x, z0 + s * run]);
+  } else {
+    line.push([edgeAt(v, cave.side, cave.z) - inw * (cave.r - 0.1), cave.z + s * 1.2]);
+    for (let d = 1.2 * cave.r + 1, last = 1.2 * cave.r + run; ; d += 3) {
+      const at = Math.min(d, last), z = cave.z + s * at;
+      line.push([edgeAt(v, cave.side, z) - inw * 3.4, z]);
+      if (at === last) break;
+    }
+  }
+  // (It comes into the cavern at the part of its rim that faces the way it comes.)
+  const [px, pz] = line[line.length - 1], ux = (px - cavern.x) / cavern.rx, uz = (pz - cavern.z) / cavern.rz, u = Math.hypot(ux, uz) || 1;
+  line.push([cavern.x + (ux / u) * (cavern.rx - 1.2), cavern.z + (uz / u) * (cavern.rz - 1.2)]);
+  return line;
+}

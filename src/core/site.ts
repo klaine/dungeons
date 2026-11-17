@@ -160,6 +160,22 @@ export interface Feature {
  * ledge that rises along the wall from the valley floor, beginning beyond one end of it. From
  * the top the whole valley can be seen, and something has been left at its far end.
  */
+/**
+ * A camp of charcoal burners: a clearing `r` metres across the half of it, off the track, with a footpath to it.
+ * In it stand clamps (round stacks of wood covered with earth and turf, in which the wood is charred): one
+ * `burning`, which smokes; one `building`, the wood stacked on end and not yet covered; and one `spent`, opened
+ * and raked out, a ring of earth with charcoal lying in it. The burners' `hut` is a cone of poles covered with
+ * turf, its door looking `facing` (radians, 0 towards greater x); they must watch a clamp night and day.
+ * `stacks` are cordwood, `turn` being the way each runs. `props` are the smaller things of the trade.
+ */
+export interface Camp {
+  x: number; z: number; r: number;
+  clamps: { x: number; z: number; r: number; state: 'burning' | 'building' | 'spent' }[];
+  hut: { x: number; z: number; r: number; facing: number };
+  stacks: { x: number; z: number; turn: number; length: number }[];
+  props: { kind: 'block' | 'barrel' | 'sacks' | 'sledge' | 'hearth'; x: number; z: number; turn: number }[];
+}
+
 export interface Terrace {
   /** Which side wall it stands against: `w` is the side of lesser x. */
   side: 'w' | 'e';
@@ -176,6 +192,8 @@ export interface Terrace {
   way: 'ledge' | 'steps';
   /** Whether the lookout at its far end is a shrine, which pilgrims climb to, with wayside crosses up the way to it; otherwise there is a cairn. */
   shrine?: boolean;
+  /** Whether this is the promontory a village's keep stands on; then it has no cairn or shrine. */
+  keep?: boolean;
 }
 
 /**
@@ -275,6 +293,8 @@ export interface Building {
    * axle runs through the back wall, square to it.
    */
   wheel?: { x: number; z: number; y: number; r: number };
+  /** Of a timber house: burnt out. Its roof and glass are gone, its timbers charred and its walls smoke-blackened; its stone chimney stands. */
+  burnt?: boolean;
   portico?: boolean;
   /**
    * For a building set into rising ground: how much higher the ground stands at its back than
@@ -350,12 +370,6 @@ export interface Valley {
    * that side as an arm, which closes at its head where the side comes back to the ridge.
    */
   ridge?: { x0: number; x1: number; z: number };
-  /**
-   * A bay in one side, below a village's keep: centred at `z`, `half` along the valley either way,
-   * and reaching `depth` out beyond `mouth`, the line the side ran along before. Its floor rises
-   * `rise` over the first two-fifths of it, as a ramp, and is level beyond, a shelf for the keep.
-   */
-  bay?: { side: 'w' | 'e'; z: number; half: number; depth: number; rise: number; mouth: number };
 }
 
 /**
@@ -483,7 +497,9 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
+  /** A camp of charcoal burners in the valley's woods: see `Camp`. */
+  camp?: Camp;
   /** Running water in the valley, if there is any. */
   streams?: Stream[];
   /** Ground in the valley that stands above its floor and can be climbed to. */
@@ -502,8 +518,9 @@ export interface Site {
   settlement?: 'village' | 'hamlet' | 'manor';
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
-   * the shelf of a bay in the valley's side (see `Valley.bay`), up a ramp from the village. The
-   * tower is in `towers`, and can be gone into and climbed. `x` and `z` are the middle of the castle.
+   * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,
+   * sheer to the valley, reached by its ledge. The tower is in `towers`, and can be gone into and
+   * climbed. `x` and `z` are the middle of the castle, whose gate faces the end the ledge comes up at.
    */
   keep?: { x: number; z: number; kind: 'tower' | 'castle' };
   /**
@@ -514,6 +531,29 @@ export interface Site {
    * builds it puts it on the highest ground at that bearing in that range.
    */
   landmarks?: { kind: 'castle' | 'tower' | 'ruin' | 'monument'; angle: number; range: 'near' | 'far' }[];
+  /**
+   * A way through the hill: a tunnel from one of the house's cave chambers (`place`) straight
+   * out through the ridge to a cave mouth in the ridge's side, in the arm of the valley on that
+   * `side`, at `z`. It leaves the chamber through its wall on that side. It is not one of
+   * `ways`: it joins a place to the open valley, and no door hangs in it.
+   */
+  backWay?: {
+    place: number; side: 'w' | 'e'; z: number;
+    /**
+     * A way down from the tunnel: a branch that leaves it `from` metres short of the ridge's side
+     * (measured from that side into the ridge), runs `leg` metres along the ridge (towards lesser z
+     * if `toward` is -1), turns out under the arm, and comes down into a cavern whose middle is at
+     * `x`, `z`, `rx` and `rz` across the halves of it, `height` high, its floor `drop` metres
+     * below the tunnel's where the branch leaves it.
+     *
+     * `join`, if present, is a second way into the cavern: from the back of the cave in the wall
+     * of the same arm (the first of `grottoes`), a passage that follows the foot of that wall
+     * under the rock for `run` metres (towards lesser z if `toward` is -1), going down all the
+     * way, and then turns in under the arm to the cavern's outer rim. So the cave in the arm, the
+     * cavern and the house are one system. Its line is `joinLine` in `valley.ts`.
+     */
+    deep?: { from: number; leg: number; toward: -1 | 1; x: number; z: number; rx: number; rz: number; height: number; drop: number; join?: { toward: -1 | 1; run: number } };
+  };
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */

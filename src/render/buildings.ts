@@ -142,7 +142,25 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
  * with either a framed gable to the street or its eaves, and then dormers; a chimney of stone
  * comes through it. Windows have shutters, and on the street side boxes of flowers.
  */
-function timberHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
+function timberHouse(b: Building, base: number, given: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
+  // A house that was burnt is built as any other, through a mesh that chars what it is given: timber nearly black, plaster sooted
+  // in streaks, stone darkened; and that throws away its glass, its flowers and its tiles, which did not survive.
+  const burnt = !!b.burnt, waste = new MeshBuilder(), charred = new Map<string, MeshBuilder>();
+  const mesh = !burnt ? given : (material: string): MeshBuilder => {
+    if (material === 'glass' || material === 'leaf' || material === 'tile') return waste;
+    let m = charred.get(material);
+    if (!m) {
+      const real = given(material), k = material === 'wood' ? 0.28 : material === 'plaster' ? 0.42 : material === 'stone' ? 0.62 : 0.8;
+      m = Object.create(real) as MeshBuilder;
+      m.addVertex = (px: number, py: number, pz: number, nx: number, ny: number, nz: number, u: number, v: number, r = 1, g = 1, bl = 1, ...rest: number[]) => {
+        // (Soot rises: the upper part of a wall is blacker than its foot.)
+        const up = Math.min(1, Math.max(0, (py - base) / 4)), f = k * (1 - 0.35 * up) * (0.85 + 0.3 * Math.abs(Math.sin(px * 3.1 + pz * 2.3)));
+        return real.addVertex(px, py, pz, nx, ny, nz, u, v, r * f, g * f, bl * f, ...rest);
+      };
+      charred.set(material, m);
+    }
+    return m;
+  };
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, slope } = k;
   const W = b.w, D = b.d, jetty = b.jetty ?? 0.35, T = 0.3, PLINTH = 0.3, H0 = b.heights[0];
   // How far behind the face of the posts each layer of a framed wall stands (see the storeys of framing).
@@ -269,7 +287,9 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
     return mid;
   };
   const upper = k.walls(front);
-  if (b.gable) {
+  if (burnt) {
+    // (No roof: a burnt house is open to the sky, and its gables fell with the roof.)
+  } else if (b.gable) {
     const rise = (W / 2 + eave) * pitch, drop = eave * pitch;
     gableWall(upper[0], top, 0);
     gableWall(upper[2], top, 0);
@@ -330,6 +350,8 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
     for (let storey = 1; storey <= b.storeys; storey++) {
       const ceiling = storey === b.storeys, y = floorOf(storey), fr = frontOf(Math.min(storey, b.storeys - 1));
       const all: Rect = { u0: -W / 2 + 0.25, u1: W / 2 - 0.25, v0: fr + 0.2, v1: D - 0.25 }, under = ceiling ? y : y - 0.13;
+      // (A burnt house has lost its ceiling with its roof.)
+      if (ceiling && burnt) continue;
       for (const r of ceiling ? [all] : without(all, well)) box('wood', r.u0, r.u1, under, ceiling ? y + 0.1 : y + 0.012, r.v0, r.v1, boards, true);
       const below = storey - 1, t = below === 0 ? G : T, deep = ceiling ? 0.15 : 0.2, a = frontOf(below) + t - 0.02, c = D - t + 0.02;
       for (let u = -W / 2 + 0.2; u < W / 2 - 0.1; u += 0.52) {
@@ -446,8 +468,20 @@ function timberHouse(b: Building, base: number, mesh: (material: string) => Mesh
       for (const h of [0.15, 0.65]) span('metal', st.at(G + 0.1), st.at(G + 0.7), y + h, y + h + 0.05, st.v1 + 0.13, st.v1 + 0.73, iron);
     }
   }
+  // In a burnt house, what fell when the roof burnt lies on the floor of each storey: charred beams, at angles, one end propped on another.
+  if (burnt) {
+    const fall = rng.fork('fallen');
+    for (let storey = 0; storey < b.storeys; storey++) {
+      const y = storey === 0 ? PLINTH + 0.18 : floorOf(storey), fr = frontOf(storey) + 0.6;
+      for (let n = 0; n < 3; n++) {
+        const u0 = fall.range(-W / 2 + 0.8, W / 2 - 0.8), v0 = fall.range(fr + 0.4, D - 1), a = fall.range(0, Math.PI), len = fall.range(1.8, 3.2);
+        const u1 = Math.max(-W / 2 + 0.5, Math.min(W / 2 - 0.5, u0 + Math.cos(a) * len)), v1 = Math.max(fr, Math.min(D - 0.6, v0 + Math.sin(a) * len));
+        stick(at(u0, y + 0.1, v0), at(u1, y + 0.1 + fall.range(0, 0.7), v1), 0.16, 0.18, OAK);
+      }
+    }
+  }
   // The first house of a row is the inn, and hangs out its sign.
-  if (first) {
+  if (first && !burnt) {
     const y = floorOf(1) + 1.75, u = doorAt - W / 2 + (doorAt > W / 2 ? -0.9 : 0.9), v = frontOf(1);
     box('metal', u - 0.025, u + 0.025, y, y + 0.05, v - 1.05, v + 0.02, [0.05, 0.05, 0.055]);
     stick(at(u, y - 0.45, v + 0.02), at(u, y, v - 0.6), 0.03, 0.03, [0.05, 0.05, 0.055], 'metal');
