@@ -414,7 +414,10 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       // Instead blocks are small, and a block straddling the range simply draws both.)
       const dist: N = distance(cameraPosition, at.xyz);
       const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, dist)) : float(1);
-      const p: N = positionLocal.mul(handOver).toVar();
+      // (By the time this runs each card's points are already where the card stands in the world, not about the card's own foot. So "shrink
+      // to its foot" is "draw towards where it stands". Multiplying the point by the share left, as this did, drew every blade towards the
+      // middle of the world instead: across the last few metres of the blade range whole tufts slid over the ground as the eye moved.)
+      const p: N = mix(at.xyz, positionLocal, handOver).toVar();
       const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
       const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
       p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
