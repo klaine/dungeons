@@ -41,9 +41,10 @@ const { chromium } = require('playwright');
         out.minY = Math.min(out.minY, p.y);
         out.maxClimb = Math.max(out.maxClimb, p.y - startY);
         const where = `run ${run}: from (${sx.toFixed(0)}, ${sz.toFixed(0)}) to (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
-        if (beyond > 0.5) out.escaped.push(where);
+        // (On an island the beach may be waded a few strides out from the waterline; out of the water's depth is out.)
+        if (beyond > (site.island ? 9 : 0.5)) out.escaped.push(where);
         // (On an island the ground goes down to the sea: fallen is below the water.)
-        if (p.y < (site.island ? site.island.sea + 1.2 : a.floor - 4)) out.fell.push(where);
+        if (p.y < (site.island ? site.island.sea - 0.6 : a.floor - 4)) out.fell.push(where);
         if (p.y - 1.75 > groundAt(p.x, p.z) + 3 ) out.stuckHigh.push(where);
       }
       // Each thing left in the valley: walk to it from a few metres off, on the side of the track, and see it taken.
@@ -52,6 +53,19 @@ const { chromium } = require('playwright');
       const track = site.track;
       for (const f of game.finds) {
         // (What is high up, at the top of a lighthouse, is reached by its stair, which this does not climb.)
+        // A sea cave is walked into from its mouth, along the strand.
+        const cave = site.island && site.island.seaCave;
+        if (cave && Math.hypot(f.at.x - cave.x, f.at.z - cave.z) < cave.length + 2) {
+          const sx = cave.x - Math.cos(cave.heading) * 5, sz = cave.z - Math.sin(cave.heading) * 5;
+          player.place({ x: sx, y: site.island.sea + 3, z: sz }, 0);
+          for (let i = 0; i < 1500 && !f.taken; i++) {
+            const tx = i < 300 ? cave.x : f.at.x, tz = i < 300 ? cave.z : f.at.z;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (from the cave's mouth; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
         const lh = site.island && site.island.lighthouse;
         if (lh && Math.hypot(f.at.x - lh.x, f.at.z - lh.z) < lh.r + 3) { out.finds.push(`high, not tried: ${f.what}`); continue; }
         let best = track[0], bd = 1e9;

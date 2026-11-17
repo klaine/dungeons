@@ -20,7 +20,7 @@ const { chromium } = require('playwright');
       const steps = Math.floor((top - 0.15) / rise), last = first + (steps / perTurn) * Math.PI * 2;
       const pts = [at(lh.door, r0 + 2.5), at(lh.door, r0 - 0.8), at(first - 0.35, (newel + inner(0)) / 2 + 0.15)];
       for (let s = 0; s <= steps; s += 1) { const a = first + ((s + 0.5) / perTurn) * Math.PI * 2; pts.push(at(a, (newel + inner(0.15 + s * rise)) / 2 + 0.12)); }
-      const out = last + Math.PI, rl = rT - 0.3, gallery = rT + 1.0, spy = last + Math.PI * 0.5;
+      const out = last + Math.PI / 4, rl = rT - 0.3, gallery = rT + 1.0, spy = last + Math.PI * 0.5;
       pts.push(at(last + 0.5, 0.9), at(out - 0.6, 1.0), at(out, 1.0), at(out, (rl + gallery) / 2));
       // Round the gallery the short way to where the spyglass lies.
       const turn = ((spy - out + Math.PI * 3) % (Math.PI * 2)) - Math.PI;

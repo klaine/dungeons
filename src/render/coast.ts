@@ -99,6 +99,10 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     }
     for (const a of [-0.22, 0.22]) box(at, 'metal', a - 0.025, a + 0.025, sea - 1.2, deck + 0.9, len + 0.02, len + 0.07, [0.12, 0.07, 0.04]);
     for (let y = sea - 1; y < deck + 0.8; y += 0.3) box(at, 'metal', -0.22, 0.22, y, y + 0.03, len + 0.03, len + 0.06, [0.12, 0.07, 0.04]);
+    // Nobody steps off the jetty into the water: the boxes nobody sees, along both sides beyond the beach and across the end.
+    const fence = (a: number, f: number) => { const p = at(a, 0, f); c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
+    for (let f = 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
+    for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
   }
 
   // ---- the fishermen's cottages
@@ -318,7 +322,8 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (let k = 0; k < N; k++) {
       const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2, am = (a0 + a1) / 2;
       const back = ((lastA - am) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-      const hatch = back < (5 / stepsPerTurn) * Math.PI * 2;
+      // (Open over the last twelve steps, three quarters of a turn: anyone coming up must have room for their head under the floor.)
+      const hatch = back < (12 / stepsPerTurn) * Math.PI * 2;
       const from = hatch ? rT - wallT + 0.02 : newel;
       solid('stone', [ring(a0, from, top - 0.05), ring(a1, from, top - 0.05), ring(a1, gallery, top - 0.05), ring(a0, gallery, top - 0.05), ring(a0, from, top + 0.15), ring(a1, from, top + 0.15), ring(a1, gallery, top + 0.15), ring(a0, gallery, top + 0.15)], shade(stone, 1.05));
       // Corbels under the gallery.
@@ -330,7 +335,8 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     }
     // The lantern: a low wall, a ring of glass in iron glazing bars, a domed roof with a vent and a vane.
     // A way out onto the gallery on the side away from the hatch.
-    const outA = lastA + Math.PI, rl = rT - 0.3, lw = 0.12;
+    // (The way out is over the quarter of the floor that is not open for the stair.)
+    const outA = lastA + Math.PI / 4, rl = rT - 0.3, lw = 0.12;
     for (let k = 0; k < 16; k++) {
       const a0 = (k / 16) * Math.PI * 2, a1 = ((k + 1) / 16) * Math.PI * 2, am = (a0 + a1) / 2;
       const isDoor = Math.abs(((am - outA + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.22;
@@ -386,7 +392,8 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   if (o.chapel) {
     const k = o.chapel, fx = Math.cos(k.facing), fz = Math.sin(k.facing);
     buildLandmark('ruin', k.x - fx * 8, k.y, k.z - fz * 8, k.facing, mesh, rng.fork('chapel'), [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]], 0.5);
-    c.finds.push({ at: new Vector3(k.x + fx * 6, k.y + 0.2, k.z + fz * 6), what: 'a bronze handbell' });
+    // (Left on the step before its west front, where the footpath comes: the walls of the nave stand too close and too high to be got through.)
+    c.finds.push({ at: new Vector3(k.x - fx * 10.5, c.ground(k.x - fx * 10.5, k.z - fz * 10.5) + 0.25, k.z - fz * 10.5), what: 'a bronze handbell' });
   }
 
   // ---- the burial ground beside the house: a dry-stone wall, headstones in rows, a high cross
