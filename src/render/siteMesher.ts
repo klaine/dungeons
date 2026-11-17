@@ -2129,11 +2129,11 @@ export function meshSite(site: Site): SceneDescription {
     const barkMesh = sceneryMesh('bark');
     const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.85, 0.58, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
-    const tree = (x: number, z: number, y: number, detail: number) => {
+    const tree = (x: number, z: number, y: number, detail: number, pick?: { oak: boolean; roll: number; old?: boolean }) => {
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
-      if (kind > 0.56) {
+      if (kind > 0.56 && !pick) {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
         const girth = plant.range(0.16, 0.26), needle = leafOf(plant.pick(firs));
         // (The old boughs are still drawn from the stream, into nothing, as the old crowns are.)
@@ -2160,16 +2160,16 @@ export function meshSite(site: Site): SceneDescription {
         spent.broadleaf(x, y, z, height, spread, Math.round(26 + 260 * detail), green, plant, 1.7 - 0.85 * detail);
         spent.leaves.matrices.length = spent.leaves.colours.length = spent.leaves.centres.length = 0;
         // Which kind grows where goes by patches, as woods do; a tree in blossom is of the spreading kind.
-        const oak = inBlossom || fbm2(x * 0.045 + s2 * 3, z * 0.045 - s1, 2) > 0.44;
+        const oak = pick ? pick.oak : inBlossom || fbm2(x * 0.045 + s2 * 3, z * 0.045 - s1, 2) > 0.44;
         // One tree in six is old: half as tall again, twice as thick, and carrying far more leaf.
-        const old = detail > 0.7 && grown % 6 === 2 ? 1 : 0;
+        const old = pick ? (pick.old ? 1 : 0) : detail > 0.7 && grown % 6 === 2 ? 1 : 0;
         // Beyond that, trees are not all of an age: now and then one is a giant, towering over the
         // rest, and about one in four is young, slender and low. (A stream of its own, so no other choice moves.)
-        const age = rng.fork(`age${grown}`), roll = age.next();
+        const age = rng.fork(`age${grown}`), mix = new URLSearchParams(location.search).has('agemix'), roll = pick ? pick.roll : mix ? [0.5, 0.5, 0.06, 0.01, 0.9, 0.9, 0.5, 0.9, 0.5][grown % 9] : age.next(); // (`?agemix` gives every kind of age in turn, for looking at)
         const giant = detail > 0.5 && roll < 0.05 ? age.range(1.7, 2.2) : 1, young = roll > 0.7 ? age.range(0.42, 0.7) : 1;
         // And very rarely an oak of great age that has spread rather than risen: a short, vast trunk
         // and limbs that reach out low and far, its crown a roof over the ground round it.
-        const epic = detail > 0.7 && oak && roll >= 0.05 && roll < 0.075;
+        const epic = detail > 0.7 && (oak || mix) && roll >= 0.05 && roll < 0.075;
         const wide = epic ? age.range(2.0, 2.5) : 1;
         const tall = giant * young * (epic ? 0.95 : 1), stout = epic ? 2.6 : giant > 1 ? giant * 1.15 : young * young, leafy = epic ? 5 : giant > 1 ? giant * giant * 0.75 : young * 0.8;
         const reach = growTree(planting, barkMesh, x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
@@ -2202,6 +2202,13 @@ export function meshSite(site: Site): SceneDescription {
     const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
     woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
     woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+    // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
+    const row = new URLSearchParams(location.search).get('treerow');
+    if (row) {
+      const [rx, rz] = row.split(',').map(Number);
+      const kinds = [{ oak: false, roll: 0.9 }, { oak: true, roll: 0.9 }, { oak: false, roll: 0.5 }, { oak: true, roll: 0.5 }, { oak: false, roll: 0.01 }, { oak: true, roll: 0.01 }, { oak: true, roll: 0.5, old: true }, { oak: true, roll: 0.06 }];
+      kinds.forEach((k, i) => { const tx = rx + i * 7 + (k.roll === 0.06 ? 6 : 0), tz = rz; tree(tx, tz, ground(tx, tz), 1, k); });
+    }
 
     /**
      * The lie of the land, as four numbers at any point, each from 0 to 1. Everything that grows

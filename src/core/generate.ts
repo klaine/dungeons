@@ -285,6 +285,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng): void 
   if (site.settlement && site.settlement !== 'village') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
   layOutMill(site, fromTrack, rng.fork('mill'));
   layOutCamp(site, meadow, fromTrack, rng.fork('camp'));
+  layOutMine(site, meadow, fromTrack, rng.fork('mine'));
   // On the hills about the valley, now and then, something built: seen against the sky from the valley floor.
   {
     const far = rng.fork('landmarks'), count = far.pick([0, 1, 1, 2, 2, 3]), taken: number[] = [];
@@ -590,6 +591,50 @@ function layOutFootpaths(site: Site, rng: Rng): void {
     else if (f.kind === 'pond') { const [tx, tz] = nearestOnTrack(f.x, f.z); lead(f.x, f.z, shoreOf(f, tx - f.x, tz - f.z) * 0.98, 'pond'); }
   }
   if (!site.keep) for (const t of site.towers ?? []) lead(t.x + (t.door === 'e' ? t.half + 1.2 : -t.half - 1.2), t.z, 0, 'tower');
+}
+
+/**
+ * A mine, in about one valley in four that has no hall under the hill: an adit driven into one side of the valley where the
+ * side runs fairly straight and nothing else is, with its yard before it. Recorded as a cave of the valley's wall is, since
+ * that is what it is to everything that asks where the wall is opened.
+ */
+function layOutMine(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const v = site.valley, track = site.track ?? [];
+  if (!v || track.length < 2 || (site.grottoes ?? []).some((q) => q.hall) || !rng.chance(0.4)) return;
+  const round = (x: number) => Math.round(x * 10) / 10;
+  for (let tries = 0; tries < 160; tries++) {
+    const side = rng.chance(0.5) ? 'w' : 'e', inw = side === 'w' ? 1 : -1, z = round(rng.range(meadow.z1 + 14, v.mouth - 24)), edge = edgeAt(v, side, z);
+    if (Math.max(...[-8, -4, 0, 4, 8].map((d) => Math.abs(slantAt(v, side, z + d)))) > 0.28) continue;
+    const heap = round(rng.range(8, 10.5)), yardX = edge + inw * 13, tipX = edge + inw * (8 + heap);
+    // The yard: from the foot of the wall out to the tip of the heap, and a few strides to either side.
+    if (!walkable(v, tipX, z, 6) || !roomAt(site, yardX, z, 10) || fromTrack(tipX, z) < 5) continue;
+    if ((site.grottoes ?? []).some((q) => q.side === side && Math.abs(q.z - z) < 18)) continue;
+    if ((site.terraces ?? []).some((t) => t.side === side && z > t.z0 - t.run - 14 && z < t.z1 + t.run + 14)) continue;
+    if (site.keep && Math.hypot(site.keep.x - yardX, site.keep.z - z) < 40) continue;
+    if (site.camp && Math.hypot(site.camp.x - yardX, site.camp.z - z) < site.camp.r + 16) continue;
+    if ((site.paths ?? []).some((p) => p.points.some(([px, pz]) => Math.hypot(px - yardX, pz - z) < 11))) continue;
+    if ((site.streams ?? []).some((st) => st.course.some(([x, cz]) => Math.abs(x - edge) < 20 && Math.abs(cz - z) < 11))) continue;
+    const length = round(rng.range(14, 22));
+    (site.grottoes ??= []).push({ side, z, r: 1.2, mine: { length, cross: { at: round(length * rng.range(0.45, 0.6)), length: round(rng.range(4.5, 7)), side: rng.chance(0.5) ? 1 : -1 }, heap, shed: rng.chance(0.5) ? 1 : -1 } });
+    // A footpath from the track to the yard, coming in beside the tramway.
+    let tx = track[0][0], tz = track[0][1], bd = Infinity;
+    const gx = edge + inw * 10, gz = z;
+    for (let k = 0; k < track.length - 1; k++) {
+      const [ax, az] = track[k], [bx, bz] = track[k + 1], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1;
+      const t = Math.min(1, Math.max(0, ((gx - ax) * (bx - ax) + (gz - az) * (bz - az)) / l2)), px = ax + (bx - ax) * t, pz = az + (bz - az) * t;
+      if (Math.hypot(gx - px, gz - pz) < bd) { bd = Math.hypot(gx - px, gz - pz); tx = px; tz = pz; }
+    }
+    const shedSide = site.grottoes[site.grottoes.length - 1].mine!.shed, ex = edge + inw * 6, ez = z - shedSide * 2.2, d = Math.hypot(ex - tx, ez - tz);
+    if (d > 6) {
+      const ux = (ex - tx) / d, uz = (ez - tz) / d, n = Math.max(2, Math.round(d / 4)), points: [number, number][] = [];
+      for (let k = 0; k <= n; k++) {
+        const t = (d * k) / n, w = k === 0 || k === n ? 0 : Math.sin((k / n) * Math.PI) * rng.range(-1.2, 1.2);
+        points.push([round(tx + ux * t - uz * w), round(tz + uz * t + ux * w)]);
+      }
+      (site.paths ??= []).push({ points, to: 'mine' });
+    }
+    return;
+  }
 }
 
 /**

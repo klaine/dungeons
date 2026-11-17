@@ -200,6 +200,24 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         ctx.setLineDash([]);
         continue;
       }
+      if (q.mine) {
+        // A mine: its adit, crosscut and working drawn as cut things are; its spoil heap as a pale tongue with the tramway down it; its shed.
+        const m = q.mine, at = (inside: number) => edge + inw * inside, r2 = (i0: number, i1: number, o0: number, o1: number) => rect(Math.min(at(i0), at(i1)), q.z + Math.min(o0, o1), Math.max(at(i0), at(i1)), q.z + Math.max(o0, o1));
+        ctx.fillStyle = DARK;
+        r2(3, -m.length, -1.1, 1.1);
+        r2(-m.length, -m.length - 5.4, -2.7, 2.7);
+        r2(-m.cross.at - 0.9, -m.cross.at + 0.9, 0, m.cross.side * m.cross.length);
+        ctx.fillStyle = PAPER;
+        ctx.globalAlpha = 0.45;
+        r2(8, 8 + m.heap, -2.2, 2.2);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = Math.max(1, 0.5 * ratio);
+        ctx.beginPath(); ctx.moveTo(X(at(3)), Z(q.z)); ctx.lineTo(X(at(8 + m.heap - 1)), Z(q.z)); ctx.stroke();
+        ctx.fillStyle = INK;
+        r2(7.4, 10.4, m.shed * 3.7, m.shed * 6.1);
+        continue;
+      }
       if (q.hall) {
         // A hall under the hill: its stair and its length drawn as built things are, with its pillars; it runs off beyond the valley's edge.
         const h = q.hall, at = (t: number) => edge + inw * (7 - t), hall0 = 3.9 + h.drop / 0.5 + 1.6;
