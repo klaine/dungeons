@@ -163,7 +163,10 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
 float heightFn(vec2 uv) {
   float warp = fbm(uv, vec2(3., 2.), 3, .5);
   // A furrow is where a slow noise, stretched upright, passes through nothing.
-  float f1 = abs(gnoise(vec2(uv.x * 11. + warp * 2.2, uv.y * 1.5), vec2(11., 3.)));
+  // (It comes round in the height of the picture, as everything here must: once it was read one and a half times up the picture
+  // while coming round only every three, and the top of the bark did not meet its foot. Wrapped up a trunk, that was a sharp line
+  // round it at every repeat.)
+  float f1 = abs(gnoise(vec2(uv.x * 11. + warp * 2.2, uv.y * 2.), vec2(11., 2.)));
   float f2 = abs(gnoise(vec2(uv.x * 23. + warp * 3. + 7., uv.y * 3.), vec2(23., 3.)));
   float ridge = smoothstep(.0, .2, f1) * (.72 + .28 * smoothstep(.0, .16, f2));
   // Now and then a ridge is broken across.
