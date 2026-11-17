@@ -8,6 +8,7 @@ import { MasonryStyle } from './geom/masonry';
 import { MeshBuilder } from './geom/meshBuilder';
 import { alongSheet, carveRock } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
+import { cells3 } from '../core/rng';
 import { layTerrain, turfColour } from './landscape';
 import { Colour, growConifer, Planting } from './planting';
 import { CardSet } from './scene';
@@ -60,6 +61,8 @@ export interface MountainResult {
   planted: Record<string, number>;
   /** Where the summit's cairn stands, for whatever wants to know where the view is. */
   lookout: { x: number; y: number; z: number; height: number };
+  /** How sharp the mountain's rock is, for its material: frost-shattered, sharper than the same stone in a valley. */
+  sharp: number;
   /** Lights: torches on the walls of the gallery way's tunnels, and the fire in the shelter. */
   torches: { position: Vector3; out: Vector3; fire?: number }[];
 }
@@ -77,9 +80,72 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const rng = b.rng.fork('mountain');
   const s1 = rng.range(0, 60), s2 = rng.range(0, 60);
   const plain = (x: number, z: number) => landAt(m, F, x, z);
-  const rockKind = ROCK[site.setting.stone];
+  // Rock high on a mountain is frost-shattered, whatever stone it is: its edges sharp and its blocks loose in their joints, not
+  // rounded by rain as in a valley. So the stone's character is taken sharper and blockier here, and much less worn round.
+  const stoneKind = ROCK[site.setting.stone];
+  const rockKind = { ...stoneKind, round: stoneKind.round * 0.3, sharp: Math.max(stoneKind.sharp, 0.8), blocky: Math.max(stoneKind.blocky, 0.75), worn: stoneKind.worn * 0.5 };
   const strata = new Strata(rockKind, rng.fork('strata'), deck - 40);
-  const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
+  const reliefSeed = rng.fork('relief').int(1, 9999);
+  const baseRelief = cliffRelief(strata, reliefSeed);
+  /**
+   * The great faces of a mountain are not lumps. They are fracture planes: the rock has split along its joints into faces some
+   * metres to some tens of metres across, each nearly flat, meeting each other in sharp edges, standing out and set back; and
+   * the face is cleft from top to bottom here and there where a joint has opened into a chimney. So the broad relief here is
+   * planes, at two sizes (each a plane tilted its own way about its own point, the highest of those near a point being the
+   * face there), with clefts cut down through them, and only a little of the soft undulation underneath.
+   */
+  const planes = (x: number, y: number, z: number, size: number, tall: number, seedP: number): number => {
+    const fx = x / size, fy = y / tall, fz = z / size, xi = Math.floor(fx), yi = Math.floor(fy), zi = Math.floor(fz);
+    let best = -Infinity;
+    for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const cx = xi + dx, cy = yi + dy, cz = zi + dz;
+      let h = Math.imul(cx * 73856093 ^ cy * 19349663 ^ cz * 83492791 ^ seedP, 2654435761) >>> 0;
+      const r = () => { h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0; return (h >>> 8) / 16777216; };
+      const px = fx - (cx + 0.2 + 0.6 * r()), py = fy - (cy + 0.2 + 0.6 * r()), pz = fz - (cz + 0.2 + 0.6 * r());
+      const d2 = px * px + py * py + pz * pz;
+      if (d2 > 2.3) continue;
+      // (Mostly upright planes: joints run up and down a face more than across it.)
+      let nx = r() * 2 - 1, ny = (r() * 2 - 1) * 0.45, nz = r() * 2 - 1;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nx /= l; ny /= l; nz /= l;
+      const v = r() * 0.6 - (px * nx + py * ny + pz * nz) - d2 * 0.08;
+      if (v > best) best = v;
+    }
+    return best;
+  };
+  const cleft = new Float32Array(5);
+  // (The planes change only over metres, and they are dear to reckon: so they are reckoned once at each point of a lattice a metre
+  // and a half apart, as they are first wanted, and blended between; so are the clefts and the undulation. The smaller breaks of a
+  // face are the joints and blocks of the fine relief. (Planes at a third of the size, on a lattice a metre apart, doubled the time.) The lattice is the world's, so pieces carved apart agree where they meet.)
+  const planeLattice = new Map<number, number>(), LAT = 1.5;
+  const planesAt = (ix: number, iy: number, iz: number): number => {
+    const key = ((ix + 4096) * 8192 + (iy + 4096)) * 8192 + (iz + 4096);
+    let v = planeLattice.get(key);
+    if (v === undefined) {
+      const x = ix * LAT, y = iy * LAT, z = iz * LAT;
+      v = (planes(x, y, z, 9, 13, reliefSeed + 101) - 0.25) * 4.4;
+      v += (fbm3(x * 0.06, y * 0.025, z * 0.06, 2, reliefSeed) - 0.5) * 1.4;
+      // Chimneys: open joints a stride or two wide, running down the face, one in three of them.
+      cells3((x + y * 0.05) / 8 + reliefSeed * 0.37, 0.5, (z - y * 0.04) / 8, reliefSeed + 41, 0.8, cleft, 0);
+      if (((cleft[2] + cleft[3]) * 7.3) % 1 > 0.66) v -= 1.7 * (1 - smooth((cleft[4] * 8) / 1.3));
+      planeLattice.set(key, v);
+    }
+    return v;
+  };
+  const planesBlended = (x0: number, y0: number, z0: number): number => {
+    const x = x0 / LAT, y = y0 / LAT, z = z0 / LAT, ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), tx = x - ix, ty = y - iy, tz = z - iz;
+    const a000 = planesAt(ix, iy, iz), a100 = planesAt(ix + 1, iy, iz), a010 = planesAt(ix, iy + 1, iz), a110 = planesAt(ix + 1, iy + 1, iz);
+    const a001 = planesAt(ix, iy, iz + 1), a101 = planesAt(ix + 1, iy, iz + 1), a011 = planesAt(ix, iy + 1, iz + 1), a111 = planesAt(ix + 1, iy + 1, iz + 1);
+    const c00 = a000 + (a100 - a000) * tx, c10 = a010 + (a110 - a010) * tx, c01 = a001 + (a101 - a001) * tx, c11 = a011 + (a111 - a011) * tx;
+    const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty;
+    return c0 + (c1 - c0) * tz;
+  };
+  const relief = {
+    fine: baseRelief.fine,
+    broad: (x: number, y: number, z: number): number => {
+      return planesBlended(x, y, z);
+    },
+  };
   const insideOuter = (x: number, z: number, mg = 0) => b.outerRects.some((r) => x > r.x0 - mg && x < r.x1 + mg && z > r.z0 - mg && z < r.z1 + mg);
   const way = m.way ?? [], climb = m.climb ?? [];
   const nearWay = (x: number, z: number, reach: number) => (way.length ? nearestOn(way, x, z, reach).off : Infinity);
@@ -130,7 +196,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
 
   __T('tiles');
   // ---- the lattice of heights over the band, worn as frost wears a precipice
-  const MARGIN = 3.5;
+  const MARGIN = 5.4;
   const land = new Grid2(area.x0 - MARGIN, area.z0 - MARGIN, CELL, Math.round((area.x1 - area.x0 + 2 * MARGIN) / CELL) + 1, Math.round((area.z1 - area.z0 + 2 * MARGIN) / CELL) + 1);
   const known = new Uint8Array(land.data.length), within = new Uint8Array(land.data.length);
   for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
@@ -230,9 +296,9 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const d = (y - spot.h) / spot.steep;
     // (Further from the ground than the rock's breaks can shift its face, only which side of it a point is on matters, and that is
     // plain: the breaks are not reckoned there. They shift it by its relief, which is the less the less rocky the ground.)
-    const within = 3.9 * spot.rocky + 0.7;
+    const within = 4.7 * spot.rocky + 0.7;
     if (spot.rocky < 0.002 || d > within || d < -within) return d;
-    let out = Math.min(2.4, Math.max(-2.4, relief.broad(x, y, z)));
+    let out = Math.min(3.2, Math.max(-3.2, relief.broad(x, y, z)));
     const most = FINE_MOST * spot.rocky + 0.45;
     if (Math.abs(d - out * spot.rocky) > most) return d - out * spot.rocky;
     let fine = relief.fine(x, y, z);
@@ -440,7 +506,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
     if (!tiles[j * tilesX + i]) continue;
     const c = { x0: area.x0 + i * TILE, x1: area.x0 + (i + 1) * TILE, z0: area.z0 + j * TILE, z1: area.z0 + (j + 1) * TILE };
     let lo = Infinity, hi = -Infinity;
-    const REACH = 4.5;
+    // (Its relief here pushes a face sideways by up to nearly five metres.)
+    const REACH = 5.4;
     for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
     if (hi < HIDDEN) continue;
     lo = Math.min(lo, tileLow[j * tilesX + i]);
@@ -1222,6 +1289,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     planted: { ...planted, pines },
     lookout,
     torches,
+    sharp: rockKind.sharp,
   };
 }
 

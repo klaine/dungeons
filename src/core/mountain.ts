@@ -126,10 +126,25 @@ function summits(m: Mountain, x: number, z: number): number {
   }
   for (const p of m.peaks) {
     const d = Math.hypot(x - p.x, z - p.z);
-    if (d > p.r) continue;
-    const t = 1 - d / p.r, ridge = 1 - Math.abs(fbm2(x / 19 + p.x * 0.01, z / 19 - p.z * 0.01, 3, 23) * 2 - 1);
+    if (d > p.r * 1.25) continue;
+    // A horn is not a cone. Frost cuts a peak back on three or four sides into faces, each nearly a plane, and where two faces meet
+    // there is a ridge running down from the top. So its height is reckoned face by face: on each, how far out from the top a point
+    // lies along that face's own bearing, at that face's own steepness; the face a point is on is the one that has it lowest. The
+    // faces are not alike, nor the ridges evenly spaced, and the top is not over the middle.
+    const k = Math.abs(Math.round(p.x * 7.13 + p.z * 3.71)), faces = 3 + (k % 2), turn = ((k * 0.618) % 1) * Math.PI * 2;
+    const ox = x - p.x - p.r * 0.08 * Math.cos(turn * 1.7), oz = z - p.z - p.r * 0.08 * Math.sin(turn * 1.7);
+    let out = 0;
+    for (let i = 0; i < faces; i++) {
+      const a = turn + (i / faces) * Math.PI * 2 + 0.35 * Math.sin(k * 1.3 + i * 2.1), steep = 0.78 + 0.34 * ((k * 0.37 + i * 0.61) % 1);
+      out = Math.max(out, (ox * Math.cos(a) + oz * Math.sin(a)) / (p.r * steep));
+    }
+    const t = Math.max(0, 1 - out);
+    if (t <= 0) continue;
+    // (Its faces broken by ribs and gullies running down them, and steepening towards the top, as a horn does.)
+    const rib = 1 - Math.abs(fbm2(x / 13 + p.x * 0.01, z / 13 - p.z * 0.01, 2, 23) * 2 - 1);
+    const shape = 0.62 * t + 0.38 * t * t * t;
     // (The summit's horn stands on its shoulders, and is half its height; a lesser peak stands by itself.)
-    const horn = (p === s ? p.height * 0.5 : p.height) * Math.pow(t, 1.25) * (0.74 + 0.4 * ridge);
+    const horn = (p === s ? p.height * 0.5 : p.height) * shape * (0.9 + 0.16 * rib);
     h = p === s ? h + horn : Math.max(h, horn);
   }
   return h;

@@ -156,6 +156,8 @@ export interface SceneDescription {
     /** The mountain, for the shadow it throws on the cloud: its body's middle, how broad at its top and at the cloud, and its top's level; its summit's place, breadth at the foot, and height. */
     shade?: { x: number; z: number; top: number; rTop: number; rFoot: number; px: number; pz: number; pr: number; py: number };
   };
+  /** How sharply the place's rock breaks, 0 to 1, if not as its stone does elsewhere: a mountain's is frost-shattered. */
+  rockSharp?: number;
   /** How much snow lies, from 0 for none to 1 for the whole of winter: the materials lay it on whatever is level enough to hold it. */
   snow?: number;
   /** Above what level snow lies more thickly, and how much more: so that in summer what is left of it is on the heights. */

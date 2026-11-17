@@ -232,8 +232,10 @@ async function start(): Promise<void> {
   if (desc.snowLine) snowUniforms.uSnowLine.value.set(desc.snowLine[0], desc.snowLine[1]);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
   // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
-  if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
-  if (site) rockUniforms.uRockFacet.value = ROCK[site.setting.stone].sharp ** 2;
+  // (On a mountain the rock is frost-shattered, and breaks sharper than the same stone does in a valley.)
+  const sharp = desc.rockSharp ?? (site ? ROCK[site.setting.stone].sharp : 0);
+  if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * sharp;
+  if (site) rockUniforms.uRockFacet.value = sharp ** 2;
   if (site) rockUniforms.uRockWorn.value = ROCK[site.setting.stone].worn;
   // Sound starts with the first click or key, which is the earliest a browser allows.
   const sound = new Sound();
