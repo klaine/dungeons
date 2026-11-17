@@ -553,14 +553,24 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
   // The trunk: nearly straight inland, with a sway; on the coast it leans away from the wind and bends back up.
   const leanAt = rng.range(0, Math.PI * 2), lean = coastal ? rng.range(0.3, 0.55) : rng.range(0, 0.05);
   const bowAt = leanAt + rng.range(-1, 1), bow = coastal ? rng.range(0.5, 1.1) : rng.range(-0.3, 0.3);
-  const axis = (t: number): Vector3 => new Vector3(
-    x + Math.cos(leanAt) * lean * H * t + Math.cos(bowAt) * bow * Math.sin(t * Math.PI) * 0.5,
-    base + H * t * (coastal ? 1 - 0.12 * t : 1),
-    z + Math.sin(leanAt) * lean * H * t + Math.sin(bowAt) * bow * Math.sin(t * Math.PI) * 0.5);
+  // (And on the coast it is crooked as well: it has been set back and has started again more than once, each time another way.)
+  const kink = coastal ? rng.range(0.25, 0.5) : 0, kinkAt = rng.range(0, Math.PI * 2), kinks = rng.range(2.2, 3.4), kinkFrom = rng.range(0, 3);
+  const axis = (t: number): Vector3 => {
+    const crook = kink * Math.sin(t * Math.PI * kinks + kinkFrom) * Math.min(1, t * 4);
+    return new Vector3(
+      x + Math.cos(leanAt) * lean * H * t + Math.cos(bowAt) * bow * Math.sin(t * Math.PI) * 0.5 + Math.cos(kinkAt + t * 2.5) * crook,
+      base + H * t * (coastal ? 1 - 0.12 * t : 1),
+      z + Math.sin(leanAt) * lean * H * t + Math.sin(bowAt) * bow * Math.sin(t * Math.PI) * 0.5 + Math.sin(kinkAt + t * 2.5) * crook);
+  };
   const thickAt = (t: number) => girth * (coastal ? 1.25 : 1) * (1 - 0.8 * Math.pow(t, 1.15)) + 0.014;
   const stem: Vector3[] = [axis(0).setY(base - 0.4), axis(0.02)], radii = [thickAt(0) * 1.5, thickAt(0) * 1.12];
-  for (let k = 1; k <= 8; k++) { stem.push(axis((k / 8) * 0.97)); radii.push(thickAt((k / 8) * 0.97)); }
-  layLimb(wood, stem, radii, rich ? 12 : 5, o.bark, rng.range(0, 3), open, rich ? { lobes: rng.int(3, 5), amp: rng.range(0.05, 0.14), phase: rng.range(0, 6), oval: rng.range(0, 0.08), ovalAt: rng.range(0, 3), lumps: rng.range(0.03, 0.06), burrs: trunkGrowths(rng, rng.int(0, 1), rng.int(3, 6)), seed: rng.int(1, 9999) } : undefined);
+  const rings = coastal ? 14 : 8;
+  for (let k = 1; k <= rings; k++) { stem.push(axis((k / rings) * 0.97)); radii.push(thickAt((k / rings) * 0.97)); }
+  // A pine inland is a clean stem with the scars of its branches. One on the coast is gnarled: deeply fluted and out of round, swollen
+  // and hollowed all the way up, with burrs on it as well as knots.
+  layLimb(wood, stem, radii, rich ? (coastal ? 14 : 12) : 5, o.bark, rng.range(0, 3), open, rich ? (coastal
+    ? { lobes: rng.int(3, 5), amp: rng.range(0.14, 0.26), phase: rng.range(0, 6), oval: rng.range(0.06, 0.16), ovalAt: rng.range(0, 3), lumps: rng.range(0.1, 0.17), burrs: trunkGrowths(rng, rng.int(3, 6), rng.int(4, 8)), seed: rng.int(1, 9999) }
+    : { lobes: rng.int(3, 5), amp: rng.range(0.05, 0.14), phase: rng.range(0, 6), oval: rng.range(0, 0.08), ovalAt: rng.range(0, 3), lumps: rng.range(0.03, 0.06), burrs: trunkGrowths(rng, rng.int(0, 1), rng.int(3, 6)), seed: rng.int(1, 9999) }) : undefined);
 
   const crownFrom = coastal ? rng.range(0.4, 0.5) : rng.range(0.3, 0.4);
   const heart = axis(crownFrom + (0.97 - crownFrom) * 0.45);
@@ -582,14 +592,15 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
   };
   /** A limb, a branch or a twig: out from `from`, turning skyward as it goes, bearing lesser ones to either side and brushes at its end. */
   const limb = (from: Vector3, az: number, rise: number, length: number, thick: number, level: number, f: number) => {
-    const steps = level === 0 ? 4 : level === 1 ? 3 : 2;
+    // (A coastal pine's limbs are as crooked as its trunk: more turns to each, and each turn sharper.)
+    const steps = (level === 0 ? 4 : level === 1 ? 3 : 2) + (coastal ? 2 : 0);
     const points = [from.clone()], thicks = [thick];
     const p = from.clone();
     dir.set(Math.cos(az) * Math.cos(rise), Math.sin(rise), Math.sin(az) * Math.cos(rise));
     const d = dir.clone(), ways: Vector3[] = [d.clone()];
     for (let s = 1; s <= steps; s++) {
       // It wanders, and sweeps upward: a little at first, strongly towards its end.
-      d.add(any.set(rng.range(-1, 1), rng.range(-0.5, 0.5), rng.range(-1, 1)).multiplyScalar(level === 0 ? 0.13 : 0.2));
+      d.add(any.set(rng.range(-1, 1), rng.range(-0.5, 0.5), rng.range(-1, 1)).multiplyScalar((level === 0 ? 0.13 : 0.2) * (coastal ? 2.4 : 1)));
       d.y += (level === 0 ? 0.03 : 0.16) + (level === 0 ? 0.13 : 0.2) * (s / steps) * (coastal ? 0.6 : 1);
       d.normalize();
       p.addScaledVector(d, length / steps);
@@ -598,7 +609,8 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
       ways.push(d.clone());
     }
     const sides = level === 0 ? (rich ? 6 : 4) : level === 1 ? 4 : 3;
-    layLimb(o.soft, points, thicks, sides, limbBark, rng.range(0, 3), open ? (y) => open(y) * (level === 0 ? 0.9 : 0.7) : null);
+    layLimb(o.soft, points, thicks, sides + (coastal && level === 0 ? 2 : 0), limbBark, rng.range(0, 3), open ? (y) => open(y) * (level === 0 ? 0.9 : 0.7) : null,
+      coastal && level === 0 && rich ? { lobes: 3, amp: 0, phase: 0, oval: 0.08, ovalAt: rng.range(0, 3), lumps: 0.12, burrs: trunkGrowths(rng, rng.int(0, 2), rng.int(1, 3)), seed: rng.int(1, 9999) } : undefined);
     const end = points[points.length - 1], endWay = ways[ways.length - 1];
     const at = (t: number): [Vector3, Vector3] => {
       const g = Math.min(steps - 1e-4, t * steps), i = Math.floor(g);
