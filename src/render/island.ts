@@ -5,7 +5,7 @@ import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { MeshBuilder } from './geom/meshBuilder';
-import { carveRock } from './geom/rock';
+import { alongSheet, carveRock } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
 import { layTerrain, turfColour } from './landscape';
 import { Colour, Planting } from './planting';
@@ -351,6 +351,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
   };
 
   // ---- carving: each tile of the band as a piece, only as tall as its own ground needs
+  // (Where a piece meets the plain sheet, it is closed on the sheet's own edge.)
+  const sheetEdge = alongSheet(ground, area.x0, area.z0, SHEET);
   wild.group = 'wild';
   const turfMesh = wild.mesh('turf'), screeMesh = wild.mesh('scree'), rockMesh = wild.mesh('rock');
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
@@ -365,7 +367,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     carveRock(rockMesh, density, {
       // (Not below a few metres under the sea, where the water is too deep to see through: there the rock is closed off flat.)
       min: V(c.x0, Math.floor((Math.max(lo - 2, sea - 4.8)) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((Math.max(hi, sea - 3) + 2.8) / CELL) * CELL, c.z1),
-      cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved,
+      cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
       meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 && at.y > sea + 0.6 ? screeMesh : turfMesh) : null),
       shade: (q, n, field, other, open) => {
         if (other === turfMesh) { const col = turfAt(q.x, q.z, q.y); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return col; }
@@ -408,8 +410,6 @@ export function buildIsland(b: IslandBuild): IslandResult {
     rock: (tone) => rockColour(tone * 0.8),
     // (Where the sea bed lies deeper than the rock is carved, under deep water, the sheet is laid there too, so there is no hole in the bottom of the sea.)
     skip: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return (carved(mx, mz) && Math.max(ground(c.x0, c.z0), ground(c.x1, c.z0), ground(c.x0, c.z1), ground(c.x1, c.z1)) > sea - 4.6) || insideOuter(mx, mz); },
-    // (And under the edge of what is carved it runs on a cell, out of sight, so no sliver of sky shows where the two meet.)
-    apron: (c) => !insideOuter((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2),
     // The ground is drawn to the outer walls of the house and goes no further, so no gap is left to look down.
     warp: (x, z) => {
       if (!insideOuter(x, z)) return [x, z];
@@ -489,7 +489,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
 
   // ---- the mainland and the islets, far across the water
   wild.group = 'soft';
-  const peaks = layMainland(wild.mesh('far'), site, tint);
+  layMainland(wild.mesh('far'), site, tint);
   wild.group = 'wild';
 
   // Where the player comes in: at the end of the jetty, facing the land.
@@ -503,7 +503,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     track: [...track].reverse().slice(1, -1) as [number, number][],
     far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
     sea: {
-      level: sea, x: o.x, z: o.z, bed, peaks,
+      level: sea, x: o.x, z: o.z, bed,
       // Where the swell breaks at the foot of a cliff, every few strides round the coast that is not beach, and round the stacks.
       spray: [
         ...Array.from({ length: 240 }, (_, k) => {
@@ -538,7 +538,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
  * sheet in rings about the island, with the far material, and left out wherever it lies under
  * the water.
  */
-function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): number {
+function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): void {
   const o = site.island!, m = o.mainland, cx = o.x, cz = o.z, sea = o.sea, seed = (o.x * 7.31 + o.z * 3.17) % 97;
   const around = 720, radii: number[] = [];
   for (let r = 240; r <= 3400; r += 4 + (r - 240) * 0.016) radii.push(r);
@@ -593,10 +593,6 @@ function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): number {
     mesh.addTriangle(a, bb, c);
     mesh.addTriangle(a, c, d);
   }
-  // (Its highest ground, for keeping the clouds above it.)
-  let top = -Infinity;
-  for (let q = 0; q < H.length; q++) top = Math.max(top, H[q]);
-  return top;
 }
 
 /** How far a point is out from the island's coast, for whatever needs a rough answer far from it. */

@@ -6,7 +6,7 @@ import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
-import { carveRock, smin } from './geom/rock';
+import { alongSheet, carveRock, smin } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
 import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
@@ -1387,6 +1387,8 @@ export function meshSite(site: Site): SceneDescription {
       carveRock(into('rock'), grottoes.length || portalAir ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9) : landAir, {
         min: V(c.x0, Math.floor((lo - 2) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
+        // (Where a patch meets the sheet of ground, it is closed on the sheet's own edge, which runs on lines 1.2 metres apart.)
+        edge: alongSheet(ground, 0, 0, 1.2),
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
         // (Nor is the floor of a grotto turf, though the hill over it may be.)
         meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
@@ -1560,8 +1562,6 @@ export function meshSite(site: Site): SceneDescription {
     const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: (x: number, z: number) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; }, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
       ...terrain, area: fine, cell: 1.2,
-      // (Under the edge of what is carved the sheet runs on a cell, sinking out of sight, so no sliver of sky shows where the two meet.)
-      apron: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return carved(mx, mz) && !insideOuter(mx, mz) && !houses.some((b) => footprint(b, mx, mz)); },
       // Not where the land is carved, and not over the house: there it is the turf of the hill
       // above the vaults, left open over every court. Carved patches end on this sheet's own
       // lines, so a cell is either wholly carved or not at all.
@@ -3287,6 +3287,9 @@ export function meshSite(site: Site): SceneDescription {
       if (alongX) { tileFace(tiles, [a, b, r1, r0], tone, inside); tileFace(tiles, [c, d, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [b, c, r1], tone, inside); tileFace(tiles, [d, a, r0], tone, inside); } }
       else { tileFace(tiles, [b, c, r1, r0], tone, inside); tileFace(tiles, [d, a, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [a, b, r0], tone, inside); tileFace(tiles, [c, d, r1], tone, inside); } }
       tileFace(tiles, [a, b, c, d], tone, V(cx, y + 1, cz));
+      // (The roof stands a hand above the tops of the walls, which the cornice hides where there is one; where there is none, the slot
+      // between could be looked into and through, to the sky beyond. A plate under the roof, lying on the walls, fills it.)
+      kit.box('stone', V(x0, site.top - 0.02, z0), V(x1, y, z1), coping, coping, 'plate');
       kit.box('tile', alongX ? V(r0.x - 0.05, y + rise - 0.06, cz - 0.13) : V(cx - 0.13, y + rise - 0.06, r0.z - 0.05), alongX ? V(r1.x + 0.05, y + rise + 0.1, cz + 0.13) : V(cx + 0.13, y + rise + 0.1, r1.z + 0.05), coping, coping, 'ridge');
       ridgeOf.set(q.id, { y: y + rise, alongX, a: alongX ? r0.x : r0.z, b: alongX ? r1.x : r1.z, c: alongX ? cz : cx });
       if (sanctum) {

@@ -66,6 +66,12 @@ export interface RockOptions {
    * edge; where it is not, this piece is closed exactly to its edge.
    */
   beyond?: (x: number, z: number) => boolean;
+  /**
+   * With `beyond`: how high the plain sheet of ground stands along this piece's edge, where nothing carved lies beyond it. The points that
+   * close the piece at its edge are put on it, so the two meet on one line: the sheet draws its edge straight from one of its points to the
+   * next, and the carving, left to itself, follows the ground between them more closely, which leaves slivers of sky between the two.
+   */
+  edge?: (x: number, z: number) => number;
   /** With `sharp`: faces meeting at more than this angle, in degrees, are shaded as an edge. Default 36. */
   crease?: number;
 }
@@ -350,7 +356,8 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
     if (pad && (i === 0 || i === nx - 1 || k === 0 || k === nz - 1) && !o.beyond!(ox + (i + 0.5) * cell, oz + (k + 0.5) * cell)) {
       const tx = Math.min(o.max.x, Math.max(o.min.x, px)), tz = Math.min(o.max.z, Math.max(o.min.z, pz));
       const nl = Math.hypot(sxn, syn, szn) || 1;
-      if (Math.abs(syn / nl) > 0.3) py -= (sxn * (tx - px) + szn * (tz - pz)) / syn;
+      if (o.edge) py = o.edge(tx, tz);
+      else if (Math.abs(syn / nl) > 0.3) py -= (sxn * (tx - px) + szn * (tz - pz)) / syn;
       px = tx; pz = tz;
     }
     points.set((k * ny + j) * nx + i, pp.length / 3);
@@ -387,19 +394,58 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
         if (id === undefined) ok = false; else quad[q] = id;
       }
       if (!ok) continue;
-      const far = (a: number, b: number) => Math.hypot(pp[a * 3] - pp[b * 3], pp[a * 3 + 1] - pp[b * 3 + 1], pp[a * 3 + 2] - pp[b * 3 + 2]);
-      const split = far(quad[0], quad[2]) <= far(quad[1], quad[3]) ? [0, 1, 2, 0, 2, 3] : [0, 1, 3, 1, 2, 3];
-      for (let t = 0; t < 6; t += 3) {
-        let a = quad[split[t]], b = quad[split[t + 1]];
-        const c = quad[split[t + 2]];
+      // The four sides are turned to face the air as one: by the way the whole of them faces (summed round them, which holds however
+      // they bend), against the edge, away from whichever end of it is in rock. (Each triangle used to be turned by its own facing; where
+      // the surface folds sharply a small one can stand nearly edge-on to the lattice edge, and then that guess went wrong as often as
+      // not, and left it facing into the rock, where it is not drawn: a speck of sky through a cliff.)
+      let qnx = 0, qny = 0, qnz = 0, cx = 0, cy = 0, cz = 0;
+      for (let q = 0; q < 4; q++) {
+        const a = quad[q] * 3, b = quad[(q + 1) % 4] * 3;
+        qnx += (pp[a + 1] - pp[b + 1]) * (pp[a + 2] + pp[b + 2]);
+        qny += (pp[a + 2] - pp[b + 2]) * (pp[a] + pp[b]);
+        qnz += (pp[a] - pp[b]) * (pp[a + 1] + pp[b + 1]);
+        cx += pp[a] / 4; cy += pp[a + 1] / 4; cz += pp[a + 2] / 4;
+      }
+      const nAlong = axis === 0 ? qnx : axis === 1 ? qny : qnz, nLength = Math.hypot(qnx, qny, qnz);
+      let flip = nAlong > 0 !== here;
+      // (Where they stand nearly edge-on to the edge, which happens where a piece is closed along its own side, that says little:
+      // then the way the rock's function rises, towards the air, says which way is out.)
+      if (Math.abs(nAlong) < 0.3 * nLength) {
+        const h = cell * 0.5;
+        const gx = sampled(cx + h, cy, cz) - sampled(cx - h, cy, cz), gy = sampled(cx, cy + h, cz) - sampled(cx, cy - h, cz), gz = sampled(cx, cy, cz + h) - sampled(cx, cy, cz - h);
+        const along = gx * qnx + gy * qny + gz * qnz;
+        if (Math.abs(along) > 1e-9) flip = along < 0;
+      }
+      if (flip) { const swap = quad[1]; quad[1] = quad[3]; quad[3] = swap; }
+      // And of the two ways to cut them into triangles, the one that folds the less: the one whose triangles lie most nearly as the whole does.
+      const facing = (a: number, b: number, c: number, out?: Vector3) => {
         A.set(pp[b * 3] - pp[a * 3], pp[b * 3 + 1] - pp[a * 3 + 1], pp[b * 3 + 2] - pp[a * 3 + 2]);
         B.set(pp[c * 3] - pp[a * 3], pp[c * 3 + 1] - pp[a * 3 + 1], pp[c * 3 + 2] - pp[a * 3 + 2]);
         F.crossVectors(A, B);
+        if (out) out.copy(F);
+        const l = F.length();
+        return l < 1e-12 ? 0 : (axis === 0 ? F.x : axis === 1 ? F.y : F.z) / l;
+      };
+      const far = (a: number, b: number) => Math.hypot(pp[a * 3] - pp[b * 3], pp[a * 3 + 1] - pp[b * 3 + 1], pp[a * 3 + 2] - pp[b * 3 + 2]);
+      const sign = here ? 1 : -1;
+      const worstA = Math.min(facing(quad[0], quad[1], quad[2]), facing(quad[0], quad[2], quad[3])) * sign;
+      const worstB = Math.min(facing(quad[0], quad[1], quad[3]), facing(quad[1], quad[2], quad[3])) * sign;
+      const shortA = far(quad[0], quad[2]) <= far(quad[1], quad[3]);
+      let tris: number[];
+      if (Math.max(worstA, worstB) >= 0) {
+        const split = Math.abs(worstA - worstB) > 0.05 ? (worstA > worstB ? [0, 1, 2, 0, 2, 3] : [0, 1, 3, 1, 2, 3]) : shortA ? [0, 1, 2, 0, 2, 3] : [0, 1, 3, 1, 2, 3];
+        tris = split.map((q) => quad[q]);
+      } else {
+        // Folded whichever way it is cut: then a point in its middle, and four triangles round it, which lie as the whole does.
+        const mid = pp.length / 3;
+        pp.push(...[0, 1, 2].map((c) => (pp[quad[0] * 3 + c] + pp[quad[1] * 3 + c] + pp[quad[2] * 3 + c] + pp[quad[3] * 3 + c]) / 4));
+        tris = [quad[0], quad[1], mid, quad[1], quad[2], mid, quad[2], quad[3], mid, quad[3], quad[0], mid];
+      }
+      for (let t = 0; t < tris.length; t += 3) {
+        const a = tris[t], b = tris[t + 1], c = tris[t + 2];
+        facing(a, b, c);
         const area = F.length();
         if (area < 1e-8) continue;
-        // It must face the air: along the edge, away from whichever end is in rock.
-        const along = axis === 0 ? F.x : axis === 1 ? F.y : F.z;
-        if (along > 0 !== here) { const swap = a; a = b; b = swap; F.negate(); }
         F.multiplyScalar(1 / area);
         C.set((pp[a * 3] + pp[b * 3] + pp[c * 3]) / 3, (pp[a * 3 + 1] + pp[b * 3 + 1] + pp[c * 3 + 1]) / 3, (pp[a * 3 + 2] + pp[b * 3 + 2] + pp[c * 3 + 2]) / 3);
         if (o.keep && !o.keep(C)) continue;
@@ -465,4 +511,23 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
     target.addTriangle(corner[0], corner[1], corner[2]);
   }
   return faces;
+}
+
+/**
+ * The height of a sheet of ground laid in square cells of `cell` from (`x0`, `z0`), along the lines between its cells: straight from each
+ * of its points to the next, as the sheet draws it. For a point on one of those lines; elsewhere, the nearer line is taken.
+ */
+export function alongSheet(height: (x: number, z: number) => number, x0: number, z0: number, cell: number): (x: number, z: number) => number {
+  return (x, z) => {
+    const fx = (x - x0) / cell, fz = (z - z0) / cell, rx = Math.round(fx), rz = Math.round(fz);
+    const offX = Math.abs(fx - rx), offZ = Math.abs(fz - rz);
+    if (offX < 1e-4 && offZ < 1e-4) return height(x0 + rx * cell, z0 + rz * cell);
+    if (offZ <= offX) {
+      // On a line of even z: between the points either side in x.
+      const i = Math.floor(fx), t = fx - i, lz = z0 + rz * cell;
+      return height(x0 + i * cell, lz) * (1 - t) + height(x0 + (i + 1) * cell, lz) * t;
+    }
+    const j = Math.floor(fz), t = fz - j, lx = x0 + rx * cell;
+    return height(lx, z0 + j * cell) * (1 - t) + height(lx, z0 + (j + 1) * cell) * t;
+  };
 }

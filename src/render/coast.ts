@@ -73,6 +73,17 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   const indoors: ((x: number, y: number, z: number) => number)[] = [];
   const { face, solid } = anyAngle(mesh);
   const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
+  // How far a point lies from the track or any footpath: what stands about a house is kept off them, or the way would be blocked.
+  const ways = [site.track ?? [], ...(site.paths ?? []).map((w) => w.points)];
+  const offWay = (x: number, z: number) => {
+    let best = Infinity;
+    for (const line of ways) for (let k = 0; k + 1 < line.length; k++) {
+      const [ax, az] = line[k], [bx, bz] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
+      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+    }
+    return best;
+  };
   /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
   const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
     solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
@@ -246,17 +257,22 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // And now and then a net hung to dry between two poles beyond the gable: brown, sagging between them.
     if (q.chance(0.55)) {
       const a0 = -side * (W + 1.4), a1 = -side * (W + 1.4 + q.range(2.2, 3)), f = q.range(0.6, 1.8), top = q.range(1.7, 2.1), net: Colour = [0.2, 0.15, 0.09];
-      for (const a of [a0, a1]) box(at, 'wood', a - 0.05, a + 0.05, -0.3, top + 0.1, f - 0.05, f + 0.05, [0.3, 0.26, 0.2], 0.9);
-      const S = 6;
-      for (let k = 0; k < S; k++) {
-        const t0 = k / S, t1 = (k + 1) / S, sag = (t: number) => Math.sin(t * Math.PI) * 0.35;
-        const u0 = a0 + (a1 - a0) * t0, u1 = a0 + (a1 - a0) * t1;
-        solid('wood', [at(u0, top - sag(t0) - 1.1, f), at(u1, top - sag(t1) - 1.1, f), at(u1, top - sag(t1) - 1.1, f + 0.025), at(u0, top - sag(t0) - 1.1, f + 0.025), at(u0, top - sag(t0), f), at(u1, top - sag(t1), f), at(u1, top - sag(t1), f + 0.025), at(u0, top - sag(t0), f + 0.025)], net, 2.5);
+      // (Not across the track or a path: the poles and the net are solid, and a net hung over the way stopped anyone going by.)
+      const clear = [0, 0.25, 0.5, 0.75, 1].every((t) => offWay(...at2(at, a0 + (a1 - a0) * t, f)) > 2.4);
+      if (clear) {
+        for (const a of [a0, a1]) box(at, 'wood', a - 0.05, a + 0.05, -0.3, top + 0.1, f - 0.05, f + 0.05, [0.3, 0.26, 0.2], 0.9);
+        const S = 6;
+        for (let k = 0; k < S; k++) {
+          const t0 = k / S, t1 = (k + 1) / S, sag = (t: number) => Math.sin(t * Math.PI) * 0.35;
+          const u0 = a0 + (a1 - a0) * t0, u1 = a0 + (a1 - a0) * t1;
+          solid('wood', [at(u0, top - sag(t0) - 1.1, f), at(u1, top - sag(t1) - 1.1, f), at(u1, top - sag(t1) - 1.1, f + 0.025), at(u0, top - sag(t0) - 1.1, f + 0.025), at(u0, top - sag(t0), f), at(u1, top - sag(t1), f), at(u1, top - sag(t1), f + 0.025), at(u0, top - sag(t0), f + 0.025)], net, 2.5);
+        }
       }
     }
     for (let k = 0; k < q.int(1, 4); k++) {
       const a = doorAt + side * (1.2 + k * 0.65), f = q.range(0.6, 1.4), y = 0, s = 0.28;
       if (Math.abs(a) > W + 1) break;
+      if (offWay(...at2(at, a, f)) < 2) continue;
       box(at, 'wood', a - s, a + s, y, y + 0.42 + (k % 2) * 0.0, f - s * 0.8, f + s * 0.8, [0.36, 0.3, 0.22], 0.9);
     }
   }

@@ -554,6 +554,10 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       let lo = Infinity, hi = -Infinity;
       for (const [cx, cz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0]]) { const y = plain(x + cx * w * 0.55, z + cz * w * 0.55); lo = Math.min(lo, y); hi = Math.max(hi, y); }
       if (hi - lo > 3.4 || lo < sea + 1.4) continue;
+      // Nor where its level ground, eased into the land about it, would pull the track out of its own grade: the ground is levelled for a
+      // house after the track is cut, and a house standing much below the track beside it left a step in the track too steep to walk.
+      const pad = Math.max(w, d) * 0.62 + 1.2, level = made(x, z);
+      if ((island.way ?? []).some(([wx, wz, wy]) => { const past = Math.hypot(wx - x, wz - z) - pad; return past < 4 && Math.abs(level - wy) * (1 - smooth(past / 4)) > 0.45; })) continue;
       // Front to the track, or, now and then, gable to it and front to the sea.
       const toTrack = Math.atan2(-((bx - ax) / l) * side, (bz - az) / l * side);
       const faces = tries % 2 === 0 && q.chance(0.7) ? toTrack : Math.atan2(cove.z - z, cove.x - x);

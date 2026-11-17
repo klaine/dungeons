@@ -18,14 +18,6 @@ export interface TerrainOptions {
   skip: (cell: Rect) => boolean;
   /** Moves a corner before it is placed: used to draw the sheet's edge up to a boundary. */
   warp?: (x: number, z: number) => [number, number];
-  /**
-   * Of the cells skipped, those under which the sheet may run on a little way, out of sight: the cells beside one that is laid are laid
-   * too, sinking `apronDrop` metres away from it. Where carved ground ends on this sheet, the two meet along a line drawn by each in its own
-   * way (the carving's points every few centimetres, the sheet's every cell), and a sliver of sky can show between them; the lip under the
-   * carving fills it.
-   */
-  apron?: (c: { x0: number; x1: number; z0: number; z1: number }) => boolean;
-  apronDrop?: number;
   seed: number;
   /** Tint of bare rock. */
   stone: [number, number, number];
@@ -50,33 +42,19 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
   let triangles = 0;
   const e = Math.min(1, cell * 0.5);
   const P = [0, 0, 0, 0].map(() => ({ x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 }));
-  // Which cells are skipped, worked out once, for the lip.
-  const cellAt = (i: number, j: number) => ({ x0: area.x0 + i * cell, x1: area.x0 + (i + 1) * cell, z0: area.z0 + j * cell, z1: area.z0 + (j + 1) * cell });
-  const skipped = new Uint8Array(nx * nz);
-  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) skipped[j * nx + i] = o.skip(cellAt(i, j)) ? 1 : 0;
-  const isSkipped = (i: number, j: number) => i < 0 || j < 0 || i >= nx || j >= nz || skipped[j * nx + i] === 1;
-  const drop = o.apronDrop ?? 2;
-  let sink = 0;
-  const corner = (k: number, x: number, z: number, i = 0, j = 0) => {
+  const corner = (k: number, x: number, z: number) => {
     const q = P[k];
     if (o.warp) [x, z] = o.warp(x, z);
     q.x = x; q.z = z;
-    // (A corner of the lip sinks if no laid cell touches it; those that do stay on the sheet, so the lip leaves it without a crack.)
-    q.y = height(x, z) - (sink && isSkipped(i - 1, j - 1) && isSkipped(i, j - 1) && isSkipped(i - 1, j) && isSkipped(i, j) ? sink : 0);
+    q.y = height(x, z);
     const dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e);
     const l = Math.hypot(dx, 2 * e, dz);
     q.nx = -dx / l; q.ny = (2 * e) / l; q.nz = -dz / l;
   };
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x0 = area.x0 + i * cell, z0 = area.z0 + j * cell;
-    sink = 0;
-    if (skipped[j * nx + i]) {
-      let beside = false;
-      for (let dj = -1; dj <= 1 && !beside; dj++) for (let di = -1; di <= 1; di++) if (!isSkipped(i + di, j + dj)) { beside = true; break; }
-      if (!beside || !o.apron || !o.apron({ x0, x1: x0 + cell, z0, z1: z0 + cell })) continue;
-      sink = drop;
-    }
-    corner(0, x0, z0, i, j); corner(1, x0 + cell, z0, i + 1, j); corner(2, x0 + cell, z0 + cell, i + 1, j + 1); corner(3, x0, z0 + cell, i, j + 1);
+    if (o.skip({ x0, x1: x0 + cell, z0, z1: z0 + cell })) continue;
+    corner(0, x0, z0); corner(1, x0 + cell, z0); corner(2, x0 + cell, z0 + cell); corner(3, x0, z0 + cell);
     // Split along the diagonal that makes the flatter pair, which keeps ridges from saw-toothing.
     const split = Math.abs(P[0].y - P[2].y) < Math.abs(P[1].y - P[3].y) ? [[0, 3, 2], [0, 2, 1]] : [[0, 3, 1], [1, 3, 2]];
     for (const [a, b, c] of split) {

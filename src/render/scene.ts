@@ -70,8 +70,6 @@ export interface SeaDesc {
   x: number;
   z: number;
   bed: { x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array };
-  /** The height of the highest ground across the water, on the mainland. */
-  peaks?: number;
   /** Points at the foot of the cliffs where the swell breaks into spray, each with the way out to sea. */
   spray?: { x: number; z: number; nx: number; nz: number }[];
 }
