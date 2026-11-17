@@ -239,6 +239,40 @@ export function wearByWater(f: HeightField, rng: Rng, o: WaterWear): void {
   }
 }
 
+/** How a lattice is worn: by water, by frost, and how far either may take it from the shape it was given. */
+export interface Wear {
+  water: Omit<WaterWear, 'keep'>;
+  frost: { passes: number; repose: number; rate: number };
+  /** How deep the water may cut below the shape, and how high it may build on it, in metres, where nothing is spared. */
+  cut: number;
+  fill: number;
+}
+
+/**
+ * A lattice of `shape`, worn. `keep`, if given, says how far each point is spared, 0 to 1: the
+ * water and the frost act there the less, and the depth they may cut to or build to is bounded by
+ * the share not spared, so that a spared place keeps its shape however long the weather is at it.
+ * `blend`, if given, is how many lattice points in from the edge the wear fades in over, so that
+ * land reckoned beyond the lattice meets it.
+ */
+export function wornLattice(x0: number, z0: number, cell: number, nx: number, nz: number, shape: (x: number, z: number) => number, rng: Rng, wear: Wear, keep?: (x: number, z: number) => number, blend = 0): HeightField {
+  const f = new HeightField(x0, z0, cell, nx, nz), kept = keep ? new Float32Array(nx * nz) : undefined;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const x = x0 + i * cell, z = z0 + j * cell, k = j * nx + i;
+    f.data[k] = shape(x, z);
+    if (kept) kept[k] = keep!(x, z);
+  }
+  const shaped = f.data.slice();
+  wearByWater(f, rng, { ...wear.water, keep: kept });
+  for (let k = 0; k < f.data.length; k++) { const free = kept ? 1 - kept[k] : 1; f.data[k] = Math.max(shaped[k] - wear.cut * free, Math.min(shaped[k] + wear.fill * free, f.data[k])); }
+  wearByFrost(f, wear.frost.passes, wear.frost.repose, wear.frost.rate, kept);
+  if (blend > 0) for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i, e = Math.min(i, j, nx - 1 - i, nz - 1 - j) / blend;
+    if (e < 1) { const s = e * e * (3 - 2 * e); f.data[k] = shaped[k] + (f.data[k] - shaped[k]) * s; }
+  }
+  return f;
+}
+
 /** Wears a heightfield with frost: wherever ground stands over its neighbour more steeply than `repose`, a share `rate` of the excess comes down. */
 export function wearByFrost(f: HeightField, passes: number, repose: number, rate: number, keep?: Float32Array): void {
   const { nx, nz, data: h, cell } = f;
@@ -255,4 +289,69 @@ export function wearByFrost(f: HeightField, passes: number, repose: number, rate
       }
     }
   }
+}
+
+/**
+ * The way of least effort between two points over a square lattice (`cell` metres, `nx` by `nz` points from `x0`, `z0`), going to
+ * any of the eight neighbours of a point at a time, `cost` saying what the step from one point to another costs (at least its
+ * length; Infinity where it may not be taken). As a track is made where nobody has laid one: round a hill rather than over it,
+ * along the side of a slope rather than up it. Its points, from `from` to `to`, or null if there is no way.
+ */
+export function leastPath(x0: number, z0: number, cell: number, nx: number, nz: number, from: [number, number], to: [number, number], cost: (a: number, b: number) => number): [number, number][] | null {
+  const at = (x: number, z: number) => Math.min(nz - 1, Math.max(0, Math.round((z - z0) / cell))) * nx + Math.min(nx - 1, Math.max(0, Math.round((x - x0) / cell)));
+  const start = at(from[0], from[1]), goal = at(to[0], to[1]), gx = goal % nx, gz = Math.floor(goal / nx);
+  const best = new Float64Array(nx * nz).fill(Infinity), came = new Int32Array(nx * nz).fill(-1), done = new Uint8Array(nx * nz);
+  // (A binary heap of points still to be looked at, by what they have cost and the least they can still cost.)
+  const heap: number[] = [], key: number[] = [];
+  const push = (k: number, f: number) => {
+    heap.push(k); key.push(f);
+    for (let i = heap.length - 1; i > 0;) { const p = (i - 1) >> 1; if (key[p] <= key[i]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; [key[p], key[i]] = [key[i], key[p]]; i = p; }
+  };
+  const pop = (): number => {
+    const top = heap[0], lastK = heap.pop()!, lastF = key.pop()!;
+    if (heap.length) {
+      heap[0] = lastK; key[0] = lastF;
+      for (let i = 0; ;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && key[l] < key[m]) m = l; if (r < heap.length && key[r] < key[m]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; [key[m], key[i]] = [key[i], key[m]]; i = m; }
+    }
+    return top;
+  };
+  const guess = (k: number) => Math.hypot((k % nx) - gx, Math.floor(k / nx) - gz) * cell;
+  best[start] = 0; push(start, guess(start));
+  while (heap.length) {
+    const k = pop();
+    if (done[k]) continue;
+    done[k] = 1;
+    if (k === goal) break;
+    const i = k % nx, j = (k - i) / nx;
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+      const n = jj * nx + ii;
+      if (done[n]) continue;
+      const c = best[k] + cost(k, n);
+      if (c < best[n]) { best[n] = c; came[n] = k; push(n, c + guess(n)); }
+    }
+  }
+  if (!done[goal]) return null;
+  const path: [number, number][] = [];
+  for (let k = goal; k >= 0; k = came[k]) path.push([x0 + (k % nx) * cell, z0 + Math.floor(k / nx) * cell]);
+  path.reverse();
+  path[0] = [from[0], from[1]]; path[path.length - 1] = [to[0], to[1]];
+  return path;
+}
+
+/** A line made smooth: corners cut a quarter in from either end, three times over (Chaikin's way), its ends kept. */
+export function smoothLine(line: [number, number][], times = 3): [number, number][] {
+  let pts = line;
+  for (let t = 0; t < times; t++) {
+    const out: [number, number][] = [pts[0]];
+    for (let k = 0; k < pts.length - 1; k++) {
+      const [ax, az] = pts[k], [bx, bz] = pts[k + 1];
+      out.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
+    }
+    out.push(pts[pts.length - 1]);
+    pts = out;
+  }
+  return pts;
 }

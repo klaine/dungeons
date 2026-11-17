@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
-import { beachness, coastAt, inland, landAt, onStair } from '../core/island';
+import { acrossWater, beachness, coastAt, inland, landAt, onStair } from '../core/island';
 import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
@@ -82,7 +82,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const nearCave = (x: number, z: number, m: number) => !!cave && Math.hypot(x - cave.x - Math.cos(cave.heading) * cave.length * 0.5, z - cave.z - Math.sin(cave.heading) * cave.length * 0.5) < cave.length * 0.5 + 8 + m;
   // (Steep ground inland is carved as rock too: the crags of the summits. And the stair, wherever it runs, is carved with the cliff it is cut in.)
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.1; };
-  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)); };
+  const ar = o.arch;
+  const nearArch = (x: number, z: number, m: number) => { if (!ar) return false; const [ax, az] = ar.from, [bx, bz] = ar.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)); return Math.hypot(x - ax - dx * t, z - az - dz * t) < ar.width + 4 + m; };
+  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || nearArch(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)); };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
@@ -208,6 +210,32 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const arch = roof - (c / half) ** 2 * 2.2;
     return Math.min(half - Math.abs(c), y - floor + 0.3, arch - y, cave.length + 1.5 - a + end * 3);
   } : null;
+  // ---- the opening under the arch: the sea cut through the neck of rock between the cliff and its stack. Not an ellipse: its roof
+  // is a bed of the rock, nearly level, stepped where blocks have fallen from it; its sides are joints, leaning in as they rise
+  // and stepping at the beds, one side not as the other; and at the water the waves have worn a notch into both.
+  const archAir = ar ? (() => {
+    const [ax, az] = ar.from, [bx, bz] = ar.to, len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len;
+    const stack = o.stacks.reduce((p, q) => (Math.hypot(q.x - bx, q.z - bz) < Math.hypot(p.x - bx, p.z - bz) ? q : p), o.stacks[0]);
+    const near = 3, far = len - (stack ? stack.r * 0.8 : 3), mid = (near + far) / 2, half = Math.max(2.5, (far - near) / 2);
+    const q = rng.fork('arch'), leanA = q.range(0.08, 0.4), leanB = q.range(0.08, 0.4), roofTilt = q.range(-0.12, 0.12), bed = rockKind.bed * q.range(2.5, 4.5);
+    const sa = q.range(0, 50), sb = q.range(0, 50);
+    // (Stepped: a smooth wander held to the nearest of steps a bed or two apart, so that its edges are ledges, not curves.)
+    const steps = (v: number, size: number) => Math.round(v / size) * size;
+    return (x: number, y: number, z: number): number => {
+      const sAlong = (x - ax) * ux + (z - az) * uz, c = -(x - ax) * uz + (z - az) * ux;
+      if (Math.abs(c) > ar.width + 3 || sAlong < near - 6 || sAlong > far + 6) return -9;
+      const up = Math.max(0, y - sea);
+      // The roof: a bed, tilted a little, its underside broken into blocks; a little higher at the middle, where most has fallen.
+      const roof = sea + ar.under + roofTilt * (sAlong - mid) + 0.18 * ar.under * (1 - ((sAlong - mid) / half) ** 2)
+        + steps((fbm2(sAlong * 0.22 + sa, c * 0.22, 2) - 0.5) * 3.2, bed) + (fbm2(sAlong * 0.9, c * 0.9 + sb, 2) - 0.5) * 0.5;
+      // The sides: joints, each leaning in by its own amount as it rises, stepping out and in at the beds.
+      const jogA = steps((fbm2(y * 0.18 + sa, c * 0.15, 2) - 0.5) * 2.6, bed * 0.7), jogB = steps((fbm2(y * 0.18 + sb, c * 0.15 + 7, 2) - 0.5) * 2.6, bed * 0.7);
+      const notch = 0.9 * Math.exp(-(((y - sea - 0.4) / 1.3) ** 2));
+      const left = mid - half + leanA * up + jogA - notch, right = mid + half - leanB * up + jogB + notch;
+      const rough = (fbm2(sAlong * 1.3 + sb, y * 1.3, 2) - 0.5) * 0.35;
+      return Math.min(sAlong - left, right - sAlong, roof - y, y - (sea - 8)) + rough;
+    };
+  })() : null;
   /** How far in under the cliff a point of the cave is, 0 at its mouth and 1 at its end: for how dark it is there. */
   const caveDeep = (x: number, z: number) => (cave ? Math.min(1, Math.max(0, ((x - cave.x) * Math.cos(cave.heading) + (z - cave.z) * Math.sin(cave.heading)) / cave.length)) : 0);
 
@@ -235,7 +263,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const sx = x + out * spot.ux, sz = z + out * spot.uz;
     return (y - land.at(sx, sz)) / steepness.at(sx, sz);
   };
-  const density = caveAir ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), caveAir(x, y, z)) : landAir;
+  const density = caveAir || archAir ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), caveAir ? caveAir(x, y, z) : -9, archAir ? archAir(x, y, z) : -9) : landAir;
 
   // ---- colours: of rock by the sea, and of the turf on the land above it
   const tint = b.stoneTint;
@@ -489,7 +517,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
 
   // ---- the mainland and the islets, far across the water
   wild.group = 'soft';
-  layMainland(wild.mesh('far'), site, tint);
+  layMainland(wild.mesh('far'), site, tint, F);
   wild.group = 'wild';
 
   // Where the player comes in: at the end of the jetty, facing the land.
@@ -538,13 +566,15 @@ export function buildIsland(b: IslandBuild): IslandResult {
  * sheet in rings about the island, with the far material, and left out wherever it lies under
  * the water.
  */
-function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): void {
+function layMainland(mesh: MeshBuilder, site: Site, stone: Colour, F: number): void {
   const o = site.island!, m = o.mainland, cx = o.x, cz = o.z, sea = o.sea, seed = (o.x * 7.31 + o.z * 3.17) % 97;
   const around = 720, radii: number[] = [];
   for (let r = 240; r <= 3400; r += 4 + (r - 240) * 0.016) radii.push(r);
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(fbm2(x, z, 3, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
     const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);
+    // (An island that was found has about it the rest of the sea it was found in: the land of that, not a mainland drawn by rule.)
+    if (o.terrain) return acrossWater(o, F, x, z, r);
     // The mainland's shore: at its distance on its bearing, coming nearer or further in bays and points, and turning away at either end of its arc.
     const off = Math.abs(((a - m.bearing + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
     const shore = m.distance * (1 + 0.12 * (fbm2(a * 3 + seed, 0.5, 3) - 0.5) + 0.05 * Math.sin(a * 9 + seed)) + Math.max(0, off - m.spread) * 2400;

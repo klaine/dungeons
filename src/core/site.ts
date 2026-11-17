@@ -418,6 +418,15 @@ export interface Island {
   peaks?: { x: number; z: number; r: number; height: number }[];
   /** How far the land comes down towards the sea near the coast in each of the directions `coast` is given for, 0 to 1: at 1 it runs down to a low rocky shore, at 0 it ends in the full height of the cliff. */
   edge?: number[];
+  /**
+   * If present, the island was found, not drawn: in a sea of islands made by noise and worn by water and frost (`archipelago.ts`,
+   * from the stream `seed`), the point (`u`, `v`) of that land's own frame lies under the middle of the house's level ground,
+   * the frame is turned by `turn`, and the land's height there, `base`, is the forecourt's floor; the sea stands at `shore` in the
+   * frame. The island's own land is that
+   * land made fine on a lattice `cell` metres fine and worn again; its coast is read off it, and the land across the water is
+   * the rest of that sea. Recorded so that whoever builds the place makes the same land.
+   */
+  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number };
   /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
   crown: { x: number; z: number; r: number; height: number };
   /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
@@ -458,6 +467,11 @@ export interface Island {
   boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
   /** Pillars of rock standing out of the sea off the cliffs: where, how broad at the foot, how high their tops stand over the sea. */
   stacks: { x: number; z: number; r: number; height: number }[];
+  /**
+   * Now and then a natural arch: a span of rock from the cliff top at `from` (a point `[x, z]`) out to a stack at `to`, `width`
+   * across, its top at the level `top`, and under it the sea cut through in an opening whose crown stands `under` metres over the sea.
+   */
+  arch?: { from: [number, number]; to: [number, number]; width: number; top: number; under: number };
   /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
   seaCave?: { x: number; z: number; heading: number; length: number };
   /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. `height` scales its hills and mountains: low green country at 0.3, a snowy range at 1. */

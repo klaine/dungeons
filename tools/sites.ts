@@ -1,15 +1,18 @@
-/** Generates many sites and reports on them. Usage: npx tsx tools/sites.ts [count] */
+/**
+ * Generates many sites and reports on them. Usage: npx tsx tools/sites.ts [count] [valley|island|mountain]
+ * (With a kind of place named, only that kind: the whole takes some twenty minutes, now that land is made before it is laid out.)
+ */
 import { generateSite } from '../src/core/generate';
 import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
 import { inland } from '../src/core/island';
 import { inside } from '../src/core/mountain';
 
-const count = Number(process.argv[2] ?? 200);
+const count = Number(process.argv[2] ?? 200), only = process.argv[3];
 const tally = new Map<string, number>();
 const bump = (k: string) => tally.set(k, (tally.get(k) ?? 0) + 1);
 let failures = 0;
-for (let n = 0; n < count; n++) {
+for (let n = 0; n < (only && only !== 'valley' ? 0 : count); n++) {
   const seed = `check-${n}`;
   try {
     const site = generateSite(seed);
@@ -47,14 +50,14 @@ for (let n = 0; n < count; n++) {
     console.log(seed, 'FAILED', (e as Error).message);
   }
 }
-console.log(`${count} sites, ${failures} failures`);
+if (!only || only === 'valley') console.log(`${count} sites, ${failures} failures`);
 for (const k of [...tally.keys()].sort()) console.log(' ', k.padEnd(14), tally.get(k));
 
 // Islands: the same houses on islands in the sea. Each must be completable, and what is built on
 // it must stand on the land, well in from the cliffs, with the track on land all the way to the jetty.
 const isles = new Map<string, number>();
 let isleFailures = 0;
-for (let n = 0; n < Math.ceil(count / 4); n++) {
+for (let n = 0; n < (only && only !== 'island' ? 0 : Math.ceil(count / 4)); n++) {
   const seed = `isle-check-${n}`;
   try {
     const site = generateSite(seed, 'island'), o = site.island!;
@@ -77,6 +80,8 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
       const run = Math.hypot(stair[k][0] - stair[k - 1][0], stair[k][1] - stair[k - 1][1]), rise = stair[k][2] - stair[k - 1][2];
       if (run > 4.5 || rise > run * 0.62 + 0.15) throw new Error(`the stair breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
     }
+    // (Whether the island was found in a sea of them, as islands are made now, or drawn, as they are where none is found.)
+    tally2(`found=${!!o.terrain}`);
     tally2(`landing=${o.landing}`);
     tally2(`peaks=${(o.peaks ?? []).length}`);
     tally2(`cottages=${o.cottages.length}`);
@@ -90,23 +95,23 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     console.log(seed, 'FAILED', (e as Error).message);
   }
 }
-console.log(`${Math.ceil(count / 4)} islands, ${isleFailures} failures`);
+if (!only || only === 'island') console.log(`${Math.ceil(count / 4)} islands, ${isleFailures} failures`);
 for (const k of [...isles.keys()].sort()) console.log(' ', k.padEnd(14), isles.get(k));
 
 // Mountain tops: the same houses as hospices above the cloud. Each must be completable; the way and
 // the climb stay on the top and climb no more steeply than a path can; the summit's cairn, the shelter
-// and the arrival stand on the top; and the arrival is in the cloud. (And a few with their land worn,
-// `?terrain=eroded`, held to the same: they take some seconds each to make.)
+// and the arrival stand on the top; and the arrival is in the cloud. (Their land worn, as it is by default; and a few with the
+// plain shape alone, `?terrain=plain`, held to the same.)
 const peaks = new Map<string, number>();
 let peakFailures = 0;
-const plainPeaks = Math.ceil(count / 4), wornPeaks = Math.ceil(count / 20);
-for (let n = 0; n < plainPeaks + wornPeaks; n++) {
-  const worn = n >= plainPeaks, seed = worn ? `worn-check-${n - plainPeaks}` : `peak-check-${n}`;
+const wornPeaks = Math.ceil(count / 4), plainPeaks = Math.ceil(count / 20);
+for (let n = 0; n < (only && only !== 'mountain' ? 0 : plainPeaks + wornPeaks); n++) {
+  const worn = n < wornPeaks, seed = worn ? `peak-check-${n}` : `plain-check-${n - wornPeaks}`;
   try {
-    const site = generateSite(seed, 'mountain', { terrain: worn ? 'eroded' : undefined }), m = site.mountain!;
+    const site = generateSite(seed, 'mountain', { terrain: worn ? 'eroded' : 'plain' }), m = site.mountain!;
     if (worn && !m.terrain) throw new Error('its land is not worn');
     if (!solve(site).ok) throw new Error('cannot be completed');
-    const tally3 = (k: string) => peaks.set(worn ? `worn ${k}` : k, (peaks.get(worn ? `worn ${k}` : k) ?? 0) + 1);
+    const tally3 = (k: string) => peaks.set(worn ? k : `plain ${k}`, (peaks.get(worn ? k : `plain ${k}`) ?? 0) + 1);
     for (const [name, line, most] of [['way', m.way ?? [], 0.56], ['climb', m.climb ?? [], 0.74]] as const) {
       if (line.length < 2) throw new Error(`no ${name}`);
       for (const [x, z] of line) if (inside(m, x, z) < 3) throw new Error(`the ${name} off the top at ${x}, ${z}`);
@@ -168,6 +173,6 @@ for (let n = 0; n < plainPeaks + wornPeaks; n++) {
     console.log(seed, 'FAILED', (e as Error).message);
   }
 }
-console.log(`${plainPeaks} mountain tops and ${wornPeaks} worn, ${peakFailures} failures`);
+if (!only || only === 'mountain') console.log(`${wornPeaks} mountain tops and ${plainPeaks} plain, ${peakFailures} failures`);
 for (const k of [...peaks.keys()].sort()) console.log(' ', k.padEnd(14), peaks.get(k));
 if (failures || isleFailures || peakFailures) process.exitCode = 1;

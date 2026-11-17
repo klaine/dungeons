@@ -164,8 +164,12 @@ export type PlaceKind = 'valley' | 'island' | 'mountain';
 
 /** Choices that are not part of the seed: trials of other ways of making a place, to be compared with the usual way. */
 export interface MakeOptions {
-  /** A mountain top's land given fractal detail and worn by water and frost (`terrain.ts`), rather than its plain shape alone. */
-  terrain?: 'eroded';
+  /**
+   * How the land is made: by default (`eroded`) its plain shape is given fractal detail and worn by water and frost (`terrain.ts`)
+   * before anything is laid on it, and the country round about is made the same way; `plain` keeps the plain shape alone, as
+   * places were first made.
+   */
+  terrain?: 'eroded' | 'plain';
 }
 
 export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: MakeOptions = {}): Site {
@@ -216,7 +220,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   for (let attempt = 0; attempt < CANDIDATES; attempt++) {
     let site: Site;
     try {
-      site = draftSite(seed, setting, base.fork(`site/${attempt}`), size, kind);
+      site = draftSite(seed, setting, base.fork(`site/${attempt}`), size, kind, { ...opts, terrain: 'plain' });
     } catch {
       continue;
     }
@@ -225,8 +229,11 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   }
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
-  if (opts.terrain) {
-    try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, opts); } catch { /* the plain draft stands */ }
+  if (opts.terrain !== 'plain' && (kind === 'mountain' || kind === 'island')) {
+    try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
+      // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
+      if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
+    }
   }
   return best;
 }
@@ -1676,7 +1683,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
   };
   // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
-  if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'));
+  if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'), opts.terrain === 'eroded');
   else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded');
   else layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);

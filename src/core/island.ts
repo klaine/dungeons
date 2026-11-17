@@ -1,4 +1,6 @@
 import { fbm2, Rng } from './rng';
+import { archipelago, findIslands, frameHeight, islandDetail, islandFrame, IslandSpot } from './archipelago';
+import { HeightField, leastPath, smoothLine, wornLattice } from './terrain';
 import { Building, Island, Place, Site } from './site';
 import { footprintOf, planClassical } from './building';
 
@@ -39,8 +41,10 @@ function softMin(a: number, b: number, k: number): number {
  */
 export function inland(o: Island, x: number, z: number): number {
   const dx = x - o.x, dz = z - o.z, r = Math.hypot(dx, dz), angle = Math.atan2(dz, dx);
-  // (Measured along the bearing, which is near enough square to the coast wherever the coast is not swinging sharply.)
-  const coast = coastAt(o, angle) - r;
+  // (Measured along the bearing, which is near enough square to the coast wherever the coast is not swinging sharply. On an island
+  // that was found, whose coast has inlets running alongside the bearings, it is measured truly, from a field worked out from the land.)
+  const sea = o.terrain ? coastField(o) : null;
+  const coast = sea && sea.holds(x, z) ? sea.at(x, z) : coastAt(o, angle) - r;
   const c = o.cove, cr = Math.hypot(x - c.x, z - c.z);
   const bowl = cr - c.r;
   // The channel: from the middle of the cove out along its bearing to the open sea.
@@ -147,13 +151,28 @@ function summits(o: Island, x: number, z: number): number {
  * way, the stair) is to be counted; while it is being laid out, it is not yet.
  */
 export function landAt(o: Island, floor: number, x: number, z: number, levelled = true): number {
+  const top = topAt(o, floor, x, z);
+  return finish(o, x, z, below(o, x, z, levelled ? levelTop(o, floor, x, z, top) : top), levelled);
+}
+
+/** The top of the island, before anything is made on it: its swell, its summits, the land rolling between, coming down towards the coast. */
+function topAt(o: Island, floor: number, x: number, z: number): number {
   const d = inland(o, x, z);
+  let top: number;
+  if (o.terrain) {
+    // The land as it was found, made fine and worn again (`islandLand`); inside the coast never lower than a little over the sea.
+    const f = islandLand(o, floor);
+    top = f.holds(x, z) ? f.at(x, z) : frameY(o, floor, x, z);
+    if (d > 0) top = Math.max(top, o.sea + 1.5);
+  } else {
   // The top: a swell of high ground, the summits, and the land rolling between, more roughly the higher it stands.
-  let top = floor + o.crown.height * Math.exp(-((Math.hypot(x - o.crown.x, z - o.crown.z) / o.crown.r) ** 2)) + summits(o, x, z);
+  top = floor + o.crown.height * Math.exp(-((Math.hypot(x - o.crown.x, z - o.crown.z) / o.crown.r) ** 2)) + summits(o, x, z);
   top += (fbm2(x / 38 + 3.1, z / 38 - 1.7, 3, 7) - 0.5) * 6 + (fbm2(x / 11, z / 11, 2, 9) - 0.5) * 0.9;
+  }
   // Towards the coast the land comes down, in some stretches all the way to a low rocky shore, in
   // others not at all, so the cliffs are low in one place and the island's full height in the next.
-  if (o.edge && d < 45) {
+  // (Not on land that was found: its coast is where the land stands at the height its cliff is to have, and the cliff is cut there.)
+  if (o.edge && d < 45 && !o.terrain) {
     const e = ringAt(o.edge, Math.atan2(z - o.z, x - o.x)), low = o.sea + 3.5 + 5 * fbm2(x / 19, z / 19, 2, 17);
     top += (Math.min(top, low) - top) * e * (1 - smooth(d / 45));
   }
@@ -165,32 +184,40 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     // A strip of beach at the foot of the hollow, a little above high water, and the hollow coming up from it.
     top = beachAt + (top - beachAt) * smooth((b - 7) / o.combe) - 0.9 * (1 - Math.min(1, b / 7));
   }
-  top = floor + (top - floor) * smooth((outside(o.level, x, z) - 2) / 16);
-  if (levelled) {
-    // The way is cut and made up to its own level, across a cart's breadth and a little more, and eased into the land beside it.
-    if (o.way) {
-      const w = nearestOn(o.way, x, z, 9);
-      if (w.off < 9) top += (w.y - top) * (1 - smooth((w.off - 2.6) / 6));
-    }
-    // What stands on the land has level ground made for it.
-    const flat = (x0: number, z0: number, y: number, r: number) => { const w = 1 - smooth((Math.hypot(x - x0, z - z0) - r) / 4); top += (y - top) * w; };
-    for (const q of o.cottages) flat(q.x, q.z, q.y, Math.max(q.w, q.d) * 0.62 + 1.2);
-    if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
-    if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
-    if (o.chapel) flat(o.chapel.x, o.chapel.z, o.chapel.y, 15);
-    if (o.mansion) { const w = 1 - smooth((outsideBuilding(o.mansion.building, x, z) - 3) / 5); top += (o.mansion.y - top) * w; }
-    if (o.graveyard) { const q = o.graveyard, w = 1 - smooth((Math.hypot(Math.max(Math.abs(x - q.x) - q.d / 2, 0), Math.max(Math.abs(z - q.z) - q.w / 2, 0)) - 1) / 5); top += (floor - top) * w; }
+  return floor + (top - floor) * smooth((outside(o.level, x, z) - 2) / 16);
+}
+
+/** The top with what has been made on it: the way cut and made up to its level, and level ground for whatever stands on the land. */
+function levelTop(o: Island, floor: number, x: number, z: number, top: number): number {
+  // The way is cut and made up to its own level, across a cart's breadth and a little more, and eased into the land beside it.
+  if (o.way) {
+    const w = nearestOn(o.way, x, z, 9);
+    if (w.off < 9) top += (w.y - top) * (1 - smooth((w.off - 2.6) / 6));
   }
-  // Below the top of the cliff the land goes down to the sea bed: steeply where it is cliff, which
-  // the builder turns to rock, and gently under a beach.
-  let y = top;
-  if (d < 0) {
-    const out = -d, beach = beachness(o, x, z), high = Math.max(0, top - o.sea);
-    const bed = o.sea - 2.5 - Math.min(24, out * 0.32) + (fbm2(x / 17, z / 17, 2, 13) - 0.5) * 3;
-    const cliff = top + (bed - top) * smooth(out / (2.5 + high * 0.2));
-    const sand = Math.min(top, o.sea + 0.3) - out * 0.1 - Math.max(0, out - 7) * 0.32;
-    y = cliff + (Math.max(sand, bed) - cliff) * beach;
-  }
+  // What stands on the land has level ground made for it.
+  const flat = (x0: number, z0: number, y: number, r: number) => { const w = 1 - smooth((Math.hypot(x - x0, z - z0) - r) / 4); top += (y - top) * w; };
+  for (const q of o.cottages) flat(q.x, q.z, q.y, Math.max(q.w, q.d) * 0.62 + 1.2);
+  if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
+  if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
+  if (o.chapel) flat(o.chapel.x, o.chapel.z, o.chapel.y, 15);
+  if (o.mansion) { const w = 1 - smooth((outsideBuilding(o.mansion.building, x, z) - 3) / 5); top += (o.mansion.y - top) * w; }
+  if (o.graveyard) { const q = o.graveyard, w = 1 - smooth((Math.hypot(Math.max(Math.abs(x - q.x) - q.d / 2, 0), Math.max(Math.abs(z - q.z) - q.w / 2, 0)) - 1) / 5); top += (floor - top) * w; }
+  return top;
+}
+
+/** Below the top of the cliff the land goes down to the sea bed: steeply where it is cliff, which the builder turns to rock, and gently under a beach. */
+function below(o: Island, x: number, z: number, top: number): number {
+  const d = inland(o, x, z);
+  if (d >= 0) return top;
+  const out = -d, beach = beachness(o, x, z), high = Math.max(0, top - o.sea);
+  const bed = o.sea - 2.5 - Math.min(24, out * 0.32) + (fbm2(x / 17, z / 17, 2, 13) - 0.5) * 3;
+  const cliff = top + (bed - top) * smooth(out / (2.5 + high * 0.2));
+  const sand = Math.min(top, o.sea + 0.3) - out * 0.1 - Math.max(0, out - 7) * 0.32;
+  return cliff + (Math.max(sand, bed) - cliff) * beach;
+}
+
+/** The strand to the sea cave, the stair, and the stacks: made or standing on the land as it otherwise is. */
+function finish(o: Island, x: number, z: number, y: number, levelled: boolean): number {
   // A strand of shingle along the foot of the cove's cliff to the sea cave, from the end of the beach or from the quay, so that it can be walked to dry-shod.
   if (o.seaCave) {
     const sc = o.seaCave, c = o.cove, head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(sc.z - c.z, sc.x - c.x);
@@ -206,6 +233,16 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     const st = nearestOn(o.stair, x, z, 3);
     if (st.off < 2.4) y += (st.y - y) * (1 - smooth((st.off - 1.45) / 0.9));
   }
+  // The arch: a span of rock from the cliff top out to its stack, falling away steeply on either hand. (The opening under it is cut
+  // by the builder, as the sea cave is: the land is heights, which cannot say "hollow".)
+  if (o.arch) {
+    const ar = o.arch, [ax, az] = ar.from, [bx, bz] = ar.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+    const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)), off = Math.hypot(x - ax - dx * t, z - az - dz * t);
+    if (off < ar.width * 1.2) {
+      const span = ar.top - 0.8 * Math.sin(Math.PI * t) - Math.max(0, off - ar.width * 0.35) * 2.2;
+      y = Math.max(y, y + (span - y) * (1 - smooth((off - ar.width * 0.5) / (ar.width * 0.35))));
+    }
+  }
   // Stacks: pillars standing out of the sea off the cliffs, as steep as the cliffs are.
   for (const s of o.stacks) {
     const r = Math.hypot(x - s.x, z - s.z);
@@ -214,6 +251,116 @@ export function landAt(o: Island, floor: number, x: number, z: number, levelled 
     y = Math.max(y, y + (lump - y) * (1 - smooth((r - s.r) / (s.r * 0.55))));
   }
   return y;
+}
+
+/** The height of the land an island was found in, at a point of the site, before it is made fine (`archipelago.ts`). */
+export function frameY(o: Island, floor: number, x: number, z: number): number {
+  const t = o.terrain!, hx = (o.level.x0 + o.level.x1) / 2, hz = (o.level.z0 + o.level.z1) / 2;
+  const [u, v] = islandFrame(t, hx, hz, x, z);
+  return frameHeight(archipelago(t.seed), u, v) - t.base + floor;
+}
+
+/**
+ * The land across the water from an island that was found: the rest of the sea of islands it was found in, with detail in fewer
+ * octaves the further `out` it lies. (About the island itself the sea has had the low land away, as it cut the cliffs: within a few
+ * hundred metres of its coast nothing stands out of the water but the island, which the near land draws.)
+ */
+export function acrossWater(o: Island, floor: number, x: number, z: number, out: number): number {
+  const t = o.terrain!, hx = (o.level.x0 + o.level.x1) / 2, hz = (o.level.z0 + o.level.z1) / 2;
+  const [u, v] = islandFrame(t, hx, hz, x, z);
+  let y = frameHeight(archipelago(t.seed), u, v, out) - t.base + floor;
+  const off = -inland(o, x, z);
+  if (off < 400) y = Math.min(y, o.sea - 3 + Math.max(0, off - 120) * 0.12);
+  return y;
+}
+
+/**
+ * How far in from its coast each point of an island that was found lies (out to sea, how far out), on a two-metre lattice. Land is
+ * what stands over the height its cliff is to have there (`edge`), on the island the house is on: other land in the lattice is sea.
+ */
+const COASTS = new WeakMap<Island, { sig: number[]; field: HeightField }>();
+function coastField(o: Island): HeightField {
+  const t = o.terrain!, had = COASTS.get(o), sig = [t.seed, t.u, t.v, t.turn, t.shore, o.coast.length, o.coast[0], o.edge?.[0] ?? 0];
+  if (had && had.sig.every((v, k) => v === sig[k])) return had.field;
+  const cell = 2, hx = (o.level.x0 + o.level.x1) / 2, hz = (o.level.z0 + o.level.z1) / 2, a = archipelago(t.seed);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let k = 0; k < o.coast.length; k++) { const an = (k / o.coast.length) * TAU, r = o.coast[k] + 60; x0 = Math.min(x0, o.x + Math.cos(an) * r); x1 = Math.max(x1, o.x + Math.cos(an) * r); z0 = Math.min(z0, o.z + Math.sin(an) * r); z1 = Math.max(z1, o.z + Math.sin(an) * r); }
+  x0 = Math.floor(x0 / cell) * cell; z0 = Math.floor(z0 / cell) * cell;
+  const nx = Math.ceil((x1 - x0) / cell) + 1, nz = Math.ceil((z1 - z0) / cell) + 1, f = new HeightField(x0, z0, cell, nx, nz);
+  const high = new Uint8Array(nx * nz), core = new Uint8Array(nx * nz);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const x = x0 + i * cell, z = z0 + j * cell, [u, v] = islandFrame(t, hx, hz, x, z), y = frameHeight(a, u, v);
+    const cliff = 3 + 13 * (1 - ringAt(o.edge ?? [0], Math.atan2(z - o.z, x - o.x)));
+    high[j * nx + i] = y > t.shore + cliff ? 1 : 0;
+    core[j * nx + i] = y > t.shore + 9 ? 1 : 0;
+  }
+  const start = Math.round((hz - z0) / cell) * nx + Math.round((hx - x0) / cell);
+  /** What is reached from the house's ground over `over`, and nowhere else. */
+  const reached = (over: Uint8Array): Uint8Array => {
+    const got = new Uint8Array(nx * nz), queue = [start];
+    if (!over[start]) return got;
+    got[start] = 1;
+    while (queue.length) {
+      const k = queue.pop()!, i = k % nx;
+      for (const n of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, k - nx, k + nx]) if (n >= 0 && n < nx * nz && over[n] && !got[n]) { got[n] = 1; queue.push(n); }
+    }
+    return got;
+  };
+  // Distances, to the nearest point of the other kind, by two sweeps of the lattice (a chamfer of three and four, in metres near enough).
+  const D1 = cell, D2 = cell * 1.4142;
+  const sweep = (dist: Float32Array) => {
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; if (!dist[k]) continue; let m = dist[k]; if (i > 0) m = Math.min(m, dist[k - 1] + D1); if (j > 0) { m = Math.min(m, dist[k - nx] + D1); if (i > 0) m = Math.min(m, dist[k - nx - 1] + D2); if (i < nx - 1) m = Math.min(m, dist[k - nx + 1] + D2); } dist[k] = m; }
+    for (let j = nz - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) { const k = j * nx + i; if (!dist[k]) continue; let m = dist[k]; if (i < nx - 1) m = Math.min(m, dist[k + 1] + D1); if (j < nz - 1) { m = Math.min(m, dist[k + nx] + D1); if (i < nx - 1) m = Math.min(m, dist[k + nx + 1] + D2); if (i > 0) m = Math.min(m, dist[k + nx - 1] + D2); } dist[k] = m; }
+  };
+  // The island is what the search found (the land nine metres over the sea, reached from the house), and its own shore, as low as
+  // its cliffs are cut, within forty metres of that: not every low shore it touches, which may run on to the next island.
+  const kernel = reached(core), near = new Float32Array(nx * nz);
+  for (let k = 0; k < nx * nz; k++) near[k] = kernel[k] ? 0 : 1e6;
+  sweep(near);
+  for (let k = 0; k < nx * nz; k++) high[k] = high[k] && near[k] <= 40 ? 1 : 0;
+  const land = reached(high);
+  const inside = new Float32Array(nx * nz), outside = new Float32Array(nx * nz);
+  for (let k = 0; k < nx * nz; k++) { inside[k] = land[k] ? 1e6 : 0; outside[k] = land[k] ? 0 : 1e6; }
+  sweep(inside); sweep(outside);
+  // (Half a cell from either side, so that the coast itself lies between a point of land and a point of sea.)
+  for (let k = 0; k < nx * nz; k++) f.data[k] = land[k] ? inside[k] - cell / 2 : -(outside[k] - cell / 2);
+  COASTS.set(o, { sig, field: f });
+  return f;
+}
+
+/** How an island's own land is made fine and worn again; open, so that the relief tool can try others. */
+export const ISLAND_WEAR = {
+  /** Detail laid on, in metres; how far the walkable land is spared the water, 0 to 1. */
+  detail: 2.2, spare: 0.5,
+  wear: {
+    cut: 8, fill: 4,
+    water: { drops: 1.2, life: 60, inertia: 0.1, capacity: 0.6, erode: 0.12, deposit: 0.2, evaporate: 0.015, gravity: 4, radius: 3, most: 0.5 },
+    frost: { passes: 2, repose: 1.6, rate: 0.35 },
+  },
+};
+const FIELDS = new WeakMap<Island, { sig: number[]; field: HeightField }>();
+/**
+ * The island's own land, on a two-metre lattice: the land it was found in, with fine detail laid on and worn again by water and frost
+ * at that scale. The house's ground is spared, and the sea bed; the rest of the land in part.
+ */
+function islandLand(o: Island, floor: number): HeightField {
+  const t = o.terrain!, had = FIELDS.get(o), sig = [floor, t.seed, t.u, t.v, t.turn, t.base, o.coast.length];
+  if (had && had.sig.every((v, k) => v === sig[k])) return had.field;
+  const cell = t.cell, W = ISLAND_WEAR;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let k = 0; k < o.coast.length; k++) { const a = (k / o.coast.length) * TAU, r = o.coast[k]; x0 = Math.min(x0, o.x + Math.cos(a) * r); x1 = Math.max(x1, o.x + Math.cos(a) * r); z0 = Math.min(z0, o.z + Math.sin(a) * r); z1 = Math.max(z1, o.z + Math.sin(a) * r); }
+  const M = 40;
+  x0 = Math.floor((x0 - M) / cell) * cell; z0 = Math.floor((z0 - M) / cell) * cell;
+  const nx = Math.ceil((x1 + M - x0) / cell) + 1, nz = Math.ceil((z1 + M - z0) / cell) + 1;
+  const keep = (x: number, z: number) => {
+    if (frameY(o, floor, x, z) < o.sea + 1) return 1;
+    const pad = 1 - smooth((outside(o.level, x, z) - 4) / 14);
+    return Math.max(pad, W.spare);
+  };
+  const shape = (x: number, z: number) => frameY(o, floor, x, z) + W.detail * islandDetail(x, z, t.seed) * (1 - smooth((10 - outside(o.level, x, z)) / 10));
+  const field = wornLattice(x0, z0, cell, nx, nz, shape, new Rng(`island-land/${t.seed}`), W.wear, keep, 6);
+  FIELDS.set(o, { sig, field });
+  return field;
 }
 
 /** Where on the stair, if anywhere, a point lies: how far from its middle line, and its level there. */
@@ -225,7 +372,7 @@ export function onStair(o: Island, x: number, z: number): { off: number; y: numb
  * Lays out an island round a house whose forecourt is `meadow` and whose door is at `doorX` in
  * the forecourt's north side. Fills in the site's `island`, `grounds`, `track` and `paths`.
  */
-export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng): void {
+export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
   const round = (v: number) => Math.round(v * 10) / 10, T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   const house = { x0: Math.min(...others.map((q) => q.x0)) - T, x1: Math.max(...others.map((q) => q.x1)) + T, z0: Math.min(...others.map((q) => q.z0)) - T, z1: meadow.z1 };
@@ -236,6 +383,17 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   // How big the cove is, decided first, since a large one wants a large island round it: from a
   // pool twenty metres across the half of it to a bay three or four times that.
   const coveR = 19 * Math.pow(3.7, Math.pow(rng.fork('cove size').next(), 1.25));
+  // If the land comes first, it is found now: an island in a sea of them with ground for the house on it (`archipelago.ts`).
+  const candidates: { seed: number; spot: IslandSpot }[] = [];
+  if (worn) {
+    const q = rng.fork('terrain'), want = Math.max(q.range(110, 160), coveR * 1.45 + 70);
+    for (let tries = 0; tries < 3 && candidates.length < 3; tries++) {
+      const seed = q.int(0, 1e6);
+      for (const spot of findIslands(archipelago(seed), level.x1 - level.x0, level.z1 - level.z0, want, q.fork(`spot${tries}`)).slice(0, 6)) candidates.push({ seed, spot });
+    }
+    if (!candidates.length) throw new Error(`no island was found for the house (seed ${site.seed})`);
+  }
+  let found: { seed: number; spot: IslandSpot } | null = null;
   // The coast. Islands come in kinds: an oval turned any way; a long ridge; two masses joined at a
   // waist; an egg, broad at one end; or a ragged one, all points and inlets. On any of them, two
   // to four headlands stand out, and now and then the sea has worked a narrow inlet into a weakness of the rock.
@@ -259,45 +417,84 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   // The house stands near the island's northern side: the middle lies south of it by about half the island's breadth.
   const middle = { x: round(hx + shape.range(-18, 18)), z: round(hz + R * Math.max(squash, 0.7) * shape.range(0.42, 0.55)) };
   // (Higher over the sea than a valley's floor over its stream: the island stands out of deep water.)
-  const sea = round(F - shape.range(20, 32));
+  let sea = round(F - shape.range(20, 32));
   const island: Island = {
     x: middle.x, z: middle.z, coast: coastOf(1), sea,
     cove: { x: 0, z: 0, r: 0, out: 0, mouth: 0, beach: 0 }, crown: { x: 0, z: 0, r: 40, height: 0 }, combe: 60, level,
     jetty: { from: [0, 0], to: [0, 0], width: 3 }, cottages: [], boats: [], stacks: [], mainland: { bearing: 0, spread: 1, distance: 1500 }, islets: [],
   };
+  /** Finds the cove; whether one would fit. */
+  const layCove = (): boolean => {
+    island.cove = { x: 0, z: 0, r: 0, out: 0, mouth: 0, beach: 0 };
+    // The cove: on the island's south side, away from the house, its head facing back towards the
+    // middle. A small one is a bowl inside the cliffs with a narrow way in; a large one lies further
+    // out and opens wider, a bay. If none of the size wanted will fit, a smaller is tried.
+    const coving = rng.fork('cove');
+    for (let r = coveR; !island.cove.r && r > 15; r *= 0.88) {
+      for (let tries = 0; tries < 50; tries++) {
+        const out = Math.PI / 2 + coving.range(-1.05, 1.05), big = Math.min(1, (r - 19) / 50);
+        const edge = coastAt(island, out), back = edge - r * coving.range(1 - 0.45 * big, 1.05 - 0.2 * big) - coving.range(4, 11);
+        const c = { x: round(island.x + Math.cos(out) * back), z: round(island.z + Math.sin(out) * back), r: round(r), out, mouth: round(Math.max(11, r * coving.range(0.45, 0.6 + 0.7 * big))), beach: coving.range(0.55, 0.85) };
+        const toMiddle = Math.hypot(island.x - c.x, island.z - c.z) || 1;
+        const headX = c.x + ((island.x - c.x) / toMiddle) * r, headZ = c.z + ((island.z - c.z) / toMiddle) * r;
+        const room = outside(level, headX, headZ);
+        // Round its rim, except at its mouth, the rock between it and the open sea is never a thin fin: the cliffs would be carved through.
+        const half = Math.asin(Math.min(1, c.mouth / 2 / r)) + 0.45;
+        let thin = false;
+        for (let k = 0; k < 48 && !thin; k++) {
+          const t = (k / 48) * TAU;
+          if (Math.abs(turnBetween(t, out)) < half) continue;
+          const px = c.x + Math.cos(t) * (r + 14), pz = c.z + Math.sin(t) * (r + 14);
+          thin = coastAt(island, Math.atan2(pz - island.z, px - island.x)) < Math.hypot(px - island.x, pz - island.z);
+        }
+        if (thin) continue;
+        if (room < 52 || back < r * 0.5 + 20 || coastAt(island, Math.atan2(headZ - island.z, headX - island.x)) - Math.hypot(headX - island.x, headZ - island.z) < 10) continue;
+        island.cove = c;
+        island.combe = round(Math.min(coving.range(55, 80), room - 10));
+        break;
+      }
+    }
+    return island.cove.r > 0;
+  };
   // Grown until the house and its level ground lie well inside the cliffs.
   const corners = [[level.x0, level.z0], [level.x1, level.z0], [level.x0, level.z1], [level.x1, level.z1], [hx, level.z0]];
-  const margin = () => Math.min(...corners.map(([x, z]) => coastAt(island, Math.atan2(z - island.z, x - island.x)) - Math.hypot(x - island.x, z - island.z)));
-  for (let grow = 1; grow < 1.8 && margin() < 18; grow += 0.05) island.coast = coastOf(grow);
-
-  // The cove: on the island's south side, away from the house, its head facing back towards the
-  // middle. A small one is a bowl inside the cliffs with a narrow way in; a large one lies further
-  // out and opens wider, a bay. If none of the size wanted will fit, a smaller is tried.
-  const coving = rng.fork('cove');
-  for (let r = coveR; !island.cove.r && r > 15; r *= 0.88) {
-    for (let tries = 0; tries < 50; tries++) {
-      const out = Math.PI / 2 + coving.range(-1.05, 1.05), big = Math.min(1, (r - 19) / 50);
-      const edge = coastAt(island, out), back = edge - r * coving.range(1 - 0.45 * big, 1.05 - 0.2 * big) - coving.range(4, 11);
-      const c = { x: round(island.x + Math.cos(out) * back), z: round(island.z + Math.sin(out) * back), r: round(r), out, mouth: round(Math.max(11, r * coving.range(0.45, 0.6 + 0.7 * big))), beach: coving.range(0.55, 0.85) };
-      const toMiddle = Math.hypot(island.x - c.x, island.z - c.z) || 1;
-      const headX = c.x + ((island.x - c.x) / toMiddle) * r, headZ = c.z + ((island.z - c.z) / toMiddle) * r;
-      const room = outside(level, headX, headZ);
-      // Round its rim, except at its mouth, the rock between it and the open sea is never a thin fin: the cliffs would be carved through.
-      const half = Math.asin(Math.min(1, c.mouth / 2 / r)) + 0.45;
-      let thin = false;
-      for (let k = 0; k < 48 && !thin; k++) {
-        const t = (k / 48) * TAU;
-        if (Math.abs(turnBetween(t, out)) < half) continue;
-        const px = c.x + Math.cos(t) * (r + 14), pz = c.z + Math.sin(t) * (r + 14);
-        thin = coastAt(island, Math.atan2(pz - island.z, px - island.x)) < Math.hypot(px - island.x, pz - island.z);
-      }
-      if (thin) continue;
-      if (room < 52 || back < r * 0.5 + 20 || coastAt(island, Math.atan2(headZ - island.z, headX - island.x)) - Math.hypot(headX - island.x, headZ - island.z) < 10) continue;
-      island.cove = c;
-      island.combe = round(Math.min(coving.range(55, 80), room - 10));
-      break;
-    }
+  // (On land that was found, measured truly, from the land: its coast has inlets that a ring of distances from the middle does not.)
+  const margin = () => Math.min(...corners.map(([x, z]) => (island.terrain ? coastField(island).at(x, z) : coastAt(island, Math.atan2(z - island.z, x - island.x)) - Math.hypot(x - island.x, z - island.z))));
+  if (!worn) for (let grow = 1; grow < 1.8 && margin() < 18; grow += 0.05) island.coast = coastOf(grow);
+  else for (const cand of candidates) {
+    found = cand;
+    // The land that was found: its middle, the sea's level, and its coast, read off it. The coast is where the land stands at the
+    // height its cliff is to have there, which differs round the island: a low rocky shore here, a cliff fifteen metres high there.
+    // Beyond that the sea has had the land away, and the cliff is cut (`below`).
+    const sp = found.spot, c = Math.cos(sp.turn), sn = Math.sin(sp.turn), du = sp.cu - sp.u, dv = sp.cv - sp.v;
+    island.terrain = { seed: found.seed, cell: 2, u: sp.u, v: sp.v, turn: sp.turn, base: Math.round(sp.base * 100) / 100, shore: Math.round(sp.sea * 100) / 100 };
+    island.x = round(hx + c * du + sn * dv); island.z = round(hz - sn * du + c * dv);
+    island.sea = sea = round(F - (island.terrain.base - island.terrain.shore));
+    const q = rng.fork('cliffs'), s0 = q.range(0, 500), sharp = q.range(0.12, 0.2);
+    const cliffAt = (a: number) => 3 + 13 * smooth((fbm2(Math.cos(a) * 1.3 + s0, Math.sin(a) * 1.3, 3) - 0.42) / sharp);
+    const height = (x: number, z: number) => frameY(island, F, x, z);
+    island.coast = Array.from({ length: N }, (_, k) => {
+      const a = (k / N) * TAU, at = island.sea + cliffAt(a);
+      let r = 0;
+      while (r < sp.reach + 60 && height(island.x + Math.cos(a) * r, island.z + Math.sin(a) * r) > at) r += 1;
+      return round(Math.max(30, r - 1));
+    });
+    island.edge = Array.from({ length: N }, (_, k) => round(1 - (cliffAt((k / N) * TAU) - 3) / 13));
+    // (Read again off the true coast, which is of this island alone: where it joins other land at a low shore, the first reading runs on.)
+    const shoreField = coastField(island);
+    island.coast = island.coast.map((was, k) => {
+      const a = (k / N) * TAU;
+      let r = 0;
+      while (r < was + 40 && shoreField.at(island.x + Math.cos(a) * r, island.z + Math.sin(a) * r) > 0) r += 1;
+      return round(Math.max(30, r - 1));
+    });
+    // (And the cove must fit on it: if it will not, the next island found is tried.)
+    if (margin() >= 16 && layCove()) break;
+    found = null;
   }
+  if (worn && !found) throw new Error(`no island found has room for the house and a cove (seed ${site.seed})`);
+  if (!found) { delete island.terrain; layCove(); }
+
   if (!island.cove.r) throw new Error(`no cove would fit the island (seed ${site.seed})`);
   const cove = island.cove;
   const headAngle = Math.atan2(island.z - cove.z, island.x - cove.x);
@@ -305,6 +502,11 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   {
     const q = rng.fork('crown'), a = cove.out + Math.PI + q.range(-0.9, 0.9), at = coastAt(island, a) * q.range(0.35, 0.6);
     island.crown = { x: round(island.x + Math.cos(a) * at), z: round(island.z + Math.sin(a) * at), r: round(q.range(40, 70)), height: round(q.range(3, 9)) };
+    // (On land that was found, the crown is where it stands highest, and is only a record: the land is what it is.)
+    if (island.terrain) {
+      let best = -Infinity;
+      for (let k = 0; k < 400; k++) { const a2 = q.range(0, TAU), r2 = coastAt(island, a2) * Math.sqrt(q.next()) * 0.9, x = island.x + Math.cos(a2) * r2, z = island.z + Math.sin(a2) * r2, y = frameY(island, F, x, z); if (y > best) { best = y; island.crown = { x: round(x), z: round(z), r: 50, height: round(y - F) }; } }
+    }
   }
   const plain = (x: number, z: number) => landAt(island, F, x, z, false);
 
@@ -323,7 +525,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const landX = cove.x + Math.cos(landA) * cove.r, landZ = cove.z + Math.sin(landA) * cove.r;
 
   // The coast comes down to a low rocky shore in some stretches and stands at the island's full height in others.
-  {
+  if (!island.terrain) {
     const q = rng.fork('edge'), s0 = q.range(0, 500), sharp = q.range(0.08, 0.16);
     island.edge = Array.from({ length: N }, (_, k) => {
       const a = (k / N) * TAU;
@@ -341,7 +543,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       return Math.hypot(x - hx - dx * t, z - hz - dz * t);
     };
     island.peaks = [];
-    for (let tries = 0; tries < 300 && island.peaks.length < want; tries++) {
+    // (Land that was found has its own hills.)
+    for (let tries = 0; tries < 300 && island.peaks.length < want && !island.terrain; tries++) {
       const r = q.range(32, 70) * scale, height = q.range(18, 64), a = q.range(0, TAU), at = coastAt(island, a) * Math.sqrt(q.next()) * 0.85;
       const x = island.x + Math.cos(a) * at, z = island.z + Math.sin(a) * at;
       if (inland(island, x, z) < r * 0.2) continue;
@@ -416,7 +619,56 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   const stairway = island.stair;
   const root: [number, number] = stairway ? [stairway[stairway.length - 1][0], stairway[stairway.length - 1][1]] : island.jetty.from;
   const track: [number, number][] = [[doorX, meadow.z0], [doorX, meadow.z1 - 4]];
-  {
+  // On land that was found, the track goes where a track would have been worn: by the way of least effort over the land, round a
+  // hill and not over it, along a slope and not up it, clear of the cliffs and round the cove, wandering a little where nothing
+  // decides it.
+  let routed = false;
+  if (island.terrain) {
+    const C = 3, [sx, sz] = track[1];
+    let bx0 = Math.min(sx, root[0]), bx1 = Math.max(sx, root[0]), bz0 = Math.min(sz, root[1]), bz1 = Math.max(sz, root[1]);
+    for (let k = 0; k < N; k++) { const a = (k / N) * TAU, r = island.coast[k]; bx0 = Math.min(bx0, island.x + Math.cos(a) * r); bx1 = Math.max(bx1, island.x + Math.cos(a) * r); bz0 = Math.min(bz0, island.z + Math.sin(a) * r); bz1 = Math.max(bz1, island.z + Math.sin(a) * r); }
+    const gx0 = Math.floor(bx0 / C) * C, gz0 = Math.floor(bz0 / C) * C, gnx = Math.ceil((bx1 - gx0) / C) + 1, gnz = Math.ceil((bz1 - gz0) / C) + 1;
+    const hs = new Float32Array(gnx * gnz), inl = new Float32Array(gnx * gnz), wander = new Float32Array(gnx * gnz), s0 = rng.fork('wander').range(0, 300);
+    for (let j = 0; j < gnz; j++) for (let i = 0; i < gnx; i++) {
+      const x = gx0 + i * C, z = gz0 + j * C, k = j * gnx + i;
+      hs[k] = plain(x, z); inl[k] = inland(island, x, z); wander[k] = fbm2(x / 40 + s0, z / 40, 2, 23);
+    }
+    const ex = root[0], ez = root[1];
+    const cost = (a: number, b: number) => {
+      const ax = a % gnx, az = (a - ax) / gnx, bxx = b % gnx, bzz = (b - bxx) / gnx, len = Math.hypot(bxx - ax, bzz - az) * C;
+      const x = gx0 + bxx * C, z = gz0 + bzz * C, grade = Math.abs(hs[b] - hs[a]) / len;
+      // (Near the landing it must come to the edge: the cliffs and the cove are kept clear of only away from it.)
+      const away = smooth((Math.hypot(x - ex, z - ez) - 5) / 9);
+      let c = len * (1 + 10 * grade * grade + 0.5 * wander[b]);
+      // (Steeper than a cart can go, it goes the long way round, along the slope.)
+      if (grade > 0.22) c += len * 400 * (grade - 0.22);
+      if (inl[b] < 12) c += len * 40 * away * (1 - inl[b] / 12);
+      // (And never at the very edge, but where it comes down to the landing.)
+      if (inl[b] < 6 && away > 0.2) return Infinity;
+      if (outside(level, x, z) < 0 && Math.hypot(x - sx, z - sz) > 6) c += len * 50;
+      return c;
+    };
+    const line = leastPath(gx0, gz0, C, gnx, gnz, [sx, sz], [ex, ez], cost);
+    if (line) {
+      // (Smoothed, and a point every three metres or so; leaving the forecourt it goes straight on south a little way first.)
+      const smoothed = smoothLine([[sx, sz], [sx, sz + 6], ...line.slice(2)], 3);
+      let last: [number, number] = [sx, sz];
+      for (const p0 of smoothed.slice(1, -1)) {
+        // (Smoothing cuts corners, round an inlet too: a point it brings near the edge is moved back inland, away from the nearest water.)
+        let [x, z] = p0;
+        for (let i = 0; i < 24 && inland(island, x, z) < 7 && Math.hypot(x - ex, z - ez) > 12; i++) {
+          const gx = inland(island, x + 1, z) - inland(island, x - 1, z), gz = inland(island, x, z + 1) - inland(island, x, z - 1), gl = Math.hypot(gx, gz) || 1;
+          x += (gx / gl) * 0.8; z += (gz / gl) * 0.8;
+        }
+        if (Math.hypot(x - last[0], z - last[1]) > 3) { track.push([round(x), round(z)]); last = [x, z]; }
+      }
+      // (The landing exactly, and no point just short of it: a step a hand long reads as a wall in the level line.)
+      if (Math.hypot(root[0] - last[0], root[1] - last[1]) < 2 && track.length > 2) track.pop();
+      track.push([round(root[0]), round(root[1])]);
+      routed = true;
+    }
+  }
+  if (!routed) {
     const q = rng.fork('track');
     const [sx, sz] = track[1], length = Math.hypot(root[0] - sx, root[1] - sz), steps = Math.max(3, Math.round(length / 9));
     const bend = q.range(-1, 1) * Math.min(18, length * 0.2), phase = q.range(0, Math.PI);
@@ -669,14 +921,33 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
 
   // Stacks off the headlands, and off the cliffs here and there; none in the way into the cove.
   {
+    // (On an island that was found, its headlands are where its coast stands out furthest from its middle, as it was found.)
+    const points = island.terrain ? island.coast.map((r, k) => ({ k, r })).filter(({ k, r }) => { for (let j = -6; j <= 6; j++) if (j && island.coast[(k + j + N) % N] > r) return false; return true; }).map(({ k }) => ({ at: (k / N) * TAU, out: 0, wide: 0.12 })) : heads;
     const q = rng.fork('stacks'), want = q.int(3, 7);
-    for (let tries = 0; tries < 120 && island.stacks.length < want; tries++) {
-      const h = q.pick(heads), a = q.chance(0.7) ? h.at + q.range(-h.wide, h.wide) * 1.5 : q.range(0, TAU);
+    for (let tries = 0; tries < 120 && island.stacks.length < want && points.length; tries++) {
+      const h = q.pick(points), a = q.chance(0.7) ? h.at + q.range(-h.wide, h.wide) * 1.5 : q.range(0, TAU);
       if (Math.abs(turnBetween(a, cove.out)) < 0.45 + cove.mouth / coastAt(island, cove.out)) continue;
       const r = q.range(2.6, 5.5), at = coastAt(island, a) + q.range(9, 24) + r, x = island.x + Math.cos(a) * at, z = island.z + Math.sin(a) * at;
       if (island.stacks.some((s) => Math.hypot(s.x - x, s.z - z) < s.r + r + 5)) continue;
       const cliff = F - sea + 3;
       island.stacks.push({ x: round(x), z: round(z), r: round(r), height: round(cliff * q.range(0.4, 0.95)) });
+    }
+    // Now and then the sea has cut through the neck of a headland and not yet brought down the rock over it: a stack near the
+    // cliff is still joined to it by a span of rock, an arch with the sea running through under it.
+    const qa = rng.fork('arch');
+    if (island.terrain && qa.chance(0.45)) {
+      for (const [i, s] of island.stacks.entries()) {
+        const a = Math.atan2(s.z - island.z, s.x - island.x), edge = coastAt(island, a), gap = Math.hypot(s.x - island.x, s.z - island.z) - s.r - edge;
+        if (gap < 6 || gap > 16) continue;
+        const fx = island.x + Math.cos(a) * (edge - 3), fz = island.z + Math.sin(a) * (edge - 3), cliffTop = plain(fx, fz);
+        // (No higher than the stack, or the cliff top: the span is what is left of the rock between them.)
+        const top = Math.min(cliffTop, sea + s.height) - qa.range(0.5, 2);
+        if (top - sea < 9) continue;
+        island.arch = { from: [round(fx), round(fz)], to: [s.x, s.z], width: round(Math.max(5, s.r * qa.range(1.2, 1.7))), top: round(top), under: round((top - sea) * qa.range(0.45, 0.65)) };
+        // (The stack stands as high as the span, at least.)
+        island.stacks[i] = { ...s, height: round(Math.max(s.height, top - sea + 1)) };
+        break;
+      }
     }
   }
 
@@ -723,7 +994,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
     island.mainland = { bearing: Math.round(q.range(0, TAU) * 1000) / 1000, spread: Math.round(q.range(0.7, 1.25) * 1000) / 1000, distance: Math.round(q.range(1100, 1700)) };
     // (How high its country stands, from a stream of its own: low green hills, or mountains with snow on them.)
     island.mainland.height = Math.round(rng.fork('mainland height').range(0.3, 1) * 100) / 100;
-    for (let k = 0, n = q.int(1, 4); k < n; k++) {
+    // (An island that was found has the rest of the sea it was found in about it, islands and all: none are put there.)
+    for (let k = 0, n = q.int(1, 4); k < n && !island.terrain; k++) {
       const a = q.range(0, TAU), d = q.range(380, 1100);
       island.islets.push({ x: round(island.x + Math.cos(a) * d), z: round(island.z + Math.sin(a) * d), r: round(q.range(18, 60)), height: round(q.range(6, 28)) });
     }

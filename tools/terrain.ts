@@ -75,8 +75,8 @@ function relief(site: Site, box: [number, number, number, number], rgb: Uint8Arr
 for (let n = 0; n < count; n++) {
   const seed = `${prefix}${n}`;
   const t0 = performance.now();
-  const plain = generateSite(seed, 'mountain'), t1 = performance.now();
-  const worn = generateSite(seed, 'mountain', { terrain: 'eroded' }), t2 = performance.now();
+  const plain = generateSite(seed, 'mountain', { terrain: 'plain' }), t1 = performance.now();
+  const worn = generateSite(seed, 'mountain'), t2 = performance.now();
   // The box: about the top and the ridge, the same for both.
   const m = plain.mountain!;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;

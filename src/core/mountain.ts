@@ -558,7 +558,10 @@ function curveThrough(ctrl: [number, number][]): [number, number][] {
   const end = out[out.length - 1], p1 = spaced[spaced.length - 1];
   if (spaced.length > 1 && Math.hypot(end[0] - p1[0], end[1] - p1[1]) < 1.2) spaced.pop();
   spaced.push(end);
-  return spaced;
+  // (And none further apart than three metres, where dropping one left a gap: a point is put back in the middle of it.)
+  const filled: [number, number][] = [spaced[0]];
+  for (const q of spaced.slice(1)) { const p0 = filled[filled.length - 1], gap = Math.hypot(q[0] - p0[0], q[1] - p0[1]); if (gap > 3) filled.push([(p0[0] + q[0]) / 2, (p0[1] + q[1]) / 2]); filled.push(q); }
+  return filled;
 }
 
 /**
@@ -1112,6 +1115,8 @@ function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
     if (share < 0.35 || share > 0.9) continue;
     const [tx, tz, ty] = climb[k], aT = Math.atan2(tz - m.z, tx - m.x), rT = Math.hypot(tx - m.x, tz - m.z), d = refAt(aT) - rT;
     if (d < IN + 12 || d > 150) continue;
+    // (Not where the climb runs in a cutting or on a bank: the way over the top comes in to it at the land's own height.)
+    if (Math.abs(landAt(m, F, tx, tz, false) - ty) > 2) continue;
     // Where the face stands on that bearing a few metres under the top; where the way comes out on the top, a stair's length in
     // from there; and how steeply the path from there must climb to the climb.
     const [ux, uz] = at(aT, refAt(aT) - 5), rP = faceAt(aT, surf(ux, uz) - 5).r, rE = rP - IN;
@@ -1204,7 +1209,14 @@ function layGallery(site: Site, m: Mountain, F: number, rng: Rng): void {
     const clearOf = (pts: [number, number][]) => pts.every(([x, z], i) => inside(m, x, z) > 6 && outside(m.level, x, z) > 6 && nearestOn(way, x, z, 8).off > 7 && (i > n - 5 || nearestOn(climb, x, z, 8).off > 6));
     const want = Math.min(20, d * 0.22) * (rng.fork('bow').chance(0.5) ? 1 : -1);
     const over = [want, -want, want / 2, -want / 2].map(lineOf).find(clearOf) ?? lineOf(0);
-    line.push(...levelLine(over, surf, out, ty, 0.34));
+    const across = levelLine(over, surf, out, ty, 0.34);
+    // (Where it has not the length to come down to the climb's level at a path's grade, its last strides are a stair onto it.)
+    const short = across[across.length - 1][2] - ty;
+    if (Math.abs(short) > 0.05) {
+      const n = Math.min(across.length - 1, Math.ceil(Math.abs(short) / 0.9) + 1);
+      for (let i = 0; i <= n; i++) { const k = across.length - 1 - n + i; across[k][2] = round(across[k][2] - short * (i / n)); }
+    }
+    line.push(...across);
   }
   // Which of it is under the rock: wherever the land stands well over a man's height above it. (Not its first stretch, down from the way.)
   const deep = line.map(([x, z, y], i) => i >= linkEnd && surf(x, z) - y > 3.3);
