@@ -380,6 +380,92 @@ export interface Valley {
   ridge?: { x0: number; x1: number; z: number };
 }
 
+/**
+ * An island: the other kind of place there is besides a valley. The house stands on high ground
+ * at one end of it, and the rest is turf and heather falling to the sea in cliffs, except where a
+ * cove is cut into its side, round as a bowl, with a narrow mouth to the open sea and a beach at
+ * its head, where boats come in. Everything is measured from `x`, `z`, the island's middle.
+ *
+ * `coast` is how far the top of the cliffs lies from the middle in each of an even ring of
+ * directions, starting towards +x and turning towards +z. `sea` is the level of the sea; the
+ * house's forecourt is at its own floor, some way above it. The cove is a disc of water `r`
+ * across the half of it, joined to the open sea by a channel `mouth` wide, which leaves it at
+ * the bearing `out` (radians, measured as `coast` is). Its beach is the part of its rim facing
+ * back into the island, `beach` radians to either side of that.
+ */
+export interface Island {
+  x: number;
+  z: number;
+  coast: number[];
+  sea: number;
+  cove: { x: number; z: number; r: number; out: number; mouth: number; beach: number };
+  /**
+   * How the island is come to. At a `beach`, the land comes down to the head of the cove through a
+   * hollow, and a jetty runs out from the sand. At a `stair`, the cove is walled all round by cliff:
+   * a stone quay stands at the foot of it, and a stair cut in the rock (`stair`) climbs the cove's
+   * wall from the quay to the top, turning back on itself where it runs out of room.
+   */
+  landing?: 'beach' | 'stair';
+  /** The stair cut in the cliff, as points `[x, z, y]` from its foot on the quay to its head on the top, a stride or so apart. */
+  stair?: [number, number, number][];
+  /**
+   * The way from the door to the landing (to the head of the stair, or the head of the jetty), as
+   * points `[x, z, y]`: the ground is cut and made up to this level along it, so that it never
+   * climbs more steeply than a path can, whatever the land does about it.
+   */
+  way?: [number, number, number][];
+  /** Summits: high ground rising `height` metres over the forecourt's floor about `x`, `z`, falling away over `r`, steep and broken. */
+  peaks?: { x: number; z: number; r: number; height: number }[];
+  /** How far the land comes down towards the sea near the coast in each of the directions `coast` is given for, 0 to 1: at 1 it runs down to a low rocky shore, at 0 it ends in the full height of the cliff. */
+  edge?: number[];
+  /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
+  crown: { x: number; z: number; r: number; height: number };
+  /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
+  combe: number;
+  /** The ground about the house, kept level at the forecourt's floor: the house and its forecourt, with room to walk round. */
+  level: { x0: number; x1: number; z0: number; z1: number };
+  /** A jetty of stone from the beach out into the cove, from `from` to `to`, `width` across, on which the player arrives. */
+  jetty: { from: [number, number]; to: [number, number]; width: number };
+  /**
+   * A lighthouse on a headland: a round tower `r` across the half of it at its foot, `height` to
+   * the gallery round its lantern, its door towards `door` (radians), with a keeper's cottage
+   * against it, on ground levelled at `y`. It can be gone into, and a stair winds up inside it to the gallery.
+   */
+  lighthouse?: { x: number; z: number; y: number; r: number; height: number; door: number };
+  /** The ruin of a castle on another headland, facing `facing` (radians), solid and walked round, not gone into. */
+  castle?: { x: number; z: number; y: number; facing: number };
+  /**
+   * Or a mansion: a stuccoed classical house of the kind a valley may have for its manor, made by
+   * the same rules (see `Building`, style `imperial`), standing back from a headland with its
+   * front to the sea, on ground levelled for it at `y`. It can be gone into.
+   */
+  mansion?: { building: Building; y: number };
+  /** Or, on an island with no castle, the ruin of a chapel on that headland: its west front standing and its walls broken down, its east end towards `facing`. */
+  chapel?: { x: number; z: number; y: number; facing: number };
+  /**
+   * The monks' burial ground, beside the house on the forecourt's level: a walled rectangle
+   * `w` along z and `d` along x, its middle at `x`, `z`, with a gap in its wall on the side
+   * towards the house, headstones in rows, and a high cross of stone.
+   */
+  graveyard?: { x: number; z: number; w: number; d: number };
+  /**
+   * Fishermen's cottages on the slope above the beach: low, of whitewashed rubble, thatched or
+   * slated, a chimney at one gable. `w` along the front and `d` deep, outside the walls; the front
+   * looks towards `faces` (radians); `y` is the ground levelled for it. Each is one room, and its door stands open.
+   */
+  cottages: { x: number; z: number; y: number; w: number; d: number; faces: number; roof: 'thatch' | 'slate'; wash: [number, number, number] }[];
+  /** Boats drawn up on the beach, or moored in the cove: where, which way the bow points, and how long. */
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
+  /** Pillars of rock standing out of the sea off the cliffs: where, how broad at the foot, how high their tops stand over the sea. */
+  stacks: { x: number; z: number; r: number; height: number }[];
+  /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
+  seaCave?: { x: number; z: number; heading: number; length: number };
+  /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. `height` scales its hills and mountains: low green country at 0.3, a snowy range at 1. */
+  mainland: { bearing: number; spread: number; distance: number; height?: number };
+  /** Small islands between, seen and not reached. */
+  islets: { x: number; z: number; r: number; height: number }[];
+}
+
 export interface Site {
   seed: string;
   places: Place[];
@@ -396,6 +482,8 @@ export interface Site {
   grounds?: { x0: number; x1: number; z0: number; z1: number };
   /** The shape of that country, of which `grounds` is only the box that holds it. */
   valley?: Valley;
+  /** If present, the site is not a valley at all but an island in the sea, and `valley` is absent. */
+  island?: Island;
   /**
    * How the house stands: built into the end of a ridge, its rooms under the hill with courts
    * open through it (`hill`, and so when absent); standing free in the valley, walled and
@@ -417,7 +505,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */

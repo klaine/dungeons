@@ -163,6 +163,8 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
   };
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, slope } = k;
   const W = b.w, D = b.d, jetty = b.jetty ?? 0.35, T = 0.3, PLINTH = 0.3, H0 = b.heights[0];
+  // How far behind the face of the posts each layer of a framed wall stands (see the storeys of framing).
+  const RAIL = 0.015, BRACE = 0.028, CROSS = 0.04, PANEL = 0.06;
   // (Each storey is as high as the document says, so floors stand at different heights from house to house.)
   const floorOf = (storey: number) => PLINTH + b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0), frontOf = (storey: number) => -jetty * storey;
   const top = floorOf(b.storeys), front = frontOf(b.storeys - 1);
@@ -227,7 +229,9 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
       // Which bays have windows: on the street as many as the house has, spread evenly; elsewhere every other bay, or one.
       const lit = new Set<number>(timberWindows(b, storey)[i].map(([s0]) => Math.round((s0 - 0.2) / pitch)));
       const gaps: Gap[] = [...lit].map((n) => ({ s0: n * pitch + 0.2, s1: (n + 1) * pitch - 0.2, y0: sill + 0.14, y1: head }));
-      pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, 0.045, T, b.colour, gaps);
+      // (Each layer of the frame stands at its own depth, a centimetre and more from the next, so that no two faces lie in one plane and
+      // flicker against each other: posts and beams in front, rails and studs behind them, the braces behind those, the plaster at the back.)
+      pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, PANEL, T, b.colour, gaps);
       // Sill beam and head beam, posts, and the rail under the windows.
       on(f, 'wood', 0, f.L, y0 - 0.14, y0 + 0.2, 0, 0.2, OAK, true);
       on(f, 'wood', 0, f.L, y1 - 0.2, y1, 0, 0.2, OAK, true);
@@ -235,19 +239,19 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
         const half = n === 0 || n === bays ? 0.11 : 0.085, s = Math.min(f.L - half, Math.max(half, n * pitch));
         on(f, 'wood', s - half, s + half, y0 + 0.2, y1 - 0.2, 0, 0.18, OAK, true);
       }
-      on(f, 'wood', 0.1, f.L - 0.1, sill, sill + 0.14, 0.005, 0.17, OAK, true);
+      on(f, 'wood', 0.1, f.L - 0.1, sill, sill + 0.14, RAIL, 0.17, OAK, true);
       for (let n = 0; n < bays; n++) {
         const a = n * pitch + 0.09, c = (n + 1) * pitch - 0.09;
         if (lit.has(n)) {
           const g = gaps.find((q) => Math.abs(q.s0 - (n * pitch + 0.2)) < 0.01)!;
-          on(f, 'wood', a, c, head, head + 0.13, 0.005, 0.17, OAK, true);
-          for (const [p, q] of [[a, g.s0], [g.s1, c]]) on(f, 'wood', p, q, sill + 0.14, head, 0.01, 0.16, OAK, true);
+          on(f, 'wood', a, c, head, head + 0.13, RAIL, 0.17, OAK, true);
+          for (const [p, q] of [[a, g.s0], [g.s1, c]]) on(f, 'wood', p, q, sill + 0.14, head, RAIL, 0.16, OAK, true);
           glazed(f, g, 2, 2, frame, 0.07);
           // Under a window, more often than not, a cross.
           if (rng.chance(0.65)) {
-            stick(f.P(a, y0 + 0.2, 0.09), f.P(c, sill, 0.09), 0.16, 0.11, OAK);
-            stick(f.P(c, y0 + 0.2, 0.085), f.P(a, sill, 0.085), 0.15, 0.11, OAK);
-          } else on(f, 'wood', (a + c) / 2 - 0.06, (a + c) / 2 + 0.06, y0 + 0.2, sill, 0.01, 0.16, OAK, true);
+            stick(f.P(a, y0 + 0.2, BRACE + 0.08), f.P(c, sill, BRACE + 0.08), 0.16, 0.11, OAK);
+            stick(f.P(c, y0 + 0.2, CROSS + 0.075), f.P(a, sill, CROSS + 0.075), 0.15, 0.11, OAK);
+          } else on(f, 'wood', (a + c) / 2 - 0.06, (a + c) / 2 + 0.06, y0 + 0.2, sill, RAIL, 0.16, OAK, true);
           if (i === 0) {
             for (const [p, q] of [[g.s0 - 0.36, g.s0 - 0.01], [g.s1 + 0.01, g.s1 + 0.36]]) on(f, 'wood', p, q, g.y0, g.y1, -0.03, 0.005, paint, true);
             // A box of flowers on the sill.
@@ -257,8 +261,8 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
         } else {
           // A brace from the foot of one post to the head of the next, leaning the way of its neighbours on that side of the wall.
           const lean = n < bays / 2;
-          stick(f.P(lean ? a : c, y0 + 0.2, 0.09), f.P(lean ? c : a, y1 - 0.2, 0.09), 0.16, 0.13, OAK);
-          if (y1 - sill > 1.45) on(f, 'wood', a, c, sill + 1.0, sill + 1.1, 0.012, 0.16, OAK, true);
+          stick(f.P(lean ? a : c, y0 + 0.2, BRACE + 0.08), f.P(lean ? c : a, y1 - 0.2, BRACE + 0.08), 0.16, 0.13, OAK);
+          if (y1 - sill > 1.45) on(f, 'wood', a, c, sill + 1.0, sill + 1.1, RAIL, 0.16, OAK, true);
         }
       }
     });
@@ -269,15 +273,16 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
   const gableWall = (f: Face, y: number, t: number) => {
     const half = f.L / 2, rise = half * pitch, mid = f.P(half, y + rise, t);
     const into = f.P(0, 0, 0.26).sub(f.P(0, 0, 0));
-    wedge(f.P(0, y, t + 0.045), f.P(f.L, y, t + 0.045), f.P(half, y + rise, t + 0.045), into, ['plaster', b.colour], ['plaster', b.colour]);
+    wedge(f.P(0, y, t + PANEL), f.P(f.L, y, t + PANEL), f.P(half, y + rise, t + PANEL), into, ['plaster', b.colour], ['plaster', b.colour]);
     const collar = y + rise * 0.48, inAt = (h: number) => (h - y) / pitch;
-    stick(f.P(0.05, y + 0.05, t + 0.09), f.P(half, y + rise - 0.1, t + 0.09), 0.16, 0.16, OAK);
-    stick(f.P(f.L - 0.05, y + 0.05, t + 0.085), f.P(half, y + rise - 0.1, t + 0.085), 0.16, 0.16, OAK);
+    // (The two rafters meet at the top, so they too stand at different depths.)
+    stick(f.P(0.05, y + 0.05, t + BRACE + 0.08), f.P(half, y + rise - 0.1, t + BRACE + 0.08), 0.16, 0.16, OAK);
+    stick(f.P(f.L - 0.05, y + 0.05, t + CROSS + 0.08), f.P(half, y + rise - 0.1, t + CROSS + 0.08), 0.16, 0.16, OAK);
     on(f, 'wood', inAt(collar) + 0.1, f.L - inAt(collar) - 0.1, collar, collar + 0.14, t, t + 0.18, OAK, true);
-    on(f, 'wood', half - 0.07, half + 0.07, collar + 0.14, y + rise - 0.25, t + 0.005, t + 0.17, OAK, true);
-    for (const side of [-1, 1]) on(f, 'wood', half + side * half * 0.5 - 0.07, half + side * half * 0.5 + 0.07, y, y + rise * 0.5 - 0.12, t + 0.005, t + 0.17, OAK, true);
+    on(f, 'wood', half - 0.07, half + 0.07, collar + 0.14, y + rise - 0.25, t + RAIL, t + 0.17, OAK, true);
+    for (const side of [-1, 1]) on(f, 'wood', half + side * half * 0.5 - 0.07, half + side * half * 0.5 + 0.07, y, y + rise * 0.5 - 0.12, t + RAIL, t + 0.17, OAK, true);
     const g: Gap = { s0: half - 0.36, s1: half + 0.36, y0: y + 0.5, y1: Math.min(collar - 0.08, y + 1.4) };
-    on(f, 'wood', g.s0 - 0.09, g.s1 + 0.09, g.y0 - 0.1, g.y1 + 0.1, t + 0.01, t + 0.15, OAK, true);
+    on(f, 'wood', g.s0 - 0.09, g.s1 + 0.09, g.y0 - 0.1, g.y1 + 0.1, t + RAIL, t + 0.15, OAK, true);
     glazed(f, g, 2, 1, frame, t - 0.02);
     return mid;
   };
@@ -304,10 +309,10 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     const dormers = b.bays >= 3 ? 2 : 1;
     for (let n = 0; n < dormers; n++) {
       const u = dormers === 1 ? 0 : (n ? 1 : -1) * W * 0.24, v0 = front + 0.55, y0 = top + (v0 - front + eave) * pitch - drop, h = 1.25, w = 0.62;
-      box('plaster', u - w, u + w, y0 - 0.5, y0 + h, v0 + 0.045, v0 + 1.6, b.colour);
+      box('plaster', u - w, u + w, y0 - 0.5, y0 + h, v0 + PANEL, v0 + 1.6, b.colour);
       for (const side of [-1, 1]) box('wood', u + side * w - 0.07, u + side * w + 0.07, y0 - 0.5, y0 + h, v0, v0 + 0.16, OAK, true);
-      box('wood', u - w, u + w, y0 + h - 0.12, y0 + h, v0, v0 + 0.16, OAK, true);
-      box('wood', u - w, u + w, y0 + 0.12, y0 + 0.24, v0, v0 + 0.16, OAK, true);
+      box('wood', u - w, u + w, y0 + h - 0.12, y0 + h, v0 + RAIL, v0 + 0.16, OAK, true);
+      box('wood', u - w, u + w, y0 + 0.12, y0 + 0.24, v0 + RAIL, v0 + 0.16, OAK, true);
       const f: Face = { L: w * 2, P: (s, y, t) => at(u - w + s, y, v0 + t) };
       glazed(f, { s0: 0.12, s1: w * 2 - 0.12, y0: y0 + 0.3, y1: y0 + h - 0.18 }, 2, 1, frame, 0.02);
       wedge(at(u - w - 0.2, y0 + h, v0 - 0.22), at(u + w + 0.2, y0 + h, v0 - 0.22), at(u, y0 + h + (w + 0.2) * 1.15, v0 - 0.22), at(0, 0, 2.6).sub(at(0, 0, 0)), tile, ['plaster', b.colour], dark);

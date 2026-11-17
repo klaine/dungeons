@@ -1,5 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
+import { layOutIsland } from './island';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
@@ -157,7 +158,10 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
  * Generates the site for a seed. Several are drafted and the one with the richest structure is
  * kept: early layers are cheap, so it pays to make many and choose.
  */
-export function generateSite(seed: string): Site {
+/** What kind of place to make: a house at the head of a valley (the default), or a house on an island in the sea. */
+export type PlaceKind = 'valley' | 'island';
+
+export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
   const base = new Rng(seed);
   const pickFrom = base.fork('setting');
   const setting: Setting = {
@@ -196,7 +200,7 @@ export function generateSite(seed: string): Site {
   for (let attempt = 0; attempt < CANDIDATES; attempt++) {
     let site: Site;
     try {
-      site = draftSite(seed, setting, base.fork(`site/${attempt}`), size);
+      site = draftSite(seed, setting, base.fork(`site/${attempt}`), size, kind);
     } catch {
       continue;
     }
@@ -1256,7 +1260,7 @@ export function score(site: Site, size = 9): number {
     - 0.5 * Math.abs(rooms - size);
 }
 
-function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): Site {
+function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, kind: PlaceKind = 'valley'): Site {
   const pick = rng.next();
   const draft = pick < 0.34 ? draftRing(rng) : pick < 0.58 ? draftDouble(rng) : pick < 0.8 ? draftStack(rng) : draftSpine(rng);
   const court = draft.court;
@@ -1651,7 +1655,9 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
     setting, sun: normalise(SKIES[setting.hour].sun), title: '',
     // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
   };
-  layOutValley(site, forecourt, ecx, rng.fork('valley'));
+  // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
+  if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'));
+  else layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
   const queue = [forecourt.id];
@@ -1694,7 +1700,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS): 
   if (below.length) parts.push(below.length === 1 ? `${a(below[0].name)} below` : `${count(below.length)} cellars below`);
   if (above.length) parts.push(above.length === 1 ? `${a(above[0].name)} above` : `${count(above.length)} rooms above`);
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
-  site.title = `A ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  site.title = `${kind === 'island' ? 'On an island in the sea, a' : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

@@ -325,6 +325,40 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = .95;
 }`,
   },
+  // Sand on a beach: laid by the wind in ripples a hand apart that wander and break, fine-grained,
+  // with broken shell and a few small pebbles in it. Pale, because it is drawn darker where it is
+  // laid as the bare ground of the turf's material, and darker again where it is wet.
+  sand: {
+    normalStrength: 3.,
+    height: /* glsl */ `
+float bits(vec2 uv, float n, float share, out float id) {
+  vec3 w = worleyId(uv * n, vec2(n));
+  id = w.z;
+  return step(1. - share, w.z) * smoothstep(.32, .12, w.x);
+}
+float heightFn(vec2 uv) {
+  vec2 q = uv + vec2(fbm(uv + 3.3, vec2(3.), 3, .5), fbm(uv + 8.8, vec2(3.), 3, .5)) * .35;
+  float ripple = sin((q.x * 2. + q.y) * 6.2832 * 6. + fbm(uv, vec2(6.), 3, .5) * 4.);
+  ripple = ripple * .5 + .5;
+  ripple = pow(ripple, 1.6) * smoothstep(-.25, .25, fbm(uv + 1.9, vec2(4.), 3, .5));
+  float ia, ib;
+  float shells = bits(uv + 2.2, 23., .12, ia) * .25 + bits(uv + 7.7, 47., .1, ib) * .15;
+  return clamp(.4 + ripple * .16 + fbm(uv, vec2(96.), 2, .6) * .08 + fbm(uv + 4., vec2(8.), 3, .5) * .12 + shells, 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  float ia, ib;
+  float a = bits(uv + 2.2, 23., .12, ia), b = bits(uv + 7.7, 47., .1, ib);
+  float drift = fbm(uv + 6.1, vec2(5.), 4, .55);
+  vec3 sand = mix(vec3(.74, .67, .52), vec3(.86, .8, .66), smoothstep(-.3, .3, drift));
+  // Darker grains gather in the troughs of the ripples, as the heavier ones do.
+  sand = mix(sand, vec3(.52, .47, .38), cavity * .7 + smoothstep(.2, .5, fbm(uv + 2.7, vec2(40.), 2, .5)) * .15);
+  vec3 shell = mix(vec3(.92, .88, .82), vec3(.45, .43, .44), step(.7, fract(ia * 5.3)));
+  albedo = mix(sand, shell, max(a, b));
+  albedo *= .9 + hash21(floor(uv * 512.)) * .2;
+  rough = .92;
+}`,
+  },
   // The floor of a wood: last year's leaves lying flat on one another, each its own brown, with
   // twigs across them and dark mould showing between.
   litter: {

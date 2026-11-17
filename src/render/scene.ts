@@ -44,7 +44,7 @@ export interface DoorDesc {
  */
 export interface CardSet {
   /** What is painted on the cards. */
-  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle' | 'fir' | 'tree';
+  kind: 'grass' | 'flower' | 'fern' | 'herb' | 'reed' | 'leaf' | 'needle' | 'fir' | 'tree' | 'thrift' | 'marram' | 'gorse' | 'bloom';
   /** A tuft is three upright sheets crossed, standing on its base; a card is one sheet about its middle. */
   shape: 'tuft' | 'card';
   /** Whether the cards cast shadows. */
@@ -60,6 +60,20 @@ export interface Scenery {
   /** Unbaked geometry by material name. */
   meshes: Map<string, MeshBuilder>;
   cards: CardSet[];
+}
+
+/**
+ * The sea round an island: its level, the island's middle, and how high the bed lies under it on
+ * a lattice about the island (beyond the lattice it is deep). The renderer draws the water from
+ * it: clear over sand, dark where it is deep, and breaking white where it comes in on the shore.
+ */
+export interface SeaDesc {
+  level: number;
+  x: number;
+  z: number;
+  bed: { x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array };
+  /** Points at the foot of the cliffs where the swell breaks into spray, each with the way out to sea. */
+  spray?: { x: number; z: number; nx: number; nz: number }[];
 }
 
 export interface SceneDescription {
@@ -132,6 +146,12 @@ export interface SceneDescription {
   crossings?: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[];
   /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */
   far?: { wood: [number, number, number]; grass: [number, number, number] };
+  /** The sea, if the place is an island. */
+  sea?: SeaDesc;
+  /** Where gulls wheel, off the cliffs. */
+  birds?: { x: number; y: number; z: number }[];
+  /** Where a lighthouse's lamp is, whose beam turns at dusk and by night. */
+  beacon?: { x: number; y: number; z: number };
   /** Small things left lying about for whoever walks that far. */
   finds?: { at: Vector3; what: string }[];
 }

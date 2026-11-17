@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { farUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -26,6 +26,10 @@ import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
+import { Sea } from '../render/sea';
+import { Birds } from '../render/birds';
+import { Beacon } from '../render/beacon';
+import { inland } from '../core/island';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
@@ -36,7 +40,19 @@ import { Game } from './game';
 import { Player } from './player';
 import { TouchControls } from './touch';
 
+// The address's settings: after its `?`, and after a `#` as well. A page shown inside another (an
+// embedded preview) may not be handed its own `?`; what follows a `#` it always keeps.
 const params = new URLSearchParams(location.search);
+for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, v);
+const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+/** Goes to the place the given settings describe, by the `#` where the page is framed and by the `?` where it is not. */
+function go(next: URLSearchParams): void {
+  if (framed) { location.hash = next.toString(); location.reload(); } else go(next);
+}
+/** Writes the settings into the address without going anywhere, so that a link or a reload brings them back. */
+function keep(next: URLSearchParams): void {
+  try { history.replaceState(null, '', framed ? `${location.pathname}${location.search}#${next}` : `${location.pathname}?${next}`); } catch { /* (a framed page may not be let change its address) */ }
+}
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
 
 /**
@@ -66,9 +82,12 @@ function randomSeed(): string {
 // Every place has a seed in its address, so a link reproduces it.
 if (!params.has('seed')) {
   params.set('seed', randomSeed());
-  history.replaceState(null, '', `${location.pathname}?${params}`);
+  keep(params);
 }
 const seed = params.get('seed')!;
+// What kind of place: a valley, unless an island is asked for.
+// (A build may be made to open on an island when nothing is asked for: `VITE_PLACE=island npm run build`.)
+const place = (params.get('place') ?? import.meta.env.VITE_PLACE) === 'island' ? 'island' : 'valley';
 
 const hud = {
   status: document.getElementById('status')!,
@@ -78,12 +97,24 @@ const hud = {
   seed: document.getElementById('seed')!,
 };
 const newPlace = () => {
-  const next = new URLSearchParams(location.search);
+  const next = new URLSearchParams(params);
   next.set('seed', randomSeed());
-  location.search = next.toString();
+  go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
+// The other kind of place: an island, from a valley, or a valley from an island; a new one, since the same seed is the same house.
+{
+  const button = document.getElementById('kind')!;
+  button.textContent = place === 'island' ? 'A valley' : 'An island';
+  button.addEventListener('click', () => {
+    const next = new URLSearchParams(params);
+    next.set('seed', randomSeed());
+    next.set('place', place === 'island' ? 'valley' : 'island');
+    next.delete('at');
+    go(next);
+  });
+}
 
 let toastTimer = 0;
 function toast(message: string): void {
@@ -135,6 +166,8 @@ async function start(): Promise<void> {
   const plaster = generateTextureSet('plaster', texSize, 41);
   const thatch = generateTextureSet('thatch', texSize, 47);
   const tile = generateTextureSet('tile', texSize, 43);
+  // On an island the bare ground is sand, where in a valley it is beaten earth.
+  const sand = place === 'island' ? generateTextureSet('sand', texSize, 53) : null;
   doneGenerating();
   const materials: Record<string, Material> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
@@ -146,7 +179,7 @@ async function start(): Promise<void> {
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
     bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
-    turf: makeGroundMaterial(ground, soil, scree, litter, thatch, moss),
+    turf: makeGroundMaterial(ground, sand ?? soil, scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
@@ -154,6 +187,9 @@ async function start(): Promise<void> {
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
     metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
     glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
+    // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
+    thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
+    lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -161,7 +197,7 @@ async function start(): Promise<void> {
   await nextFrame();
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
-  const site = params.get('scene') === 'test' ? null : generateSite(seed);
+  const site = params.get('scene') === 'test' ? null : generateSite(seed, place);
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;
@@ -203,10 +239,10 @@ async function start(): Promise<void> {
     select.value = qualityName;
     select.addEventListener('change', () => {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
-      const next = new URLSearchParams(location.search);
+      const next = new URLSearchParams(params);
       next.delete('quality');
       next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror');
-      location.search = next.toString();
+      go(next);
     });
     document.getElementById('begin')!.addEventListener('click', () => {
       intro.hidden = true;
@@ -325,6 +361,21 @@ async function start(): Promise<void> {
     deep: [(0.55 * SKY.zenith[0] + 0.45 * SKY.horizon[0]) * 0.06 + 0.002, (0.55 * SKY.zenith[1] + 0.45 * SKY.horizon[1]) * 0.17 + 0.003, (0.55 * SKY.zenith[2] + 0.45 * SKY.horizon[2]) * 0.11 + 0.003],
   });
   for (const m of water.meshes) { scene.add(m); scenic.push(m); }
+  // The sea round an island: blue-green and clear in the shallows, and white where it breaks.
+  const sea = desc.sea ? new Sea(desc.sea, {
+    deep: [0, 1, 2].map((c) => (0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]) * [0.05, 0.16, 0.2][c] + 0.002),
+    shallow: [0, 1, 2].map((c) => (0.5 * SKY.zenith[c] + 0.5 * SKY.horizon[c]) * [0.18, 0.5, 0.48][c]),
+    foam: [0, 1, 2].map((c) => 0.55 * SKY.horizon[c] + 0.1 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
+  }) : null;
+  if (sea) { scene.add(sea.mesh); scenic.push(sea.mesh); }
+  // Gulls over the cliffs, white in the light of the hour.
+  const birds = desc.birds?.length ? new Birds(desc.birds, seed, SUN_INTENSITY * 0.55 + 0.4) : null;
+  if (birds) scene.add(birds.mesh);
+  // The lighthouse's beam turns once the sun is low enough for it to be lit.
+  const lit = site?.setting.hour === 'night' ? 0.22 : site?.setting.hour === 'dusk' ? 0.1 : site?.setting.hour === 'sunset' ? 0.035 : 0;
+  const beacon = desc.beacon && lit ? new Beacon(desc.beacon, lit) : null;
+  if (beacon) scene.add(beacon.group);
+  if (site && (site.setting.hour === 'night' || site.setting.hour === 'dusk')) (materials.lamp as MeshStandardMaterial).emissiveIntensity = site.setting.hour === 'night' ? 60 : 25;
   const buildMs = performance.now() - t0;
 
   // One merged copy of everything, for collision and for the bake.
@@ -417,6 +468,8 @@ async function start(): Promise<void> {
   under.rotation.x = -Math.PI / 2;
   // (Below the lowest floor there is, which in a cave may be some way down.)
   under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5), ...(desc.lowest !== undefined ? [desc.lowest - 1.5] : []));
+  // (Round an island it is below the sea bed, out of sight under deep water.)
+  if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -495,6 +548,7 @@ async function start(): Promise<void> {
   // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
   water.mirrorSky(atmosphere);
+  sea?.attach(atmosphere);
   /**
    * The weather: how much of the sky is cloud and whether it heaps up or lies in banks, how much
    * mist lies in the low ground, and how thick the air is with distance. All of it is read by the
@@ -614,10 +668,10 @@ async function start(): Promise<void> {
     (document.getElementById('wHour') as HTMLSelectElement).value = site?.setting.hour ?? 'midday';
     const show = () => { for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind']) (panel.querySelector(`output[for=${id}]`) as HTMLOutputElement).value = Number(field(id).value).toFixed(2); };
     const remember = () => {
-      const next = new URLSearchParams(location.search);
+      const next = new URLSearchParams(params);
       next.set('cloud', now.cloud.toFixed(2)); next.set('mist', now.mist.toFixed(2)); next.set('haze', now.haze.toFixed(2)); next.set('layered', now.layered ? '1' : '0');
       if (now.wind !== 1) next.set('wind', now.wind.toFixed(2)); else next.delete('wind');
-      history.replaceState(null, '', `?${next}`);
+      keep(next);
     };
     const change = () => {
       now.cloud = Number(field('wCloud').value); now.mist = Number(field('wMist').value); now.haze = Number(field('wHaze').value); now.wind = Number(field('wWind').value);
@@ -631,11 +685,11 @@ async function start(): Promise<void> {
     // A new hour moves the sun, and with it every shadow and all the light that was worked out: the place is built again, and the eye put back where it was.
     document.getElementById('wHour')!.addEventListener('change', (e) => {
       remember();
-      const next = new URLSearchParams(location.search), p = player.position;
+      const next = new URLSearchParams(params), p = player.position;
       next.set('hour', (e.target as HTMLSelectElement).value);
       next.set('at', [p.x, p.y, p.z, player.yaw].map((v) => v.toFixed(2)).join(','));
       next.set('nointro', '1');
-      location.search = `?${next}`;
+      go(next);
     });
     document.getElementById('weather')!.addEventListener('click', () => { panel.hidden = !panel.hidden; show(); });
   }
@@ -840,6 +894,12 @@ async function start(): Promise<void> {
         // A fall carries much further than a brook, and a high one further than a low one.
         let fall = 0;
         for (const f of desc.falls ?? []) fall = Math.max(fall, (0.5 + 0.5 * Math.min(1, f.height / 8)) / (1 + (Math.hypot(f.x - px, f.z - pz) / 11) ** 2));
+        // On an island the surf is heard all round, loudest at the edge and under the cliffs: it is the roar a fall makes, coming from the shore.
+        if (site?.island) {
+          const edge = Math.abs(inland(site.island, px, pz));
+          fall = Math.max(fall, 0.5 / (1 + (edge / 14) ** 2));
+          if (py < site.island.sea + 1.9) hearing.wading = true;
+        }
         hearing.fall = fall < 0.02 ? 0 : fall;
       }
       let surface: Surface = 'stone';
@@ -863,6 +923,9 @@ async function start(): Promise<void> {
     }
     cullCards(cardMeshes, camera.position);
     water.update(time, camera);
+    sea?.update(time);
+    birds?.update(time);
+    beacon?.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));
     atmosphere.update();
@@ -901,7 +964,8 @@ async function start(): Promise<void> {
         hud.seed.textContent = `${seed} · ${here.name}`;
       } else if (!here && lastPlace !== -2) {
         lastPlace = -2;
-        hud.seed.textContent = `${seed} · valley`;
+        // (Out of doors: the valley, or the island.)
+        hud.seed.textContent = `${seed} · ${site.island ? 'island' : 'valley'}`;
       }
     }
 
@@ -1080,6 +1144,7 @@ async function start(): Promise<void> {
   // How far a point is outside the valley that can be walked (less than nothing inside it): for the tests that try to get out.
   // (A cave or a hall in the valley's side runs in under the hill beyond its edge, and whoever is in one has not got out.)
   (window as any).__dbg.beyond = (x: number, z: number) => {
+    if (site?.island) return -inland(site.island, x, z);
     const v = site?.valley;
     if (!v) return -1;
     // (Nor whoever is down a mine.)

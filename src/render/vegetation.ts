@@ -269,6 +269,59 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
       ctx.ellipse(x, y, size * rng.range(0.07, 0.13), size * rng.range(0.06, 0.1), rng.range(0, 3), 0, Math.PI * 2);
       ctx.fill();
     }
+  } else if (kind === 'thrift') {
+    // Thrift: a low cushion of fine dark leaves, and over it round heads of flowers on bare stems.
+    for (let k = 0; k < 60; k++) {
+      const x0 = size * (0.5 + rng.range(-0.38, 0.38)), h = size * rng.range(0.12, 0.3), lean = rng.range(-0.15, 0.15) * size;
+      ctx.strokeStyle = grey(rng.range(0.12, 0.2));
+      ctx.lineWidth = rng.range(2, 3.5);
+      ctx.beginPath(); ctx.moveTo(x0, size); ctx.lineTo(x0 + lean, size - h); ctx.stroke();
+    }
+    for (let k = 0; k < 11; k++) {
+      const x0 = size * (0.5 + rng.range(-0.3, 0.3)), h = size * rng.range(0.45, 0.88), lean = rng.range(-0.12, 0.12) * size;
+      ctx.strokeStyle = grey(0.22);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x0, size); ctx.quadraticCurveTo(x0, size - h * 0.6, x0 + lean, size - h); ctx.stroke();
+      const r = size * rng.range(0.045, 0.065);
+      for (let d = 0; d < 24; d++) {
+        const a = rng.range(0, Math.PI * 2), rr = Math.sqrt(rng.next()) * r;
+        ctx.fillStyle = grey(rng.range(0.75, 1));
+        ctx.beginPath(); ctx.arc(x0 + lean + Math.cos(a) * rr, size - h + Math.sin(a) * rr, rng.range(2.5, 4), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  } else if (kind === 'marram') {
+    // Marram: stiff blades rolled tight against the wind, arching over from a dense foot, pale at their tips.
+    for (let k = 0; k < 64; k++) {
+      const x0 = size * (0.5 + rng.range(-0.3, 0.3)), h = rng.range(0.55, 0.98) * size, lean = rng.range(-0.42, 0.42) * size;
+      const steps = 9, wide = rng.range(2.2, 3.6), tone = rng.range(0.55, 1);
+      for (let st = 0; st < steps; st++) {
+        const f0 = st / steps, f1 = (st + 1) / steps;
+        ctx.strokeStyle = grey(tone * (0.45 + 0.55 * f1));
+        ctx.lineWidth = Math.max(1, (1 - f0 * 0.9) * wide);
+        ctx.beginPath();
+        ctx.moveTo(x0 + lean * f0 * f0, size - h * f0 + lean * 0.12 * f0 * f0 * f0 * Math.sign(lean) * Math.sign(lean));
+        ctx.lineTo(x0 + lean * f1 * f1, size - h * f1 + Math.abs(lean) * 0.25 * f1 * f1 * f1);
+        ctx.stroke();
+      }
+    }
+  } else if (kind === 'bloom') {
+    // Blossom without stems, crowded over a rounded mound: the flowers of gorse, laid over its spines.
+    for (let k = 0; k < 340; k++) {
+      const a = rng.range(Math.PI * 1.05, Math.PI * 1.95), d = Math.pow(rng.next(), 0.45);
+      const cx = size / 2 + Math.cos(a) * d * size * 0.44, cy = size * 0.98 + Math.sin(a) * d * size * 0.86;
+      ctx.fillStyle = grey(rng.range(0.7, 1));
+      ctx.beginPath(); ctx.ellipse(cx, cy, rng.range(2.5, 4.2), rng.range(2, 3.4), rng.range(0, 3), 0, Math.PI * 2); ctx.fill();
+    }
+  } else if (kind === 'gorse') {
+    // Gorse: a dense rounded mass of spines on green shoots, darker within, bristling at its edge.
+    for (let k = 0; k < 520; k++) {
+      const a = rng.range(Math.PI * 1.02, Math.PI * 1.98), d = Math.pow(rng.next(), 0.6);
+      const cx = size / 2 + Math.cos(a) * d * size * 0.46, cy = size * 0.98 + Math.sin(a) * d * size * 0.9;
+      const len = rng.range(5, 13), dir = a + rng.range(-0.6, 0.6);
+      ctx.strokeStyle = grey((0.25 + 0.75 * d) * rng.range(0.55, 1));
+      ctx.lineWidth = rng.range(1.4, 2.6);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(dir) * len, cy + Math.sin(dir) * len); ctx.stroke();
+    }
   }
   const texture = new CanvasTexture(canvas);
   texture.colorSpace = SRGBColorSpace;

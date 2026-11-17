@@ -6,7 +6,7 @@ import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
-import { carveRock, smin } from './geom/rock';
+import { alongSheet, carveRock, smin } from './geom/rock';
 import { buildCamp } from './camp';
 import { buildMineYard } from './mine';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
@@ -19,7 +19,8 @@ import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
 import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
-import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
+import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
+import { buildIsland } from './island';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -1598,7 +1599,9 @@ export function meshSite(site: Site): SceneDescription {
     };
     const cliff = site.top - p.floor + 0.5;
     /** Carves one patch of the land: rock where it is steep, turf where it is level, scree where debris lies. */
-    const carveLand = (whole: Patch, into: (material: string) => MeshBuilder, keep?: (at: Vector3) => boolean) => {
+    // (`onSheet`: the patch ends on the plain sheet of ground, and is closed on the sheet's own edge. Not the meadow and the hill over the house,
+    // which end on the house: the sheet's height there is the hilltop's, and closing on it raised rock into the doorway.)
+    const carveLand = (whole: Patch, into: (material: string) => MeshBuilder, keep?: (at: Vector3) => boolean, onSheet = false) => {
       // A long patch is carved in lengths, each only as tall as its own ground needs.
       const TILE = 12;
       if (whole.x1 - whole.x0 > TILE * 1.5 || whole.z1 - whole.z0 > TILE * 1.5) {
@@ -1606,14 +1609,17 @@ export function meshSite(site: Site): SceneDescription {
         const from = alongX ? whole.x0 : whole.z0, to = alongX ? whole.x1 : whole.z1;
         for (let a = from; a < to - 1e-6; a += TILE) {
           const b = to - (a + TILE) < TILE * 0.5 ? to : a + TILE;
-          carveLand(alongX ? { ...whole, x0: a, x1: b } : { ...whole, z0: a, z1: b }, into, keep);
+          carveLand(alongX ? { ...whole, x0: a, x1: b } : { ...whole, z0: a, z1: b }, into, keep, onSheet);
           if (b === to) break;
         }
         return;
       }
       const c = whole;
       let lo = Infinity, hi = -Infinity;
-      for (let z = c.z0; z < c.z1 + CELL / 2; z += CELL) for (let x = c.x0; x < c.x1 + CELL / 2; x += CELL) {
+      // (Over the ground a little beyond the piece as well: the rock's face is pushed sideways by its relief, up to some four metres,
+      // and so reads heights from there; a face that rose above the box or sank below it would be cut off there, and leave a hole.)
+      const REACH = 4.5;
+      for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) {
         const h = land.at(x, z);
         lo = Math.min(lo, h); hi = Math.max(hi, h);
       }
@@ -1622,6 +1628,8 @@ export function meshSite(site: Site): SceneDescription {
       carveRock(into('rock'), grottoes.length || portalAir || backWay ? (x, y, z) => Math.max(landAir(x, y, z), grottoes.length ? grottoAir(x, y, z) : -9, portalAir ? portalAir(x, y, z) : -9, backWay ? backWay.air(x, y, z) : -9, join ? join.air(x, y, z) : -9) : landAir, {
         min: V(c.x0, Math.floor((Math.min(lo - 2, join?.byCave(c) ? join.high - 2.6 : Infinity)) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
         cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === scree ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], keep, sharp: true, beyond: carved,
+        // (Where a rim patch meets the sheet of ground, it is closed on the sheet's own edge, which runs on lines 1.2 metres apart.)
+        edge: onSheet ? alongSheet(ground, 0, 0, 1.2) : undefined,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
         // (Nor is the floor of a grotto turf, though the hill over it may be.)
         meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) && !(backWay && backWay.along(at.x) > -4.6 && backWay.air(at.x, at.y, at.z) > -0.6) && !(join && join.air(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
@@ -1722,7 +1730,7 @@ export function meshSite(site: Site): SceneDescription {
     const backOwn = (at: Vector3) => !!backWay && ((backWay.along(at.x) > -0.3 && Math.abs(at.z - backWay.z) < 3 && at.y < backWay.top) || (!!backWay.deepAir && at.y < backWay.start - 0.5 && backWay.deepAir(at.x, at.y, at.z) > -1.3));
     // (Nor near the passage from the cave to the cavern, once it has left the cave.)
     const joinOwn = (at: Vector3) => !!join && join.own(at.z) && join.air(at.x, at.y, at.z) > -0.6;
-    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, (at) => !underOwn(at) && !backOwn(at) && !joinOwn(at));
+    for (const c of [...rimPatches, ...shelfPatches]) carveLand(c, sceneryMesh, (at) => !underOwn(at) && !backOwn(at) && !joinOwn(at), true);
     if (join && backWay?.deepAir) {
       // The passage from the cave down to the cavern, from where the land's carving leaves off to where the cavern's begins.
       // (It is carved on the same lattice as the cavern, so that the two meet without a crack.)
@@ -2165,7 +2173,7 @@ export function meshSite(site: Site): SceneDescription {
         const old = pick ? (pick.old ? 1 : 0) : detail > 0.7 && grown % 6 === 2 ? 1 : 0;
         // Beyond that, trees are not all of an age: now and then one is a giant, towering over the
         // rest, and about one in four is young, slender and low. (A stream of its own, so no other choice moves.)
-        const age = rng.fork(`age${grown}`), mix = new URLSearchParams(location.search).has('agemix'), roll = pick ? pick.roll : mix ? [0.5, 0.5, 0.06, 0.01, 0.9, 0.9, 0.5, 0.9, 0.5][grown % 9] : age.next(); // (`?agemix` gives every kind of age in turn, for looking at)
+        const age = rng.fork(`age${grown}`), mix = typeof location !== 'undefined' && new URLSearchParams(location.search).has('agemix'), roll = pick ? pick.roll : mix ? [0.5, 0.5, 0.06, 0.01, 0.9, 0.9, 0.5, 0.9, 0.5][grown % 9] : age.next(); // (`?agemix` gives every kind of age in turn, for looking at)
         const giant = detail > 0.5 && roll < 0.05 ? age.range(1.7, 2.2) : 1, young = roll > 0.7 ? age.range(0.42, 0.7) : 1;
         // And very rarely an oak of great age that has spread rather than risen: a short, vast trunk
         // and limbs that reach out low and far, its crown a roof over the ground round it.
@@ -2200,7 +2208,7 @@ export function meshSite(site: Site): SceneDescription {
     // (Not where the keep stands.)
     // (Nor at the far end of a terrace, where a shrine or a cairn stands.)
     const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
-    const row = new URLSearchParams(location.search).get('treerow'); // (no woods when a row is asked for, so the row stands alone)
+    const row = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('treerow') : null; // (no woods when a row is asked for, so the row stands alone)
     if (!row) woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
     if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
     // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
@@ -3237,12 +3245,33 @@ export function meshSite(site: Site): SceneDescription {
       return Math.min(air, t + Math.min(depthA, 1.5 - Math.min(0, rise0 - 0.3)), T + Math.min(depthB, 1.5 + Math.max(0, rise1 - T + 0.3)) - t);
     };
   };
+  // An island in place of a valley: the house front where it meets the forecourt is built here, as for a house standing
+  // free in a valley, and everything else out of doors by the island's own builder (see `island.ts`).
+  let islandSea: SeaDesc | undefined, spawnYaw = 0, birdSpots: { x: number; y: number; z: number }[] | undefined, beacon: { x: number; y: number; z: number } | undefined;
+  const buildIslandApproach = (p: Place) => {
+    kit.group = `p${p.id}`;
+    kit.field = outdoorFieldAt(p.floor, 1.2);
+    const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
+    kit.wallFace('stone', kit.frame(fx0, p.z0, fx1, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    wild.field = outdoorFieldAt(p.floor, 1.5);
+    const made = buildIsland({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    arrival.spawn = made.spawn;
+    arrival.track = made.track;
+    farCover = made.far;
+    islandSea = made.sea;
+    spawnYaw = made.yaw;
+    censuses.push(made.planted);
+    unders.push(...made.unders);
+    birdSpots = made.birds;
+    beacon = made.lamp;
+    scenery.cards.push(...planting.sets);
+  };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
   // Where a cave's shaft comes up through the hill, the turf laid over the house is left open.
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
-    if (p.role === 'approach') { buildApproach(p); continue; }
+    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -3729,6 +3758,9 @@ export function meshSite(site: Site): SceneDescription {
       if (alongX) { tileFace(tiles, [a, b, r1, r0], tone, inside); tileFace(tiles, [c, d, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [b, c, r1], tone, inside); tileFace(tiles, [d, a, r0], tone, inside); } }
       else { tileFace(tiles, [b, c, r1, r0], tone, inside); tileFace(tiles, [d, a, r0, r1], tone, inside); if (!sanctum) { tileFace(tiles, [a, b, r0], tone, inside); tileFace(tiles, [c, d, r1], tone, inside); } }
       tileFace(tiles, [a, b, c, d], tone, V(cx, y + 1, cz));
+      // (The roof stands a hand above the tops of the walls, which the cornice hides where there is one; where there is none, the slot
+      // between could be looked into and through, to the sky beyond. A plate under the roof, lying on the walls, fills it.)
+      kit.box('stone', V(x0, site.top - 0.02, z0), V(x1, y, z1), coping, coping, 'plate');
       kit.box('tile', alongX ? V(r0.x - 0.05, y + rise - 0.06, cz - 0.13) : V(cx - 0.13, y + rise - 0.06, r0.z - 0.05), alongX ? V(r1.x + 0.05, y + rise + 0.1, cz + 0.13) : V(cx + 0.13, y + rise + 0.1, r1.z + 0.05), coping, coping, 'ridge');
       ridgeOf.set(q.id, { y: y + rise, alongX, a: alongX ? r0.x : r0.z, b: alongX ? r1.x : r1.z, c: alongX ? cz : cx });
       if (sanctum) {
@@ -3855,12 +3887,12 @@ export function meshSite(site: Site): SceneDescription {
     sunShafts,
     landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),
-    spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: 0 },
+    spawn: { position: arrival.spawn ?? V(site.ways.find((w) => w.b === approach.id || w.a === approach.id)?.at ?? (approach.x0 + approach.x1) / 2, approach.floor + 1.75, approach.z1 - 6.2), yaw: spawnYaw },
     track: arrival.track,
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
-    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: approach.floor },
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: site.island ? site.island.sea + 1.5 : approach.floor },
     doors,
     anchors,
     furnishing,
@@ -3874,6 +3906,9 @@ export function meshSite(site: Site): SceneDescription {
     crossings,
     lookouts,
     far: farCover,
+    sea: islandSea,
+    birds: birdSpots,
+    beacon,
     finds,
   };
 }

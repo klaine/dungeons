@@ -36,7 +36,7 @@ import * as TSL from 'three/tsl';
 type N = any;
 const {
   Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getViewPosition, length, log2, max, min, mix, normalize, pass, pow,
-  screenCoordinate, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform, uniformArray, uv, vec2, vec3, vec4,
+  screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform, uniformArray, uv, vec2, vec3, vec4,
 } = TSL as N;
 
 const MAX_LIGHTS = 4;
@@ -108,7 +108,8 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
 
   // Clouds along a line of sight, as far as `reach`: the light they send, and the share of what
   // is behind them that still comes through.
-  const cloudMarch: N = Fn(([ro, rd, jitter, reach]: [N, N, N, N]) => {
+  // (The light the cloud sends, and the share of what is behind that comes through it: before far cloud is sunk into the haze.)
+  const cloudRaw: N = Fn(([ro, rd, jitter, reach]: [N, N, N, N]) => {
     const out: N = vec4(0, 0, 0, 1).toVar();
     If(rd.y.greaterThanEqual(0.015), () => {
       const t0: N = max(u.uCloudBase.sub(ro.y).div(rd.y), 0).toVar(), t1: N = min(min(u.uCloudTop.sub(ro.y).div(rd.y), 14000), reach).toVar();
@@ -135,12 +136,23 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
           });
           t.addAssign(dt);
         });
-        // Far cloud sinks into the haze at the horizon.
-        const near: N = exp(t0.div(-9000)).mul(smoothstep(0.015, 0.1, rd.y)).toVar();
-        out.assign(vec4(lit.mul(near), mix(1, left, near)));
+        out.assign(vec4(lit, left));
       });
     });
     return out;
+  });
+  // How much of a cloud along a line of sight is seen as cloud, and not lost in the haze at the horizon.
+  const cloudNear = (ro: N, rd: N): N => exp(max(u.uCloudBase.sub(ro.y).div(max(rd.y, 0.015)), 0).div(-9000)).mul(smoothstep(0.015, 0.1, rd.y));
+  // Clouds against the sky: far cloud fades into the sky behind it.
+  const cloudMarch: N = Fn(([ro, rd, jitter, reach]: [N, N, N, N]) => {
+    const raw: N = cloudRaw(ro, rd, jitter, reach).toVar(), near: N = cloudNear(ro, rd).toVar();
+    return vec4(raw.rgb.mul(near), mix(1, raw.a, near));
+  });
+  // Clouds in front of the land: far cloud fades into the colour of the haze, but still hides what is behind it. (Faded into
+  // nothing, as against the sky, it let the far mountains show through a cloud that stood in front of them.)
+  const cloudOver: N = Fn(([ro, rd, jitter, reach, air]: [N, N, N, N, N]) => {
+    const raw: N = cloudRaw(ro, rd, jitter, reach).toVar(), near: N = cloudNear(ro, rd).toVar();
+    return vec4(raw.rgb.mul(near).add(air.mul(one(raw.a)).mul(one(near))), raw.a);
   });
 
   // What the sky has after sunset that the daytime sky does not: a faint light of its own, and a glow where the sun went down.
@@ -183,7 +195,7 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
     return vec2(haze, mist);
   });
 
-  return { phaseHG, cloudShade, cloudMarch, skyAfterDark, airColour, airAlong, airBeyond };
+  return { phaseHG, cloudShade, cloudMarch, cloudOver, skyAfterDark, airColour, airAlong, airBeyond };
 }
 
 export class Atmosphere {
@@ -290,6 +302,16 @@ export class Atmosphere {
       const out: N = vec4(col, 1).toVar();
       If(u.uEnabled.greaterThan(0.5), () => {
         const depth: N = depthOf.toVar();
+        // (A point of open sky beside far land is taken as land, as far off as the nearest of it. Along a skyline the picture's colour is
+        // smoothed, part land and part sky, but its depth is one or the other; where the depth says sky, the land's share of the colour
+        // would be left without its haze, and a far ridge would be drawn with a bright line along it, through any cloud in front.)
+        If(depth.greaterThan(0.999999), () => {
+          const px: N = vec2(1).div(screenSize).toVar();
+          const near = min(min(depthOf.sample(screenUV.add(vec2(px.x, 0))).x, depthOf.sample(screenUV.sub(vec2(px.x, 0))).x), min(depthOf.sample(screenUV.add(vec2(0, px.y))).x, depthOf.sample(screenUV.sub(vec2(0, px.y))).x));
+          // (Only far land: near things, a tree against the sky, have no haze to lose, and the open sky's own mist about them would be lost instead.)
+          const far: N = length(getViewPosition(screenUV, near, u.uInvProj)).toVar();
+          If(near.lessThan(0.999999).and(far.greaterThan(300)), () => { depth.assign(near); });
+        });
         const view: N = getViewPosition(screenUV, depth, u.uInvProj);
         const wp: N = u.uInvView.mul(vec4(view, 1)).xyz.toVar();
         const dist: N = length(wp.sub(u.uCamPos)).toVar();
@@ -356,7 +378,7 @@ export class Atmosphere {
           col.assign(col.mul(through).add(air.mul(one(through))).add(u.uGlare.mul(sky.phaseHG(c, float(0.76))).mul(one(exp(thick.x.mul(-1.5))))));
           // Cloud that is nearer than the land stands in front of it: so peaks go up into cloud.
           If(open.not().and(u.uCloudOn.greaterThan(0.5)), () => {
-            const cloud: N = sky.cloudMarch(u.uCamPos, rd, dither, dist).toVar();
+            const cloud: N = sky.cloudOver(u.uCamPos, rd, dither, dist, air).toVar();
             col.assign(col.mul(cloud.a).add(cloud.rgb));
           });
         });

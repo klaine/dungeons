@@ -1,4 +1,5 @@
 import { drawStorey } from './buildingPlan';
+import { footprintOf } from '../core/building';
 import { boxValley, edgeAt, hallOnward, joinLine } from '../core/valley';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
@@ -61,11 +62,13 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     x0 = Math.min(x0, p.x0 - T); x1 = Math.max(x1, p.x1 + T);
     z0 = Math.min(z0, p.z0 - T); z1 = Math.max(z1, p.z1 + T);
   }
-  const g = opts.valley ? site.grounds : undefined, vale = g ? site.valley ?? boxValley(g) : undefined;
+  const g = opts.valley ? site.grounds : undefined, isle = g ? site.island : undefined, vale = g && !isle ? site.valley ?? boxValley(g) : undefined;
   // Where a side of the valley lies at any place down it.
   const sideAt = (side: 'w' | 'e', z: number) => edgeAt(vale!, side, z);
   if (g) {
     x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
+    // (An island is seen whole, with a little of the sea all round.)
+    if (isle) { z0 = Math.min(z0, g.z0 - 12); x0 -= 7; x1 += 7; z1 += 7; }
     // A hall under the hill runs out beyond the valley's edge, and the map is made wide enough to show all of it.
     for (const q of site.grottoes ?? []) {
       if (!q.hall) continue;
@@ -102,14 +105,85 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.closePath();
       ctx.fill();
     };
+    if (isle) {
+      // An island: the sea, the land within its coast, less the cove and the channel to it; the cliffs as a band of ink round the edge.
+      const coastLine = (grow: number) => {
+        ctx.beginPath();
+        isle.coast.forEach((r, k) => { const a = (k / isle.coast.length) * Math.PI * 2, x = X(isle.x + Math.cos(a) * (r + grow)), z = Z(isle.z + Math.sin(a) * (r + grow)); if (k) ctx.lineTo(x, z); else ctx.moveTo(x, z); });
+        ctx.closePath();
+        ctx.fill();
+      };
+      const c = isle.cove, ux = Math.cos(c.out), uz = Math.sin(c.out);
+      const cove = (grow: number) => {
+        ctx.beginPath(); ctx.arc(X(c.x), Z(c.z), (c.r - grow) * scale, 0, Math.PI * 2); ctx.fill();
+        const w = c.mouth / 2 - grow, far = c.r + 40;
+        ctx.beginPath();
+        ctx.moveTo(X(c.x - uz * w), Z(c.z + ux * w)); ctx.lineTo(X(c.x + ux * far - uz * w), Z(c.z + uz * far + ux * w));
+        ctx.lineTo(X(c.x + ux * far + uz * w), Z(c.z + uz * far - ux * w)); ctx.lineTo(X(c.x + uz * w), Z(c.z - ux * w));
+        ctx.closePath(); ctx.fill();
+      };
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 0.55;
+      coastLine(2.5);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = COURT;
+      coastLine(0);
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 0.55;
+      cove(-2.5);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = PAPER;
+      cove(0);
+      // Stacks out in the sea, as rock; the lighthouse as a ring of wall; the castle as a block; the cottages solid.
+      ctx.fillStyle = INK;
+      for (const q of isle.stacks) { ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.arc(X(q.x), Z(q.z), q.r * scale, 0, Math.PI * 2); ctx.fill(); }
+      ctx.globalAlpha = 1;
+      if (isle.lighthouse) { ctx.beginPath(); ctx.arc(X(isle.lighthouse.x), Z(isle.lighthouse.z), isle.lighthouse.r * scale, 0, Math.PI * 2); ctx.fill(); }
+      if (isle.castle) {
+        const k = isle.castle;
+        ctx.save(); ctx.translate(X(k.x), Z(k.z)); ctx.rotate(k.facing);
+        ctx.globalAlpha = 0.7; ctx.fillRect(-11 * scale, -14 * scale, 22 * scale, 28 * scale); ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      if (isle.chapel) {
+        const k = isle.chapel;
+        ctx.save(); ctx.translate(X(k.x), Z(k.z)); ctx.rotate(k.facing);
+        ctx.globalAlpha = 0.55; ctx.fillRect(-8 * scale, -4 * scale, 18 * scale, 8 * scale); ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+      if (isle.mansion) {
+        // (Drawn solid, as the valley's buildings are, wings and all.)
+        const b = isle.mansion.building, turn = b.faces === 'w' ? 1 : -1;
+        ctx.globalAlpha = 0.8;
+        for (const r of footprintOf(b)) {
+          const xs = [b.x - (turn * b.d) / 2 + turn * r.v0, b.x - (turn * b.d) / 2 + turn * r.v1], zs = [b.z + turn * r.u0, b.z + turn * r.u1];
+          ctx.fillRect(X(Math.min(...xs)), Z(Math.min(...zs)), Math.abs(xs[1] - xs[0]) * scale, Math.abs(zs[1] - zs[0]) * scale);
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (isle.graveyard) {
+        const q = isle.graveyard;
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.8 * ratio, 0.4 * scale);
+        ctx.strokeRect(X(q.x - q.d / 2), Z(q.z - q.w / 2), q.d * scale, q.w * scale);
+      }
+      for (const h of isle.cottages) {
+        ctx.save(); ctx.translate(X(h.x), Z(h.z)); ctx.rotate(h.faces);
+        ctx.fillRect(-h.d / 2 * scale, -h.w / 2 * scale, h.d * scale, h.w * scale);
+        ctx.restore();
+      }
+      // The jetty.
+      ctx.strokeStyle = INK; ctx.lineWidth = isle.jetty.width * scale;
+      ctx.beginPath(); ctx.moveTo(X(isle.jetty.from[0]), Z(isle.jetty.from[1])); ctx.lineTo(X(isle.jetty.to[0]), Z(isle.jetty.to[1])); ctx.stroke();
+    } else {
     ctx.fillStyle = INK;
     ctx.globalAlpha = 0.55;
     outline(3);
     ctx.globalAlpha = 1;
     ctx.fillStyle = COURT;
     outline(0);
+    }
     // The ridge the house is built into, which the arms of the valley run past, is rock like the rest.
-    if (vale!.ridge) {
+    if (vale?.ridge) {
       ctx.fillStyle = INK;
       ctx.globalAlpha = 0.55;
       rect(vale!.ridge.x0, g.z0 - 6, vale!.ridge.x1, vale!.ridge.z);

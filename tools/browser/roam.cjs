@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
   for (const seed of process.argv.slice(2)) {
     const page = await browser.newPage({ viewport: { width: 240, height: 135 }, deviceScaleFactor: 1 });
     page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 200)));
-    await page.goto(`http://localhost:5173/?seed=${seed}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
+    await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${seed}${process.env.PLACE ? `&place=${process.env.PLACE}` : ''}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 600000 });
     const r = await page.evaluate(() => {
       const { site, player, desc, groundAt } = window.__dbg;
@@ -19,9 +19,12 @@ const { chromium } = require('playwright');
         // Start somewhere inside, aim at a point well beyond the edge (or at the cliff by the house).
         // Start somewhere inside the valley: a place in its box is tried until one is found that is in the valley itself.
         let sx = 0, sz = 0;
-        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = a.z1 + 4 + rnd() * (g.z1 - a.z1 - 12); if (!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) break; }
+        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = (site.island ? g.z0 + 8 : a.z1 + 4) + rnd() * (g.z1 - (site.island ? g.z0 + 8 : a.z1) - 12); const gy = groundAt(sx, sz) + 1, fenced = player.blockers.some((b) => b.active && sx > b.min.x && sx < b.max.x && sz > b.min.z && sz < b.max.z && gy > b.min.y && gy < b.max.y);
+          // (Not inside one of the fences that keep the player off ground nobody can reach: nobody starts there.)
+          if ((!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) && !fenced) break; }
         const ang = (run / 36) * Math.PI * 2;
-        const tx = cx + Math.sin(ang) * 140, tz = cz + Math.cos(ang) * 140;
+        // (An island is driven at from further: the coast may be two hundred metres from its middle.)
+        const reach = site.island ? 320 : 140, tx = cx + Math.sin(ang) * reach, tz = cz + Math.cos(ang) * reach;
         player.place({ x: sx, y: groundAt(sx, sz) + 1.8, z: sz }, 0);
         const startY = player.position.y;
         for (let i = 0; i < 1500; i++) {
@@ -40,8 +43,10 @@ const { chromium } = require('playwright');
         out.minY = Math.min(out.minY, p.y);
         out.maxClimb = Math.max(out.maxClimb, p.y - startY);
         const where = `run ${run}: from (${sx.toFixed(0)}, ${sz.toFixed(0)}) to (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
-        if (beyond > 0.5) out.escaped.push(where);
-        if (p.y < a.floor - 4) out.fell.push(where);
+        // (On an island the beach may be waded a few strides out from the waterline; out of the water's depth is out.)
+        if (beyond > (site.island ? 9 : 0.5)) out.escaped.push(where);
+        // (On an island the ground goes down to the sea: fallen is below the water.)
+        if (p.y < (site.island ? site.island.sea - 0.6 : a.floor - 4)) out.fell.push(where);
         if (p.y - 1.75 > groundAt(p.x, p.z) + 3 ) out.stuckHigh.push(where);
       }
       // Each thing left in the valley: walk to it from a few metres off, on the side of the track, and see it taken.
@@ -49,6 +54,60 @@ const { chromium } = require('playwright');
       out.finds = [];
       const track = site.track;
       for (const f of game.finds) {
+        // (What is high up, at the top of a lighthouse, is reached by its stair, which this does not climb.)
+        // A sea cave is walked into from its mouth, along the strand.
+        const cave = site.island && site.island.seaCave;
+        if (cave && Math.hypot(f.at.x - cave.x, f.at.z - cave.z) < cave.length + 2) {
+          // From the end of the beach, along the strand at the foot of the cliff, to the mouth, and in: as the builder lays the strand.
+          const c = site.island.cove, o = site.island, head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(cave.z - c.z, cave.x - c.x);
+          let turn = (at - head) % (Math.PI * 2); if (turn > Math.PI) turn -= Math.PI * 2; if (turn < -Math.PI) turn += Math.PI * 2;
+          const end = head + Math.sign(turn) * c.beach * 0.85, stairway = o.landing === 'stair', bx = stairway ? o.jetty.from[0] : c.x + Math.cos(end) * (c.r - 1), bz = stairway ? o.jetty.from[1] : c.z + Math.sin(end) * (c.r - 1);
+          player.place({ x: bx, y: (stairway ? o.sea + 1.35 : groundAt(bx, bz)) + 1.8, z: bz }, 0);
+          const legs = [[cave.x, cave.z], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 3000 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg === 0 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.6) leg = 1;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (along the strand from the beach; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
+        // A mansion is gone into by its front door, up its steps.
+        const mansion = site.island && site.island.mansion;
+        if (mansion && Math.hypot(f.at.x - mansion.building.x, f.at.z - mansion.building.z) < mansion.building.w) {
+          const b = mansion.building, turn = b.faces === 'w' ? 1 : -1, front = b.x - turn * (b.d / 2);
+          player.place({ x: front - turn * 10, y: groundAt(front - turn * 10, b.z) + 1.8, z: b.z }, 0);
+          const legs = [[front - turn * 1.5, b.z], [front + turn * 1.5, b.z], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 2400 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg < 2 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.5) leg++;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (in by the front door; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
+        // A castle is gone into by its gate.
+        const castle = site.island && site.island.castle;
+        if (castle && Math.hypot(f.at.x - castle.x, f.at.z - castle.z) < 20) {
+          const ux = -Math.cos(castle.facing), uz = -Math.sin(castle.facing), sx = castle.x + ux * 20, sz = castle.z + uz * 20;
+          player.place({ x: sx, y: groundAt(sx, sz) + 1.8, z: sz }, 0);
+          const legs = [[castle.x + ux * 11, castle.z + uz * 11], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 2000 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg === 0 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.6) leg = 1;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (in by the gate; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
+        const lh = site.island && site.island.lighthouse;
+        if (lh && Math.hypot(f.at.x - lh.x, f.at.z - lh.z) < lh.r + 3) { out.finds.push(`high, not tried: ${f.what}`); continue; }
         let best = track[0], bd = 1e9;
         for (const t of track) { const d = Math.hypot(t[0] - f.at.x, t[1] - f.at.z); if (d < bd) { bd = d; best = t; } }
         const ux = (best[0] - f.at.x) / bd, uz = (best[1] - f.at.z) / bd;
