@@ -19,9 +19,10 @@ const { chromium } = require('playwright');
         // Start somewhere inside, aim at a point well beyond the edge (or at the cliff by the house).
         // Start somewhere inside the valley: a place in its box is tried until one is found that is in the valley itself.
         let sx = 0, sz = 0;
-        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = a.z1 + 4 + rnd() * (g.z1 - a.z1 - 12); if (!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) break; }
+        for (let tries = 0; tries < 200; tries++) { sx = g.x0 + 8 + rnd() * (g.x1 - g.x0 - 16); sz = (site.island ? g.z0 + 8 : a.z1 + 4) + rnd() * (g.z1 - (site.island ? g.z0 + 8 : a.z1) - 12); if (!window.__dbg.beyond || window.__dbg.beyond(sx, sz) < -8) break; }
         const ang = (run / 36) * Math.PI * 2;
-        const tx = cx + Math.sin(ang) * 140, tz = cz + Math.cos(ang) * 140;
+        // (An island is driven at from further: the coast may be two hundred metres from its middle.)
+        const reach = site.island ? 320 : 140, tx = cx + Math.sin(ang) * reach, tz = cz + Math.cos(ang) * reach;
         player.place({ x: sx, y: groundAt(sx, sz) + 1.8, z: sz }, 0);
         const startY = player.position.y;
         for (let i = 0; i < 1500; i++) {
@@ -41,7 +42,8 @@ const { chromium } = require('playwright');
         out.maxClimb = Math.max(out.maxClimb, p.y - startY);
         const where = `run ${run}: from (${sx.toFixed(0)}, ${sz.toFixed(0)}) to (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
         if (beyond > 0.5) out.escaped.push(where);
-        if (p.y < a.floor - 4) out.fell.push(where);
+        // (On an island the ground goes down to the sea: fallen is below the water.)
+        if (p.y < (site.island ? site.island.sea + 1.2 : a.floor - 4)) out.fell.push(where);
         if (p.y - 1.75 > groundAt(p.x, p.z) + 3 ) out.stuckHigh.push(where);
       }
       // Each thing left in the valley: walk to it from a few metres off, on the side of the track, and see it taken.
@@ -49,6 +51,9 @@ const { chromium } = require('playwright');
       out.finds = [];
       const track = site.track;
       for (const f of game.finds) {
+        // (What is high up, at the top of a lighthouse, is reached by its stair, which this does not climb.)
+        const lh = site.island && site.island.lighthouse;
+        if (lh && Math.hypot(f.at.x - lh.x, f.at.z - lh.z) < lh.r + 3) { out.finds.push(`high, not tried: ${f.what}`); continue; }
         let best = track[0], bd = 1e9;
         for (const t of track) { const d = Math.hypot(t[0] - f.at.x, t[1] - f.at.z); if (d < bd) { bd = d; best = t; } }
         const ux = (best[0] - f.at.x) / bd, uz = (best[1] - f.at.z) / bd;
