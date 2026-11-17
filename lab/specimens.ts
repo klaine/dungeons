@@ -17,6 +17,9 @@ import { CardSet } from '../src/render/scene';
 
 export type Season = 'spring' | 'summer' | 'autumn';
 
+/** What the plant brush can paint. A `wood` is a mixture of the trees and bushes. */
+export const PLANTS = ['oak', 'ash', 'pine', 'coast pine', 'spruce', 'bush', 'wood', 'grass', 'flowers', 'ferns'] as const;
+
 export interface Stage {
   /** Solid geometry by the name of its material: `rock`, `turf`, `bark`. */
   meshes: Map<string, MeshBuilder>;
@@ -33,6 +36,12 @@ export interface Stage {
    * carved, so that a hill takes no longer than a boulder. Null if there is nothing to carve.
    */
   carveMass: (balls: number[][]) => { mesh: MeshBuilder; cell: number; ms: number } | null;
+  /**
+   * Grows what was painted with the plant brush. Each dab is where it was laid, how broad, which of `PLANTS`, and a number of its
+   * own from which everything in it follows: so the same dabs always grow the same plants. `heightAt` says how high the land
+   * stands at a spot, or null where there is none. Trees keep their distance from trees already standing.
+   */
+  growPainted: (dabs: number[][], heightAt: (x: number, z: number) => number | null) => { meshes: Map<string, MeshBuilder>; cards: CardSet[]; count: number; ms: number };
   /** How long each part took to make, in milliseconds. */
   times: Record<string, number>;
   counts: Record<string, number>;
@@ -402,11 +411,55 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     return { mesh: mass, cell, ms: performance.now() - t0 };
   };
 
+  const growPainted = (dabs: number[][], heightAt: (x: number, z: number) => number | null) => {
+    const t0 = performance.now();
+    const grown = new Map<string, MeshBuilder>();
+    const to = (name: string): MeshBuilder => { let m = grown.get(name); if (!m) grown.set(name, (m = new MeshBuilder())); return m; };
+    const pl = new Planting();
+    const SPACE: Record<string, number> = { oak: 7, ash: 6.5, pine: 6.5, 'coast pine': 6, spruce: 4.5, bush: 2.4, wood: 5, grass: 0.42, flowers: 0.7, ferns: 0.9 };
+    const hues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
+    const fern: Colour = o.season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
+    const stood: number[][] = [];
+    let count = 0;
+    for (const dab of dabs) {
+      const [sx, , sz, r, kindAt, , seed] = dab, kind = PLANTS[kindAt] ?? 'grass';
+      const q = new Rng(`lab/paint/${seed}`);
+      const low = kind === 'grass' || kind === 'flowers' || kind === 'ferns';
+      const tries = Math.max(1, Math.ceil(((Math.PI * r * r) / (SPACE[kind] * SPACE[kind])) * (low ? 1 : 1.7)));
+      for (let k = 0; k < tries; k++) {
+        const a = q.range(0, Math.PI * 2), d = r * Math.sqrt(q.next()), x = sx + Math.cos(a) * d, z = sz + Math.sin(a) * d;
+        const own = q.fork(`p${k}`);
+        const what = kind === 'wood' ? own.pick(['oak', 'oak', 'ash', 'spruce', 'spruce', 'pine', 'bush', 'bush'] as const) : kind;
+        if (!low && stood.some((p) => Math.hypot(p[0] - x, p[1] - z) < (p[2] + SPACE[what]) * 0.42)) continue;
+        const y = heightAt(x, z);
+        if (y === null) continue;
+        if (what === 'oak') growTree(pl, to('bark'), x, y, z, own.range(7, 10.5), own.range(0.24, 0.36), { kind: 'oak', detail: 1, cards: 1500, cardSize: 0.74, leaf: leafOf(own.pick(greens)), bark: oakBark, shaded: true, soft: to('bark') }, own);
+        else if (what === 'ash') growTree(pl, to('barkAsh'), x, y, z, own.range(9, 12.5), own.range(0.2, 0.28), { kind: 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: leafOf(own.pick(greens)), bark: ashBark, shaded: true, soft: to('barkAsh') }, own);
+        else if (what === 'spruce') growConifer(pl, to('barkFir'), x, y, z, own.range(9, 14), own.range(2.1, 2.8), own.range(0.18, 0.25), { kind: 'spruce', detail: 1, needle: leafOf([0.045, 0.13, 0.04]), bark: firBark, shaded: true, soft: to('barkFir') }, own);
+        else if (what === 'pine' || what === 'coast pine') growConifer(pl, to('barkPine'), x, y, z, what === 'pine' ? own.range(11, 16) : own.range(9, 12), 2.8, own.range(0.24, 0.32), { kind: 'pine', coastal: what === 'coast pine', detail: 1, needle: leafOf(what === 'pine' ? [0.07, 0.15, 0.07] : [0.08, 0.16, 0.06]), bark: what === 'pine' ? pineBark : [0.8, 0.62, 0.5], shaded: true, soft: to('barkPine') }, own);
+        else if (what === 'bush') growTree(pl, to('bark'), x, y - 0.05, z, own.range(1.6, 2.8), own.range(0.035, 0.05), { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, leaf: leafOf(own.pick(greens)), bark: oakBark, shaded: true }, own);
+        else if (what === 'grass') {
+          const c = turfColour(x, z, s1), t = own.range(0.75, 1.2), tall = (0.75 + 0.8 * own.next()) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2)), dry = Math.min(1, parched + (own.chance(0.08) ? 0.8 : 0));
+          pl.tuft(pl.grass, x, y - 0.05, z, own.range(0.4, 0.7) * (0.75 + 0.35 * tall), own.range(0.2, 0.34) * (0.35 + 1.25 * tall), own.range(0, Math.PI), [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t]);
+        } else if (what === 'flowers') {
+          const size = own.range(0.3, 0.45);
+          pl.tuft(pl.flowers, x, y - 0.02, z, size, size * own.range(0.9, 1.3), own.range(0, Math.PI), hues[Math.floor(fbm2(x * 0.05 + s2, z * 0.05 - s1, 2) * 3.99) % 4]);
+        } else {
+          const size = own.range(0.8, 1.4), t = own.range(0.75, 1.2);
+          pl.tuft(pl.ferns, x, y - 0.04, z, size, size * own.range(0.55, 0.8), own.range(0, Math.PI), [fern[0] * t, fern[1] * t, fern[2] * t]);
+        }
+        if (!low) stood.push([x, z, SPACE[what]]);
+        count++;
+      }
+    }
+    return { meshes: grown, cards: pl.sets, count, ms: performance.now() - t0 };
+  };
+
   spots.cliff = [0, 7.5, FACE_Z];
   spots.boulders = [1.6, 1, -8.5];
   spots.track = [trackX(14), ground(trackX(14), 14), 14];
   spots.path = [1, ground(1, 18.5), 18.5];
   spots.hollow = [HOLLOW.x, ground(HOLLOW.x, HOLLOW.z), HOLLOW.z];
   spots.meadow = [-4, ground(-4, 24), 24];
-  return { meshes, cards: planting.sets, ground, carveMass, near: { min: V(-99, -3, -216), max: V(111, 99, 46) }, spots, times, counts };
+  return { meshes, cards: planting.sets, ground, carveMass, growPainted, near: { min: V(-99, -3, -216), max: V(111, 99, 46) }, spots, times, counts };
 }

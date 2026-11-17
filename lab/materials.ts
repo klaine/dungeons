@@ -24,7 +24,8 @@ import { Atmosphere } from '../src/render/post';
 import * as siteMaterial0 from '../src/render/siteMaterial';
 import * as textures0 from '../src/render/textures';
 import * as vegetation0 from '../src/render/vegetation';
-import { buildStage, Season, Stage } from './specimens';
+import { buildStage, PLANTS, Season, Stage } from './specimens';
+import { CardSet } from '../src/render/scene';
 
 // The three files whose saving is taken up without a reload. Each is held here as it was last
 // loaded; everything below reaches them through these, never through the imports above.
@@ -54,11 +55,15 @@ interface State {
   brush: boolean; radius: number; dig: boolean;
   /** Land painted with it: for each ball its middle, its radius, 1 to add or -1 to dig, and which stroke it was laid in. */
   balls: number[][];
+  /** What the brush paints: `rock`, or one of the plants. */
+  paint: string;
+  /** Plants painted with it: for each dab where it was laid, how broad, which plant, which stroke, and a number of its own. */
+  dabs: number[][];
 }
 const DEFAULTS: State = {
   stone: 'greystone', season: 'summer', hour: 'morning', bearing: null, height: null, exposure: null, air: true, haze: 0.5, wind: 1, grassTall: 1, grassVary: 0,
   moss: 1, damp: 0, facet: null, broad: null, worn: null, tex: 1024, clay: false, show: { rock: true, ground: true, wood: true, leaves: true, grass: true },
-  cam: null, fov: 55, panel: true, brush: false, radius: 4, dig: false, balls: [],
+  cam: null, fov: 55, panel: true, brush: false, radius: 4, dig: false, balls: [], paint: 'rock', dabs: [],
 };
 const KEY = 'dungeons.lab.materials';
 const query = new URLSearchParams(location.search);
@@ -115,10 +120,12 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ the stage
   let stage: Stage;
   /** The solid things, by material; and beside each what its points carried when made, which the sliders work from. */
-  const solids: { name: string; mesh: Mesh; field: Float32Array; open: Float32Array; painted?: boolean }[] = [];
+  const solids: { name: string; mesh: Mesh; field: Float32Array; open: Float32Array; painted?: 'land' | 'plants' }[] = [];
   const cardGroups = { leaves: new Group(), grass: new Group() };
   scene.add(cardGroups.leaves, cardGroups.grass);
   let cardMeshes: InstancedMesh[] = [];
+  /** What the plant brush has grown, as cards: drawn with the stage's own. */
+  let paintedCards: CardSet[] = [];
   let materials: Record<string, Material> = {};
   const clay = new MeshStandardNodeMaterial({ color: new Color(0.42, 0.41, 0.4), roughness: 0.92, metalness: 0 });
   let sets: Record<string, textures0.TextureSet> | null = null;
@@ -168,7 +175,7 @@ async function start(): Promise<void> {
     for (const m of spent) { (m as MeshStandardNodeMaterial).map?.dispose(); m.dispose(); }
     cardMeshes = [];
     VG.vegetationRange.value = 80;
-    for (const set of stage.cards) {
+    for (const set of [...stage.cards, ...paintedCards]) {
       const high = set.kind === 'leaf' || set.kind === 'needle';
       for (const mesh of VG.makeCards(set, VG.paintCards(set.kind))) { (high ? cardGroups.leaves : cardGroups.grass).add(mesh); cardMeshes.push(mesh); }
     }
@@ -181,7 +188,7 @@ async function start(): Promise<void> {
     for (const [name, builder] of stage.meshes) addSolid(name, builder);
     plant();
   };
-  const addSolid = (name: string, builder: MeshBuilder, painted = false) => {
+  const addSolid = (name: string, builder: MeshBuilder, painted?: 'land' | 'plants') => {
     const geometry = builder.build();
     // (So that a line from the pointer finds where it meets the land at once, however much land there is.)
     (geometry as unknown as { boundsTree: MeshBVH }).boundsTree = new MeshBVH(geometry);
@@ -381,7 +388,9 @@ async function start(): Promise<void> {
   // carved, as the cliff is carved and of the same stone, and takes the place of the balls.
   const ballShape = new SphereGeometry(1, 28, 14);
   const ballLook = (colour: number, opacity: number) => new MeshBasicNodeMaterial({ color: colour, transparent: true, opacity, depthWrite: false });
-  const addLook = ballLook(0xe0b070, 0.3), digLook = ballLook(0xff5a40, 0.3), tipLook = ballLook(0xffffff, 0.22);
+  const addLook = ballLook(0xe0b070, 0.3), digLook = ballLook(0xff5a40, 0.3), tipLook = ballLook(0xffffff, 0.22), plantLook = ballLook(0x70c060, 0.3);
+  const planting = () => state.paint !== 'rock';
+  const hitAt = new Vector3();
   const laid = new Group(), tip = new Mesh(ballShape, tipLook);
   tip.visible = false;
   scene.add(laid, tip);
@@ -394,31 +403,59 @@ async function start(): Promise<void> {
     ray.setFromCamera(new Vector2(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2), camera);
     // (Not on the balls of the stroke being drawn: each would be laid on the near side of the last, and the stroke would come straight
     // at the eye instead of following the pointer. A mass is built upward stroke by stroke, on what the last stroke carved.)
-    const hit = ray.intersectObjects(solids.filter((s) => s.mesh.visible).map((s) => s.mesh), false)[0];
+    const hit = ray.intersectObjects(solids.filter((s) => s.mesh.visible && (!planting() || s.name === 'rock' || s.name === 'turf')).map((s) => s.mesh), false)[0];
     if (!hit) return null;
+    hitAt.copy(hit.point);
+    // (Plants are laid on the land itself; rock stands out of it by half the brush, or is sunk in to dig.)
+    if (planting()) return hit.point.clone();
     const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new Vector3(0, 1, 0);
     return hit.point.clone().addScaledVector(n, state.radius * (digging(e) ? -0.3 : 0.5));
   };
   const lay = (at: Vector3, dig: boolean) => {
-    state.balls.push([at.x, at.y, at.z, state.radius, dig ? -1 : 1, stroke]);
-    const ball = new Mesh(ballShape, dig ? digLook : addLook);
+    const plants = planting();
+    if (plants && dig) state.dabs = state.dabs.filter((d) => Math.hypot(d[0] - at.x, d[2] - at.z) > state.radius);
+    else if (plants) state.dabs.push([at.x, at.y, at.z, state.radius, Math.max(0, (PLANTS as readonly string[]).indexOf(state.paint)), stroke, Math.floor(Math.random() * 1e9)]);
+    else state.balls.push([at.x, at.y, at.z, state.radius, dig ? -1 : 1, stroke]);
+    const ball = new Mesh(ballShape, dig ? digLook : plants ? plantLook : addLook);
     ball.position.copy(at);
     ball.scale.setScalar(state.radius);
+    if (plants) ball.scale.y = Math.min(0.6, state.radius * 0.2);
     laid.add(ball);
     lastBall.copy(at);
   };
   /** Carves what has been painted, in place of what was carved from it before. */
   const carvePainted = (say0 = true) => {
-    for (let i = solids.length - 1; i >= 0; i--) if (solids[i].painted) { scene.remove(solids[i].mesh); solids[i].mesh.geometry.dispose(); solids.splice(i, 1); }
+    for (let i = solids.length - 1; i >= 0; i--) if (solids[i].painted === 'land') { scene.remove(solids[i].mesh); solids[i].mesh.geometry.dispose(); solids.splice(i, 1); }
     laid.clear();
     const made = stage.carveMass(state.balls);
-    if (made) addSolid('rock', made.mesh, true);
+    if (made) addSolid('rock', made.mesh, 'land');
     lightFromSky();
     setFields();
     dress();
     atmosphere.updateStatic(solids.map((s) => s.mesh), sunDir, stage.near.min, stage.near.max);
     remember();
     if (say0) say(made ? `Land carved from ${state.balls.length} balls in ${made.ms.toFixed(0)} ms, sampled every ${made.cell.toFixed(2)} m: ${made.mesh.triangleCount.toLocaleString()} triangles` : 'No painted land', 'good');
+  };
+  /** Grows what has been painted with the plant brush, in place of what was grown from it before. */
+  const down = new Raycaster();
+  const landAt = (x: number, z: number): number | null => {
+    down.set(new Vector3(x, 600, z), new Vector3(0, -1, 0));
+    const hit = down.intersectObjects(solids.filter((s) => s.mesh.visible && (s.name === 'rock' || s.name === 'turf')).map((s) => s.mesh), false)[0];
+    return hit ? hit.point.y : null;
+  };
+  const growPlants = (say0 = true) => {
+    for (let i = solids.length - 1; i >= 0; i--) if (solids[i].painted === 'plants') { scene.remove(solids[i].mesh); solids[i].mesh.geometry.dispose(); solids.splice(i, 1); }
+    laid.clear();
+    const made = stage.growPainted(state.dabs, landAt);
+    for (const [name, builder] of made.meshes) if (builder.vertexCount) addSolid(name, builder, 'plants');
+    paintedCards = made.cards;
+    plant();
+    lightFromSky();
+    setFields();
+    dress();
+    atmosphere.updateStatic(solids.map((s) => s.mesh), sunDir, stage.near.min, stage.near.max);
+    remember();
+    if (say0) say(`${made.count.toLocaleString()} plants grown from ${state.dabs.length} dabs in ${made.ms.toFixed(0)} ms`, 'good');
   };
   const holdBrush = () => {
     // With the brush in hand the left button paints; the right turns the view, the wheel closes in, as ever.
@@ -433,7 +470,8 @@ async function start(): Promise<void> {
     if (!at) return;
     tip.position.copy(at);
     tip.scale.setScalar(state.radius);
-    tip.material = digging(e) ? digLook : tipLook;
+    if (planting()) tip.scale.y = Math.min(0.6, state.radius * 0.2);
+    tip.material = digging(e) ? digLook : planting() ? plantLook : tipLook;
     if (painting && at.distanceTo(lastBall) > state.radius * 0.55) lay(at, digging(e));
   });
   canvas.addEventListener('pointerdown', (e) => {
@@ -442,19 +480,20 @@ async function start(): Promise<void> {
     if (!at) return;
     canvas.setPointerCapture(e.pointerId);
     painting = true;
-    stroke = 1 + state.balls.reduce((m, b) => Math.max(m, b[5]), 0);
+    stroke = 1 + Math.max(state.balls.reduce((m, b) => Math.max(m, b[5]), 0), state.dabs.reduce((m, b) => Math.max(m, b[5]), 0));
     lay(at, digging(e));
   });
-  const endStroke = () => { if (!painting) return; painting = false; try { carvePainted(); } catch (e) { console.error(e); } };
+  const endStroke = () => { if (!painting) return; painting = false; try { if (planting()) growPlants(); else { carvePainted(); if (state.dabs.length) growPlants(false); } } catch (e) { console.error(e); } };
   canvas.addEventListener('pointerup', endStroke);
   canvas.addEventListener('pointercancel', endStroke);
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   const undoStroke = () => {
-    const last = state.balls.reduce((m, b) => Math.max(m, b[5]), 0);
-    state.balls = state.balls.filter((b) => b[5] !== last);
-    carvePainted();
+    const lastBall = state.balls.reduce((m, b) => Math.max(m, b[5]), 0), lastDab = state.dabs.reduce((m, b) => Math.max(m, b[5]), 0);
+    if (lastDab > lastBall) { state.dabs = state.dabs.filter((b) => b[5] !== lastDab); growPlants(); }
+    else { state.balls = state.balls.filter((b) => b[5] !== lastBall); carvePainted(); if (state.dabs.length) growPlants(false); }
   };
-  const clearLand = () => { state.balls = []; carvePainted(); };
+  const clearLand = () => { state.balls = []; carvePainted(); if (state.dabs.length) growPlants(false); };
+  const clearPlants = () => { state.dabs = []; growPlants(); };
 
   // ------------------------------------------------------------------ a picture kept, to compare with
   const keptImage = document.getElementById('kept') as HTMLImageElement, divider = document.getElementById('divider')!;
@@ -551,7 +590,7 @@ async function start(): Promise<void> {
   slider('Haze', 0, 1, 0.01, () => state.haze, (v) => { state.haze = v; light(); });
 
   heading('Rock');
-  choice<Stone>('Stone', Object.keys(ROCK) as Stone[], () => state.stone, (v) => { state.stone = v; state.facet = state.broad = state.worn = null; redo('Stage carved again', () => { build(); if (state.balls.length) carvePainted(false); lightFromSky(); setFields(); dress(); light(); setUniforms(); }); });
+  choice<Stone>('Stone', Object.keys(ROCK) as Stone[], () => state.stone, (v) => { state.stone = v; state.facet = state.broad = state.worn = null; redo('Stage carved again', () => { build(); if (state.balls.length) carvePainted(false); if (state.dabs.length) growPlants(false); lightFromSky(); setFields(); dress(); light(); setUniforms(); }); });
   slider('Flat faces', 0, 1, 0.01, () => SM.rockUniforms.uRockFacet.value, (v) => { state.facet = v; setUniforms(); }, 'uRockFacet: how far each face is lit as the flat plane it is. Each stone has its own; choosing a stone puts it back.');
   slider('Broad faces', 0, 2, 0.01, () => SM.rockUniforms.uRockBroad.value, (v) => { state.broad = v; setUniforms(); }, 'uRockBroad: the strength of the faces a stride across, from the normal map read large');
   slider('Water-worn', 0, 1, 0.01, () => SM.rockUniforms.uRockWorn.value, (v) => { state.worn = v; setUniforms(); }, 'uRockWorn: grooves eaten back along the planes between beds, and runnels down the faces. Limestone has it; choosing a stone puts it back.');
@@ -559,7 +598,7 @@ async function start(): Promise<void> {
   slider('Damp', 0, 1, 0.01, () => state.damp, (v) => { state.damp = v; setFields(); }, 'Added to the wet that rock and ground carry: after rain');
 
   heading('What grows');
-  choice<Season>('Season', ['spring', 'summer', 'autumn'], () => state.season, (v) => { state.season = v; redo('Stage planted again', () => { build(); if (state.balls.length) carvePainted(false); lightFromSky(); setFields(); dress(); light(); }); });
+  choice<Season>('Season', ['spring', 'summer', 'autumn'], () => state.season, (v) => { state.season = v; redo('Stage planted again', () => { build(); if (state.balls.length) carvePainted(false); if (state.dabs.length) growPlants(false); lightFromSky(); setFields(); dress(); light(); }); });
   slider('Wind', 0, 3, 0.01, () => state.wind, (v) => { state.wind = v; setUniforms(); });
   slider('Grass height', 0.2, 3, 0.01, () => state.grassTall, (v) => { state.grassTall = v; setUniforms(); }, 'uGrassTall: multiplies how tall grass stands');
   slider('Grass uneven', 0, 1, 0.01, () => state.grassVary, (v) => { state.grassVary = v; setUniforms(); }, 'uGrassVary: at 0 grass is as it was planted; at 1 some tufts stand near twice as tall and others are cropped to a third, in drifts and tuft by tuft');
@@ -572,13 +611,14 @@ async function start(): Promise<void> {
     ['clay', () => state.clay, (v) => { state.clay = v; dress(); }, 'Everything solid in one plain grey: what the shapes alone give, without their materials'],
   ]);
 
-  heading('Land brush');
+  heading('Brush');
   checks([
     ['brush in hand', () => state.brush, (v) => { state.brush = v; holdBrush(); }, 'L. Drag with the left button to lay rock on whatever the pointer meets; the right button then turns the view'],
     ['dig', () => state.dig, (v) => { state.dig = v; }, 'Bite out of what was painted, instead of adding. Holding Shift does the opposite of what is set here.'],
   ]);
+  choice<string>('Paints', ['rock', ...PLANTS], () => state.paint, (v) => { state.paint = v; }, );
   slider('Size', 0.4, 40, 0.1, () => state.radius, (v) => { state.radius = v; }, 'The radius of the brush in metres. [ and ] make it smaller and larger.');
-  buttons([['Undo stroke', undoStroke, 'Z'], ['Clear', clearLand, 'Takes away all painted land']]);
+  buttons([['Undo stroke', undoStroke, 'Z'], ['Clear land', clearLand, 'Takes away all painted land'], ['Clear plants', clearPlants, 'Takes away all painted plants']]);
 
   heading('Textures');
   choice<string>('Size', ['512', '1024', '2048'], () => String(state.tex), (v) => { state.tex = Number(v); redo(`Textures painted at ${v} and materials made`, () => { paint(); forge(); }); });
@@ -642,6 +682,7 @@ async function start(): Promise<void> {
     const t2 = performance.now();
     forge();
     if (state.balls.length) carvePainted(false);
+    if (state.dabs.length) growPlants(false);
     holdBrush();
     lightFromSky();
     setFields();
