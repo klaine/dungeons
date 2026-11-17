@@ -1,6 +1,6 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
-import { armRise, armsOf, edgeAt, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
+import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -482,8 +482,10 @@ function layOutBackWay(site: Site, meadow: Place, rng: Rng): void {
     for (const s of [-1, 1] as const) for (let run = 14; run <= 36; run += 2) {
       // The cavern is not under the arm, which draws in towards its head and seldom has room, but under the hill behind the arm's
       // outer wall: the passage from the cave runs behind that wall to it, and the way from the house crosses to it deep under the arm.
+      // (That way first runs along inside the ridge until it is level with the cavern, and so comes to it from the side and not from the
+      // end the passage comes in by.)
       // (The passage, going on as it was going, runs into the cavern's end; the way from the house comes into its side. So the two do not arrive together, one over the other.)
-      const endZ = cave.z + s * (1.2 * cave.r + run), cz = round(endZ + s * (rz + 2.5)), toward = cz >= bw.z ? 1 : -1, leg = 8, z1 = bw.z + toward * leg;
+      const endZ = cave.z + s * (1.2 * cave.r + run), cz = round(endZ + s * (rz + 2.5)), toward = cz >= bw.z ? 1 : -1, leg = round(Math.min(36, Math.max(8, Math.abs(cz - bw.z)))), z1 = bw.z + toward * leg;
       if (Math.max(z1 + 6, cz + rz) > meadow.z0 || cz - rz < v.z0 - 12 || !stripClear(z1)) continue;
       const made = { from, leg, toward, x: round(edgeAt(v, bw.side, endZ) - dir * 7.4), z: cz, rx, rz, height: 5, drop: 8.5, join: { toward: s, run } } as const;
       const line = joinLine(v, cave, made), lens = line.slice(1).map((q, i) => Math.hypot(q[0] - line[i][0], q[1] - line[i][1])), total = lens.reduce((t, l) => t + l, 0);
@@ -491,11 +493,45 @@ function layOutBackWay(site: Site, meadow: Place, rng: Rng): void {
       const fall = meadow.floor + armRise(cave.z, meadow.z0) - (p.floor - 8.5) + 0.5;
       if ((total - 5) * 0.4 < fall || lens[lens.length - 1] < 2.5) continue;
       if (line.slice(0, -1).some(([x, z]) => Math.hypot((x - made.x) / (rx + 2.6), (z - cz) / (rz + 2.6)) < 1)) continue;
-      // (Nor does the way from the house, crossing to the cavern, pass under it anywhere but at the cavern.)
-      const ax = edge + dir * 5, bx = made.x + dir * (rx - 1.2) - ax, bz = cz - z1;
-      if (line.slice(0, -1).some(([x, z]) => { const t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - z1) * bz) / (bx * bx + bz * bz))); return Math.hypot(x - ax - bx * t, z - z1 - bz * t) < 4; })) continue;
+      // (Nor does the way from the house, crossing to the cavern at the cavern's depth, pass under it where it has itself come down
+      // more than half way: higher up there is rock enough between the two.)
+      const ax = edge - dir * 5, bx = made.x + dir * (rx - 1.2) - ax, bz = cz - z1;
+      let along = 0;
+      if (line.slice(0, -1).some(([x, z], i) => {
+        along += i ? lens[i - 1] : 0;
+        const t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - z1) * bz) / (bx * bx + bz * bz)));
+        return along > total * 0.5 && Math.hypot(x - ax - bx * t, z - z1 - bz * t) < 4;
+      })) continue;
       if ((site.features ?? []).some((f) => line.some(([x, z]) => Math.hypot(f.x - x, f.z - z) < f.r + 5))) continue;
       if ((site.streams ?? []).some((st) => st.course.some(([x, z]) => line.slice(0, -1).some(([lx, lz]) => Math.hypot(lx - x, lz - z) < 6)))) continue;
+      if (!best || run < best.cost) best = { cost: run, deep: made };
+    }
+    if (best) { bw.deep = best.deep; return; }
+  }
+  // Or a hall cut under the hill from that arm: then the cavern lies beyond the hall, to one side of it, and the passage to it leaves by a
+  // door in the hall's side wall (or, from a great hall, by one in the room over its upper bridge, which was made to have a door onward).
+  if (cave && cave.hall && cave.side === bw.side && cave.z < r.z) {
+    const h = cave.hall, half = h.width / 2, caveEdge = edgeAt(v, cave.side, cave.z), hall0 = 3.9 + h.drop / 0.5 + 1.6;
+    let best: { cost: number; deep: NonNullable<NonNullable<Site['backWay']>['deep']> } | null = null;
+    for (const s of (h.great ? [h.great.gallery === 's' ? -1 : 1] : [-1, 1]) as (-1 | 1)[]) for (let run = 10; run <= 30; run += 2) {
+      const on = hallOnward(v, cave, s), endZ = cave.z + s * (on.end - 0.6 + run), cz = round(endZ + s * (rz + 2.5)), toward = cz >= bw.z ? 1 : -1, leg = round(Math.min(36, Math.max(8, Math.abs(cz - bw.z)))), z1 = bw.z + toward * leg;
+      if (Math.max(z1 + 6, cz + rz) > meadow.z0 || cz - rz < v.z0 - 12 || !stripClear(z1)) continue;
+      const made = { from, leg, toward, x: round(on.x), z: cz, rx, rz, height: 5, drop: 8.5, join: { toward: s, run } } as const;
+      const line = joinLine(v, cave, made), lens = line.slice(1).map((q, i) => Math.hypot(q[0] - line[i][0], q[1] - line[i][1])), total = lens.reduce((t, l) => t + l, 0);
+      // (It goes down to the cavern, not up, and no steeper than the other ways do.)
+      const fall = meadow.floor + armRise(cave.z, meadow.z0) - h.drop - (p.floor - 8.5);
+      if (fall < 0.8 || (total - 5) * 0.4 < fall + 0.5) continue;
+      // (All of it lies under the hill and none of it under the valley, whichever way the valley's side goes from here.)
+      const round_ = Array.from({ length: 8 }, (_, k) => [made.x + Math.cos((k * Math.PI) / 4) * rx, cz + Math.sin((k * Math.PI) / 4) * rz]);
+      if ([...line, ...round_].some(([x, z]) => insideOf(v, x, z) > -3)) continue;
+      // (And the way from the house, crossing to the cavern, keeps clear of the hall and of the stair down to it: it is at their depth.)
+      const ax = edge - dir * 5, bx = made.x + dir * (rx - 1.2) - ax, bz = cz - z1, n = Math.ceil(Math.hypot(bx, bz));
+      let clear = true;
+      for (let k = 0; k <= n && clear; k++) {
+        const x = ax + (bx * k) / n, z = z1 + (bz * k) / n, t = 7 - (x - caveEdge) * (dir), off = Math.abs(z - cave.z);
+        if (t > -1 && t < hall0 + h.length + 6 && off < (t < hall0 - 2 ? 2.4 : half + (h.great ? 10 : 1)) + 5) clear = false;
+      }
+      if (!clear) continue;
       if (!best || run < best.cost) best = { cost: run, deep: made };
     }
     if (best) { bw.deep = best.deep; return; }

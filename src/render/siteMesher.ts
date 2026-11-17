@@ -15,7 +15,7 @@ import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
-import { armRise, boxValley, edgeAt, insideOf, joinLine, slantAt } from '../core/valley';
+import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, TorchSpec } from './scene';
 
@@ -260,6 +260,8 @@ export function meshSite(site: Site): SceneDescription {
     const dp = bw.deep;
     const cave = dp?.join ? site.grottoes?.[0] : undefined;
     const jLine = cave && dp && site.valley ? joinLine(site.valley, cave, dp) : [], jLens = jLine.slice(1).map((q, i) => Math.hypot(q[0] - jLine[i][0], q[1] - jLine[i][1])), jTotal = jLens.reduce((t, l) => t + l, 0);
+    // (Points along the way down, every half metre, with its floor at each: for the barriers, which must stop above it.)
+    const deepSamples: { x: number; y: number; z: number }[] = [];
     let deepAir: ((x: number, y: number, z: number) => number) | null = null, cavern: { x: number; z: number; floor: number; rx: number; rz: number; height: number; box: [number, number, number, number] } | null = null;
     if (dp) {
       const X = (a: number) => edge + dir * a, z1 = bw.z + dp.toward * dp.leg, start = floorAt(dp.from), yC = start - dp.drop;
@@ -268,6 +270,7 @@ export function meshSite(site: Site): SceneDescription {
       const lens = line.slice(1).map((q, i) => Math.hypot(q[0] - line[i][0], q[1] - line[i][1])), total = lens.reduce((t, l) => t + l, 0);
       // (Where the cavern lies beyond the arm, all of the fall is inside the ridge, and the way crosses under the arm level and deep.)
       const fallOver = dp.join ? lens[0] + lens[1] - 0.5 : total - 3;
+      for (let i = 0, run = 0; i < lens.length; run += lens[i], i++) for (let d = 0; d < lens[i]; d += 0.5) deepSamples.push({ x: line[i][0] + ((line[i + 1][0] - line[i][0]) * d) / lens[i], y: start - dp.drop * Math.min(1, (run + d) / fallOver), z: line[i][1] + ((line[i + 1][1] - line[i][1]) * d) / lens[i] });
       const spikes = Array.from({ length: 7 }, () => { const a = seeds.range(0, Math.PI * 2), d = seeds.range(0.25, 0.8); return { x: dp.x + Math.cos(a) * d * dp.rx, z: dp.z + Math.sin(a) * d * dp.rz, r: seeds.range(0.35, 0.7), h: seeds.range(1.2, 2.6) }; })
         // (None stands in the way in, nor between a way in and the middle of the cavern, where what was left there lies.)
         .filter((q) => [[rim, dp.z], ...(jLine.length ? [jLine[jLine.length - 1]] : [])].every(([ex, ez]) => {
@@ -350,7 +353,7 @@ export function meshSite(site: Site): SceneDescription {
     const deepMin = V(Math.min(xa0, xb0, cavern ? cavern.box[0] : Infinity), cavern ? cavern.floor - 1.5 : Math.min(out, p.floor) - 1, Math.min(bw.z - 3, cavern ? cavern.box[2] : Infinity));
     // (Whether a point is over the part of that passage that is carved by itself and not with the cavern.)
     const joinOwn = (x: number, z: number): boolean => { if (!jLine.length) return false; const q = joinAt(x, z); return q.off < 2.4 && q.along < jTotal - JOIN_LEVEL; };
-    return { p, dir, edge, length, z: bw.z, along, air, top, low: Math.min(out, p.floor), x: (a: number) => edge + dir * a, deepAir, cavernAir, cavern, start: dp ? floorAt(dp.from) : 0, deepMin, joinOwn, joinAt, joinSection, join: jLine.length ? { line: jLine, lens: jLens, total: jTotal, level: JOIN_LEVEL } : null };
+    return { p, dir, edge, length, z: bw.z, along, air, top, low: Math.min(out, p.floor), x: (a: number) => edge + dir * a, deepAir, deepSamples, cavernAir, cavern, start: dp ? floorAt(dp.from) : 0, deepMin, joinOwn, joinAt, joinSection, join: jLine.length ? { line: jLine, lens: jLens, total: jTotal, level: JOIN_LEVEL } : null };
   })();
 
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
@@ -733,7 +736,9 @@ export function meshSite(site: Site): SceneDescription {
       const seeds = rng.fork(`grotto${k}`);
       // (For a hall: where its stair begins, measured as everything in a grotto is, going out of the valley from seven metres inside its edge; how far the stair runs; and where the hall itself begins.)
       const stair0 = 3.9, run = q.hall ? q.hall.drop / 0.5 : 0, hall0 = stair0 + run + 1.6;
-      return { ...q, inw: q.side === 'w' ? 1 : -1, edge: sideAt(q.side, q.z), y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0, gs: q.hall?.great?.gallery === 's' ? 1 : -1 };
+      // (And, if a passage goes on from it to the cavern, where its door onward is: see `hallOnward`.)
+      const js = site.backWay?.deep?.join?.toward, on = q.hall && k === 0 && js !== undefined && vale ? { ...hallOnward(vale, q, js), s: js } : null;
+      return { ...q, on, inw: q.side === 'w' ? 1 : -1, edge: sideAt(q.side, q.z), y0: NaN, far: 7 + q.r - 0.3, bend: seeds.range(-1, 1), n1: seeds.range(0, 50), n2: seeds.range(0, 50), stair0, run, hall0, gs: q.hall?.great?.gallery === 's' ? 1 : -1 };
     });
     /**
      * The air of a hewn hall, at a point given as the grotto's own measures: `t` going out of
@@ -846,6 +851,8 @@ export function meshSite(site: Site): SceneDescription {
         // The door at the far end of the upper bridge, and the room behind it.
         a = Math.max(a, Math.min(1.2 - Math.abs(u - uc), -half + 0.3 - o, o + half + 1.7, yy - G, G + 3.0 - yy));
         a = Math.max(a, Math.min(3.2 - Math.abs(u - uc), -half - 1.5 - o, o + half + 8, yy - G, G + 3.8 - yy));
+        // And, if a passage goes on from it, the door in that room's far wall.
+        if (q.on) a = Math.max(a, Math.min(1.1 - Math.abs(u - uc), -half - 7.7 - o, o + q.on.end, yy - G, G + 2.6 - yy));
       }
       // The shaft that lets the day in.
       const sh = shaftFor.get(q)!;
@@ -876,6 +883,8 @@ export function meshSite(site: Site): SceneDescription {
           const tu = h.length - 2.7;
           a = Math.min(a, Math.max(Math.abs(u - tu) - 0.62, Math.abs(off) - 1.15, y - (floor + 1.0)));
         }
+        // The door onward: a plain squared doorway through the side wall.
+        if (q.on) a = Math.max(a, Math.min(1.1 - Math.abs(u - q.on.u), off * q.on.s - (half - 0.4), q.on.end - off * q.on.s, y - floor, floor + 2.6 - y));
         air = Math.max(air, a);
       }
       return air;
@@ -1322,22 +1331,24 @@ export function meshSite(site: Site): SceneDescription {
      */
     const join = (() => {
       const dp = site.backWay?.deep, cv = backWay?.cavern, jw = backWay?.join, q = grottoes[0];
-      if (!dp?.join || !cv || !jw || !backWay || !q || q.hall) return null;
+      if (!dp?.join || !cv || !jw || !backWay || !q || (q.hall && !q.on)) return null;
       const bwy = backWay, s = dp.join.toward, total = jw.total;
-      const yS = q.y0 - 0.045 * (q.far - 2), yE = cv.floor, floorAt = (along: number) => yS + (yE - yS) * Math.min(1, Math.max(0, (along - 2) / (total - 2 - jw.level)));
+      const yS = q.hall ? q.y0 - q.hall.drop : q.y0 - 0.045 * (q.far - 2), yE = cv.floor, floorAt = (along: number) => yS + (yE - yS) * Math.min(1, Math.max(0, (along - 2) / (total - 2 - jw.level)));
       const xs = jw.line.map((b) => b[0]), zs = jw.line.map((b) => b[1]);
       const box = [Math.min(...xs) - 2.6, Math.max(...xs) + 2.6, Math.min(...zs) - 2.6, Math.max(...zs) + 2.6], top = yS + 3.4;
       const air = (x: number, y: number, z: number): number => {
         if (x < box[0] || x > box[1] || z < box[2] || z > box[3] || y > top || y < yE - 1.5) return -9;
-        const at = bwy.joinAt(x, z);
-        return at.off > 2.4 ? -9 : bwy.joinSection(at.off, at.along, x, y, z, floorAt(at.along));
+        const at = bwy.joinAt(x, z), tube = at.off > 2.4 ? -9 : bwy.joinSection(at.off, at.along, x, y, z, floorAt(at.along));
+        // (From a hall it begins inside the hall's door onward, and where the two overlap its air is the door's as well: so that
+        // its own carving and the hall's make the same thing there.)
+        return q.on && (z - q.z) * s > q.on.end - 1.5 && (z - q.z) * s < q.on.end + 0.2 ? Math.max(tube, hallAir(q, 7 - (x - q.edge) * q.inw, z - q.z, y)) : tube;
       };
       // Points along it, every half metre, with its floor at each: for what must know where it runs without asking for its air.
       const samples: { x: number; y: number; z: number }[] = [];
       for (let i = 0, run = 0; i < jw.lens.length; run += jw.lens[i], i++) for (let d = 0; d < jw.lens[i]; d += 0.5) samples.push({ x: jw.line[i][0] + ((jw.line[i + 1][0] - jw.line[i][0]) * d) / jw.lens[i], y: floorAt(run + d), z: jw.line[i][1] + ((jw.line[i + 1][1] - jw.line[i][1]) * d) / jw.lens[i] });
-      const seam = q.z + s * (1.2 * q.r + 1.6);
+      const seam = q.z + s * (q.on ? q.on.end - 0.1 : 1.2 * q.r + 1.6);
       // (`own`: whether a point is past the seam, going from the cave, and so not the land's to carve. `byCave`: whether a patch of land holds the stretch before the seam.)
-      return { air, box, top, high: yS, samples, back: s * 0.7, own: (z: number) => (z - seam) * s > 0, byCave: (c: { x0: number; x1: number; z0: number; z1: number }) => c.x1 > xs[0] - 5 && c.x0 < xs[0] + 5 && c.z1 > Math.min(q.z, seam) - 1 && c.z0 < Math.max(q.z, seam) + 1 };
+      return { air, box, top, high: yS, hewn: !!q.hall, samples, back: s * (q.on ? 0.5 : 0.7), own: (z: number) => (z - seam) * s > 0, byCave: (c: { x0: number; x1: number; z0: number; z1: number }) => !q.hall && c.x1 > xs[0] - 5 && c.x0 < xs[0] + 5 && c.z1 > Math.min(q.z, seam) - 1 && c.z0 < Math.max(q.z, seam) + 1 };
     })();
     // Three things read off the worn heights: how steep the ground is, which turns a height
     // above it into a distance from it; which way is uphill; and how far the ground is rock,
@@ -1569,9 +1580,9 @@ export function meshSite(site: Site): SceneDescription {
         const cave = caves.find((q) => z + 1.5 > q.z - q.r * 1.25 - 2.4 && z < q.z + q.r * 1.25 + 2.4);
         // (The cavern under an arm may reach beneath the valley's side: the barrier stops above its roof there.)
         const cv = backWay?.cavern, over = !!cv && z + 1.5 > cv.z - cv.rz - 2 && z < cv.z + cv.rz + 2 && Math.max(near, far) > cv.x - cv.rx - 2 && Math.min(near, far) < cv.x + cv.rx + 2;
-        // (And above the passage from a cave to the cavern, where that runs behind the side or crosses under it.)
+        // (And above the passage from a cave to the cavern, and the way from the house to it, wherever either runs behind the side or crosses under it.)
         let under = -Infinity;
-        if (join) for (const q of join.samples) if (q.z > z - 1.5 && q.z < z + 3 && q.x > Math.min(near, far) - 2 && q.x < Math.max(near, far) + 2) under = Math.max(under, q.y + 3.5);
+        for (const q of [...(join?.samples ?? []), ...(backWay?.deepSamples ?? [])]) if (q.z > z - 1.5 && q.z < z + 3 && q.x > Math.min(near, far) - 2 && q.x < Math.max(near, far) + 2) under = Math.max(under, q.y + 3.5);
         fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : Math.max(over ? cv!.floor + cv!.height + 1.5 : -Infinity, under, p.floor - 6), z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
       }
     }
@@ -1641,7 +1652,10 @@ export function meshSite(site: Site): SceneDescription {
       // (The cavern's air is taken with it as the cavern is without this passage's own foot in it, which is level and would cut a pit in the floor here.)
       const jn = join, bwy = backWay, deepAir = backWay.cavernAir ?? backWay.deepAir, from = backWay.deepMin, snap = (v: number, o: number) => o + Math.floor((v - o) / 0.28) * 0.28;
       const wetField = indoorField([], jn.high - 9), tone3 = rng.fork('jointone').range(0, 50);
-      carveRock(kit.mesh('rock'), (x, y, z) => Math.max(deepAir(x, y, z), jn.air(x, y, z)), {
+      // (From a hall it is of the hall's kind, which is told that it sees no sky at all; from a cave it is of the house's, like the cavern.)
+      let rockFor = kit.mesh('rock');
+      if (jn.hewn) { wild.group = 'under'; rockFor = wild.mesh('rock'); wild.group = 'wild'; }
+      carveRock(rockFor, (x, y, z) => Math.max(deepAir(x, y, z), jn.air(x, y, z)), {
         min: V(snap(jn.box[0], from.x), from.y, snap(jn.box[2], from.z)), max: V(jn.box[1], jn.top + 0.3, jn.box[3]), cell: 0.28, uvScale: 0.45,
         // (It begins a little before the land's carving leaves off: the two are on different lattices, and where they only met there would be chinks.)
         keep: (at) => jn.own(at.z + jn.back) && bwy.joinOwn(at.x, at.z),
@@ -1652,7 +1666,7 @@ export function meshSite(site: Site): SceneDescription {
         },
       });
       // (Rock over it, for the sun's shadow only, as over the cavern.)
-      for (let i = 10; i < jn.samples.length; i += 4) { const q = jn.samples[i]; kit.mass(V(q.x - 2.2, q.y + 3.5, q.z - 2.2), V(q.x + 2.2, q.y + 4.3, q.z + 2.2)); }
+      for (let i = jn.hewn ? 2 : 10; i < jn.samples.length; i += 4) { const q = jn.samples[i]; kit.mass(V(q.x - 2.2, q.y + 3.5, q.z - 2.2), V(q.x + 2.2, q.y + 4.3, q.z + 2.2)); }
       // Something glows a third and two thirds of the way down it, to draw on whoever looks in.
       for (const t of [0.36, 0.7]) {
         const q = jn.samples[Math.floor(jn.samples.length * t)], side = t < 0.5 ? 1 : -1;
@@ -2476,7 +2490,12 @@ export function meshSite(site: Site): SceneDescription {
           V(xOf(q.hall0 + Math.min(sh.u, sh.u + sh.du * lean) - sh.r - 1.2), yf + sh.yy - 0.6, q.z + Math.min(sh.off, sh.off + sh.dv * lean) - sh.r - 1.2),
           V(xOf(q.hall0 + Math.max(sh.u, sh.u + sh.du * lean) + sh.r + 1.2), yf + sh.yy + rise, q.z + Math.max(sh.off, sh.off + sh.dv * lean) + sh.r + 1.2)));
       } else pieces.push(span(V(xOf(q.hall0 - 0.3), yf - 0.9, q.z - half - 0.9), V(xOf(q.hall0 + h.length + 0.9), yf + h.height + 0.9, q.z + half + 0.9)));
-      for (const [min, max] of pieces) carveRock(rockUnder, air, { min, max, cell: gr ? 0.42 : 0.36, uvScale: 0.4, fromSamples: true, sharp: true, shade: (c, n) => shade(c, n) });
+      // The door onward, and the first of the passage beyond it, which is the hall's to carve as far as the passage's own carving begins.
+      const on = q.on, jn = on ? join : null;
+      if (on) pieces.push(gr
+        ? span(at(on.u - 1.7, -on.end - 0.4, gr.deep - 0.9), at(on.u + 1.7, -half - 8.5, gr.deep + 3.5))
+        : span(V(xOf(q.hall0 + on.u - 1.7), yl - 0.9, q.z + on.s * (half + 0.5)), V(xOf(q.hall0 + on.u + 1.7), yl + 3.5, q.z + on.s * (on.end + 0.4))));
+      for (const [min, max] of pieces) carveRock(rockUnder, jn ? (x, y, z) => Math.max(air(x, y, z), jn.air(x, y, z)) : air, { min, max, cell: gr ? 0.42 : 0.36, uvScale: 0.4, fromSamples: true, sharp: true, shade: (c, n) => shade(c, n), ...(jn ? { keep: (p3: Vector3) => !jn.own(p3.z) } : {}) });
       // The stair: steps of stone on the slope the rock was cut to, a stride and a half broad, each a hand and a half high.
       const cut = rng.fork('hallsteps');
       // (Counted from the bottom, so that the first step up from the hall is no higher than the rest: a step and a bit is a wall.)
@@ -2530,6 +2549,8 @@ export function meshSite(site: Site): SceneDescription {
         // Torches on the pillars, facing the middle of the hall, and one either side of the tomb.
         for (const [u, v] of pillarsOf(q)) torch(V(xOf(q.hall0 + u), yf + 2.5, q.z + v - Math.sign(v) * 0.76), V(0, 0, -Math.sign(v)));
         for (const side of [-1, 1]) torch(V(xOf(q.hall0 + h.length - 0.14), yf + 0.51 + 2.5, q.z + side * 3.2), V(q.inw, 0, 0));
+        // (And one beside the door onward, so that it is seen.)
+        if (on) torch(V(xOf(q.hall0 + on.u + 1.9), yf + 2.5, q.z + on.s * (half - 0.14)), V(0, 0, -on.s));
         finds.push({ at: V(xOf(q.hall0 + h.length - 2.7), yf + 0.51 + 1.18, q.z), what: 'a crown of dull gold, lying on the tomb in the hall under the hill' });
         unders.push({ min: V(Math.min(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf - 1, q.z - h.width / 2 - 1), max: V(Math.max(xOf(q.stair0), xOf(q.hall0 + h.length + 1)), yf + h.height + 1, q.z + h.width / 2 + 1) });
       }
