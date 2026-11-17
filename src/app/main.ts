@@ -177,7 +177,8 @@ async function start(): Promise<void> {
     rock: makeRockMaterial(rock, moss),
     far: makeFarMaterial(),
     scree: makeSiteMaterial(scree, moss, { normalScale: 1.6, matt: true }),
-    bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5 }),
+    // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)
+    bark: makeSiteMaterial(bark, moss, { normalScale: 1.8, mossScale: 2.5, matt: true }),
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
     turf: makeGroundMaterial(ground, sand ?? soil, scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),

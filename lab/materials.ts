@@ -143,7 +143,7 @@ async function start(): Promise<void> {
     materials = {
       rock: SM.makeRockMaterial(t.rock, t.moss),
       turf: SM.makeGroundMaterial(t.ground, t.soil, t.scree, t.litter, t.thatch, t.moss),
-      bark: SM.makeSiteMaterial(t.bark, t.moss, { normalScale: 1.8, mossScale: 2.5 }),
+      bark: SM.makeSiteMaterial(t.bark, t.moss, { normalScale: 1.8, mossScale: 2.5, matt: true }),
     };
     dress();
     setUniforms();

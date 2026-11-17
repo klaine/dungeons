@@ -1,6 +1,6 @@
 import {
   CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh,
-  PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture,
+  NoColorSpace, PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture,
 } from 'three';
 import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -17,7 +17,7 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
+const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalMap, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
 
 export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number } } = { uTime: uniform(0), uWind: uniform(1) };
 
@@ -29,7 +29,7 @@ export const vegetationUniforms: { uTime: { value: number }; uWind: { value: num
  * height is all glancing angles; it turns pale and blue.
  */
 class LeafLighting extends (PhysicalLightingModel as N) {
-  constructor(private readonly through: number) {
+  constructor(private readonly through: number, private readonly gleam = 0.2) {
     super();
   }
 
@@ -44,7 +44,7 @@ class LeafLighting extends (PhysicalLightingModel as N) {
     super.indirect(builder);
     const reflected = builder.context.reflectedLight;
     reflected.indirectSpecular.assign(vec3(0));
-    reflected.directSpecular.mulAssign(0.2);
+    reflected.directSpecular.mulAssign(this.gleam);
   }
 }
 
@@ -59,7 +59,7 @@ const grey = (v: number, a = 1) => `rgba(${Math.round(v * 255)},${Math.round(v *
 /** Paints the texture for one kind of card. Light and dark only: colour comes from the card. */
 export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
   // Leaves are looked at closely and are worth four times the paint.
-  const size = kind === 'leaf' ? 512 : 256;
+  const size = kind === 'leaf' ? 1024 : 256;
   const [canvas, ctx] = canvasOf(size);
   const rng = new Rng(`cards/${kind}/${seed}`);
   ctx.clearRect(0, 0, size, size);
@@ -178,20 +178,62 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
     }
   } else if (kind === 'leaf') {
     // A spray: a twig across the card with lesser twigs off it, and on them leaves that can be
-    // told apart, each with a pointed tip, a midrib, and one half a little darker than the other.
+    // told apart. Each leaf is painted twice. Once as it looks: a pointed blade, darker at its
+    // foot and lighter at its tip, one half a little darker than the other, with a pale midrib
+    // and side veins, and a cast of its own (yellower for a young leaf, bluer for an old one).
+    // And once as it lies: no leaf on a twig lies in the plane of the twig. Each is tipped its
+    // own way, folded a little along its midrib, and droops from foot to tip; that is written
+    // into a second picture as the way each point of the leaf faces, and the material lights
+    // the leaf by it. A spray painted flat and lit flat is a paper cut-out, however it is drawn.
+    const [reliefCanvas, lie] = canvasOf(size);
+    lie.fillStyle = 'rgb(128,128,255)';
+    lie.fillRect(0, 0, size, size);
+    const cast = (tone: number, warm: number, a = 1) => {
+      const c = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+      return `rgba(${c(tone * (1 + 0.16 * warm))},${c(tone)},${c(tone * (1 - 0.3 * warm))},${a})`;
+    };
+    // (A picture's rows run downward and a card's upward, so the upward lean is written reversed.)
+    const facing = (nx: number, ny: number) => {
+      const l = Math.hypot(nx, ny, 1);
+      return `rgb(${Math.round((nx / l) * 127.5 + 127.5)},${Math.round((-ny / l) * 127.5 + 127.5)},${Math.round((1 / l) * 127.5 + 127.5)})`;
+    };
     const leaf = (x: number, y: number, turn: number, len: number, tone: number) => {
       const wide = len * rng.range(0.34, 0.46), c = Math.cos(turn), s = Math.sin(turn);
       const at = (u: number, v: number): [number, number] => [x + c * u * len - s * v * wide, y + s * u * len + c * v * wide];
+      const warm = rng.range(-0.7, 1), tipX = rng.range(-0.55, 0.55), tipY = rng.range(-0.55, 0.55), droop = rng.range(0.15, 0.6), fold = rng.range(0.25, 0.6);
+      const shade = tone * 0.86;
       for (const half of [-1, 1]) {
-        ctx.fillStyle = grey(tone * (half < 0 ? 0.8 : 1));
-        ctx.beginPath();
-        ctx.moveTo(...at(0, 0));
-        ctx.bezierCurveTo(...at(0.25, half * 1.1), ...at(0.7, half * 0.8), ...at(1, 0));
-        ctx.closePath();
-        ctx.fill();
+        const blade = (to: CanvasRenderingContext2D) => {
+          to.beginPath();
+          to.moveTo(...at(0, 0));
+          to.bezierCurveTo(...at(0.25, half * 1.1), ...at(0.7, half * 0.8), ...at(1, 0));
+          to.closePath();
+          to.fill();
+        };
+        const k = half < 0 ? 0.82 : 1;
+        const look = ctx.createLinearGradient(...at(0, 0), ...at(1, 0));
+        look.addColorStop(0, cast(shade * k * 0.7, warm - 0.2));
+        look.addColorStop(0.55, cast(shade * k, warm));
+        look.addColorStop(1, cast(shade * k * 1.12, warm + 0.25));
+        ctx.fillStyle = look;
+        blade(ctx);
+        // This half leans in towards the midrib (a leaf is a shallow trough), and the whole leaf leans back at its foot and forward at its tip.
+        const px = -s * half, py = c * half;
+        const lean = lie.createLinearGradient(...at(0, 0), ...at(1, 0));
+        lean.addColorStop(0, facing(tipX - px * fold - c * droop, tipY - py * fold - s * droop));
+        lean.addColorStop(1, facing(tipX - px * fold + c * droop, tipY - py * fold + s * droop));
+        lie.fillStyle = lean;
+        blade(lie);
+        // Side veins, from the midrib out towards the edge and forward.
+        ctx.strokeStyle = cast(shade * 1.16, warm + 0.3, 0.45);
+        ctx.lineWidth = Math.max(1, size / 700);
+        for (let v = 0; v < 4; v++) {
+          const u = 0.16 + v * 0.19;
+          ctx.beginPath(); ctx.moveTo(...at(u, 0)); ctx.lineTo(...at(u + 0.16, half * 0.62 * (1 - u * 0.75))); ctx.stroke();
+        }
       }
-      ctx.strokeStyle = grey(tone * 0.62, 0.8);
-      ctx.lineWidth = Math.max(1, size / 256);
+      ctx.strokeStyle = cast(shade * 1.22, warm + 0.4, 0.85);
+      ctx.lineWidth = Math.max(1, size / 340);
       ctx.beginPath(); ctx.moveTo(...at(0, 0)); ctx.lineTo(...at(0.95, 0)); ctx.stroke();
     };
     const twig = (x0: number, y0: number, dir: number, reach: number, width: number, depth: number) => {
@@ -199,7 +241,8 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
       let x = x0, y = y0, d = dir;
       for (let k = 0; k < steps; k++) {
         const f = k / steps, nx = x + Math.cos(d) * (reach / steps), ny = y + Math.sin(d) * (reach / steps);
-        ctx.strokeStyle = grey(0.26);
+        // (Brown against the leaves' green, as far as paint that is multiplied by the card's green can be.)
+        ctx.strokeStyle = cast(0.34, 2.2);
         ctx.lineWidth = width * (1 - 0.7 * f);
         ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(nx, ny); ctx.stroke();
         x = nx; y = ny;
@@ -212,8 +255,17 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
     };
     for (let k = 0; k < 5; k++) {
       const a = (k / 5) * Math.PI * 2 + rng.range(-0.3, 0.3);
-      twig(size / 2, size / 2, a, size * rng.range(0.3, 0.42), size * 0.018, 1);
+      twig(size / 2, size / 2, a, size * rng.range(0.3, 0.42), size * 0.012, 1);
     }
+    const relief = new CanvasTexture(reliefCanvas);
+    relief.colorSpace = NoColorSpace;
+    relief.anisotropy = 4;
+    const texture = new CanvasTexture(canvas);
+    texture.colorSpace = SRGBColorSpace;
+    texture.anisotropy = 4;
+    // (It goes with the picture, for whoever makes a material of it.)
+    texture.userData.relief = relief;
+    return texture;
   } else if (kind === 'needle') {
     // A conifer bough seen from above: a stem up the card with side shoots, all bristling with
     // needles, broad at the foot of the card (the trunk end is at the top).
@@ -357,7 +409,14 @@ function bladeClump(): BufferGeometry {
   return g;
 }
 
-function shapeGeometry(shape: CardSet['shape']): BufferGeometry {
+function shapeGeometry(shape: CardSet['shape'], folded = false): BufferGeometry {
+  if (shape === 'card' && folded) {
+    // A spray of leaves is not a flat sheet either: the card is creased down its middle, so that its two halves face different ways,
+    // catch different light, and do not vanish together when seen edge on.
+    const g = new PlaneGeometry(1, 1, 2, 1), p = g.getAttribute('position');
+    for (let i = 0; i < p.count; i++) if (Math.abs(p.getX(i)) < 0.01) p.setZ(i, 0.16);
+    return g;
+  }
   if (shape === 'card') return new PlaneGeometry(1, 1);
   // Three upright sheets through one line, a third of a turn apart, with their feet on the ground.
   const sheets = [0, 1, 2].map((k) => {
@@ -428,13 +487,18 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     })();
     // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
     // given like this is not turned round on back faces, which a two-sided material would do to its own.)
-    material.normalNode = transformNormalToView(normalize(positionWorld.sub(attribute('aCentre', 'vec3'))));
-    (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1);
+    const round: N = transformNormalToView(normalize(positionWorld.sub(attribute('aCentre', 'vec3'))));
+    // Leaves are lit both ways at once: as parts of the crown's rounded body, which gives the crown its light side and its dark, and each
+    // as it lies on its twig, which gives one leaf a gleam and its neighbour none. And a leaf's skin is waxy: it throws the sun back.
+    const relief = set.kind === 'leaf' ? (texture.userData.relief as Texture | undefined) : undefined;
+    material.normalNode = relief ? normalize(round.mul(0.6).add((normalMap(tex(relief, uv())) as N).mul(0.62))) : round;
+    if (relief) { material.roughness = 0.58; material.color.setScalar(1.16); }
+    (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1, relief ? 0.55 : 0.2);
     return material;
   };
   const layers: { layer: 'painted' | 'blades'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
   if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
-  layers.push({ layer: 'painted', base: shapeGeometry(set.shape), material: materialFor('painted') });
+  layers.push({ layer: 'painted', base: shapeGeometry(set.shape, set.kind === 'leaf'), material: materialFor('painted') });
 
   // Which block each card falls in.
   const count = set.matrices.length / 16;
