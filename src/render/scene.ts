@@ -145,9 +145,15 @@ export interface SceneDescription {
   /** Where the track crosses running water, how it gets over, and how high the water stands there. */
   crossings?: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[];
   /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */
-  far?: { wood: [number, number, number]; grass: [number, number, number] };
+  far?: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number] };
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
+  /** The sea of cloud, if the place is a mountain top: the level of its top, and how high its billows stand above and below that. Drawn with the air. */
+  deck?: { level: number; billow: number };
+  /** How much snow lies, from 0 for none to 1 for the whole of winter: the materials lay it on whatever is level enough to hold it. */
+  snow?: number;
+  /** Above what level snow lies more thickly, and how much more: so that in summer what is left of it is on the heights. */
+  snowLine?: [number, number];
   /** Where gulls wheel, off the cliffs. */
   birds?: { x: number; y: number; z: number }[];
   /** Where a lighthouse's lamp is, whose beam turns at dusk and by night. */

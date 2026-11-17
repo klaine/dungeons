@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, snowUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -30,6 +30,7 @@ import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
+import { inside as onMountain } from '../core/mountain';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
@@ -85,9 +86,10 @@ if (!params.has('seed')) {
   keep(params);
 }
 const seed = params.get('seed')!;
-// What kind of place: a valley, unless an island is asked for.
-// (A build may be made to open on an island when nothing is asked for: `VITE_PLACE=island npm run build`.)
-const place = (params.get('place') ?? import.meta.env.VITE_PLACE) === 'island' ? 'island' : 'valley';
+// What kind of place: a valley, unless an island or a mountain top is asked for.
+// (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
+const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : 'valley';
 
 const hud = {
   status: document.getElementById('status')!,
@@ -103,14 +105,14 @@ const newPlace = () => {
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
-// The other kind of place: an island, from a valley, or a valley from an island; a new one, since the same seed is the same house.
+// Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.
 {
-  const button = document.getElementById('kind')!;
-  button.textContent = place === 'island' ? 'A valley' : 'An island';
+  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'valley' } as const)[place];
+  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain' }[then];
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
     next.set('seed', randomSeed());
-    next.set('place', place === 'island' ? 'valley' : 'island');
+    next.set('place', then);
     next.delete('at');
     go(next);
   });
@@ -221,6 +223,10 @@ async function start(): Promise<void> {
   }
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
+  if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
+  // Snow, on a mountain: all over in winter, and in summer only what is left of it in the hollows.
+  snowUniforms.uSnow.value = num('snow', desc.snow ?? 0);
+  if (desc.snowLine) snowUniforms.uSnowLine.value.set(desc.snowLine[0], desc.snowLine[1]);
   hud.title.textContent = desc.title ?? 'Courtyard and hall, assembled by hand.';
   // Stone that breaks sharp shows broad flat faces; stone that weathers round hardly any.
   if (site) rockUniforms.uRockBroad.value = 0.35 + 1.1 * ROCK[site.setting.stone].sharp;
@@ -478,6 +484,8 @@ async function start(): Promise<void> {
   under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5), ...(desc.lowest !== undefined ? [desc.lowest - 1.5] : []));
   // (Round an island it is below the sea bed, out of sight under deep water.)
   if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
+  // (On a mountain, deep under the cloud.)
+  if (desc.deck) under.position.y = Math.min(under.position.y, desc.deck.level - 120);
   scene.add(under);
 
   // ------------------------------------------------------------------ sun and sky
@@ -613,6 +621,13 @@ async function start(): Promise<void> {
     u.uAirOn.value = 1;
     u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
     applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
+  }
+  if (desc.deck) {
+    // The sea of cloud below a mountain top: white in the sun, the sky's colour in its troughs.
+    const u = atmosphere.uniforms;
+    u.uDeck.value.set(desc.deck.level, desc.deck.billow, 1, 0);
+    u.uDeckSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.27);
+    u.uDeckAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.0);
   }
   if (desc.underDeep) { atmosphere.uniforms.uUnder2Min.value.copy(desc.underDeep.min); atmosphere.uniforms.uUnder2Max.value.copy(desc.underDeep.max); }
   else { atmosphere.uniforms.uUnder2Min.value.set(1, 1, 1); atmosphere.uniforms.uUnder2Max.value.set(0, 0, 0); }
@@ -973,7 +988,7 @@ async function start(): Promise<void> {
       } else if (!here && lastPlace !== -2) {
         lastPlace = -2;
         // (Out of doors: the valley, or the island.)
-        hud.seed.textContent = `${seed} · ${site.island ? 'island' : 'valley'}`;
+        hud.seed.textContent = `${seed} · ${site.island ? 'island' : site.mountain ? 'mountain' : 'valley'}`;
       }
     }
 
@@ -1153,6 +1168,7 @@ async function start(): Promise<void> {
   // (A cave or a hall in the valley's side runs in under the hill beyond its edge, and whoever is in one has not got out.)
   (window as any).__dbg.beyond = (x: number, z: number) => {
     if (site?.island) return -inland(site.island, x, z);
+    if (site?.mountain) return -onMountain(site.mountain, x, z);
     const v = site?.valley;
     if (!v) return -1;
     // (Nor whoever is down a mine.)

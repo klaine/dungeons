@@ -3,6 +3,7 @@ import { generateSite } from '../src/core/generate';
 import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
 import { inland } from '../src/core/island';
+import { inside } from '../src/core/mountain';
 
 const count = Number(process.argv[2] ?? 200);
 const tally = new Map<string, number>();
@@ -91,4 +92,40 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
 }
 console.log(`${Math.ceil(count / 4)} islands, ${isleFailures} failures`);
 for (const k of [...isles.keys()].sort()) console.log(' ', k.padEnd(14), isles.get(k));
-if (failures || isleFailures) process.exitCode = 1;
+
+// Mountain tops: the same houses as hospices above the cloud. Each must be completable; the way and
+// the climb stay on the top and climb no more steeply than a path can; the summit's cairn, the shelter
+// and the arrival stand on the top; and the arrival is in the cloud.
+const peaks = new Map<string, number>();
+let peakFailures = 0;
+for (let n = 0; n < Math.ceil(count / 4); n++) {
+  const seed = `peak-check-${n}`;
+  try {
+    const site = generateSite(seed, 'mountain'), m = site.mountain!;
+    if (!solve(site).ok) throw new Error('cannot be completed');
+    const tally3 = (k: string) => peaks.set(k, (peaks.get(k) ?? 0) + 1);
+    for (const [name, line, most] of [['way', m.way ?? [], 0.42], ['climb', m.climb ?? [], 0.64]] as const) {
+      if (line.length < 2) throw new Error(`no ${name}`);
+      for (const [x, z] of line) if (inside(m, x, z) < 3) throw new Error(`the ${name} off the top at ${x}, ${z}`);
+      let steepest = 0;
+      for (let k = 1; k < line.length; k++) steepest = Math.max(steepest, Math.abs(line[k][2] - line[k - 1][2]) / (Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]) || 1));
+      if (steepest > most) throw new Error(`the ${name} climbs at ${steepest.toFixed(2)}`);
+    }
+    if (m.cairn && inside(m, m.cairn.x, m.cairn.z) < 4) throw new Error('the cairn at the edge');
+    const cl = m.climb ?? [];
+    if (m.cairn && cl.some(([x, z], k) => k < cl.length - 10 && Math.hypot(x - m.cairn!.x, z - m.cairn!.z) < 15)) throw new Error('the climb crosses the summit before it reaches it');
+    if (m.shelter && inside(m, m.shelter.x, m.shelter.z) < 5) throw new Error('the shelter at the edge');
+    const arrive = m.way![m.way!.length - 1];
+    if (arrive[2] + 1.7 > m.deck) throw new Error(`the arrival is above the cloud (${arrive[2]} against ${m.deck})`);
+    tally3(`season=${site.setting.season}`);
+    tally3(`peaks=${m.peaks.length}`);
+    tally3(`shelter=${!!m.shelter}`);
+    tally3(`summit=${Math.round((m.cairn?.y ?? 0) / 10) * 10}`);
+  } catch (e) {
+    peakFailures++;
+    console.log(seed, 'FAILED', (e as Error).message);
+  }
+}
+console.log(`${Math.ceil(count / 4)} mountain tops, ${peakFailures} failures`);
+for (const k of [...peaks.keys()].sort()) console.log(' ', k.padEnd(14), peaks.get(k));
+if (failures || isleFailures || peakFailures) process.exitCode = 1;

@@ -466,6 +466,56 @@ export interface Island {
   islets: { x: number; z: number; r: number; height: number }[];
 }
 
+/**
+ * The top of a mountain: the third kind of place. The house is a hospice on a shoulder of it,
+ * under its summit, and the rest is bare rock, scree and thin turf (or snow, in winter) ending
+ * all round in precipices that fall away into a sea of cloud. A ridge runs out from the top and
+ * down into the cloud, and the way up it is how anyone comes; the summit can be climbed. Other
+ * peaks stand out of the cloud far off. Everything is measured from `x`, `z`, the top's middle.
+ *
+ * `rim` is how far the top of the precipice lies from the middle in each of an even ring of
+ * directions, starting towards +x and turning towards +z, as an island's `coast` is; `drop` is
+ * how high the precipice is in each of them before the slope below it.
+ */
+export interface Mountain {
+  x: number;
+  z: number;
+  rim: number[];
+  drop: number[];
+  /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
+  deck: number;
+  billow: number;
+  /**
+   * The ridge the way comes up: its crest runs from `from`, on the rim, out to `to`, `width`
+   * across its top, falling from `y0` there to `y1` at its far end, which is in or near the cloud.
+   */
+  spur: { from: [number, number]; to: [number, number]; width: number; y0: number; y1: number };
+  /** Summits, the highest first: rising `height` metres over the forecourt's floor about `x`, `z`, falling away over `r`, steep and broken. */
+  peaks: { x: number; z: number; r: number; height: number }[];
+  /** The ground about the house, kept level at the forecourt's floor. */
+  level: { x0: number; x1: number; z0: number; z1: number };
+  /** The way from the door down the ridge to where the player arrives, as points `[x, z, y]`: the ground is cut and made up to it. */
+  way?: [number, number, number][];
+  /** The path up to the summit from beside the house, as points `[x, z, y]`, cut into the rock where it must be. */
+  climb?: [number, number, number][];
+  /** How far up the climb, in metres along it from where it leaves the level ground, its last stretch becomes a stair cut in the rock, if it does. */
+  climbStair?: number;
+  /** A shelter of dry stone beside the way on the ridge, a little above the cloud, its door towards `facing` (radians), on ground levelled at `y`. */
+  shelter?: { x: number; z: number; y: number; facing: number };
+  /**
+   * Stopping places on the climb, at the outer side of its bends: ground widened and levelled at
+   * `y`, `r` across the half of it, where the view opens; `out` is the bearing (radians) out of the
+   * bend. Beside each, on the inner side, a crag stands up from the ridge, `height` over the
+   * landing, `cr` across the half of it, at `cx`, `cz`. `what` is what is there besides: a
+   * stone seat, a cairn, a wayside cross, or nothing but the view.
+   */
+  landings?: { x: number; z: number; y: number; r: number; out: number; cx: number; cz: number; cr: number; height: number; what: 'seat' | 'cairn' | 'cross' | 'view' }[];
+  /** The cairn on the summit, with a cross of timber beside it, at the end of the climb. */
+  cairn?: { x: number; z: number; y: number };
+  /** Other mountains, seen standing out of the cloud and not reached: where, how far they spread at the foot, how high their tops stand over the cloud. */
+  range: { x: number; z: number; r: number; height: number }[];
+}
+
 export interface Site {
   seed: string;
   places: Place[];
@@ -484,6 +534,8 @@ export interface Site {
   valley?: Valley;
   /** If present, the site is not a valley at all but an island in the sea, and `valley` is absent. */
   island?: Island;
+  /** If present, the site is neither a valley nor an island but the top of a mountain above a sea of cloud; `valley` is absent. */
+  mountain?: Mountain;
   /**
    * How the house stands: built into the end of a ridge, its rooms under the hill with courts
    * open through it (`hill`, and so when absent); standing free in the valley, walled and
@@ -505,7 +557,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */
@@ -589,7 +641,7 @@ export interface Setting {
   /** How it has fared: looked after, left to the wet, or abandoned long enough for a roof to fall. */
   condition: 'kept' | 'damp' | 'forsaken';
   /** The time of year, which colours everything that grows. */
-  season?: 'spring' | 'summer' | 'autumn';
+  season?: 'spring' | 'summer' | 'autumn' | 'winter';
   /** How much of the sky is cloud, from 0 for clear to 1 for overcast. Clouds drift, and shade what is under them. */
   cloud?: number;
   /** Whether that cloud is heaped up or lies in flat banks. */

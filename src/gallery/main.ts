@@ -34,12 +34,12 @@ function card(site: Site): HTMLElement {
   const a = document.createElement('a');
   a.className = 'card';
   // (The settings go after a `#` as well, which a page shown inside another keeps when it is not handed its own `?`.)
-  const query = `seed=${encodeURIComponent(site.seed)}&place=${site.island ? 'island' : 'valley'}`;
+  const query = `seed=${encodeURIComponent(site.seed)}&place=${site.island ? 'island' : site.mountain ? 'mountain' : 'valley'}`;
   a.href = `./?${query}#${query}`;
   const canvas = document.createElement('canvas');
   // The whole plan, as a referee would see it: nothing is hidden in the gallery.
   drawPlan(canvas, site, {
-    pixels: 540, items: site.items, levers: site.levers, showSecrets: true, valley: !!site.island,
+    pixels: 540, items: site.items, levers: site.levers, showSecrets: true, valley: !!site.island || !!site.mountain,
     shut: new Set(site.ways.map((w, i) => (w.door && w.door.leaf !== 'open' ? i : -1))),
   });
   const solution = solve(site);
@@ -61,8 +61,8 @@ function more(): void {
   const test = want.value in TESTS ? TESTS[want.value] : null;
   let added = 0;
   for (let attempt = 0; attempt < 400 && added < 12; attempt++) {
-    // (Islands are a kind of place of their own, drawn whole, coast and all.)
-    const site = generateSite(randomSeed(), want.value === 'island' ? 'island' : 'valley');
+    // (Islands and mountain tops are kinds of place of their own, drawn whole, coast or rim and all.)
+    const site = generateSite(randomSeed(), want.value === 'island' ? 'island' : want.value === 'mountain' ? 'mountain' : 'valley');
     tried++;
     if (test && !test(site)) continue;
     grid.append(card(site));

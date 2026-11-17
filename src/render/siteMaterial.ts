@@ -131,8 +131,12 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   let colour: N = stone.rgb.mul(vertexColor().rgb).mul(mix(1, 0.5, wet));
   colour = mix(colour, mossTex.rgb, mossy);
   colour = mix(colour, vec3(0.012), f.z.mul(0.9));
+  // Snow on what is built, out of doors: on roofs, copings, sills and the floors of open courts. What is out of doors is known only
+  // from the bake, which says how much sky each point sees; until it arrives, nothing built has snow on it.
+  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y.add(one(stone.a).mul(0.1))).mul(smoothstep(0.3, 0.55, bk.x)).mul(uBake).toVar();
+  colour = mix(colour, vec3(...SNOW), snowy);
   m.colorNode = vec4(colour, 1);
-  m.roughnessNode = mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z));
+  m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
@@ -208,7 +212,26 @@ function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?:
  * variation and nothing that could be seen repeating.
  */
 /** How far off grass is drawn in full, in metres (see `vegetationRange`): where it thins out, the ground begins to stand in for it. */
-export const groundUniforms: { uGrassRange: { value: number } } = { uGrassRange: uniform(80) as N };
+/**
+ * Snow. `uSnow` is how much lies, from 0 for none (the valley and the island) to 1 for the whole
+ * of a mountain's winter. It is laid by the materials on whatever faces up enough to hold it:
+ * at 1, everything but steep faces, which stay dark, with ragged edges where a slope grows too
+ * steep; at a little, only patches of old snow lying late into summer on what is nearly level.
+ * Its edges are drawn from noise at two sizes, drifts some tens of metres across and a ragged
+ * fringe, so that it never ends along a line.
+ */
+export const snowUniforms: { uSnow: { value: number }; uSnowLine: { value: Vector2 } } = { uSnow: uniform(0) as N, uSnowLine: uniform(new Vector2(0, 0)) as N };
+const snowOn = (P: N, up: N): N => {
+  const cover = snowUniforms.uSnow as N, line = snowUniforms.uSnowLine as N;
+  const drift: N = farFbm(P.xz.mul(0.045).add(3.7)), fringe: N = farNoise(P.xz.mul(0.85));
+  // (And more of it higher up, above a line, if one is given: in summer the old snow lies on the summit and hardly anywhere below it.)
+  const higher: N = smoothstep(line.x, line.x.add(35), P.y).mul(line.y);
+  return smoothstep(0, 0.12, mix(-1.15, 0.75, cover).add(higher).add(up.sub(0.8).mul(2.4)).add(drift.sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, cover));
+};
+/** Snow's own colour: white, a little blue, and darker and greyer where it has been trodden. */
+const SNOW: [number, number, number] = [0.84, 0.87, 0.93];
+
+export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: Vector3 } } = { uGrassRange: uniform(80) as N, uSward: uniform(new Vector3(0.225, 0.3, 0.066)) as N };
 
 export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
@@ -288,7 +311,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // the tufts thin, the turf takes on what standing grass looks like from a distance: its colour, which is paler and yellower than
   // the mat under it, and its unevenness, drifts some metres across. It costs nothing, and it has no farthest distance.
   const swardFar: N = smoothstep((groundUniforms.uGrassRange as N).mul(0.55), (groundUniforms.uGrassRange as N).mul(2.2), far).toVar();
-  const sward = vertexColor().rgb.mul(vec3(0.225, 0.3, 0.066)).mul(1.68).mul(mix(0.9, 1.1, mid)).mul(mix(0.86, 1.12, macro));
+  const sward = vertexColor().rgb.mul(groundUniforms.uSward as N).mul(1.68).mul(mix(0.9, 1.1, mid)).mul(mix(0.86, 1.12, macro));
   turfed = mix(turfed, sward, swardFar.mul(0.85)).toVar();
   // And moss, low and dark, where it is damp or shaded.
   const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);
@@ -305,7 +328,11 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const wetRim: N = smoothstep(0.45, 0.56, lowSpot).mul(rutFloor).toVar();
   ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
   ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
-  m.colorNode = vec4(ground.mul(mix(1, 0.52, wetV)), 1);
+  // Snow over all of it; trodden on the track and the paths, where it is packed and dirtied.
+  const trodSnow: N = max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare).toVar();
+  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(0.25))).toVar();
+  ground = mix(ground.mul(mix(1, 0.52, wetV)), mix(vec3(...SNOW).mul(mix(0.94, 1.04, macro)), vec3(0.5, 0.49, 0.47), trodSnow.mul(0.55)), snowy);
+  m.colorNode = vec4(ground, 1);
   m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.04, puddle);
   {
     // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
@@ -317,10 +344,17 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     const turfN: N = mix(gN.mul(vec3(flat, flat, 1)), gT, dry.mul(0.8));
     const n: N = mix(turfN, gE, bare);
     const steep = mix(1, stony.mul(1.2).add(1.15), bare).mul(one(puddle));
-    m.normalNode = normalMap(vec3(n.xy.mul(steep), n.z).mul(0.5).add(0.5));
+    // Snow the wind has worked: low ripples across the way it blows, and broader drifts, as light and shade.
+    const rip = (k: number, e: number): N => {
+      const q: N = vec2(at0.x.mul(0.8).add(at0.y.mul(0.35)), at0.y.mul(2.6).sub(at0.x.mul(0.5))).mul(k);
+      return vec2(farNoise(q.add(vec2(e, 0))).sub(farNoise(q.sub(vec2(e, 0)))), farNoise(q.add(vec2(0, e))).sub(farNoise(q.sub(vec2(0, e))))).div(e * 2);
+    };
+    const drifted: N = rip(0.9, 0.08).mul(0.09).add(rip(0.16, 0.05).mul(0.35)).mul(one(smoothstep(20, 90, far))).toVar();
+    m.normalNode = normalMap(vec3(n.xy.mul(steep).mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), n.z).mul(0.5).add(0.5));
   }
+  m.roughnessNode = mix(m.roughnessNode as N, 0.66, snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)) });
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), 0.55, snowy) });
   return m;
 }
 
@@ -470,9 +504,11 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy: N = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(tex.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1)).toVar();
   rock = rock.mul(edge.mul(0.7).add(1));
-  m.colorNode = vec4(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), 1);
+  // Snow, on ledges and whatever faces up; it lies first in the cracks and the pits of the stone.
+  const snowy: N = snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).toVar();
+  m.colorNode = vec4(mix(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), vec3(...SNOW).mul(mix(0.9, 1.02, tex.a)), snowy), 1);
   const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
-  m.roughnessNode = mix(rough, 0.97, mossy);
+  m.roughnessNode = mix(mix(rough, 0.97, mossy), 0.66, snowy);
   // The normal map from three sides, each bent onto the surface and blended as the colour was.
   // It is read twice: as it is, for the grain and the small breaks, and four times larger, for
   // faces a stride or two across, which the carved surface is too coarse to hold an edge on.
@@ -498,7 +534,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // The grooves between beds and the runnels down the face bend the light as their slopes would.
   const up: N = vec3(0, 1, 0).sub(rockN.mul(rockN.y));
   const worn: N = up.mul(lip.mul(1.1)).add(vec3(fluteZ, 0, fluteX).mul(fluteNear).mul(1.6));
-  const bent: N = normalize(mix(bentSmooth, flat, facetW.mul(0.2)).sub(worn)).toVar();
+  const bent: N = normalize(mix(normalize(mix(bentSmooth, flat, facetW.mul(0.2)).sub(worn)), rockN, snowy.mul(0.75))).toVar();
   m.normalNode = transformNormalToView(bent);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
@@ -509,7 +545,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // Rough rock gleams little, and less where it is dry.
   // (The sky's light is reckoned for the surface as its grain turns it, not for the smooth surface under the grain: most of a cliff is in
   // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
-  lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(0.3, 1, wet) });
+  lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
   return m;
 }
 

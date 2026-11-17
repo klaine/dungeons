@@ -1,6 +1,7 @@
 import { planMission, solve } from './mission';
 import { Rng } from './rng';
 import { layOutIsland } from './island';
+import { layOutMountain } from './mountain';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
@@ -158,8 +159,8 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
  * Generates the site for a seed. Several are drafted and the one with the richest structure is
  * kept: early layers are cheap, so it pays to make many and choose.
  */
-/** What kind of place to make: a house at the head of a valley (the default), or a house on an island in the sea. */
-export type PlaceKind = 'valley' | 'island';
+/** What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, or a hospice on a mountain top above the cloud. */
+export type PlaceKind = 'valley' | 'island' | 'mountain';
 
 export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
   const base = new Rng(seed);
@@ -174,6 +175,10 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
     // Mostly a sky of broken cloud; now and then nearly clear, or heavy.
     cloud: Math.round(base.fork('cloud').pick([0.12, 0.3, 0.38, 0.45, 0.5, 0.58, 0.72]) * 100) / 100,
   };
+  // A mountain top has two seasons, not four: bare rock and thin turf in summer, snow in winter.
+  // (From a stream of its own, so valleys and islands keep the seasons they had.)
+  // And what stands on a pass or a peak, keeping travellers alive, is a hospice.
+  if (kind === 'mountain') { setting.season = base.fork('mountain season').chance(0.5) ? 'winter' : 'summer'; setting.kind = 'hospice'; }
   // The later hours were added after the first three, and are reached from the evening by a
   // stream of their own, so that most sites already seen keep the hour they had.
   if (setting.hour === 'evening') {
@@ -1657,6 +1662,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   };
   // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
   if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'));
+  else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'));
   else layOutValley(site, forecourt, ecx, rng.fork('valley'));
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
@@ -1700,7 +1706,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   if (below.length) parts.push(below.length === 1 ? `${a(below[0].name)} below` : `${count(below.length)} cellars below`);
   if (above.length) parts.push(above.length === 1 ? `${a(above[0].name)} above` : `${count(above.length)} rooms above`);
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
-  site.title = `${kind === 'island' ? 'On an island in the sea, a' : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  site.title = `${kind === 'island' ? 'On an island in the sea, a' : kind === 'mountain' ? `On a mountain top above the cloud${setting.season === 'winter' ? ', in snow' : ''}, a` : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

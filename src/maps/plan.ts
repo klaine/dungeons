@@ -62,13 +62,15 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     x0 = Math.min(x0, p.x0 - T); x1 = Math.max(x1, p.x1 + T);
     z0 = Math.min(z0, p.z0 - T); z1 = Math.max(z1, p.z1 + T);
   }
-  const g = opts.valley ? site.grounds : undefined, isle = g ? site.island : undefined, vale = g && !isle ? site.valley ?? boxValley(g) : undefined;
+  const g = opts.valley ? site.grounds : undefined, isle = g ? site.island : undefined, mtn = g ? site.mountain : undefined, vale = g && !isle && !mtn ? site.valley ?? boxValley(g) : undefined;
   // Where a side of the valley lies at any place down it.
   const sideAt = (side: 'w' | 'e', z: number) => edgeAt(vale!, side, z);
   if (g) {
     x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
     // (An island is seen whole, with a little of the sea all round.)
     if (isle) { z0 = Math.min(z0, g.z0 - 12); x0 -= 7; x1 += 7; z1 += 7; }
+    // (So is a mountain top, with its ridge.)
+    if (mtn) { z0 = Math.min(z0, g.z0 - 6); }
     // A hall under the hill runs out beyond the valley's edge, and the map is made wide enough to show all of it.
     for (const q of site.grottoes ?? []) {
       if (!q.hall) continue;
@@ -174,6 +176,33 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       // The jetty.
       ctx.strokeStyle = INK; ctx.lineWidth = isle.jetty.width * scale;
       ctx.beginPath(); ctx.moveTo(X(isle.jetty.from[0]), Z(isle.jetty.from[1])); ctx.lineTo(X(isle.jetty.to[0]), Z(isle.jetty.to[1])); ctx.stroke();
+    } else if (mtn) {
+      // A mountain top: the ground within the rim, and the ridge running out from it; the precipices as a band of ink round the edge.
+      // Beyond is cloud, left as paper.
+      const ground = (grow: number) => {
+        ctx.beginPath();
+        mtn.rim.forEach((r, k) => { const a = (k / mtn.rim.length) * Math.PI * 2, x = X(mtn.x + Math.cos(a) * (r + grow)), z = Z(mtn.z + Math.sin(a) * (r + grow)); if (k) ctx.lineTo(x, z); else ctx.moveTo(x, z); });
+        ctx.closePath();
+        ctx.fill();
+        ctx.lineCap = 'round';
+        ctx.lineWidth = (mtn.spur.width * 0.86 + grow * 2) * scale;
+        ctx.strokeStyle = ctx.fillStyle as string;
+        ctx.beginPath(); ctx.moveTo(X(mtn.spur.from[0]), Z(mtn.spur.from[1])); ctx.lineTo(X(mtn.spur.to[0]), Z(mtn.spur.to[1])); ctx.stroke();
+        ctx.lineCap = 'butt';
+      };
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 0.55;
+      ground(2.5);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = COURT;
+      ground(0);
+      // The summits, as rings drawn closer together towards their tops; the cairn as a small triangle; the shelter as a block.
+      ctx.strokeStyle = INK; ctx.lineWidth = Math.max(0.6 * ratio, 0.15 * scale); ctx.globalAlpha = 0.4;
+      for (const q of mtn.peaks) for (let k = 1; k <= 4; k++) { ctx.beginPath(); ctx.arc(X(q.x), Z(q.z), q.r * scale * Math.pow(k / 4, 1.3), 0, Math.PI * 2); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = INK;
+      if (mtn.cairn) { const c = mtn.cairn, r = 2.6 * scale + 2 * ratio; ctx.beginPath(); ctx.moveTo(X(c.x), Z(c.z) - r); ctx.lineTo(X(c.x) + r * 0.9, Z(c.z) + r * 0.6); ctx.lineTo(X(c.x) - r * 0.9, Z(c.z) + r * 0.6); ctx.closePath(); ctx.fill(); }
+      if (mtn.shelter) { const q = mtn.shelter; ctx.save(); ctx.translate(X(q.x), Z(q.z)); ctx.rotate(q.facing); ctx.fillRect(-1.5 * scale, -1.8 * scale, 3 * scale, 3.6 * scale); ctx.restore(); }
     } else {
     ctx.fillStyle = INK;
     ctx.globalAlpha = 0.55;

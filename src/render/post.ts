@@ -273,6 +273,10 @@ export class Atmosphere {
       uShaftCol: uniform(new Vector3()),
       // What little light the air of such a hall holds everywhere, from the day let into it.
       uUnderAir: uniform(new Vector3()),
+      // A sea of cloud below, on a mountain: the level of its top, how high its billows stand, and whether there is one; its sunlit and its shaded colour.
+      uDeck: uniform(new Vector4(0, 8, 0, 0)),
+      uDeckSun: uniform(new Vector3(2, 2, 2)),
+      uDeckAir: uniform(new Vector3(0.6, 0.7, 0.8)),
     });
     const sky = (this.sky = skyParts(u, cloudSteps));
     const colourOf: N = this.scenePass.getTextureNode('output'), depthOf: N = this.scenePass.getTextureNode('depth');
@@ -296,6 +300,76 @@ export class Atmosphere {
       return select(u.uMist.x.greaterThan(0), d.mul(drifts).mul(smoothstep(u.uMistLow.sub(1.5), u.uMistLow, p.y)), 0);
     };
 
+    /**
+     * The sea of cloud. Its top is a surface of billows, broad and slow ones with smaller ones on
+     * them, drifting with the wind, which a line of sight from above is walked down to: what it
+     * meets is lit as a surface, white where it faces the sun and grey-blue in its troughs, and
+     * whatever lies beyond it is hidden, gradually for a few tens of metres, so that rock going
+     * down into it fades into it and is not cut off at a line. From inside it, the air is cloud:
+     * thick enough to see no more than a stone's throw, thinner towards its top.
+     */
+    const deckHeight = (xz: N): N => {
+      // (Three sizes: great swells a mile across, heaps a few hundred metres across on them, and billows on those.)
+      const vast = u.tCloud.sample(vec3(xz.x.div(3400), 0.13, xz.y.div(3400)).add(u.uCloudDrift.mul(vec3(0.3, 0, 0.3)))).level(0).r;
+      const big = u.tCloud.sample(vec3(xz.x.div(900), 0.31, xz.y.div(900)).add(u.uCloudDrift.mul(vec3(0.6, 0, 0.6)))).level(0).r;
+      const small = u.tCloud.sample(vec3(xz.x.div(210), 0.67, xz.y.div(210)).add(u.uCloudDrift.mul(vec3(1.7, 0, 1.7)))).level(0).r;
+      return u.uDeck.x.add(smoothstep(0.3, 0.72, vast).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, big).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, small).mul(2).sub(1).mul(u.uDeck.y.mul(0.45)));
+    };
+    // (Built where it is called, inside the program of the picture: it gives back two things.)
+    const deckOver = (ro: N, rd: N, reach: N, jitter: N): { out: N; far: N } => {
+      // x, y, z: the colour of what is seen of the cloud; w: how much of what lies behind is hidden. And how far off it is.
+      const out: N = vec4(0, 0, 0, 0).toVar(), far: N = float(0).toVar();
+      const amp: N = u.uDeck.y.mul(2.5).toVar();
+      const here: N = deckHeight(ro.xz).toVar();
+      If(ro.y.lessThan(here), () => {
+        // Inside it: it thins towards its top; and a line of sight that goes up out of it leaves it.
+        const deep: N = here.sub(ro.y).toVar();
+        const thick: N = smoothstep(0, 14, deep).mul(0.075).add(0.012).toVar();
+        const leaves: N = select(rd.y.greaterThan(0.002), deep.div(rd.y), float(1e9));
+        const through: N = min(reach, leaves).toVar();
+        const lightness: N = smoothstep(-5, 40, deep).oneMinus().mul(0.5).add(0.45);
+        out.assign(vec4(u.uDeckAir.mul(1.1).add(u.uDeckSun.mul(0.35)).mul(lightness), one(exp(through.mul(thick).negate()))));
+        far.assign(0);
+      }).ElseIf(rd.y.lessThan(-0.0004), () => {
+        const top: N = u.uDeck.x.add(amp), bottom: N = u.uDeck.x.sub(amp);
+        const t0: N = max(top.sub(ro.y).div(rd.y), 0).toVar();
+        const tBottom: N = bottom.sub(ro.y).div(rd.y).toVar();
+        const t1: N = min(min(tBottom, reach), 40000).toVar();
+        If(t1.greaterThan(t0), () => {
+          // Walked from where the line of sight comes down past the highest billows to where it passes the lowest, or meets the land.
+          const dt: N = t1.sub(t0).div(20).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
+          const prev: N = ro.y.add(rd.y.mul(t)).sub(deckHeight(ro.xz.add(rd.xz.mul(t)))).toVar();
+          const hit: N = float(-1).toVar();
+          Loop(20, () => {
+            t.addAssign(dt);
+            const p: N = ro.add(rd.mul(t)).toVar();
+            const d: N = p.y.sub(deckHeight(p.xz)).toVar();
+            If(d.lessThan(0), () => {
+              hit.assign(t.sub(dt.mul(d.div(d.sub(prev)))));
+              Break();
+            });
+            prev.assign(d);
+          });
+          // (A line of sight that reaches the lowest billows without meeting the land is in the cloud there, whatever the walk found.)
+          If(hit.lessThan(0).and(tBottom.lessThan(reach)), () => { hit.assign(min(tBottom, 40000)); });
+          If(hit.greaterThan(0), () => {
+            const p: N = ro.add(rd.mul(hit)).toVar();
+            const e = 18;
+            const hx: N = deckHeight(p.xz.add(vec2(e, 0))).sub(deckHeight(p.xz.sub(vec2(e, 0)))), hz: N = deckHeight(p.xz.add(vec2(0, e))).sub(deckHeight(p.xz.sub(vec2(0, e))));
+            const n: N = normalize(vec3(hx.negate(), 2 * e, hz.negate())).toVar();
+            const hh: N = deckHeight(p.xz).sub(u.uDeck.x).div(max(u.uDeck.y, 0.1)).toVar();
+            // Lit as cloud is: much of the sun's light comes through and round it, so even what faces away is not dark; the troughs hold shadow.
+            const sun: N = max(dot(n, u.uSunDir), 0).mul(0.7).add(0.3).mul(smoothstep(-0.05, 0.08, u.uSunDir.y));
+            const hollow: N = smoothstep(-1.3, 1.1, hh).mul(0.45).add(0.55);
+            const edge: N = sky.phaseHG(dot(rd, u.uSunDir), float(0.6)).mul(0.6);
+            const colour: N = u.uDeckSun.mul(sun.mul(hollow).add(edge.mul(0.25))).add(u.uDeckAir.mul(n.y.mul(0.35).add(0.6)).mul(hollow));
+            out.assign(vec4(colour, one(exp(reach.sub(hit).div(-16)))));
+            far.assign(hit);
+          });
+        });
+      });
+      return { out, far };
+    };
     this.node = Fn(() => {
       // The sun's disc is thousands of times brighter than anything else; left alone, bloom spreads it over the whole view.
       const col: N = min(colourOf.rgb, vec3(6)).toVar();
@@ -370,15 +444,23 @@ export class Atmosphere {
           outside.assign(open3);
           t.addAssign(dt);
         });
+        // How far the line of sight goes before it meets the land, or the sea of cloud; and whether it ends in open sky.
+        const seenTo: N = dist.toVar(), clear: N = select(open, float(1), float(0)).toVar();
+        If(u.uDeck.z.greaterThan(0.5), () => {
+          const deck = deckOver(u.uCamPos, rd, select(open, float(1e9), dist), dither);
+          col.assign(mix(col, deck.out.xyz, deck.out.w));
+          // (Where the cloud hides what is behind it, the air is reckoned only as far as the cloud.)
+          If(deck.out.w.greaterThan(0.5), () => { seenTo.assign(deck.far); clear.assign(0); });
+        });
         If(u.uAirOn.greaterThan(0.5), () => {
           // Beyond that walk, the air is reckoned. Open sky has its own haze already and takes only the mist.
-          const thick: N = sky.airBeyond(u.uCamPos, rd, tMax, select(open, 1e5, dist), select(open, 0, dist)).toVar();
+          const thick: N = sky.airBeyond(u.uCamPos, rd, tMax, select(clear.greaterThan(0.5), 1e5, seenTo), select(clear.greaterThan(0.5), 0, seenTo)).toVar();
           const through: N = exp(thick.x.negate().sub(thick.y.mul(outside))).toVar();
           // Towards a low sun the haze itself is alight.
           col.assign(col.mul(through).add(air.mul(one(through))).add(u.uGlare.mul(sky.phaseHG(c, float(0.76))).mul(one(exp(thick.x.mul(-1.5))))));
           // Cloud that is nearer than the land stands in front of it: so peaks go up into cloud.
-          If(open.not().and(u.uCloudOn.greaterThan(0.5)), () => {
-            const cloud: N = sky.cloudOver(u.uCamPos, rd, dither, dist, air).toVar();
+          If(clear.lessThan(0.5).and(u.uCloudOn.greaterThan(0.5)), () => {
+            const cloud: N = sky.cloudOver(u.uCamPos, rd, dither, seenTo, air).toVar();
             col.assign(col.mul(cloud.a).add(cloud.rgb));
           });
         });

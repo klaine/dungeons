@@ -21,6 +21,7 @@ import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt } f
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
+import { buildMountain } from './mountain';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -3175,7 +3176,7 @@ export function meshSite(site: Site): SceneDescription {
     scenery.cards.push(...planting.sets);
   };
   const planting = new Planting();
-  let farCover: { wood: [number, number, number]; grass: [number, number, number] } | undefined;
+  let farCover: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number] } | undefined;
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
   let underDeep: { min: Vector3; max: Vector3 } | undefined;
@@ -3341,12 +3342,30 @@ export function meshSite(site: Site): SceneDescription {
     beacon = made.lamp;
     scenery.cards.push(...planting.sets);
   };
+  // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
+  let cloudDeck: { level: number; billow: number } | undefined;
+  const buildMountainApproach = (p: Place) => {
+    kit.group = `p${p.id}`;
+    kit.field = outdoorFieldAt(p.floor, 1.2);
+    const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
+    kit.wallFace('stone', kit.frame(fx0, p.z0, fx1, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    wild.field = outdoorFieldAt(p.floor, 1.5);
+    const made = buildMountain({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    arrival.spawn = made.spawn;
+    arrival.track = made.track;
+    farCover = made.far;
+    spawnYaw = made.yaw;
+    cloudDeck = made.deck;
+    censuses.push(made.planted);
+    lookouts.push(made.lookout);
+    scenery.cards.push(...planting.sets);
+  };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
   // Where a cave's shaft comes up through the hill, the turf laid over the house is left open.
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
-    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else buildApproach(p); continue; }
+    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -3967,7 +3986,7 @@ export function meshSite(site: Site): SceneDescription {
     bounds: { min, max },
     blocks: kit.blocks,
     title: site.title,
-    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: site.island ? site.island.sea + 1.5 : approach.floor },
+    sun: { colour: sky.colour, intensity: sky.intensity, sky: { zenith: sky.zenith, horizon: sky.horizon, ground: sky.ground }, disc: sky.disc, night: sky.night, eyes: sky.eyes, cloud: site.setting.cloud, layered: site.setting.cloudForm === 'layered', mist: site.setting.mist, haze: site.setting.haze, floor: site.island ? site.island.sea + 1.5 : site.mountain ? site.mountain.deck : approach.floor },
     doors,
     anchors,
     furnishing,
@@ -3982,6 +4001,7 @@ export function meshSite(site: Site): SceneDescription {
     lookouts,
     far: farCover,
     sea: islandSea,
+    ...(cloudDeck ? { deck: cloudDeck, snow: site.setting.season === 'winter' ? 1 : 0.24, snowLine: [approach.floor + 22, site.setting.season === 'winter' ? 0 : 0.4] as [number, number] } : {}),
     birds: birdSpots,
     beacon,
     finds,
