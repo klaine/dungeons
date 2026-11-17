@@ -3343,7 +3343,7 @@ export function meshSite(site: Site): SceneDescription {
     scenery.cards.push(...planting.sets);
   };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
-  let cloudDeck: { level: number; billow: number } | undefined;
+  let cloudDeck: SceneDescription['deck'];
   const buildMountainApproach = (p: Place) => {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
@@ -3359,6 +3359,8 @@ export function meshSite(site: Site): SceneDescription {
     censuses.push(made.planted);
     lookouts.push(made.lookout);
     hallTorches.push(...made.torches);
+    birdSpots = made.birds;
+    smokes.push(...made.smokes);
     scenery.cards.push(...planting.sets);
   };
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];

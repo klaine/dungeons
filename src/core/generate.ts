@@ -178,7 +178,12 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley'): Site {
   // A mountain top has two seasons, not four: bare rock and thin turf in summer, snow in winter.
   // (From a stream of its own, so valleys and islands keep the seasons they had.)
   // And what stands on a pass or a peak, keeping travellers alive, is a hospice.
-  if (kind === 'mountain') { setting.season = base.fork('mountain season').chance(0.5) ? 'winter' : 'summer'; setting.kind = 'hospice'; }
+  if (kind === 'mountain') {
+    setting.season = base.fork('mountain season').chance(0.5) ? 'winter' : 'summer'; setting.kind = 'hospice';
+    // And it is at its best with the sun low: long shadows on rock and snow, the cloud lit from the side, the mountain's own
+    // shadow lying out across it. So the day is oftener young or old up here than in a valley. (The evening goes on to sunset and dusk as elsewhere.)
+    setting.hour = base.fork('mountain hour').pick<Hour>(['morning', 'morning', 'morning', 'midday', 'evening', 'evening', 'evening', 'evening']);
+  }
   // The later hours were added after the first three, and are reached from the evening by a
   // stream of their own, so that most sites already seen keep the hour they had.
   if (setting.hour === 'evening') {

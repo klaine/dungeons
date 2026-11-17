@@ -50,8 +50,12 @@ export interface MountainResult {
   yaw: number;
   track: [number, number][];
   far: { wood: [number, number, number]; grass: [number, number, number]; sward: [number, number, number]; bare: [number, number, number, number] };
-  /** The sea of cloud: the level of its top, how high its billows stand. */
-  deck: { level: number; billow: number };
+  /** The sea of cloud: the level of its top, how high its billows stand, how broken it is, and the mountain's shape for its shadow on it. */
+  deck: NonNullable<import('./scene').SceneDescription['deck']>;
+  /** Where birds wheel: off the precipices, below the rim, and about the summit. */
+  birds: { x: number; y: number; z: number }[];
+  /** Where smoke rises: from the fire in the shelter. */
+  smokes: { x: number; y: number; z: number; height: number }[];
   planted: Record<string, number>;
   /** Where the summit's cairn stands, for whatever wants to know where the view is. */
   lookout: { x: number; y: number; z: number; height: number };
@@ -486,7 +490,12 @@ export function buildMountain(b: MountainBuild): MountainResult {
       const k = up / high, r = (1 - k) * high * 0.42 + 0.12, ring = Math.max(1, Math.round((r * Math.PI * 2) / 0.55)), size = 0.42 - 0.18 * k;
       for (let i = 0; i < ring; i++) {
         const a = (i / ring) * Math.PI * 2 + course * 0.7 + q.range(-0.15, 0.15), sx = size * q.range(0.85, 1.25), sz = size * q.range(0.7, 1.05), sy = size * q.range(0.45, 0.7);
-        block('rock', x + Math.cos(a) * r, y + up, z + Math.sin(a) * r, sx, sz, sy, a + q.range(-0.3, 0.3), [stone[0] * q.range(0.85, 1.1), stone[1] * q.range(0.85, 1.1), stone[2] * q.range(0.85, 1.1)]);
+        // (A stone as it was picked up: no face square to another, narrower above than below, sitting a little askew.)
+        const cx = x + Math.cos(a) * r, cz = z + Math.sin(a) * r, yaw = a + q.range(-0.5, 0.5), c = Math.cos(yaw), sn = Math.sin(yaw), tilt = [q.range(-0.12, 0.12), q.range(-0.12, 0.12)];
+        const at = (u: number, v: number, h: number): [number, number, number] => [cx + c * u - sn * v, y + up + h + u * tilt[0] + v * tilt[1], cz + sn * u + c * v];
+        const tw = q.range(0.55, 0.9), ox = q.range(-0.1, 0.1) * sx, oz = q.range(-0.1, 0.1) * sz;
+        solid('rock', [at(-sx / 2, -sz / 2, 0), at(sx / 2, -sz / 2, 0), at(sx / 2, sz / 2, 0), at(-sx / 2, sz / 2, 0),
+          at((-sx / 2) * tw + ox, (-sz / 2) * tw + oz, sy * q.range(0.8, 1)), at((sx / 2) * tw + ox, (-sz / 2) * tw + oz, sy), at((sx / 2) * tw + ox, (sz / 2) * tw + oz, sy * q.range(0.75, 1)), at((-sx / 2) * tw + ox, (sz / 2) * tw + oz, sy * q.range(0.85, 1))], rockColour(q.range(0.85, 1.45)), 0.4);
       }
       up += size * 0.5; course++;
     }
@@ -837,7 +846,19 @@ export function buildMountain(b: MountainBuild): MountainResult {
     far: { wood: [0.05, 0.08, 0.035], grass: winter ? [0.2, 0.2, 0.17] : [0.2, 0.19, 0.1], sward: [0.25, 0.225, 0.125],
       // (And bare ground is scree: stones of the mountain's own rock, its colour and as pale.)
       bare: [0.42 * (rockKind.dark[0] + rockKind.pale[0]) * outcrop[0], 0.42 * (rockKind.dark[1] + rockKind.pale[1]) * outcrop[1], 0.43 * (rockKind.dark[2] + rockKind.pale[2]) * outcrop[2], 1] },
-    deck: { level: deck, billow: m.billow },
+    deck: {
+      level: deck, billow: m.billow, breaks: m.breaks ?? 0,
+      shade: (() => {
+        const mean = m.rim.reduce((sum, r) => sum + r, 0) / m.rim.length, pk = m.peaks[0];
+        return { x: m.x, z: m.z, top: F, rTop: mean * 0.92, rFoot: mean + (F - deck) * 0.75, px: m.cairn?.x ?? pk.x, pz: m.cairn?.z ?? pk.z, pr: pk.r * 0.9, py: m.cairn?.y ?? F + pk.height };
+      })(),
+    },
+    // Choughs: off the precipices on four sides, a little under the rim, so that they are looked down on; and about the summit.
+    birds: [
+      ...[0.4, 1.9, 3.5, 5.1].map((a) => { const r = m.rim[Math.floor((a / (Math.PI * 2)) * m.rim.length) % m.rim.length] + 22; return { x: m.x + Math.cos(a + s1) * r, y: F - 12, z: m.z + Math.sin(a + s1) * r }; }),
+      ...(m.cairn ? [{ x: m.cairn.x + 14, y: m.cairn.y + 6, z: m.cairn.z - 10 }] : []),
+    ],
+    smokes: m.shelter ? [{ x: m.shelter.x - Math.cos(m.shelter.facing) * 0.3, y: m.shelter.y + 2.3, z: m.shelter.z - Math.sin(m.shelter.facing) * 0.3, height: 9 }] : [],
     planted: { ...planted, pines },
     lookout,
     torches,
@@ -923,11 +944,12 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
   for (let r = 60; r <= 6900; r += 3 + r * 0.02) radii.push(r);
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(fbm2(x, z, 3, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
-    // The country under the cloud: ridges and valleys that are never seen, but must be there for the peaks to stand on.
-    let y = deck - 260 + 140 * ridge(x * 0.0012 + seed, z * 0.0012, 5);
+    // The country under the cloud: valleys six or seven hundred metres down, with ridges between them, seen through the cloud's breaks.
+    let y = deck - 680 + 330 * ridge(x * 0.00075 + seed, z * 0.00075, 5) + 70 * ridge(x * 0.0035, z * 0.0035 + seed, 15);
     for (const q of m.range) {
       const d = Math.hypot(x - q.x, z - q.z);
-      if (d > q.r) continue;
+      // (Below the cloud a mountain goes on down and out to the valley floor.)
+      if (d > q.r) { if (d < q.r + 520) y = Math.max(y, deck - 250 - (d - q.r) * 0.85); continue; }
       const t = 1 - d / q.r, crest = ridge(x * 0.006 + q.x * 0.001, z * 0.006, 11), arete = ridge(x * 0.0025, z * 0.0025 + q.z * 0.001, 13);
       // A horn: hollow-flanked, steepening to its top, with three or four ridges running down from it and faces between them;
       // the ridges and the faces broken by lesser ribs and gullies.
@@ -967,8 +989,9 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
   };
   for (let ri = 0; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
     const qa = at(ri, k), qb = at(ri, k + 1), qc = at(ri + 1, k + 1), qd = at(ri + 1, k);
-    // (Deep in the cloud nothing is drawn; nor where the near ground is.)
-    if (Math.max(H[qa], H[qb], H[qc], H[qd]) < deck - 45) continue;
+    // (Deep in the cloud about the mountain nothing is drawn, nor where the near ground is: the cloud is whole there. Further off it
+    // may be broken, and all the land is drawn, down to the valley floors.)
+    if (Math.max(H[qa], H[qb], H[qc], H[qd]) < deck - 45 && (radii[ri] < 440 || !(m.breaks ?? 0))) continue;
     const a = id(ri, k), bb = id(ri, k + 1), c = id(ri + 1, k + 1), d = id(ri + 1, k);
     mesh.addTriangle(a, bb, c);
     mesh.addTriangle(a, c, d);

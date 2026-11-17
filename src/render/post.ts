@@ -275,6 +275,13 @@ export class Atmosphere {
       uUnderAir: uniform(new Vector3()),
       // A sea of cloud below, on a mountain: the level of its top, how high its billows stand, and whether there is one; its sunlit and its shaded colour.
       uDeck: uniform(new Vector4(0, 8, 0, 0)),
+      // (Its fourth number is how broken it is, 0 to 1.) Its breaks: the bar the noise must clear to open one, and how deep the cloud's walls stand round it, in billows.
+      uDeckGap: uniform(new Vector4(0.6, 7, 0, 0)),
+      // The mountain, for the shadow it throws on the cloud: its body as a round tower narrowing upward (its middle's x and z, how broad its
+      // top is, the top's level; how broad it is at the cloud), and its summit as a cone on that (x, z, how broad at its foot, how high its point).
+      uShadeBody: uniform(new Vector4(0, 0, 0, 0)),
+      uShadeFoot: uniform(0),
+      uShadePeak: uniform(new Vector4(0, 0, 0, 0)),
       uDeckSun: uniform(new Vector3(2, 2, 2)),
       uDeckAir: uniform(new Vector3(0.6, 0.7, 0.8)),
     });
@@ -308,7 +315,16 @@ export class Atmosphere {
      * down into it fades into it and is not cut off at a line. From inside it, the air is cloud:
      * thick enough to see no more than a stone's throw, thinner towards its top.
      */
-    const deckHeight = (xz: N): N => {
+    // Where the cloud is broken: 0 where it is whole, 1 in the middle of a break. Breaks are great ragged holes and lanes, miles
+    // apart; there are none about the mountain itself, which stands in the cloud, nor so far off that no land is drawn under them.
+    const deckOpen = (xz: N): N => {
+      const wide = u.tCloud.sample(vec3(xz.x.div(5300), 0.47, xz.y.div(5300)).add(u.uCloudDrift.mul(vec3(0.12, 0, 0.12)))).level(0).r;
+      const ragged = u.tCloud.sample(vec3(xz.x.div(1250), 0.71, xz.y.div(1250)).add(u.uCloudDrift.mul(vec3(0.4, 0, 0.4)))).level(0).g;
+      const out: N = length(xz.sub(u.uAirCentre.xz));
+      return smoothstep(u.uDeckGap.x, u.uDeckGap.x.add(0.07), wide.add(ragged.sub(0.5).mul(0.16))).mul(smoothstep(480, 900, out)).mul(one(smoothstep(4600, 6000, out))).mul(step(0.01, u.uDeck.w));
+    };
+    const deckHeight = (xz: N): N => deckWhole(xz).sub(deckOpen(xz).mul(u.uDeck.y).mul(u.uDeckGap.y));
+    const deckWhole = (xz: N): N => {
       // (Three sizes: great swells a mile across, heaps a few hundred metres across on them, and billows on those.)
       const vast = u.tCloud.sample(vec3(xz.x.div(3400), 0.13, xz.y.div(3400)).add(u.uCloudDrift.mul(vec3(0.3, 0, 0.3)))).level(0).r;
       const big = u.tCloud.sample(vec3(xz.x.div(900), 0.31, xz.y.div(900)).add(u.uCloudDrift.mul(vec3(0.6, 0, 0.6)))).level(0).r;
@@ -335,16 +351,16 @@ export class Atmosphere {
         out.assign(vec4(u.uDeckAir.mul(1.1).add(u.uDeckSun.mul(0.35)).mul(lightness), one(exp(through.mul(thick).negate()))));
         far.assign(0);
       }).ElseIf(rd.y.lessThan(-0.0004), () => {
-        const top: N = u.uDeck.x.add(amp.mul(2.05)), bottom: N = u.uDeck.x.sub(amp);
+        const top: N = u.uDeck.x.add(amp.mul(2.05)), bottom: N = u.uDeck.x.sub(amp).sub(u.uDeck.y.mul(u.uDeckGap.y).mul(step(0.01, u.uDeck.w)));
         const t0: N = max(top.sub(ro.y).div(rd.y), 0).toVar();
         const tBottom: N = bottom.sub(ro.y).div(rd.y).toVar();
         const t1: N = min(min(tBottom, reach), 40000).toVar();
         If(t1.greaterThan(t0), () => {
           // Walked from where the line of sight comes down past the highest billows to where it passes the lowest, or meets the land.
-          const dt: N = t1.sub(t0).div(26).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
+          const dt: N = t1.sub(t0).div(30).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
           const prev: N = ro.y.add(rd.y.mul(t)).sub(deckHeight(ro.xz.add(rd.xz.mul(t)))).toVar();
           const hit: N = float(-1).toVar();
-          Loop(26, () => {
+          Loop(30, () => {
             t.addAssign(dt);
             const p: N = ro.add(rd.mul(t)).toVar();
             const d: N = p.y.sub(deckHeight(p.xz)).toVar();
@@ -370,11 +386,25 @@ export class Atmosphere {
             let shaded: N = float(0);
             for (const d of [38, 130, 380]) shaded = max(shaded, smoothstep(0, u.uDeck.y.mul(0.7), deckHeight(p.xz.add(sunWay.mul(d))).sub(here2.add(rise.mul(d)))));
             // Lit as cloud is: much of the sun's light comes through and round it, so even what faces away is not dark; the troughs hold shadow.
-            const sun: N = max(dot(n, u.uSunDir), 0).mul(0.75).add(0.25).mul(smoothstep(-0.05, 0.08, u.uSunDir.y)).mul(one(shaded.mul(0.72)));
+            // And the mountain shades the cloud: its shadow lies out across the sea, miles long when the sun is low. Up the line to the sun
+            // from this point, at a few heights, is the line inside the mountain's body, or its summit?
+            let cast: N = float(0);
+            const upTo = (h: N): N => p.xz.add(u.uSunDir.xz.mul(h.sub(here2).div(max(u.uSunDir.y, 0.03))));
+            for (let k = 1; k <= 4; k++) {
+              const h: N = mix(here2, u.uShadeBody.w, k / 4.3), broad: N = mix(u.uShadeFoot, u.uShadeBody.z, clamp(h.sub(u.uDeck.x).div(max(u.uShadeBody.w.sub(u.uDeck.x), 1)), 0, 1));
+              cast = max(cast, one(smoothstep(broad.mul(0.8), broad.mul(1.12), length(upTo(h).sub(u.uShadeBody.xy)))));
+            }
+            for (let k = 1; k <= 3; k++) {
+              const h: N = mix(u.uShadeBody.w, u.uShadePeak.w, k / 3.6), broad: N = u.uShadePeak.z.mul(u.uShadePeak.w.sub(h)).div(max(u.uShadePeak.w.sub(u.uShadeBody.w), 1));
+              cast = max(cast, one(smoothstep(broad.mul(0.7), broad.mul(1.15), length(upTo(h).sub(u.uShadePeak.xy)))));
+            }
+            cast = cast.mul(step(0.5, u.uShadeBody.z)).mul(smoothstep(0.02, 0.1, u.uSunDir.y));
+            const sun: N = max(dot(n, u.uSunDir), 0).mul(0.75).add(0.25).mul(smoothstep(-0.05, 0.08, u.uSunDir.y)).mul(one(shaded.mul(0.72))).mul(one(cast.mul(0.82)));
             const hollow: N = smoothstep(-1.5, 1.4, hh).mul(0.62).add(0.38);
             const edge: N = sky.phaseHG(dot(rd, u.uSunDir), float(0.6)).mul(0.6);
             const colour: N = u.uDeckSun.mul(sun.mul(hollow).add(edge.mul(0.25))).add(u.uDeckAir.mul(n.y.mul(0.3).add(0.42)).mul(hollow));
-            out.assign(vec4(colour, one(exp(reach.sub(hit).div(-16)))));
+            // (In a break there is no cloud: thinning to nothing towards its middle, with the cloud's walls standing round it.)
+            out.assign(vec4(colour, one(exp(reach.sub(hit).div(-16))).mul(one(smoothstep(0.5, 0.95, deckOpen(p.xz))))));
             far.assign(hit);
           });
         });

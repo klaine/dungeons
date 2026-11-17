@@ -381,6 +381,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   {
     const q = rng.fork('cloud'), arrive = m.way![m.way!.length - 1][2];
     m.billow = round(q.range(6, 11));
+    // (One day in four it is unbroken to the horizon; on the others it has breaks in it, few or many, with the valleys showing through.)
+    m.breaks = rng.fork('breaks').chance(0.25) ? 0 : Math.round(rng.fork('breaks amount').range(0.3, 0.85) * 100) / 100;
     // (Above the arrival by about as much as its deepest troughs go below it, so that the player always starts in the cloud and climbs out of it.)
     m.deck = round(arrive + m.billow * 2.3 + q.range(0, 4));
   }

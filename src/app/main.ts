@@ -384,7 +384,8 @@ async function start(): Promise<void> {
   }) : null;
   if (sea) { scene.add(sea.mesh); scenic.push(sea.mesh); }
   // Gulls over the cliffs, white in the light of the hour.
-  const birds = desc.birds?.length ? new Birds(desc.birds, seed, SUN_INTENSITY * 0.55 + 0.4) : null;
+  // (Over a mountain they are choughs, black against the cloud.)
+  const birds = desc.birds?.length ? new Birds(desc.birds, seed, desc.deck ? 0.04 : SUN_INTENSITY * 0.55 + 0.4) : null;
   if (birds) scene.add(birds.mesh);
   // The lighthouse's beam turns once the sun is low enough for it to be lit.
   const lit = site?.setting.hour === 'night' ? 0.22 : site?.setting.hour === 'dusk' ? 0.1 : site?.setting.hour === 'sunset' ? 0.035 : 0;
@@ -631,7 +632,11 @@ async function start(): Promise<void> {
   if (desc.deck) {
     // The sea of cloud below a mountain top: white in the sun, the sky's colour in its troughs.
     const u = atmosphere.uniforms;
-    u.uDeck.value.set(desc.deck.level, desc.deck.billow, 1, 0);
+    u.uDeck.value.set(desc.deck.level, desc.deck.billow, 1, num('breaks', desc.deck.breaks ?? 0));
+    // (The more broken, the lower the bar a stretch of it must clear to open.)
+    u.uDeckGap.value.set(0.66 - 0.2 * u.uDeck.value.w, 7, 0, 0);
+    const sh = desc.deck.shade;
+    if (sh) { u.uShadeBody.value.set(sh.x, sh.z, sh.rTop, sh.top); u.uShadeFoot.value = sh.rFoot; u.uShadePeak.value.set(sh.px, sh.pz, sh.pr, sh.py); }
     u.uDeckSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.27);
     u.uDeckAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.0);
   }

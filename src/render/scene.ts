@@ -149,7 +149,13 @@ export interface SceneDescription {
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
   /** The sea of cloud, if the place is a mountain top: the level of its top, and how high its billows stand above and below that. Drawn with the air. */
-  deck?: { level: number; billow: number };
+  deck?: {
+    level: number; billow: number;
+    /** How broken it is, 0 to 1: through its breaks the valleys under it are seen. */
+    breaks?: number;
+    /** The mountain, for the shadow it throws on the cloud: its body's middle, how broad at its top and at the cloud, and its top's level; its summit's place, breadth at the foot, and height. */
+    shade?: { x: number; z: number; top: number; rTop: number; rFoot: number; px: number; pz: number; pr: number; py: number };
+  };
   /** How much snow lies, from 0 for none to 1 for the whole of winter: the materials lay it on whatever is level enough to hold it. */
   snow?: number;
   /** Above what level snow lies more thickly, and how much more: so that in summer what is left of it is on the heights. */

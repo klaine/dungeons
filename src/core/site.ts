@@ -485,6 +485,8 @@ export interface Mountain {
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;
+  /** How broken the sea of cloud is, from 0 for unbroken to 1 for as much gap as cloud: through its breaks, far from the mountain, the valleys under it are seen. */
+  breaks?: number;
   /**
    * The ridge the way comes up: its crest runs from `from`, on the rim, out to `to`, `width`
    * across its top, falling from `y0` there to `y1` at its far end, which is in or near the cloud.
