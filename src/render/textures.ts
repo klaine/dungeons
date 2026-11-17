@@ -175,11 +175,22 @@ float heightFn(vec2 uv) {
     surface: /* glsl */ `
 void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
   float t = fbm(uv + 5.5, vec2(4., 3.), 4, .5);
-  vec3 base = mix(vec3(.13, .105, .09), vec3(.47, .43, .38), smoothstep(.2, .8, h + t * .3));
+  // Furrows nearly black, ridges lighter; and by patches the ridges run a little warmer (brown) or cooler (grey).
+  vec3 base = mix(vec3(.085, .07, .06), vec3(.5, .45, .39), smoothstep(.2, .8, h + t * .3));
+  float warm = fbm(uv + 2.1, vec2(2., 2.), 3, .5);
+  base *= mix(vec3(1.08, .96, .84), vec3(.9, .98, 1.08), smoothstep(.3, .7, warm));
   // Grey-green crust on the ridges, as there is on any old trunk.
   base = mix(base, vec3(.4, .45, .34), smoothstep(.1, .4, fbm(uv + 8., vec2(5., 4.), 3, .5)) * smoothstep(.5, .8, h) * .5);
-  albedo = base * (1. - cavity * .65);
-  rough = clamp(.9 + cavity * .08, .6, 1.);
+  // Round pale lichens, in colonies, on the ridges; and now and then a small yellow-orange one.
+  vec2 w = worley(uv * vec2(9., 7.) + 4., vec2(9., 7.));
+  float colony = smoothstep(.45, .72, fbm(uv + 11., vec2(3., 3.), 3, .5));
+  float disc = (1. - smoothstep(.1, .3, w.x)) * colony * smoothstep(.4, .75, h);
+  base = mix(base, vec3(.62, .66, .5), disc * .6);
+  vec2 w2 = worley(uv * vec2(17., 13.) + 9., vec2(17., 13.));
+  float fleck = (1. - smoothstep(.05, .16, w2.x)) * smoothstep(.62, .8, fbm(uv + 21., vec2(4., 4.), 3, .5)) * smoothstep(.5, .8, h);
+  base = mix(base, vec3(.62, .45, .14), fleck * .7);
+  albedo = base * (1. - cavity * .7);
+  rough = clamp(.9 + cavity * .08 - disc * .1, .6, 1.);
 }`,
   },
   // Moss: soft clumps. Alpha (height) is used as the growth mask when blending over stone.

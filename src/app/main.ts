@@ -1147,6 +1147,8 @@ async function start(): Promise<void> {
     if (site?.island) return -inland(site.island, x, z);
     const v = site?.valley;
     if (!v) return -1;
+    // (Nor whoever is down a mine.)
+    if ((site.grottoes ?? []).some((q) => q.mine && Math.abs(z - q.z) < Math.max(5, q.mine.cross.length + 2.5) && (q.side === 'w' ? edgeAt(v, 'w', q.z) - x : x - edgeAt(v, 'e', q.z)) < q.mine.length + 8)) return -1;
     if ((site.grottoes ?? []).some((q) => Math.abs(z - q.z) < (q.hall ? q.hall.width / 2 + 12 : q.r * 1.25 + 4) && (q.side === 'w' ? edgeAt(v, 'w', q.z) - x : x - edgeAt(v, 'e', q.z)) < (q.hall ? q.hall.length + 30 : q.r + 6))) return -1;
     // (Nor has whoever is in the way through the hill.)
     const bw = site.backWay;

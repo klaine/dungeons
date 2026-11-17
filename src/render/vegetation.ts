@@ -385,7 +385,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   // Whole trees stand far off, are never dropped for distance, and are drawn in large lots.
   const whole = set.kind === 'fir' || set.kind === 'tree';
   const ground = set.kind !== 'leaf' && set.kind !== 'needle' && !whole;
-  const block = whole ? 220 : ground ? 24 : 48;
+  const block = whole ? 220 : ground ? (set.kind === 'grass' ? 12 : 24) : 48;
   // Grass is drawn two ways: near the eye as real blades, farther off as painted tufts. Each block
   // gets both, and which is drawn, and where one gives way to the other, is settled in `cullCards`
   // and by the cards themselves shrinking away over the hand-over. (`?blades=0` keeps the painted tufts alone.)
@@ -409,16 +409,18 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     material.envMapIntensity = 0.55;
     // Wind: the free end of each card moves, the fixed end does not. And grass and flowers shrink into the ground as they near the end of their range.
     material.positionNode = Fn(() => {
-      const p: N = positionLocal.toVar();
+      // The hand-over: blades shrink to their feet as they pass the blade range. (The tufts are
+      // not shrunk to meet them: that was tried, and it sent tufts far from where they stand.
+      // Instead blocks are small, and a block straddling the range simply draws both.)
+      const dist: N = distance(cameraPosition, at.xyz);
+      const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, dist)) : float(1);
+      const p: N = positionLocal.mul(handOver).toVar();
       const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
       const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
       p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
       p.z.addAssign(free.mul(cos(uTime.mul(1.7).add(at.z.mul(0.3)))).mul(uWind).mul(at.w).mul(sway * 0.6));
-      const d: N = distance(cameraPosition, at.xyz);
+      const d: N = dist;
       if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d)));
-      // The hand-over: blades shrink to their feet as they pass the blade range, and the painted tufts grow out of theirs.
-      if (split && real) p.mulAssign(float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, d)));
-      if (split && !real) p.mulAssign(smoothstep(uBlade.mul(0.85), uBlade.mul(1.05), d));
       return p;
     })();
     // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal

@@ -167,6 +167,8 @@ export interface TreeOptions {
   cardSize: number;
   leaf: (rng: Rng) => Colour;
   bark: Colour;
+  /** How far the limbs spread, as a multiple of the usual: an old oak standing alone, its boughs reaching out low like an umbrella. 1 by default. */
+  wide?: number;
   /** For wood that is not baked: gives each point its share of the sky, less up among the leaves. */
   shaded?: boolean;
   /** Where to build roots and other small wood that nobody should be stopped by. */
@@ -179,7 +181,18 @@ const UP = new Vector3(0, 1, 0);
  * A length of trunk or branch: a tube through the given points, round, tapering, closed at both
  * ends. Bark is wrapped round it a whole number of times, so it meets itself without a seam.
  */
-export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], sides: number, colour: Colour, along: number, open: ((y: number) => number) | null): void {
+/** How a limb's cross-section departs from a circle: ridges and flutes that die away up it, and an oval. */
+export interface LimbShape {
+  /** Flutes round the foot: how many, how deep (a fraction of the radius), and where they start. */
+  lobes: number;
+  amp: number;
+  phase: number;
+  /** How much longer one way across than the other, and which way. */
+  oval: number;
+  ovalAt: number;
+}
+
+export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], sides: number, colour: Colour, along: number, open: ((y: number) => number) | null, shape?: LimbShape): void {
   const side = new Vector3(), fore = new Vector3(), dir = new Vector3();
   const rows: number[][] = [];
   let v = along;
@@ -196,7 +209,10 @@ export function layLimb(mesh: MeshBuilder, points: Vector3[], radii: number[], s
       const a = (i / sides) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
       const nx = side.x * c + fore.x * s, ny = side.y * c + fore.y * s, nz = side.z * c + fore.z * s;
       const tone = 0.82 + 0.3 * (((i * 7 + j * 3) % 5) / 5);
-      const id = mesh.addVertex(p.x + nx * r, p.y + ny * r, p.z + nz * r, nx, ny, nz, (i / sides) * wraps, v / 0.7, colour[0] * tone, colour[1] * tone, colour[2] * tone);
+      // Flutes are deepest at the foot and gone by the first third of the way up; the oval stays, easing off.
+      const fade = Math.max(0, 1 - j / Math.max(1, (points.length - 1) * 0.5));
+      const swell = shape ? 1 + shape.amp * fade * Math.cos(shape.lobes * a + shape.phase) + shape.oval * (1 - 0.5 * j / Math.max(1, points.length - 1)) * Math.cos(2 * (a - shape.ovalAt)) : 1;
+      const id = mesh.addVertex(p.x + nx * r * swell, p.y + ny * r * swell, p.z + nz * r * swell, nx, ny, nz, (i / sides) * wraps, v / 0.7, colour[0] * tone, colour[1] * tone, colour[2] * tone);
       if (open) mesh.setOpen(id, open(p.y));
       row.push(id);
     }
@@ -237,6 +253,14 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
   const inner: { at: Vector3; reach: number }[] = [];
   let spread = 0;
   const any = new Vector3();
+  // No two trunks are alike: some bend, some stand straight; some are fluted at the foot, with
+  // buttresses between the flutes, some are oval, some nearly round. (Drawn from a stream of its
+  // own, so the branching of trees already seen is not changed.)
+  const wide = o.wide ?? 1;
+  const form = rng.fork('trunk-form');
+  const bendAt = form.range(0, Math.PI * 2), bendBy = form.chance(0.4) ? form.range(0.12, 0.3) : form.range(0, 0.08);
+  const bend = new Vector3(Math.cos(bendAt) * bendBy, 0, Math.sin(bendAt) * bendBy);
+  const trunkShape: LimbShape = { lobes: form.int(3, 5), amp: form.range(0.04, 0.2) * (oak ? 1.3 : 0.8), phase: form.range(0, Math.PI * 2), oval: form.range(0.0, 0.11), ovalAt: form.range(0, Math.PI) };
   const branch = (from: Vector3, dir: Vector3, length: number, radius: number, level: number) => {
     const steps = level === 0 ? 4 : level >= levels - 1 ? 2 : 3;
     const points = [from.clone()], radii = [radius];
@@ -246,16 +270,17 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
     const taper = level === 0 ? 0.3 : 0.4;
     for (let s = 1; s <= steps; s++) {
       // It wanders as it grows, and turns upward: less so for a trunk, which was never in shade.
-      const gnarl = (oak ? 0.2 : 0.1) * (level === 0 ? 0.35 : 1);
+      const gnarl = (oak ? 0.2 : 0.1) * (level === 0 ? 0.35 : 1) * (1 + 0.6 * (wide - 1));
       d.add(any.set(rng.range(-1, 1), rng.range(-1, 1), rng.range(-1, 1)).multiplyScalar(gnarl));
-      d.y += level === 0 ? 0 : oak ? 0.1 : 0.16;
+      d.y += level === 0 ? 0 : (oak ? 0.1 : 0.16) / wide;
+      if (level === 0) d.addScaledVector(bend, 1);
       d.normalize();
       p.addScaledVector(d, length / steps);
       points.push(p.clone());
       radii.push(radius * (1 - (taper * s) / steps));
     }
     const sides = level === 0 ? (o.detail > 0.5 ? 9 : 6) : level === 1 ? (o.detail > 0.5 ? 6 : 4) : level === 2 ? 4 : 3;
-    layLimb(wood, points, radii, sides, o.bark, rng.range(0, 3), open);
+    layLimb(wood, points, radii, sides, o.bark, rng.range(0, 3), open, level === 0 && o.detail > 0.4 ? trunkShape : undefined);
     const end = points[points.length - 1], endRadius = radii[radii.length - 1];
     spread = Math.max(spread, Math.hypot(end.x - x, end.z - z));
     if (level >= levels) {
@@ -266,16 +291,17 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
     if (level === levels - 1) inner.push({ at: end.clone(), reach: length });
     // Where it divides. An ash keeps a leader going nearly straight on; an oak does not.
     const forks = level === 0 ? (oak ? 3 + rng.int(0, 1) : 3) : 2 + (rng.chance(oak ? 0.45 : 0.25) ? 1 : 0);
+    // (A wide tree does not draw more from the stream: it only uses what it drew differently.)
     const turn = rng.range(0, Math.PI * 2);
     // Two directions square to this one, to spread the forks about.
     const a = new Vector3().crossVectors(d, Math.abs(d.y) > 0.9 ? any.set(1, 0, 0) : UP).normalize(), b = new Vector3().crossVectors(d, a);
     for (let k = 0; k < forks; k++) {
       const leader = !oak && k === 0;
-      const lean = leader ? rng.range(0.05, 0.2) : level === 0 ? (oak ? rng.range(0.6, 1.0) : rng.range(0.7, 0.95)) : rng.range(0.45, 0.8);
+      const lean = Math.min(1.35, (leader ? rng.range(0.05, 0.2) : level === 0 ? (oak ? rng.range(0.6, 1.0) : rng.range(0.7, 0.95)) : rng.range(0.45, 0.8)) + (leader ? 0 : 0.18 * (wide - 1)));
       const az = turn + (k / forks) * Math.PI * 2 + rng.range(-0.4, 0.4);
       const nd = d.clone().multiplyScalar(Math.cos(lean)).addScaledVector(a, Math.sin(lean) * Math.cos(az)).addScaledVector(b, Math.sin(lean) * Math.sin(az));
       const share = leader ? 0.82 : forks === 2 ? 0.74 : 0.64;
-      const nl = level === 0 ? height * (oak ? 0.32 : leader ? 0.3 : 0.24) * rng.range(0.85, 1.15) : length * rng.range(0.62, 0.8);
+      const nl = level === 0 ? height * (oak ? 0.32 : leader ? 0.3 : 0.24) * rng.range(0.85, 1.15) * wide : length * rng.range(0.62, 0.8);
       branch(end, nd, nl, endRadius * share, level + 1);
     }
     // An ash also puts out branches from the side of its trunk, below the top.
@@ -303,18 +329,38 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
   // and bright at its edge: each spray is tinted by how deep in the crown it hangs.
   let crownReach = 1;
   for (const tip of tips) crownReach = Math.max(crownReach, tip.at.distanceTo(heart));
-  const hang = (list: { at: Vector3; reach: number }[], cards: number, size: number, dim: number) => {
-    const each = Math.max(1, Math.round(cards / list.length));
-    for (const tip of list) {
+  // What the eye takes for a living crown, apart from its shape, is the variety in it. Each spray
+  // has its own shade: new growth at the sunlit edge is yellower and brighter, the old leaf inside
+  // and beneath is bluer and darker, and from bough to bough the green wanders a little. And the
+  // outer shell is not quite whole: some sprays are left out, so the outline is lumpy and the sky
+  // shows through in places, the leaves of the rest made a little more numerous to keep the crown full.
+  // (Drawn from a stream of its own, so the branching of trees already seen is not changed.)
+  const look = rng.fork('crown-look');
+  const gaps = o.detail > 0.3;
+  const hang = (list: { at: Vector3; reach: number }[], cards: number, size: number, dim: number, outer = false) => {
+    let kept = 0;
+    const keep: boolean[] = list.map((tip) => {
+      const depth = Math.min(1, tip.at.distanceTo(heart) / crownReach);
+      const k = !(gaps && outer && look.chance(0.3 * depth * depth * depth));
+      if (k) kept++;
+      return k;
+    });
+    const each = Math.max(1, Math.round(cards / Math.max(1, kept)));
+    list.forEach((tip, i) => {
+      if (!keep[i]) return;
       const r = Math.min(1.6, 0.3 + tip.reach * 0.55);
       const depth = Math.min(1, tip.at.distanceTo(heart) / crownReach);
+      const up = Math.min(1, Math.max(0, (tip.at.y - heart.y) / (crownReach * 0.7) + 0.5));
       const light = dim * (0.5 + 0.5 * depth * depth) * (tip.at.y < heart.y ? 0.82 : 1);
+      // Towards yellow in the sun at the edge, towards blue-green in the old leaf; and a wander of its own.
+      const warm = (depth * depth * up - 0.25) * 0.3 + (look.next() - 0.5) * 0.16;
+      const tint = [1 + warm * 0.9, 1 + warm * 0.1, 1 - warm * 1.1];
       const centre = tip.at.clone().lerp(heart, 0.5);
-      planting.spray(tip.at.x, tip.at.y, tip.at.z, r, r * 0.65, each, size, (q) => { const c = o.leaf(q); return [c[0] * light, c[1] * light, c[2] * light]; }, rng, centre.x, centre.y - r, centre.z);
+      planting.spray(tip.at.x, tip.at.y, tip.at.z, r, r * 0.65, each, size, (q) => { const c = o.leaf(q); return [c[0] * light * tint[0], c[1] * light * tint[1], c[2] * light * tint[2]]; }, rng, centre.x, centre.y - r, centre.z);
       spread = Math.max(spread, Math.hypot(tip.at.x - x, tip.at.z - z) + r * 0.7);
-    }
+    });
   };
-  hang(tips, o.cards * 0.78, o.cardSize, 1);
+  hang(tips, o.cards * 0.78, o.cardSize, 1, true);
   // Larger, darker boughs fill the inside, so the sky does not show through the middle of the tree.
   if (inner.length) hang(inner, o.cards * 0.22, o.cardSize * 1.7, 0.62);
   return spread;

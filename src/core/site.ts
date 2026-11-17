@@ -212,6 +212,14 @@ export interface Grotto {
    * crown of its roof, with two rows of pillars down it and a tomb on a dais at the far end.
    * It is lit by torches on the pillars and by nothing else.
    */
+  /**
+   * If present, this is a mine and `r` is not used: an adit driven level into the hill from the foot of the wall, `length`
+   * metres of timbered drift to a working at its end, with a crosscut off it part way in (`cross.at` metres in, `cross.length`
+   * long, towards greater z if `cross.side` is 1) that was given up. Out of doors, before its mouth: a tramway of wooden rails
+   * runs out along the adit's line to the tip of a spoil heap `heap` metres long; and the miners' shed stands beside the
+   * mouth, on the side of `shed` (1 is greater z).
+   */
+  mine?: { length: number; cross: { at: number; length: number; side: -1 | 1 }; heap: number; shed: -1 | 1 };
   hall?: {
     length: number; width: number; height: number; drop: number;
     /**
@@ -497,7 +505,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */
