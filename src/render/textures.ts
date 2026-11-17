@@ -155,31 +155,40 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = clamp(.78 + cavity * .15 - h * .1, .45, 1.);
 }`,
   },
-  // Bark: long upright ridges with furrows between them that wander, join and part, cracked
-  // across here and there, and fibrous within. Mid-grey, so that the vertex tint makes it oak or ash.
+  // Bark, as an old trunk has it: plates several times as tall as they are wide, each standing at a height of its own, parted by
+  // deep narrow furrows that wander and fork; every plate built of thinner flakes, one overlapping the next, with a hair crack
+  // where they meet and here and there one lifting; and the whole fibrous along the grain. Mid-grey, so that the tint a tree gives
+  // makes it oak, ash or pine. (Everything in it comes round in the height of the picture as well as across it.)
   bark: {
-    normalStrength: 7.,
+    normalStrength: 9.,
     height: /* glsl */ `
 float heightFn(vec2 uv) {
   float warp = fbm(uv, vec2(3., 2.), 3, .5);
-  // A furrow is where a slow noise, stretched upright, passes through nothing.
-  // (It comes round in the height of the picture, as everything here must: once it was read one and a half times up the picture
-  // while coming round only every three, and the top of the bark did not meet its foot. Wrapped up a trunk, that was a sharp line
-  // round it at every repeat.)
-  float f1 = abs(gnoise(vec2(uv.x * 11. + warp * 2.2, uv.y * 2.), vec2(11., 2.)));
-  float f2 = abs(gnoise(vec2(uv.x * 23. + warp * 3. + 7., uv.y * 3.), vec2(23., 3.)));
-  float ridge = smoothstep(.0, .2, f1) * (.72 + .28 * smoothstep(.0, .16, f2));
-  // Now and then a ridge is broken across.
-  vec3 w = worleyId(vec2(uv.x * 6., uv.y * 5. + warp), vec2(6., 5.));
-  float across = smoothstep(.0, .05, w.y - w.x);
+  float sway = fbm(uv + 4.1, vec2(4., 2.), 3, .5);
+  // The plates, and the furrows between them: deepest where three plates meet, and not all the same width.
+  vec3 pl = worleyId(vec2(uv.x * 7. + warp * 1.5, uv.y * 2. + sway * .6), vec2(7., 2.));
+  float gap = pl.y - pl.x;
+  float furrow = smoothstep(.0, .1 + .1 * fbm(uv + 7.3, vec2(6., 3.), 2, .5), gap);
+  float plate = .4 + .26 * pl.z;
+  // Flakes on the plates: smaller, stepped one above another, with a crack round each.
+  vec3 fl = worleyId(vec2(uv.x * 17. + warp * 2.5 + 3., uv.y * 5. + sway), vec2(17., 5.));
+  float seam = fl.y - fl.x;
+  // (Each a little domed, and standing above or below its neighbours by a good part of the plate's own height.)
+  float flake = (fl.z - .5) * .34 + (.45 - fl.x) * .16 + (1. - smoothstep(.0, .1, seam)) * -.12;
+  // The smallest: scales lifting at their lower edge, and the grain.
+  vec3 sc = worleyId(vec2(uv.x * 41. + 1.7, uv.y * 11. + warp), vec2(41., 11.));
+  float scale = (sc.z - .5) * .14 * smoothstep(.0, .1, sc.y - sc.x) - (1. - smoothstep(.0, .07, sc.y - sc.x)) * .04;
   float fibre = gnoise(vec2(uv.x * 64., uv.y * 6.), vec2(64., 6.)) * .5 + gnoise(vec2(uv.x * 150., uv.y * 14.), vec2(150., 14.)) * .3;
-  return clamp(.1 + ridge * (.55 + .2 * w.z) * (.75 + .25 * across) + fibre * .11 + fbm(uv + 3., vec2(5.), 3, .5) * .12, 0., 1.);
+  float body = plate + flake + scale + fibre * .13 + fbm(uv + 3., vec2(5.), 3, .5) * .12;
+  return clamp(.04 + furrow * body, 0., 1.);
 }`,
     surface: /* glsl */ `
 void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
   float t = fbm(uv + 5.5, vec2(4., 3.), 4, .5);
   // Furrows nearly black, ridges lighter; and by patches the ridges run a little warmer (brown) or cooler (grey).
-  vec3 base = mix(vec3(.085, .07, .06), vec3(.5, .45, .39), smoothstep(.2, .8, h + t * .3));
+  vec3 base = mix(vec3(.05, .04, .035), vec3(.5, .45, .39), smoothstep(.12, .85, h + t * .3));
+  // Where a flake has come away the bark under it is fresher and redder.
+  base = mix(base, vec3(.5, .34, .25), smoothstep(.5, .3, h) * smoothstep(.12, .28, h) * .55);
   float warm = fbm(uv + 2.1, vec2(2., 2.), 3, .5);
   base *= mix(vec3(1.08, .96, .84), vec3(.9, .98, 1.08), smoothstep(.3, .7, warm));
   // Grey-green crust on the ridges, as there is on any old trunk.

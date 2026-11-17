@@ -24,7 +24,7 @@ import { TextureSet } from './textures';
 type N = any;
 const {
   Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
-  normalMap, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
+  normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
 
@@ -104,8 +104,14 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
 /**
  * `matt` is for ground: turf and loose stone throw back almost no gleam. With the ordinary sheen
  * every surface has at a glancing angle, land seen from the air goes pale as milk with distance.
+ *
+ * `deep` is for a surface with real depth to it, bark above all: how deep its hollows are, as a share of one repeat of its texture.
+ * Within a few strides such a surface is drawn with that depth. The texture is slid along the line of sight until the line meets
+ * the height the texture has there, so that a plate of bark hides the furrow behind it, and more of the furrow shows as the eye
+ * comes round: which is what tells the eye that a thing has depth and is not paint.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number } = {}): MeshStandardNodeMaterial {
+  if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
     normalScale: new Vector2(o.normalScale ?? 1, o.normalScale ?? 1),
@@ -131,6 +137,50 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
+  return m;
+}
+
+/** The same material as `makeSiteMaterial` makes, for a surface with depth (see `deep` there). */
+function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep: number }): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: o.roughness ?? 1, metalness: 0, color: new Color(1, 1, 1) });
+  const f = fieldOf(), bk = bakeOf();
+  // Which way the texture's two directions run across the surface, as the eye sees it: worked out from how the surface and the
+  // texture's coordinates change from one point of the picture to the next.
+  const dp1: N = dFdx(positionView), dp2: N = dFdy(positionView), du1: N = dFdx(uv()), du2: N = dFdy(uv());
+  const flatN: N = normalize(normalViewGeometry).toVar();
+  const p2: N = dp2.cross(flatN), p1: N = flatN.cross(dp1);
+  const T: N = normalize(p2.mul(du1.x).add(p1.mul(du2.x))), B: N = normalize(p2.mul(du1.y).add(p1.mul(du2.y)));
+  const eye: N = normalize(positionView.negate());
+  const near: N = one(smoothstep(5, 13, length(positionView)));
+  const at: N = Fn(() => {
+    const p: N = vec2(uv()).toVar();
+    If(near.greaterThan(0), () => {
+      const slide: N = vec2(dot(eye, T), dot(eye, B)).div(max(dot(eye, flatN), 0.32)).mul(o.deep).mul(near).toVar();
+      const sunk: N = float(0).toVar();
+      Loop(10, () => {
+        const h = (texture(base.map, uv().sub(slide.mul(sunk))) as N).level(0).a;
+        If(one(h).lessThanEqual(sunk), () => { Break(); });
+        sunk.addAssign(1 / 10);
+      });
+      p.subAssign(slide.mul(sunk));
+    });
+    return p;
+  })().toVar();
+  const stone: N = (texture(base.map, at) as N).toVar(), orm: N = (texture(base.ormMap, at) as N).toVar(), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
+  const wet = f.y;
+  const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
+  const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
+  // (The hollows are darker than the texture alone makes them: little light of any kind gets down a furrow.)
+  const hollow = mix(0.5, 1, smoothstep(0.05, 0.45, stone.a));
+  let colour: N = stone.rgb.mul(vertexColor().rgb).mul(mix(1, 0.5, wet)).mul(hollow);
+  colour = mix(colour, mossTex.rgb, mossy);
+  colour = mix(colour, vec3(0.012), f.z.mul(0.9));
+  m.colorNode = vec4(colour, 1);
+  m.roughnessNode = mix(float(o.roughness ?? 1).mul(orm.g).mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z));
+  m.aoNode = orm.r;
+  const tn: N = (texture(base.normalMap, at) as N).xyz.mul(2).sub(1);
+  m.normalNode = normalMap(vec3(tn.xy.mul(o.normalScale ?? 1), tn.z).mul(0.5).add(0.5));
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk).mul(mix(0.6, 1, smoothstep(0.05, 0.5, stone.a))), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
   return m;
 }
 

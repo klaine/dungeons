@@ -240,7 +240,7 @@ export function buildStage(o: { stone: Stone; season: Season; seed: string }): S
     : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
   const parched = o.season === 'autumn' ? 0.55 : o.season === 'summer' ? 0.25 : 0;
   const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
-  const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8], firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [1.12, 0.62, 0.4];
+  const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8], firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.98, 0.6, 0.42];
   timed('trees', () => {
     const stand = (name: string, x: number, z: number, height: number): number => { const y = ground(x, z); spots[name] = [x, y + height * 0.6, z]; return y; };
     {

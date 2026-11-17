@@ -2140,7 +2140,7 @@ export function meshSite(site: Site): SceneDescription {
     // Trees thin out into glades, firs take the higher ground, and here and there a stand is in
     // blossom. In the valley the trunks are solid; the track and the meadow are kept clear.
     const barkMesh = sceneryMesh('bark');
-    const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [1.12, 0.62, 0.4], pineGreen: Colour = [0.07, 0.15, 0.07];
+    const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.98, 0.6, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number, pick?: { oak: boolean; roll: number; old?: boolean }) => {
       const lift = y - p.floor;
