@@ -301,7 +301,7 @@ An island (`?place=island`) is the other kind of open place, and the target is a
 | Air | The mist lies on the sea, not on the house's floor twenty metres above it: a sea fog in the morning and at dusk, with the island standing out of it. |
 | Gulls | Wheeling off the cliffs, the stacks and the cove, in loops of their own, gliding and now and then beating their wings; a few triangles each, flown entirely where they are drawn. |
 | Mainland | One sheet in rings, drawn with the far material: open sea, then a coast of low cliffs filling an arc of the horizon, rising into hills and mountains behind; and two or three islets between. |
-| Built things | The jetty, of big stones with a coping, bollards and an iron ladder; the cottages of whitewashed rubble, thatched or slated, with a chimney at one gable and pots and boxes at the door; boats drawn up on the sand, painted above and tarred below; the lighthouse, white, perhaps banded, with a stair winding up inside to a gallery with an iron rail, a lantern of glass in iron bars, a domed roof, and a lamp that shines by night; and the castle of the far hills, at true size, on a headland. |
+| Built things | The jetty, of big stones with a coping, bollards and an iron ladder; the cottages of whitewashed rubble, thatched or slated, with a chimney at one gable and pots and boxes at the door; boats drawn up on the sand, painted above and tarred below; the lighthouse, white, perhaps banded, with a stair winding up inside to a gallery with an iron rail, a lantern of glass in iron bars, a domed roof, and a lamp that shines by night; and on a headland the curtain walls, round towers and gate of the far hills' castle at true size, about a court with a square keep in it. |
 
 ## 2D maps
 

@@ -385,8 +385,18 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   // ---- the castle on its headland: curtain walls, towers and a keep, true to size, walked round and into its court
   if (o.castle) {
     const k = o.castle;
-    buildLandmark('castle', k.x, k.y, k.z, k.facing, mesh, rng.fork('castle'), [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]], 0.5);
-    c.finds.push({ at: new Vector3(k.x - Math.cos(k.facing) * 6, k.y + 0.2, k.z - Math.sin(k.facing) * 6), what: 'a rusted helm' });
+    // (Its walls, towers and gate only: the far hills' castle fills its court with ranges of buildings, and one of them stands across the gate.)
+    const tint: Colour = [0.82 * c.stoneTint[0], 0.78 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
+    buildLandmark('castle', k.x, k.y, k.z, k.facing, mesh, rng.fork('castle'), tint, 0.5, true);
+    // The keep, at the back of the court: a square tower with a battlement, its door towards the gate.
+    const at = frame(k.x, k.z, k.y, k.facing), q = rng.fork('castle keep'), half = q.range(3.2, 4), tall = q.range(12, 16), back = q.range(3, 4.5);
+    box(at, 'stone', -half, half, -2.5, tall, back, back + half * 2, shade(tint, 0.95), 0.35);
+    for (let a = -half; a < half - 0.3; a += 1.2) for (const f of [back, back + half * 2 - 0.5]) box(at, 'stone', a, a + 0.6, tall, tall + 1, f, f + 0.5, shade(tint, 0.9), 0.35);
+    for (let f = back + 0.5; f < back + half * 2 - 0.5; f += 1.2) for (const a of [-half, half - 0.5]) box(at, 'stone', a, a + 0.5, tall, tall + 1, f, f + 0.6, shade(tint, 0.9), 0.35);
+    box(at, 'wood', -0.6, 0.6, 0, 2.3, back - 0.06, back, [0.18, 0.12, 0.08], 0.9);
+    for (let y = 4; y < tall - 2; y += 3.2) box(at, 'glass', -0.15, 0.15, y, y + 1.1, back - 0.03, back, [0.02, 0.02, 0.02]);
+    // Something left lying in the court, before the keep.
+    c.finds.push({ at: new Vector3(...at(0.8, 0.2, -2)), what: 'a rusted helm' });
   }
 
   // ---- the ruin of a chapel on its headland: its west front with the window empty, its walls broken down
