@@ -357,7 +357,10 @@ export function buildIsland(b: IslandBuild): IslandResult {
     if (!tiles[j * tilesX + i]) continue;
     const c = { x0: area.x0 + i * TILE, x1: area.x0 + (i + 1) * TILE, z0: area.z0 + j * TILE, z1: area.z0 + (j + 1) * TILE };
     let lo = Infinity, hi = -Infinity;
-    for (let z = c.z0; z < c.z1 + CELL / 2; z += CELL) for (let x = c.x0; x < c.x1 + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+    // (Taken over the ground a little beyond the tile as well: the rock's face is pushed sideways by its relief, up to some four metres,
+    // and so reads heights from there; a face that rose above the box or sank below it would be cut off there, and leave a hole.)
+    const REACH = 4.5;
+    for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
     if (cave && nearCave((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2, TILE)) lo = Math.min(lo, caveFloor - 1);
     carveRock(rockMesh, density, {
       // (Not below a few metres under the sea, where the water is too deep to see through: there the rock is closed off flat.)
@@ -385,8 +388,12 @@ export function buildIsland(b: IslandBuild): IslandResult {
       if (along > 0 && across < c.mouth / 2 + 4) continue;
       if (lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.6)) continue;
       const form = boulderForm(q.fork(`b${lying.length}`), size, rockKind), cy = y + form.half * q.range(0.2, 0.6), cell = Math.min(0.26, Math.max(0.1, size * 0.13));
+      // (Cut off a little under the ground, to save carving what is buried: under the lowest ground beneath it, not only the ground
+      // at its middle, for where the bed falls away the cut would show, an open hole in the stone at the water's edge.)
+      let under = y;
+      for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) under = Math.min(under, ground(x + dx * form.reach, z + dz * form.reach));
       carveRock(rockMesh, (qx, qy, qz) => form.density(qx - x, qy - cy, qz - z), {
-        min: V(x - form.reach, Math.max(y - 1, cy - form.sink), z - form.reach), max: V(x + form.reach, cy + form.rise, z + form.reach),
+        min: V(x - form.reach, Math.max(under - 1, cy - form.sink), z - form.reach), max: V(x + form.reach, cy + form.rise, z + form.reach),
         cell, uvScale: 0.5, fromSamples: true, occlusion: [cell * 2, Math.max(cell * 3, size * 0.45)], sharp: true,
         shade: (pt, n, field, _other, open) => shadeRock(pt, n, field, open),
       });
@@ -401,6 +408,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
     rock: (tone) => rockColour(tone * 0.8),
     // (Where the sea bed lies deeper than the rock is carved, under deep water, the sheet is laid there too, so there is no hole in the bottom of the sea.)
     skip: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return (carved(mx, mz) && Math.max(ground(c.x0, c.z0), ground(c.x1, c.z0), ground(c.x0, c.z1), ground(c.x1, c.z1)) > sea - 4.6) || insideOuter(mx, mz); },
+    // (And under the edge of what is carved it runs on a cell, out of sight, so no sliver of sky shows where the two meet.)
+    apron: (c) => !insideOuter((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2),
     // The ground is drawn to the outer walls of the house and goes no further, so no gap is left to look down.
     warp: (x, z) => {
       if (!insideOuter(x, z)) return [x, z];
@@ -480,7 +489,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
 
   // ---- the mainland and the islets, far across the water
   wild.group = 'soft';
-  layMainland(wild.mesh('far'), site, tint);
+  const peaks = layMainland(wild.mesh('far'), site, tint);
   wild.group = 'wild';
 
   // Where the player comes in: at the end of the jetty, facing the land.
@@ -494,7 +503,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
     track: [...track].reverse().slice(1, -1) as [number, number][],
     far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
     sea: {
-      level: sea, x: o.x, z: o.z, bed,
+      level: sea, x: o.x, z: o.z, bed, peaks,
       // Where the swell breaks at the foot of a cliff, every few strides round the coast that is not beach, and round the stacks.
       spray: [
         ...Array.from({ length: 240 }, (_, k) => {
@@ -529,7 +538,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
  * sheet in rings about the island, with the far material, and left out wherever it lies under
  * the water.
  */
-function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): void {
+function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): number {
   const o = site.island!, m = o.mainland, cx = o.x, cz = o.z, sea = o.sea, seed = (o.x * 7.31 + o.z * 3.17) % 97;
   const around = 720, radii: number[] = [];
   for (let r = 240; r <= 3400; r += 4 + (r - 240) * 0.016) radii.push(r);
@@ -584,6 +593,10 @@ function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): void {
     mesh.addTriangle(a, bb, c);
     mesh.addTriangle(a, c, d);
   }
+  // (Its highest ground, for keeping the clouds above it.)
+  let top = -Infinity;
+  for (let q = 0; q < H.length; q++) top = Math.max(top, H[q]);
+  return top;
 }
 
 /** How far a point is out from the island's coast, for whatever needs a rough answer far from it. */

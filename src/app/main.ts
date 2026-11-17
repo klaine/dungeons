@@ -565,7 +565,9 @@ async function start(): Promise<void> {
     if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
     // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
     // banks it is a thin layer; heaped, it towers.
-    u.uCloudBase.value = floor + 310 - 150 * w.cloud;
+    // (Across the sea the mainland's mountains stand far higher than that, and a layer of cloud passing through them is drawn only
+    // in the thin slice in front of each slope, which looks like cloud that can be seen through. So there the clouds sail over the peaks.)
+    u.uCloudBase.value = Math.max(floor + 310 - 150 * w.cloud, (desc.sea?.peaks ?? -Infinity) + 70);
     u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
     u.uCloudFlat.value = layered ? 1 : 0;
   };

@@ -188,14 +188,15 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     box(at, 'stone', doorAt - 0.48, doorAt + 0.48, -0.4, 0.12, -t, 0, shade(stone, 0.9));
     box(at, 'stone', doorAt - 0.6, doorAt + 0.6, -0.4, 0.06, 0, 0.42, shade(stone, 0.95));
     // A lintel of timber over the door, and the door itself standing open into the room against the wall.
-    box(at, 'wood', doorAt - 0.62, doorAt + 0.62, doorTop, doorTop + 0.16, -t, 0.02, [0.22, 0.17, 0.12], 0.9);
+    // (It stands proud of the wall on both faces, a few centimetres, so that no face of it lies in the plane of the plaster and flickers.)
+    box(at, 'wood', doorAt - 0.62, doorAt + 0.62, doorTop, doorTop + 0.16, -t - 0.04, 0.05, [0.22, 0.17, 0.12], 0.9);
     box(at, 'wood', doorAt - 0.48, doorAt - 0.43, 0.14, doorTop - 0.04, -t - 0.9, -t, doorCol, 0.9);
     // The windows: dark glass in the middle of the wall's thickness, white frames, and a deep sill inside.
     for (const wa of windowsAt) {
       box(at, 'glass', wa - 0.4, wa + 0.4, 0.9, 1.8, -t / 2 - 0.02, -t / 2 + 0.02, [0.03, 0.04, 0.05]);
       box(at, 'wood', wa - 0.03, wa + 0.03, 0.9, 1.8, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
       box(at, 'wood', wa - 0.4, wa + 0.4, 1.33, 1.38, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
-      box(at, 'stone', wa - 0.5, wa + 0.5, 0.84, 0.9, -0.02, 0.12, shade(stone, 1.05));
+      box(at, 'stone', wa - 0.5, wa + 0.5, 0.84, 0.93, -0.02, 0.12, shade(stone, 1.05));
     }
     box(at, 'glass', backWindow - 0.3, backWindow + 0.3, 1.0, 1.6, -D + t / 2 - 0.02, -D + t / 2 + 0.02, [0.03, 0.04, 0.05]);
     // A ceiling of boards on the tie beams, under the roof.

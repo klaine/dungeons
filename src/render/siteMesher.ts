@@ -1375,7 +1375,10 @@ export function meshSite(site: Site): SceneDescription {
       }
       const c = whole;
       let lo = Infinity, hi = -Infinity;
-      for (let z = c.z0; z < c.z1 + CELL / 2; z += CELL) for (let x = c.x0; x < c.x1 + CELL / 2; x += CELL) {
+      // (Over the ground a little beyond the piece as well: the rock's face is pushed sideways by its relief, up to some four metres,
+      // and so reads heights from there; a face that rose above the box or sank below it would be cut off there, and leave a hole.)
+      const REACH = 4.5;
+      for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) {
         const h = land.at(x, z);
         lo = Math.min(lo, h); hi = Math.max(hi, h);
       }
@@ -1557,6 +1560,8 @@ export function meshSite(site: Site): SceneDescription {
     const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: (x: number, z: number) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; }, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
       ...terrain, area: fine, cell: 1.2,
+      // (Under the edge of what is carved the sheet runs on a cell, sinking out of sight, so no sliver of sky shows where the two meet.)
+      apron: (c) => { const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2; return carved(mx, mz) && !insideOuter(mx, mz) && !houses.some((b) => footprint(b, mx, mz)); },
       // Not where the land is carved, and not over the house: there it is the turf of the hill
       // above the vaults, left open over every court. Carved patches end on this sheet's own
       // lines, so a cell is either wholly carved or not at all.

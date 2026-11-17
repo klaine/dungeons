@@ -253,10 +253,16 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
   const ny = Math.ceil((o.max.y - o.min.y) / cell - 1e-6);
   const nz = Math.ceil((o.max.z - o.min.z) / cell - 1e-6) + 2 * pad;
   const ox = o.min.x - pad * cell, oy = o.min.y, oz = o.min.z - pad * cell;
+  // Where a point of the lattice lies. Pieces of land that meet must find exactly the same numbers at the points they share, to the
+  // last bit: the rock's function has sharp breaks in it (its joints run on a lattice of their own), and where one falls on a shared
+  // point, a difference in the last place of `x0 + i * cell` can put the point in rock for one piece and in air for the other, which
+  // leaves a hole between them. So a piece that lies on the lattice counts from the lattice's origin, not from its own corner.
+  const lattice = (o0: number) => { const g = Math.round(o0 / cell); return pad && Math.abs(o0 / cell - g) < 1e-6 ? (f: number) => (g + f) * cell : (f: number) => o0 + f * cell; };
+  const X = lattice(ox), Y = lattice(oy), Z = lattice(oz);
   const sx = nx + 1, sy = ny + 1, layer = sx * sy;
   const values = new Float32Array(layer * (nz + 1));
   for (let k = 0; k <= nz; k++) for (let i = 0; i <= nx; i++) for (let j = 0; j <= ny; j++) {
-    values[k * layer + j * sx + i] = density(ox + i * cell, oy + j * cell, oz + k * cell);
+    values[k * layer + j * sx + i] = density(X(i), Y(j), Z(k));
   }
   const sampled = (x: number, y: number, z: number): number => {
     const fx = Math.min(nx - 1e-4, Math.max(0, (x - ox) / cell)), fy = Math.min(ny - 1e-4, Math.max(0, (y - oy) / cell)), fz = Math.min(nz - 1e-4, Math.max(0, (z - oz) / cell));
@@ -279,13 +285,13 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
     if (id !== undefined) return id;
     const a = values[node], b = values[node + stride[axis]];
     let t = a / (a - b);
-    const at = (f: number) => density(ox + (i + (axis === 0 ? f : 0)) * cell, oy + (j + (axis === 1 ? f : 0)) * cell, oz + (k + (axis === 2 ? f : 0)) * cell);
+    const at = (f: number) => density(X(i + (axis === 0 ? f : 0)), Y(j + (axis === 1 ? f : 0)), Z(k + (axis === 2 ? f : 0)));
     // The function is not straight between samples, least of all near an edge; one more look
     // puts the crossing much nearer where it truly is.
     const d = at(t);
     if (d !== 0) t = (d < 0) === (a < 0) ? t + ((1 - t) * d) / (d - b) : (t * a) / (a - d);
     t = Math.min(1, Math.max(0, t));
-    const x = ox + (i + (axis === 0 ? t : 0)) * cell, y = oy + (j + (axis === 1 ? t : 0)) * cell, z = oz + (k + (axis === 2 ? t : 0)) * cell;
+    const x = X(i + (axis === 0 ? t : 0)), y = Y(j + (axis === 1 ? t : 0)), z = Z(k + (axis === 2 ? t : 0));
     const g0 = density(x + e, y - e, z - e), g1 = density(x - e, y - e, z + e), g2 = density(x - e, y + e, z - e), g3 = density(x + e, y + e, z + e);
     let gx = g0 - g1 - g2 + g3, gy = -g0 - g1 + g2 + g3, gz = -g0 + g1 - g2 + g3;
     const l = Math.hypot(gx, gy, gz);
@@ -336,9 +342,9 @@ function carveSharp(mesh: MeshBuilder, density: Density, o: RockOptions): number
       pz += (c02 * b0 + (a01 * a02 - a00 * a12) * b1 + (a00 * a11 - a01 * a01) * b2) / det;
     }
     // It may not leave its cell, or the surface could fold over itself.
-    px = Math.min(ox + (i + 1) * cell, Math.max(ox + i * cell, px));
-    py = Math.min(oy + (j + 1) * cell, Math.max(oy + j * cell, py));
-    pz = Math.min(oz + (k + 1) * cell, Math.max(oz + k * cell, pz));
+    px = Math.min(X(i + 1), Math.max(X(i), px));
+    py = Math.min(Y(j + 1), Math.max(Y(j), py));
+    pz = Math.min(Z(k + 1), Math.max(Z(k), pz));
     // A cell beyond the edge of this piece, with no other piece there to answer for it, has its
     // point brought back onto the edge, sliding along the ground as it lies there.
     if (pad && (i === 0 || i === nx - 1 || k === 0 || k === nz - 1) && !o.beyond!(ox + (i + 0.5) * cell, oz + (k + 0.5) * cell)) {

@@ -36,7 +36,7 @@ import * as TSL from 'three/tsl';
 type N = any;
 const {
   Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getViewPosition, length, log2, max, min, mix, normalize, pass, pow,
-  screenCoordinate, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform, uniformArray, uv, vec2, vec3, vec4,
+  screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform, uniformArray, uv, vec2, vec3, vec4,
 } = TSL as N;
 
 const MAX_LIGHTS = 4;
@@ -285,6 +285,14 @@ export class Atmosphere {
       const out: N = vec4(col, 1).toVar();
       If(u.uEnabled.greaterThan(0.5), () => {
         const depth: N = depthOf.toVar();
+        // (A point of open sky beside the land is taken as land, as far off as the nearest of it. Along a skyline the picture's colour is
+        // smoothed, part land and part sky, but its depth is one or the other; where the depth says sky, the land's share of the colour
+        // would be left without its haze, and a far ridge would be drawn with a bright line along it, through any cloud in front.)
+        If(depth.greaterThan(0.999999), () => {
+          const px: N = vec2(1).div(screenSize).toVar();
+          const near = min(min(depthOf.sample(screenUV.add(vec2(px.x, 0))).x, depthOf.sample(screenUV.sub(vec2(px.x, 0))).x), min(depthOf.sample(screenUV.add(vec2(0, px.y))).x, depthOf.sample(screenUV.sub(vec2(0, px.y))).x));
+          depth.assign(min(depth, near));
+        });
         const view: N = getViewPosition(screenUV, depth, u.uInvProj);
         const wp: N = u.uInvView.mul(vec4(view, 1)).xyz.toVar();
         const dist: N = length(wp.sub(u.uCamPos)).toVar();
