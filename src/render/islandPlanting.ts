@@ -39,7 +39,7 @@ const set = (kind: CardSet['kind']): CardSet => ({ kind, shape: 'tuft', shadow: 
 export function plantIsland(c: IslandPlanting): Record<string, number> {
   const { site, planting, rng } = c, o = site.island!, sea = o.sea;
   const season = site.setting.season ?? 'spring';
-  const thrift = set('thrift'), marram = set('marram'), gorse = set('gorse');
+  const thrift = set('thrift'), marram = set('marram'), gorse = set('gorse'), bloomCards = set('bloom');
   const s = rng.range(0, 99);
   const places = site.places;
   const hx0 = Math.min(...places.map((p) => p.x0)) - 2.5, hx1 = Math.max(...places.map((p) => p.x1)) + 2.5, hz0 = Math.min(...places.map((p) => p.z0)) - 2.5;
@@ -60,7 +60,7 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
   const green = (base: Colour, k = 1): Colour => [base[0] * k, base[1] * k, base[2] * k];
   // (Tints as the valley's are, which the card's paint and the light then brighten: a grass card tinted a third green is a full green on the screen.)
   const dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : 0;
-  const heather: Colour = season === 'autumn' ? [0.26, 0.12, 0.16] : season === 'summer' ? [0.32, 0.14, 0.26] : [0.17, 0.13, 0.09];
+  const heather: Colour = season === 'autumn' ? [0.26, 0.12, 0.16] : season === 'summer' ? [0.32, 0.14, 0.26] : [0.13, 0.15, 0.07];
   const gorseGreen: Colour = [0.05, 0.09, 0.025], bloom: Colour = [0.62, 0.42, 0.02];
   const counts: Record<string, number> = {};
   const count = (k: string) => { counts[k] = (counts[k] ?? 0) + 1; };
@@ -91,7 +91,7 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
         const big = q.range(0.9, 1.6);
         planting.tuft(gorse, px, y - 0.1, pz, big * 1.3, big, yaw, green(gorseGreen, q.range(0.8, 1.2)));
         // Its flowers are among the spines, not on top of them: a smaller card, inside the bush.
-        if (q.chance(season === 'autumn' ? 0.15 : 0.6)) planting.tuft(planting.flowers, px, y - 0.15, pz, big * 0.95, big * 0.9, yaw + 1, green(bloom, q.range(0.7, 1.05)));
+        if (q.chance(season === 'autumn' ? 0.15 : 0.6)) planting.tuft(bloomCards, px, y - 0.1, pz, big * 1.25, big * 0.97, yaw + 0.5, green(bloom, q.range(0.7, 1.05)));
         count('gorse');
       } else {
         planting.tuft(planting.grass, px, y - 0.05, pz, q.range(0.6, 0.85), q.range(0.28, 0.42), yaw, green(heather, q.range(0.75, 1.2)));
@@ -151,6 +151,6 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     }
     counts.pines = pines;
   }
-  c.cards.push(...[thrift, marram, gorse].filter((q2) => q2.matrices.length));
+  c.cards.push(...[thrift, marram, gorse, bloomCards].filter((q2) => q2.matrices.length));
   return counts;
 }

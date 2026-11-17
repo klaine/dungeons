@@ -304,6 +304,14 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
         ctx.stroke();
       }
     }
+  } else if (kind === 'bloom') {
+    // Blossom without stems, crowded over a rounded mound: the flowers of gorse, laid over its spines.
+    for (let k = 0; k < 340; k++) {
+      const a = rng.range(Math.PI * 1.05, Math.PI * 1.95), d = Math.pow(rng.next(), 0.45);
+      const cx = size / 2 + Math.cos(a) * d * size * 0.44, cy = size * 0.98 + Math.sin(a) * d * size * 0.86;
+      ctx.fillStyle = grey(rng.range(0.7, 1));
+      ctx.beginPath(); ctx.ellipse(cx, cy, rng.range(2.5, 4.2), rng.range(2, 3.4), rng.range(0, 3), 0, Math.PI * 2); ctx.fill();
+    }
   } else if (kind === 'gorse') {
     // Gorse: a dense rounded mass of spines on green shoots, darker within, bristling at its edge.
     for (let k = 0; k < 520; k++) {
