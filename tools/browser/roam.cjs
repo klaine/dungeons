@@ -56,14 +56,36 @@ const { chromium } = require('playwright');
         // A sea cave is walked into from its mouth, along the strand.
         const cave = site.island && site.island.seaCave;
         if (cave && Math.hypot(f.at.x - cave.x, f.at.z - cave.z) < cave.length + 2) {
-          const sx = cave.x - Math.cos(cave.heading) * 5, sz = cave.z - Math.sin(cave.heading) * 5;
-          player.place({ x: sx, y: site.island.sea + 3, z: sz }, 0);
-          for (let i = 0; i < 1500 && !f.taken; i++) {
-            const tx = i < 300 ? cave.x : f.at.x, tz = i < 300 ? cave.z : f.at.z;
+          // From the end of the beach, along the strand at the foot of the cliff, to the mouth, and in: as the builder lays the strand.
+          const c = site.island.cove, o = site.island, head = Math.atan2(o.z - c.z, o.x - c.x), at = Math.atan2(cave.z - c.z, cave.x - c.x);
+          let turn = (at - head) % (Math.PI * 2); if (turn > Math.PI) turn -= Math.PI * 2; if (turn < -Math.PI) turn += Math.PI * 2;
+          const end = head + Math.sign(turn) * c.beach * 0.85, bx = c.x + Math.cos(end) * (c.r - 1), bz = c.z + Math.sin(end) * (c.r - 1);
+          player.place({ x: bx, y: groundAt(bx, bz) + 1.8, z: bz }, 0);
+          const legs = [[cave.x, cave.z], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 3000 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg === 0 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.6) leg = 1;
             player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
             player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
           }
-          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (from the cave's mouth; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (along the strand from the beach; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
+          continue;
+        }
+        // A castle is gone into by its gate.
+        const castle = site.island && site.island.castle;
+        if (castle && Math.hypot(f.at.x - castle.x, f.at.z - castle.z) < 20) {
+          const ux = -Math.cos(castle.facing), uz = -Math.sin(castle.facing), sx = castle.x + ux * 20, sz = castle.z + uz * 20;
+          player.place({ x: sx, y: groundAt(sx, sz) + 1.8, z: sz }, 0);
+          const legs = [[castle.x + ux * 11, castle.z + uz * 11], [f.at.x, f.at.z]];
+          let leg = 0;
+          for (let i = 0; i < 2000 && !f.taken; i++) {
+            const [tx, tz] = legs[leg];
+            if (leg === 0 && Math.hypot(tx - player.position.x, tz - player.position.z) < 0.6) leg = 1;
+            player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
+            player.analog.set(0, -1); player.update(1 / 60); game.update(1 / 60, i / 60);
+          }
+          out.finds.push(`${f.taken ? 'taken' : 'NOT TAKEN'}: ${f.what} (in by the gate; ended ${Math.hypot(player.position.x - f.at.x, player.position.z - f.at.z).toFixed(1)} m away)`);
           continue;
         }
         const lh = site.island && site.island.lighthouse;
