@@ -2200,14 +2200,14 @@ export function meshSite(site: Site): SceneDescription {
     // (Not where the keep stands.)
     // (Nor at the far end of a terrace, where a shrine or a cairn stands.)
     const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
-    woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
-    woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+    const row = new URLSearchParams(location.search).get('treerow'); // (no woods when a row is asked for, so the row stands alone)
+    if (!row) woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
+    if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
     // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
-    const row = new URLSearchParams(location.search).get('treerow');
     if (row) {
       const [rx, rz] = row.split(',').map(Number);
       const kinds = [{ oak: false, roll: 0.9 }, { oak: true, roll: 0.9 }, { oak: false, roll: 0.5 }, { oak: true, roll: 0.5 }, { oak: false, roll: 0.01 }, { oak: true, roll: 0.01 }, { oak: true, roll: 0.5, old: true }, { oak: true, roll: 0.06 }];
-      kinds.forEach((k, i) => { const tx = rx + i * 7 + (k.roll === 0.06 ? 6 : 0), tz = rz; tree(tx, tz, ground(tx, tz), 1, k); });
+      kinds.forEach((k, i) => { const tx = rx + i * 5.5 + (k.roll === 0.06 ? 7 : 0), tz = rz; tree(tx, tz, ground(tx, tz), 1, k); });
     }
 
     /**
