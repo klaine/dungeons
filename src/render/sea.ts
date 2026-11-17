@@ -114,9 +114,10 @@ export class Sea {
       // How high the swell stands here now, from -1 to 1: the spray goes up as it peaks.
       const h: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0)).div(0.8).toVar();
       const burst: N = smoothstep(0.15, 0.9, h).toVar();
-      const across = one(abs(at.x.mul(2).sub(1)));
+      // A soft round cloud, thickest low in the middle, rising as high as the burst takes it: no edges anywhere.
+      const across: N = at.x.mul(2).sub(1);
       const tall: N = at.y.div(max(burst, 0.05));
-      const body = smoothstep(0, 0.6, across).mul(one(smoothstep(0.3, 1, tall))).mul(smoothstep(0, 0.06, at.y));
+      const body = exp(across.mul(across).mul(-5)).mul(exp(tall.mul(tall).mul(-3.5))).mul(smoothstep(0, 0.08, at.y));
       const drift = texture(this.ripples, vec2(P.x.add(P.z), P.y).mul(0.08).add(vec2(0.02, -0.11).mul(t))).x.add(texture(this.ripples, vec2(P.x.sub(P.z), P.y).mul(0.19).add(vec2(-0.03, -0.17).mul(t))).y);
       // (Never a solid sheet: broken up into drifting wisps, and thin.)
       return vec4(white, body.mul(smoothstep(0.7, 1.8, drift)).mul(burst).mul(0.32));

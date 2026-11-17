@@ -491,7 +491,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
       spray: [
         ...Array.from({ length: 240 }, (_, k) => {
           const a = (k / 240) * Math.PI * 2, r = coastAt(o, a) + (k % 2 ? 3 : 5.5), x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
-          return { x, z, nx: Math.cos(a), nz: Math.sin(a), ok: beachness(o, x, z) < 0.2 && inland(o, x, z) < -1 && ground(x, z) < sea - 0.2 && ground(x - Math.cos(a) * 5, z - Math.sin(a) * 5) > sea + 1.5 };
+          // (Not in the cove, which is sheltered, nor anywhere the coast found along this bearing is not the cliff's own foot.)
+          const inCove = Math.hypot(x - o.cove.x, z - o.cove.z) < o.cove.r + 12;
+          return { x, z, nx: Math.cos(a), nz: Math.sin(a), ok: !inCove && inland(o, x - Math.cos(a) * 2, z - Math.sin(a) * 2) > -4 && beachness(o, x, z) < 0.2 && inland(o, x, z) < -1 && ground(x, z) < sea - 0.2 && ground(x - Math.cos(a) * 5, z - Math.sin(a) * 5) > sea + 1.5 };
         }).filter((q) => q.ok).map(({ x, z, nx, nz }) => ({ x, z, nx, nz })),
         ...o.stacks.flatMap((q) => [0, 1, 2, 3].map((k) => ({ x: q.x + Math.cos(k * 1.57) * (q.r + 1.5), z: q.z + Math.sin(k * 1.57) * (q.r + 1.5), nx: Math.cos(k * 1.57), nz: Math.sin(k * 1.57) }))),
       ],
