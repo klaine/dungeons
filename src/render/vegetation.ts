@@ -1,6 +1,6 @@
 import {
   CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh,
-  PlaneGeometry, BufferGeometry, SRGBColorSpace, StaticDrawUsage, Texture,
+  PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture,
 } from 'three';
 import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -276,6 +276,34 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
   return texture;
 }
 
+/**
+ * A tuft of real blades, to stand where the painted tuft stands: some thirty strips, each
+ * tapering to a point and bent over, in a spread as wide as the card and as tall as it. The shade
+ * runs from dark at the foot to light at the tip, as the painted blades do. (`?blades=0` turns them off.)
+ */
+function bladeClump(): BufferGeometry {
+  const P: number[] = [], C: number[] = [], U: number[] = [], I: number[] = [];
+  let seed = 12345;
+  const r = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
+  const segs = 2;
+  for (let b = 0; b < 30; b++) {
+    const x0 = (r() - 0.5) * 0.95, z0 = (r() - 0.5) * 0.25, h = 0.35 + 0.65 * Math.pow(r(), 0.6), hw = 0.02 * (0.7 + 0.6 * r());
+    const th = r() * Math.PI, wx = Math.cos(th), wz = Math.sin(th), lean = (r() - 0.5) * 2, tone = 0.6 + 0.4 * r();
+    const base = P.length / 3;
+    for (let i = 0; i <= segs; i++) {
+      const t = i / segs, w = hw * (1 - t) + 0.0006, bend = lean * t * t * h * 0.45;
+      const cx = x0 + bend, cz = z0 + bend * 0.4, cy = t * h * (1 - 0.12 * t);
+      P.push(cx - wx * w, cy, cz - wz * w, cx + wx * w, cy, cz + wz * w);
+      const c = tone * (0.55 + 0.45 * t); C.push(c, c, c, c, c, c); U.push(0, t, 1, t);
+      if (i < segs) { const a = base + i * 2; I.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    }
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(P, 3)); g.setAttribute('color', new Float32BufferAttribute(C, 3));
+  g.setAttribute('uv', new Float32BufferAttribute(U, 2)); g.setIndex(I); g.computeVertexNormals();
+  return g;
+}
+
 function shapeGeometry(shape: CardSet['shape']): BufferGeometry {
   if (shape === 'card') return new PlaneGeometry(1, 1);
   // Three upright sheets through one line, a third of a turn apart, with their feet on the ground.
@@ -291,6 +319,10 @@ function shapeGeometry(shape: CardSet['shape']): BufferGeometry {
 /** How far off grass and flowers are still drawn. They shrink into the ground over the last third. */
 export const vegetationRange: { value: number } = uniform(75);
 
+/** How near the eye grass is drawn as real blades, in metres; beyond it, as painted tufts. */
+export const bladeRange = 15;
+const bladeRangeUniform = uniform(bladeRange);
+
 /**
  * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
  * mesh to a block, so that blocks out of view are not drawn at all; blocks of grass and flowers
@@ -301,36 +333,50 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   const whole = set.kind === 'fir' || set.kind === 'tree';
   const ground = set.kind !== 'leaf' && set.kind !== 'needle' && !whole;
   const block = whole ? 220 : ground ? 24 : 48;
-  const base = shapeGeometry(set.shape);
+  // Grass is drawn two ways: near the eye as real blades, farther off as painted tufts. Each block
+  // gets both, and which is drawn, and where one gives way to the other, is settled in `cullCards`
+  // and by the cards themselves shrinking away over the hand-over. (`?blades=0` keeps the painted tufts alone.)
+  const split = set.kind === 'grass' && new URLSearchParams(location.search).get('blades') !== '0';
   const sway = whole ? 0.004 : ground ? 0.07 : set.kind === 'leaf' ? 0.035 : 0.02;
-  const material = new MeshStandardNodeMaterial({
-    map: texture, alphaTest: 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: true,
-  });
-  // In the shadow map a crown's leaves are drawn smaller than they are (only the denser middle of
-  // each card), so that some of the sun gets through the crown, as it does in life.
-  if (set.kind === 'leaf' || set.kind === 'needle') {
-    const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
-    if (cut > 0.42) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
-  }
-  // The sky lights leaves from all round, but as blue as it is it would turn them teal.
-  material.envMapIntensity = 0.55;
-  const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N;
+  const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N;
   // Where each card stands, and how large it is.
   const at: N = attribute('aAt', 'vec4');
-  // Wind: the free end of each card moves, the fixed end does not. And grass and flowers shrink into the ground as they near the end of their range.
-  material.positionNode = Fn(() => {
-    const p: N = positionLocal.toVar();
-    const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
-    const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
-    p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
-    p.z.addAssign(free.mul(cos(uTime.mul(1.7).add(at.z.mul(0.3)))).mul(uWind).mul(at.w).mul(sway * 0.6));
-    if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, distance(cameraPosition, at.xyz))));
-    return p;
-  })();
-  // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
-  // given like this is not turned round on back faces, which a two-sided material would do to its own.)
-  material.normalNode = transformNormalToView(normalize(positionWorld.sub(attribute('aCentre', 'vec3'))));
-  (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1);
+  const materialFor = (layer: 'painted' | 'blades'): MeshStandardNodeMaterial => {
+    const real = layer === 'blades';
+    const material = new MeshStandardNodeMaterial({
+      map: real ? null : texture, alphaTest: real ? 0 : 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: !real, vertexColors: real,
+    });
+    // In the shadow map a crown's leaves are drawn smaller than they are (only the denser middle of
+    // each card), so that some of the sun gets through the crown, as it does in life.
+    if (set.kind === 'leaf' || set.kind === 'needle') {
+      const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
+      if (cut > 0.42) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
+    }
+    // The sky lights leaves from all round, but as blue as it is it would turn them teal.
+    material.envMapIntensity = 0.55;
+    // Wind: the free end of each card moves, the fixed end does not. And grass and flowers shrink into the ground as they near the end of their range.
+    material.positionNode = Fn(() => {
+      const p: N = positionLocal.toVar();
+      const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
+      const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
+      p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
+      p.z.addAssign(free.mul(cos(uTime.mul(1.7).add(at.z.mul(0.3)))).mul(uWind).mul(at.w).mul(sway * 0.6));
+      const d: N = distance(cameraPosition, at.xyz);
+      if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d)));
+      // The hand-over: blades shrink to their feet as they pass the blade range, and the painted tufts grow out of theirs.
+      if (split && real) p.mulAssign(float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, d)));
+      if (split && !real) p.mulAssign(smoothstep(uBlade.mul(0.85), uBlade.mul(1.05), d));
+      return p;
+    })();
+    // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
+    // given like this is not turned round on back faces, which a two-sided material would do to its own.)
+    material.normalNode = transformNormalToView(normalize(positionWorld.sub(attribute('aCentre', 'vec3'))));
+    (material as N).setupLightingModel = () => new LeafLighting(whole ? 0.25 : 1);
+    return material;
+  };
+  const layers: { layer: 'painted' | 'blades'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
+  if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
+  layers.push({ layer: 'painted', base: shapeGeometry(set.shape), material: materialFor('painted') });
 
   // Which block each card falls in.
   const count = set.matrices.length / 16;
@@ -351,32 +397,42 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       stands[k * 4 + 3] = Math.hypot(set.matrices[i * 16], set.matrices[i * 16 + 1], set.matrices[i * 16 + 2]);
       for (let c = 0; c < 3; c++) { colours[k * 3 + c] = set.colours[i * 3 + c]; centres[k * 3 + c] = set.centres[i * 3 + c]; }
     });
-    // Each block has its own geometry object, sharing the shape's buffers, because the centres are per card.
-    const geometry = new BufferGeometry();
-    geometry.setIndex(base.getIndex());
-    for (const name of ['position', 'normal', 'uv']) geometry.setAttribute(name, base.getAttribute(name));
-    geometry.setAttribute('aCentre', new InstancedBufferAttribute(centres, 3));
-    geometry.setAttribute('aAt', new InstancedBufferAttribute(stands, 4));
-    const mesh = new InstancedMesh(geometry, material, n);
-    mesh.instanceMatrix.setUsage(StaticDrawUsage);
-    (mesh.instanceMatrix.array as Float32Array).set(matrices);
-    mesh.instanceColor = new InstancedBufferAttribute(colours, 3);
-    mesh.name = `cards:${set.kind}`;
-    mesh.computeBoundingSphere();
-    mesh.receiveShadow = true;
-    mesh.castShadow = set.shadow;
-    mesh.matrixAutoUpdate = false;
-    mesh.userData.ground = ground;
-    meshes.push(mesh);
+    for (const { layer, base, material } of layers) {
+      // Each block has its own geometry object, sharing the shape's buffers, because the centres are per card.
+      const geometry = new BufferGeometry();
+      geometry.setIndex(base.getIndex());
+      for (const name of ['position', 'normal', 'uv', 'color']) if (base.getAttribute(name)) geometry.setAttribute(name, base.getAttribute(name));
+      geometry.setAttribute('aCentre', new InstancedBufferAttribute(centres, 3));
+      geometry.setAttribute('aAt', new InstancedBufferAttribute(stands, 4));
+      const mesh = new InstancedMesh(geometry, material, n);
+      mesh.instanceMatrix.setUsage(StaticDrawUsage);
+      (mesh.instanceMatrix.array as Float32Array).set(matrices);
+      mesh.instanceColor = new InstancedBufferAttribute(colours, 3);
+      mesh.name = `cards:${set.kind}`;
+      mesh.computeBoundingSphere();
+      mesh.receiveShadow = true;
+      mesh.castShadow = set.shadow;
+      mesh.matrixAutoUpdate = false;
+      mesh.userData.ground = ground;
+      mesh.userData.layer = split ? layer : 'whole';
+      meshes.push(mesh);
+    }
   }
   return meshes;
 }
 
-/** Hides blocks of grass and flowers that are wholly beyond the range at which they are drawn. */
+/**
+ * Hides blocks of grass and flowers that are wholly beyond the range at which they are drawn;
+ * and, where grass comes in two kinds, blades beyond the blade range and tufts wholly inside it.
+ */
 export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; z: number }): void {
   for (const m of meshes) {
     if (!m.userData.ground) continue;
     const s = m.boundingSphere!;
-    m.visible = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z) - s.radius < vegetationRange.value;
+    const d = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z);
+    let show = d - s.radius < vegetationRange.value;
+    if (m.userData.layer === 'blades') show = show && d - s.radius < bladeRange;
+    else if (m.userData.layer === 'painted') show = show && d + s.radius > bladeRange * 0.85;
+    m.visible = show;
   }
 }
