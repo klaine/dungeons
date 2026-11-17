@@ -413,8 +413,8 @@ export interface Island {
   stacks: { x: number; z: number; r: number; height: number }[];
   /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
   seaCave?: { x: number; z: number; heading: number; length: number };
-  /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. */
-  mainland: { bearing: number; spread: number; distance: number };
+  /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. `height` scales its hills and mountains: low green country at 0.3, a snowy range at 1. */
+  mainland: { bearing: number; spread: number; distance: number; height?: number };
   /** Small islands between, seen and not reached. */
   islets: { x: number; z: number; r: number; height: number }[];
 }

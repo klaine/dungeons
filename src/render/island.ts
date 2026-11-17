@@ -534,7 +534,7 @@ function layMainland(mesh: MeshBuilder, site: Site, stone: Colour): void {
       // Low cliffs and a strand at the water, then rising country, then mountains.
       const lift = smooth((inn + 25) / 60) * (14 + 30 * fbm2(x * 0.004 + seed, z * 0.004, 3));
       const hills = smooth((inn - 80) / 500) * (40 + 260 * ridge(x * 0.0016 + seed, z * 0.0016, 7)) + smooth((inn - 500) / 900) * (200 + 520 * ridge(x * 0.0008 - seed, z * 0.0008, 9));
-      y = sea - 30 + smooth((inn + 60) / 70) * 30 + lift + hills;
+      y = sea - 30 + smooth((inn + 60) / 70) * 30 + lift + hills * (m.height ?? 1);
     }
     // The islets: low humps, steep at their edges.
     for (const q of o.islets) {

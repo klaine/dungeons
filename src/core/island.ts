@@ -382,6 +382,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
   {
     const q = rng.fork('mainland');
     island.mainland = { bearing: Math.round(q.range(0, TAU) * 1000) / 1000, spread: Math.round(q.range(0.7, 1.25) * 1000) / 1000, distance: Math.round(q.range(1100, 1700)) };
+    // (How high its country stands, from a stream of its own: low green hills, or mountains with snow on them.)
+    island.mainland.height = Math.round(rng.fork('mainland height').range(0.3, 1) * 100) / 100;
     for (let k = 0, n = q.int(1, 4); k < n; k++) {
       const a = q.range(0, TAU), d = q.range(380, 1100);
       island.islets.push({ x: round(island.x + Math.cos(a) * d), z: round(island.z + Math.sin(a) * d), r: round(q.range(18, 60)), height: round(q.range(6, 28)) });
