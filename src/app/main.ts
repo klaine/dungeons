@@ -40,7 +40,19 @@ import { Game } from './game';
 import { Player } from './player';
 import { TouchControls } from './touch';
 
+// The address's settings: after its `?`, and after a `#` as well. A page shown inside another (an
+// embedded preview) may not be handed its own `?`; what follows a `#` it always keeps.
 const params = new URLSearchParams(location.search);
+for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, v);
+const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+/** Goes to the place the given settings describe, by the `#` where the page is framed and by the `?` where it is not. */
+function go(next: URLSearchParams): void {
+  if (framed) { location.hash = next.toString(); location.reload(); } else go(next);
+}
+/** Writes the settings into the address without going anywhere, so that a link or a reload brings them back. */
+function keep(next: URLSearchParams): void {
+  try { history.replaceState(null, '', framed ? `${location.pathname}${location.search}#${next}` : `${location.pathname}?${next}`); } catch { /* (a framed page may not be let change its address) */ }
+}
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
 
 /**
@@ -70,11 +82,12 @@ function randomSeed(): string {
 // Every place has a seed in its address, so a link reproduces it.
 if (!params.has('seed')) {
   params.set('seed', randomSeed());
-  history.replaceState(null, '', `${location.pathname}?${params}`);
+  keep(params);
 }
 const seed = params.get('seed')!;
 // What kind of place: a valley, unless an island is asked for.
-const place = params.get('place') === 'island' ? 'island' : 'valley';
+// (A build may be made to open on an island when nothing is asked for: `VITE_PLACE=island npm run build`.)
+const place = (params.get('place') ?? import.meta.env.VITE_PLACE) === 'island' ? 'island' : 'valley';
 
 const hud = {
   status: document.getElementById('status')!,
@@ -84,9 +97,9 @@ const hud = {
   seed: document.getElementById('seed')!,
 };
 const newPlace = () => {
-  const next = new URLSearchParams(location.search);
+  const next = new URLSearchParams(params);
   next.set('seed', randomSeed());
-  location.search = next.toString();
+  go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
@@ -95,11 +108,11 @@ document.getElementById('again')!.addEventListener('click', newPlace);
   const button = document.getElementById('kind')!;
   button.textContent = place === 'island' ? 'A valley' : 'An island';
   button.addEventListener('click', () => {
-    const next = new URLSearchParams(location.search);
+    const next = new URLSearchParams(params);
     next.set('seed', randomSeed());
-    if (place === 'island') next.delete('place'); else next.set('place', 'island');
+    next.set('place', place === 'island' ? 'valley' : 'island');
     next.delete('at');
-    location.search = next.toString();
+    go(next);
   });
 }
 
@@ -225,10 +238,10 @@ async function start(): Promise<void> {
     select.value = qualityName;
     select.addEventListener('change', () => {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
-      const next = new URLSearchParams(location.search);
+      const next = new URLSearchParams(params);
       next.delete('quality');
       next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror');
-      location.search = next.toString();
+      go(next);
     });
     document.getElementById('begin')!.addEventListener('click', () => {
       intro.hidden = true;
@@ -649,10 +662,10 @@ async function start(): Promise<void> {
     (document.getElementById('wHour') as HTMLSelectElement).value = site?.setting.hour ?? 'midday';
     const show = () => { for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind']) (panel.querySelector(`output[for=${id}]`) as HTMLOutputElement).value = Number(field(id).value).toFixed(2); };
     const remember = () => {
-      const next = new URLSearchParams(location.search);
+      const next = new URLSearchParams(params);
       next.set('cloud', now.cloud.toFixed(2)); next.set('mist', now.mist.toFixed(2)); next.set('haze', now.haze.toFixed(2)); next.set('layered', now.layered ? '1' : '0');
       if (now.wind !== 1) next.set('wind', now.wind.toFixed(2)); else next.delete('wind');
-      history.replaceState(null, '', `?${next}`);
+      keep(next);
     };
     const change = () => {
       now.cloud = Number(field('wCloud').value); now.mist = Number(field('wMist').value); now.haze = Number(field('wHaze').value); now.wind = Number(field('wWind').value);
@@ -666,11 +679,11 @@ async function start(): Promise<void> {
     // A new hour moves the sun, and with it every shadow and all the light that was worked out: the place is built again, and the eye put back where it was.
     document.getElementById('wHour')!.addEventListener('change', (e) => {
       remember();
-      const next = new URLSearchParams(location.search), p = player.position;
+      const next = new URLSearchParams(params), p = player.position;
       next.set('hour', (e.target as HTMLSelectElement).value);
       next.set('at', [p.x, p.y, p.z, player.yaw].map((v) => v.toFixed(2)).join(','));
       next.set('nointro', '1');
-      location.search = `?${next}`;
+      go(next);
     });
     document.getElementById('weather')!.addEventListener('click', () => { panel.hidden = !panel.hidden; show(); });
   }

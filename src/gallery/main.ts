@@ -33,7 +33,9 @@ let shown = 0, tried = 0;
 function card(site: Site): HTMLElement {
   const a = document.createElement('a');
   a.className = 'card';
-  a.href = `./?seed=${encodeURIComponent(site.seed)}${site.island ? '&place=island' : ''}`;
+  // (The settings go after a `#` as well, which a page shown inside another keeps when it is not handed its own `?`.)
+  const query = `seed=${encodeURIComponent(site.seed)}&place=${site.island ? 'island' : 'valley'}`;
+  a.href = `./?${query}#${query}`;
   const canvas = document.createElement('canvas');
   // The whole plan, as a referee would see it: nothing is hidden in the gallery.
   drawPlan(canvas, site, {
