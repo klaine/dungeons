@@ -572,16 +572,24 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
       if (cut > 0.42 && !sprig) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
     }
+    // Real blades came out a good deal lighter than the painted tufts they give way to, so that the belt between them was a change of
+    // colour as well as of kind, and showed as an edge however gradually the two were mixed. Each is brought towards the other.
+    if (split) material.color.setScalar(real ? 0.8 : 1.24);
     // The sky lights leaves from all round, but as blue as it is it would turn them teal.
     material.envMapIntensity = 0.55;
     // Wind: the free end of each card moves, the fixed end does not. And grass and flowers shrink into the ground as they near the end of their range.
     material.positionNode = Fn(() => {
-      // The hand-over: blades shrink to their feet as they pass the blade range. (The tufts are
-      // not shrunk to meet them: that was tried, and it sent tufts far from where they stand.
-      // Instead blocks are small, and a block straddling the range simply draws both.)
+      // The hand-over: blades shrink to their feet as they near the blade range, and the painted tufts
+      // grow from theirs to meet them. It is spread over half the range, and each tuft makes the change
+      // at a distance of its own, a couple of metres nearer or farther than its neighbour: so there is
+      // no ring on the ground where one kind of grass ends and the other begins, only a belt in which
+      // some tufts are already blades and others not yet.
       const dist: N = distance(cameraPosition, at.xyz);
+      const own: N = sin(dot(at.xz, vec2(127.1, 311.7))).mul(43758.5453).fract().toVar();
+      const turn: N = dist.add(own.sub(0.5).mul(uBlade).mul(0.3));
       // (Leaves the same: sprigs shrink to nothing as they pass the sprig range, and the painted sprays grow from nothing to meet them.)
-      const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.8), uBlade, dist))
+      const handOver: N = real ? float(1).sub(smoothstep(uBlade.mul(0.5), uBlade, turn))
+        : split ? smoothstep(uBlade.mul(0.4), uBlade.mul(0.9), turn)
         : sprig ? float(1).sub(smoothstep(uSprig.mul(0.82), uSprig, dist))
         : sprigs ? smoothstep(uSprig.mul(0.78), uSprig.mul(0.96), dist) : float(1);
       // (By the time this runs each card's points are already where the card stands in the world, not about the card's own foot. So "shrink
@@ -591,7 +599,6 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       if (set.kind === 'grass') {
         // How tall it stands is settled here as well as in the planting, so that it can be changed while one watches.
         const drift = sin(at.x.mul(0.31).add(sin(at.z.mul(0.17)).mul(1.9))).add(sin(at.z.mul(0.23).add(at.x.mul(0.11)).add(1.3))).mul(0.25).add(0.5);
-        const own = sin(dot(at.xz, vec2(127.1, 311.7))).mul(43758.5453).fract();
         const unequal = mix(float(1), mix(float(0.3), float(1.9), mix(drift, own, 0.45).clamp()), vegetationUniforms.uGrassVary as N);
         p.y.assign(at.y.add(p.y.sub(at.y).mul(vegetationUniforms.uGrassTall as N).mul(unequal)));
       }
@@ -681,8 +688,9 @@ export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; 
     if (m.userData.layer === 'sprays') { m.visible = d + s.radius > sprigRange * 0.78; continue; }
     if (!m.userData.ground) continue;
     let show = d - s.radius < vegetationRange.value;
-    if (m.userData.layer === 'blades') show = show && d - s.radius < bladeRange;
-    else if (m.userData.layer === 'painted') show = show && d + s.radius > bladeRange * 0.85;
+    // (With room for the belt in which the two give way to each other, tuft by tuft.)
+    if (m.userData.layer === 'blades') show = show && d - s.radius < bladeRange * 1.15;
+    else if (m.userData.layer === 'painted') show = show && d + s.radius > bladeRange * 0.25;
     m.visible = show;
   }
 }
