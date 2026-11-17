@@ -17,7 +17,7 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, transformNormalToView, uniform, uv, vec3 } = TSL as N;
+const { Fn, attribute, cameraPosition, cos, diffuseColor, distance, dot, float, mix, normalView, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
 
 export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number } } = { uTime: uniform(0), uWind: uniform(1) };
 
@@ -306,6 +306,12 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   const material = new MeshStandardNodeMaterial({
     map: texture, alphaTest: 0.42, side: DoubleSide, roughness: 0.82, metalness: 0, alphaToCoverage: true,
   });
+  // In the shadow map a crown's leaves are drawn smaller than they are (only the denser middle of
+  // each card), so that some of the sun gets through the crown, as it does in life.
+  if (set.kind === 'leaf' || set.kind === 'needle') {
+    const cut = Number(new URLSearchParams(location.search).get('leafcut') ?? 0.7);
+    if (cut > 0.42) material.maskShadowNode = (tex(texture, uv()) as N).a.greaterThan(cut);
+  }
   // The sky lights leaves from all round, but as blue as it is it would turn them teal.
   material.envMapIntensity = 0.55;
   const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N;
