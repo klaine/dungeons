@@ -67,6 +67,10 @@ for (let n = 0; n < Math.ceil(count / 4); n++) {
     let steepest = 0;
     for (let k = 1; k < way.length; k++) steepest = Math.max(steepest, Math.abs(way[k][2] - way[k - 1][2]) / (Math.hypot(way[k][0] - way[k - 1][0], way[k][1] - way[k - 1][1]) || 1));
     if (steepest > 0.42) throw new Error(`the way climbs at ${steepest.toFixed(2)}`);
+    for (let k = 1; k < way.length - 1; k++) {
+      const ux = way[k][0] - way[k - 1][0], uz = way[k][1] - way[k - 1][1], vx = way[k + 1][0] - way[k][0], vz = way[k + 1][1] - way[k][1], l = Math.hypot(ux, uz) * Math.hypot(vx, vz);
+      if (l > 0 && (ux * vx + uz * vz) / l < -0.3) throw new Error(`the way turns back on itself at ${way[k][0]}, ${way[k][1]}`);
+    }
     const stair = o.stair ?? [];
     for (let k = 1; k < stair.length; k++) {
       const run = Math.hypot(stair[k][0] - stair[k - 1][0], stair[k][1] - stair[k - 1][1]), rise = stair[k][2] - stair[k - 1][2];

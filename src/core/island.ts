@@ -439,6 +439,15 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       track.push([round(x), round(z)]);
     }
   }
+  // (No point is left that turns the track back on itself, as the pushing off the cliffs can: a hairpin a stride long is a step for whoever walks it.)
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let k = 2; k < track.length - 1; k++) {
+      const [ax, az] = track[k - 1], [bx, bz] = track[k], [cx, cz] = track[k + 1];
+      const ux = bx - ax, uz = bz - az, vx = cx - bx, vz = cz - bz, lu = Math.hypot(ux, uz), lv = Math.hypot(vx, vz);
+      if (lu < 1.2 || (lu * lv > 0 && (ux * vx + uz * vz) / (lu * lv) < -0.2)) { track.splice(k, 1); changed = true; break; }
+    }
+  }
   // The way's level line: the land's own heights along it, smoothed, then eased wherever they climb
   // more steeply than one in three, with its ends held at the forecourt and at the landing.
   {
