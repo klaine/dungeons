@@ -38,6 +38,8 @@ interface State {
   /** Exposure, if it is held; otherwise it follows the picture, as the game's does. */
   exposure: number | null;
   air: boolean; haze: number; wind: number;
+  /** Grass: how tall it stands, as a multiple of how it was planted, and how unequal it is, 0 to 1. */
+  grassTall: number; grassVary: number;
   /** Moss on rock and bark, as a multiple of what the geometry carries; damp added to rock and ground, 0 to 1. */
   moss: number; damp: number;
   /** How far rock is lit face by face, and how broad its faces are, if not what the stone itself gives. */
@@ -54,7 +56,7 @@ interface State {
   balls: number[][];
 }
 const DEFAULTS: State = {
-  stone: 'greystone', season: 'summer', hour: 'morning', bearing: null, height: null, exposure: null, air: true, haze: 0.5, wind: 1,
+  stone: 'greystone', season: 'summer', hour: 'morning', bearing: null, height: null, exposure: null, air: true, haze: 0.5, wind: 1, grassTall: 1, grassVary: 0,
   moss: 1, damp: 0, facet: null, broad: null, worn: null, tex: 1024, clay: false, show: { rock: true, ground: true, wood: true, leaves: true, grass: true },
   cam: null, fov: 55, panel: true, brush: false, radius: 4, dig: false, balls: [],
 };
@@ -295,6 +297,8 @@ async function start(): Promise<void> {
     SM.rockUniforms.uRockWorn.value = state.worn ?? ROCK[state.stone].worn;
     SM.rockUniforms.uShaftTop.value.set(0, 0, 0, 0);
     VG.vegetationUniforms.uWind.value = state.wind;
+    VG.vegetationUniforms.uGrassTall.value = state.grassTall;
+    VG.vegetationUniforms.uGrassVary.value = state.grassVary;
     const S = SKIES[state.hour], mean = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
     SM.siteUniforms.uFallback.value.set(mean[0] * 0.9, mean[1] * 0.82, mean[2] * 0.71);
   };
@@ -549,6 +553,8 @@ async function start(): Promise<void> {
   heading('What grows');
   choice<Season>('Season', ['spring', 'summer', 'autumn'], () => state.season, (v) => { state.season = v; redo('Stage planted again', () => { build(); if (state.balls.length) carvePainted(false); lightFromSky(); setFields(); dress(); light(); }); });
   slider('Wind', 0, 3, 0.01, () => state.wind, (v) => { state.wind = v; setUniforms(); });
+  slider('Grass height', 0.2, 3, 0.01, () => state.grassTall, (v) => { state.grassTall = v; setUniforms(); }, 'uGrassTall: multiplies how tall grass stands');
+  slider('Grass uneven', 0, 1, 0.01, () => state.grassVary, (v) => { state.grassVary = v; setUniforms(); }, 'uGrassVary: at 0 grass is as it was planted; at 1 some tufts stand near twice as tall and others are cropped to a third, in drifts and tuft by tuft');
 
   heading('Shown');
   checks([

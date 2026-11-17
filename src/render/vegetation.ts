@@ -17,9 +17,13 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec3 } = TSL as N;
+const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec2, vec3 } = TSL as N;
 
-export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number } } = { uTime: uniform(0), uWind: uniform(1) };
+/**
+ * `uGrassTall` multiplies how tall grass stands, and `uGrassVary` (0 to 1) makes it more unequal: at 0 it is as it was planted, at 1 some
+ * tufts stand near twice as tall and others are cropped to a third, in drifts some metres across and tuft by tuft within them.
+ */
+export const vegetationUniforms: { uTime: { value: number }; uWind: { value: number }; uGrassTall: { value: number }; uGrassVary: { value: number } } = { uTime: uniform(0), uWind: uniform(1), uGrassTall: uniform(1), uGrassVary: uniform(0) };
 
 /**
  * How light falls on a leaf. Light comes through a leaf as well as off it: seen against the sun
@@ -584,6 +588,13 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       // to its foot" is "draw towards where it stands". Multiplying the point by the share left, as this did, drew every blade towards the
       // middle of the world instead: across the last few metres of the blade range whole tufts slid over the ground as the eye moved.)
       const p: N = mix(at.xyz, positionLocal, handOver).toVar();
+      if (set.kind === 'grass') {
+        // How tall it stands is settled here as well as in the planting, so that it can be changed while one watches.
+        const drift = sin(at.x.mul(0.31).add(sin(at.z.mul(0.17)).mul(1.9))).add(sin(at.z.mul(0.23).add(at.x.mul(0.11)).add(1.3))).mul(0.25).add(0.5);
+        const own = sin(dot(at.xz, vec2(127.1, 311.7))).mul(43758.5453).fract();
+        const unequal = mix(float(1), mix(float(0.3), float(1.9), mix(drift, own, 0.45).clamp()), vegetationUniforms.uGrassVary as N);
+        p.y.assign(at.y.add(p.y.sub(at.y).mul(vegetationUniforms.uGrassTall as N).mul(unequal)));
+      }
       const free: N = set.shape === 'tuft' ? uv().y.mul(uv().y) : float(1);
       const gust = sin(uTime.mul(1.3).add(at.x.mul(0.21)).add(at.z.mul(0.17))).add(sin(uTime.mul(2.9).add(at.x.mul(0.6)).sub(at.z.mul(0.45))).mul(0.5));
       p.x.addAssign(free.mul(gust).mul(uWind).mul(at.w).mul(sway));
