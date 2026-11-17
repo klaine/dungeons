@@ -381,7 +381,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng)
       // (It keeps to the face, but never swings in or out by more than half a stride at a step.)
       const radius = Math.min(prev + 0.5, Math.max(prev - 0.5, cove.r - out + APART * flight));
       const next = a + (dir * STEP) / radius;
-      if (Math.abs(turnBetween(next, cove.out)) < halfMouth + 0.35 || travelled > Math.PI * 1.5) {
+      if (Math.abs(turnBetween(next, cove.out)) < halfMouth + 0.85 || travelled > Math.PI * 1.5) {
         // A landing, level, going in a stride or two into the rock; then back the other way, the next flight cut further in.
         dir = -dir; flight++; travelled = 0;
         if (flight > 3) break;

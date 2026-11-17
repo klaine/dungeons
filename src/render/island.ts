@@ -81,7 +81,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const cave = o.seaCave;
   const nearCave = (x: number, z: number, m: number) => !!cave && Math.hypot(x - cave.x - Math.cos(cave.heading) * cave.length * 0.5, z - cave.z - Math.sin(cave.heading) * cave.length * 0.5) < cave.length * 0.5 + 8 + m;
   // (Steep ground inland is carved as rock too: the crags of the summits. And the stair, wherever it runs, is carved with the cliff it is cut in.)
-  const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 0.9; };
+  const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.1; };
   const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)); };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
