@@ -366,8 +366,8 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ the land brush
   // A ball on the end of the pointer. Dragged over the land with the left button it leaves a
-  // trail of balls of rock, each resting on whatever the pointer met (the ground, the cliff, the
-  // balls already laid: so a mass can be built upward); with Shift, or with digging chosen, the
+  // trail of balls of rock, each resting on whatever the pointer met (the ground, the cliff, land
+  // painted by an earlier stroke: so a mass can be built upward); with Shift, or with digging chosen, the
   // balls are bitten out of what was painted before. When the button is let go the whole is
   // carved, as the cliff is carved and of the same stone, and takes the place of the balls.
   const ballShape = new SphereGeometry(1, 28, 14);
@@ -383,7 +383,9 @@ async function start(): Promise<void> {
   const brushAt = (e: PointerEvent): Vector3 | null => {
     const box = canvas.getBoundingClientRect();
     ray.setFromCamera(new Vector2(((e.clientX - box.left) / box.width) * 2 - 1, 1 - ((e.clientY - box.top) / box.height) * 2), camera);
-    const hit = ray.intersectObjects([...solids.filter((s) => s.mesh.visible).map((s) => s.mesh), ...laid.children], false)[0];
+    // (Not on the balls of the stroke being drawn: each would be laid on the near side of the last, and the stroke would come straight
+    // at the eye instead of following the pointer. A mass is built upward stroke by stroke, on what the last stroke carved.)
+    const hit = ray.intersectObjects(solids.filter((s) => s.mesh.visible).map((s) => s.mesh), false)[0];
     if (!hit) return null;
     const n = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new Vector3(0, 1, 0);
     return hit.point.clone().addScaledVector(n, state.radius * (digging(e) ? -0.3 : 0.5));
