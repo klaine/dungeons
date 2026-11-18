@@ -282,10 +282,27 @@ centimetres at 60, 125, 250, 500 and a thousand), and meshed again, a few a fram
 squares let go of beyond a kilometre; beyond them the world's lattice of 8 metres, read every 32, in
 blocks of a kilometre with holes where squares are, a metre low. One walks on the squares' heights
 (or flies, `V`); `1` to `4` go to the valley heads, with Shift the islands, with Ctrl the mountain tops;
-`M` shows the triangles. Its ground is coloured by what the world's lattice says lies there, rock where
-it is steep and sand by the water, and lit plainly: the game's ground material, grass and trees are not
-on it. `tools/stream.ts` makes squares about each place without a browser and checks that neighbours
-meet; `tools/browser/walk.cjs` walks the page to places and keeps pictures.
+`M` shows the triangles. `tools/stream.ts` makes squares about each place without a browser and checks
+that neighbours meet; `tools/browser/walk.cjs` walks the page to places and keeps pictures.
+
+**Drawn as the game draws** ("2 first": the game's ground, grass and trees on the walk page, to judge the
+land as it will look before anything is built on it; `src/worldwalk/dress.ts`). The game's own textures
+and materials, made as `main.ts` makes them: each square meshed as the game's turf and rock (a triangle
+to rock where it is steep, as the valley's sheet is laid, `squareBuilders`), with the colours and the four
+fields the ground material reads, from what the world says lies at each point: pasture the valley's turf;
+hay fields paler and yellower; heath brown, the purple of heather in it; marsh wet; the floor of a wood
+under litter; the shore bare sand and shingle; bare earth and stones where it grows steep. The far land the
+same, laid every 32 metres. Lit by the sky as the game lights what it does not bake, the sun with shadows
+over 160 metres about the walker, the game's sky, its air (`Atmosphere`, with haze thinner than a valley's,
+since here the eye sees ten kilometres) and its pipeline, the eye adjusting to the picture. What grows:
+grass, flowers, ferns and reeds grown about the walker out to 90 metres, in blocks of 32 (as the lab's meadow
+is grown: thick in pasture, tall and pale in hay, short and brown or purple on heath, sparse in woods, none
+on rock, shingle or water); trees where the world has woods (one to a cell of seven metres there, a few in
+pasture and heath; oak and ash low down, spruce and pine higher, pine alone near the treeline; the same trees
+whoever asks, `treesIn`), grown whole out to 120 metres as the valley's are, and beyond as single painted
+cards out to 1.8 kilometres, as the valley's far hillsides have them. `?hour=`, `?season=`, `?haze=`, `?tex=`.
+Not yet: water but the sea (lakes and rivers are not drawn), snow, tracks and roads on the ground, the
+places' houses.
 
 *Measured*, November 2026, in the cloud container of four cores, on `w2`:
 
