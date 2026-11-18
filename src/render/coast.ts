@@ -26,6 +26,8 @@ export interface CoastBuild {
   finds: { at: Vector3; what: string }[];
   fences: { min: Vector3; max: Vector3 }[];
   caveFloor: number;
+  /** The colour of the island's own rock at a point and facing, with its fields (beds, the tide's bands, lichens), as the cliffs have it. */
+  rockAt?: (q: Vector3, n: Vector3, field: Float32Array) => Colour;
 }
 
 type P3 = [number, number, number];
@@ -108,14 +110,20 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
         const lift = q.range(-0.025, 0.02), tone = q.range(0.56, 0.82), t0 = y0 + lift, t1 = y1 + lift;
         if (weed > foot) solid('stone', [at(a0, foot, f), at(a1, foot, f), at(a1, foot, f1 - gap), at(a0, foot, f1 - gap), at(a0, weed, f), at(a1, weed, f), at(a1, weed, f1 - gap), at(a0, weed, f1 - gap)], [0.16 * tone, 0.17 * tone, 0.11 * tone], 0.35);
         const b0 = Math.max(foot, weed);
-        const weathered = shade(stone, tone), stain = q.next();
+        // (Of the island's own stone, as the cliff it stands under is: its colour at that place, if the island says what that is.)
+        const local = c.rockAt ? c.rockAt(new Vector3(...at((a0 + a1) / 2, t0, (f + f1) / 2)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+        const weathered = local ? shade(local, 1.1 + (tone - 0.69) * 0.8) : shade(stone, tone), stain = q.next();
         if (stain < 0.15) { weathered[0] *= 1.12; weathered[1] *= 0.98; weathered[2] *= 0.82; } else if (stain < 0.35) { weathered[0] *= 0.92; weathered[1] *= 1.02; weathered[2] *= 0.9; }
         solid('stone', [at(a0, b0, f), at(a1, b0, f), at(a1, b0, f1 - gap), at(a0, b0, f1 - gap), at(a0, t0, f), at(a1, t0, f), at(a1, t1, f1 - gap), at(a0, t1, f1 - gap)], weathered, 0.35);
       }
       f = f1;
     }
     // Coping along either edge, bollards, and a ladder of iron down the end into the water.
-    for (const side of [-1, 1]) for (let f = 4.5; f < len - 0.3; f += 0.9) box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), shade(stone, 1.08), 0.4);
+    for (const side of [-1, 1]) for (let f = 4.5; f < len - 0.3; f += 0.9) {
+      // (The coping of the same stone, a little paler where it is worn by ropes and feet.)
+      const local = c.rockAt ? c.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+      box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), local ? shade(local, 1.25) : shade(stone, 1.08), 0.4);
+    }
     for (const f of [len * 0.55, len - 0.9]) for (const side of [-1, 1]) {
       const a = side * (half - 0.7);
       for (let k = 0; k < 6; k++) {
@@ -138,20 +146,56 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
   }
 
-  // ---- the stair cut in the cliff: a step of dressed stone at every half stride, set into the slope it is cut in.
+  // ---- the stair cut in the cliff: a step at every half stride, cut in the cliff's own rock, set into the slope it is cut in.
   // They are for the eye, as the valley's are: what is walked on is the slope, so no foot catches on a riser.
+  // (Cut from the rock, not laid in dressed stone: each step is the cliff's rock, coloured as the cliff is at that place and height,
+  // with its beds, the tide's dark bands low down and the lichens higher; not quite square, its nose worn round and its tread
+  // paler down the middle, where feet have gone for a century or two. Steps of pale building stone looked laid on the rock.)
   if (o.stair) {
     const was = wild.group, q = rng.fork('stair'), st = o.stair;
     wild.group = 'soft';
+    const rock = c.rockAt ? mesh('rock') : null, field = new Float32Array(4), P = new Vector3(), N = new Vector3();
+    /** A face of rock through `pts`, wound away from `inside`, each corner coloured as the cliff is there; `worn` brightens the corners it names. */
+    const rockFace = (pts: P3[], inside: P3, worn: boolean[] = []) => {
+      const [a, b, d] = pts;
+      let nx = (b[1] - a[1]) * (d[2] - a[2]) - (b[2] - a[2]) * (d[1] - a[1]), ny = (b[2] - a[2]) * (d[0] - a[0]) - (b[0] - a[0]) * (d[2] - a[2]), nz = (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]);
+      const l = Math.hypot(nx, ny, nz);
+      if (l < 1e-9) return;
+      nx /= l; ny /= l; nz /= l;
+      const mid = pts.reduce((sum, p0) => [sum[0] + p0[0] / pts.length, sum[1] + p0[1] / pts.length, sum[2] + p0[2] / pts.length], [0, 0, 0]);
+      let list = pts, wear = worn;
+      if ((mid[0] - inside[0]) * nx + (mid[1] - inside[1]) * ny + (mid[2] - inside[2]) * nz < 0) { nx = -nx; ny = -ny; nz = -nz; list = [...pts].reverse(); wear = [...worn].reverse(); }
+      const flat = Math.abs(ny) > 0.7, side = Math.abs(nx) > Math.abs(nz);
+      const ids = list.map((p0, i) => {
+        field.fill(0);
+        const col = c.rockAt!(P.set(p0[0], p0[1], p0[2]), N.set(nx, ny, nz), field);
+        const k = wear[i] ? 1.16 : 1;
+        return rock!.addVertex(p0[0], p0[1], p0[2], nx, ny, nz, (flat ? p0[0] : side ? p0[2] : p0[0]) * 0.4, (flat ? p0[2] : p0[1]) * 0.4, col[0] * k, col[1] * k, col[2] * k, field[0], field[1], field[2], field[3]);
+      });
+      for (let i = 1; i < ids.length - 1; i++) rock!.addTriangle(ids[0], ids[i], ids[i + 1]);
+    };
     for (let k = 0; k < st.length - 1; k++) {
       const [ax, az, ay] = st[k], [bx, bz, by] = st[k + 1], run = Math.hypot(bx - ax, bz - az);
       if (run < 0.05) continue;
       const heading = Math.atan2(bz - az, bx - ax), at = frame(ax, az, 0, heading), n = Math.max(1, Math.round(run / 0.5));
       for (let j = 0; j < n; j++) {
-        const f0 = (run * j) / n, f1 = (run * (j + 1)) / n, top = ay + (by - ay) * ((j + 1) / n);
+        const f0 = (run * j) / n, f1 = (run * (j + 1)) / n + 0.03, top = ay + (by - ay) * ((j + 1) / n) + q.range(-0.02, 0.015);
         // (Level stretches, the landings, are paved, not stepped.)
-        const flat = Math.abs(by - ay) < 0.05;
-        box(at, 'stone', -1.35, 1.35, top - (flat ? 0.12 : 0.3), top + 0.02, f0, f1 + 0.03, shade(stone, q.range(0.78, 1.0)), 0.6);
+        const flat = Math.abs(by - ay) < 0.05, foot = top - (flat ? 0.12 : 0.3);
+        if (!rock) { box(at, 'stone', -1.35, 1.35, foot, top + 0.02, f0, f1, shade(stone, q.range(0.78, 1.0)), 0.6); continue; }
+        // Not quite square: its ends not in line, its front edge worn down and back where it is trodden.
+        const wl = q.range(1.22, 1.42), wr = q.range(1.22, 1.42), nose = flat ? 0 : q.range(0.03, 0.06), back = flat ? 0 : q.range(0.03, 0.07);
+        const A = [-wl, -wl / 3, wr / 3, wr], tops: P3[] = A.map((a) => at(a, top - (Math.abs(a) < 0.5 ? nose : nose * 0.4), f0 + (Math.abs(a) < 0.5 ? back : back * 0.4)));
+        const rear: P3[] = A.map((a) => at(a, top + 0.02, f1)), low: P3[] = [at(-wl, foot, f0), at(wr, foot, f0), at(wr, foot, f1), at(-wl, foot, f1)];
+        const inside = at((wr - wl) / 2, (top + foot) / 2, (f0 + f1) / 2);
+        // The tread in three strips across, the middle one paler; the two ends; the back; the underside; and the riser.
+        for (let i = 0; i < 3; i++) rockFace([tops[i], tops[i + 1], rear[i + 1], rear[i]], inside, i === 1 ? [true, true, true, true] : []);
+        rockFace([low[0], tops[0], rear[0], low[3]], inside);
+        rockFace([low[1], low[2], rear[3], tops[3]], inside);
+        rockFace([low[3], rear[0], rear[3], low[2]], inside);
+        rockFace([low[0], low[3], low[2], low[1]], inside);
+        // (The riser follows the tread's worn front edge, so its face takes in the strips' inner corners.)
+        rockFace([low[0], tops[0], tops[1], tops[2], tops[3], low[1]], inside);
       }
     }
     wild.group = was;

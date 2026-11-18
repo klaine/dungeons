@@ -487,7 +487,7 @@ export function buildIsland(b: IslandBuild): IslandResult {
 
   // ---- what stands on the island, and what grows on it
   wild.group = 'wild';
-  const coast = buildCoast({ site, wild, rng: rng.fork('coast'), ground, stoneTint: tint, finds: b.finds, fences: b.fences, caveFloor });
+  const coast = buildCoast({ site, wild, rng: rng.fork('coast'), ground, stoneTint: tint, finds: b.finds, fences: b.fences, caveFloor, rockAt: (q, n, field) => shadeRock(q, n, field, 1) });
   // The dry-stone walls, of the island's own stone.
   (o.walls ?? []).forEach((w, k) => layWall((m) => wild.mesh(m), w, ground, [0.62 * (0.6 + 0.4 * tint[0]), 0.6 * (0.6 + 0.4 * tint[1]), 0.56 * (0.6 + 0.4 * tint[2])], rng.fork(`wall${k}`)));
   const planted = plantIsland({ site, wild, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, heathAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), trackOff, offFoot, looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0) });
