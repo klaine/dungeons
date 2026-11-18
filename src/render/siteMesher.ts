@@ -2273,6 +2273,9 @@ export function meshSite(site: Site): SceneDescription {
         const tall = giant * young * (epic ? 0.95 : 1), stout = epic ? 2.6 : giant > 1 ? giant * 1.15 : young * young, leafy = epic ? 5 : giant > 1 ? giant * giant * 0.75 : young * 0.8;
         const reach = growTree(planting, woodOf(oak ? 'oak' : 'ash'), x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
           kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
+          // (Its boughs kept out of the house: a great oak by a house standing free reached over its roofs and drooped into its court,
+          // and through the arch from the court, where it stopped whoever walked through.)
+          keepOut: (q) => q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4),
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }

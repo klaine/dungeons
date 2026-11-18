@@ -180,6 +180,11 @@ export interface TreeOptions {
    * more, so that a tree by the sea grows swept away from it, its crown low and thrown to the lee.
    */
   wind?: { x: number; z: number; strength: number };
+  /**
+   * Where no limb may grow: a limb that would is cut off where it would enter, and bears nothing beyond. For a house beside a wood,
+   * whose walls a great tree's boughs would otherwise reach through, and droop into its court.
+   */
+  keepOut?: (p: Vector3) => boolean;
 }
 
 const UP = new Vector3(0, 1, 0);
@@ -345,6 +350,7 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
     // The trunk spreads into the ground at its foot.
     if (level === 0) { points[0].y -= 0.4; radii[0] = radius * 1.55; points.push(from.clone().setY(from.y + 0.25)); radii.push(radius * 1.15); }
     const taper = level === 0 ? 0.3 : 0.4;
+    let cut = false;
     for (let s = 1; s <= steps; s++) {
       // It wanders as it grows, and turns upward: less so for a trunk, which was never in shade.
       const gnarl = (oak ? 0.2 : 0.1) * (level === 0 ? 0.35 : 1) * (1 + 0.6 * (wide - 1));
@@ -353,8 +359,14 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
       if (level === 0) d.addScaledVector(bend, 1);
       d.normalize();
       p.addScaledVector(d, length / steps);
+      // (Where it may not go, it stops: cut back a little short of it, as a bough lopped off a wall is.)
+      if (level > 0 && o.keepOut?.(p)) { cut = true; break; }
       points.push(p.clone());
       radii.push(radius * (1 - (taper * s) / steps));
+    }
+    if (cut) {
+      if (points.length >= 2) layLimb(wood, points, radii, level === 1 ? 6 : 4, o.bark, rng.range(0, 3), open);
+      return;
     }
     const sides = level === 0 ? (o.detail > 0.5 ? 14 : 6) : level === 1 ? (o.detail > 0.5 ? 6 : 4) : level === 2 ? 4 : 3;
     layLimb(wood, points, radii, sides, o.bark, rng.range(0, 3), open, level === 0 && o.detail > 0.4 ? trunkShape : undefined);

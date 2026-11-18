@@ -787,7 +787,15 @@ async function start(): Promise<void> {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+  // The interface hidden, for pictures: H, or `?nogui`. (Only what is drawn over the scene: the title, buttons, map, messages and hints.)
+  {
+    const style = document.createElement('style');
+    style.textContent = 'body.nogui #hud, body.nogui #map, body.nogui #toast, body.nogui #won, body.nogui #hint, body.nogui #status { display: none !important; }';
+    document.head.appendChild(style);
+    if (params.has('nogui')) document.body.classList.add('nogui');
+  }
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyH' && !e.repeat) document.body.classList.toggle('nogui');
     if (e.code === 'KeyF') atmosphere.uniforms.uEnabled.value = 1 - atmosphere.uniforms.uEnabled.value;
     if (e.code === 'KeyL') toggleLantern();
     if (e.code === 'KeyB') bakeTarget = bakeTarget > 0.5 ? 0 : 1;
