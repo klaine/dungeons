@@ -68,12 +68,20 @@ export function footprintOf(b: Building): { u0: number; u1: number; v0: number; 
 
 /**
  * The variations a classical building may have, dealt from `rng` (a stream of its own, so that adding them changed nothing else):
- * now and then its middle stands forward without a pediment over it; and a building with wings, an L or a U, may have towers at one
+ * its storeys may be other than a tall principal storey over a lower ground one (a tall ground storey under lower ones alike, or all
+ * alike); now and then its middle stands forward without a pediment over it; and a building with wings, an L or a U, may have towers at one
  * to three of its corners, rising one to three storeys over its cornice. Towers go in pairs where they can (the two ends of the front,
  * or the two ends of a U's wings), and a third, if there is one, at a wing's end.
  */
 export function classicalVariations(b: Building, rng: Rng): void {
   if (b.style !== 'imperial') return;
+  // Its storeys. Most have the tall principal storey over a lower ground storey, as dealt; but some have a tall ground storey (shops,
+  // a counting house, a hall) with lower storeys alike over it, and some have every storey the same height.
+  if (b.storeys >= 2) {
+    const q = rng.fork('storeys'), kind = q.pick(['principal', 'principal', 'principal', 'ground', 'ground', 'even', 'even']), r1 = (v: number) => Math.round(v * 10) / 10;
+    if (kind === 'ground') b.heights = [r1(q.range(4.4, 5.2)), ...Array.from({ length: b.storeys - 1 }, (_, n) => r1(q.range(3.1, 3.5) - n * 0.05))];
+    else if (kind === 'even') { const h = r1(q.range(3.3, 3.9)); b.heights = Array.from({ length: b.storeys }, (_, n) => r1(h + (n === 0 ? 0.2 : 0) - (n === b.storeys - 1 && b.storeys > 2 ? q.range(0, 0.2) : 0))); }
+  }
   if (b.portico && rng.fork('pediment').chance(0.3)) b.pediment = false;
   const wings = b.wings ?? [], q = rng.fork('towers');
   if (!wings.length || !q.chance(0.65)) return;
@@ -125,23 +133,33 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
     plan.rooms.push({ kind: 'hall', u0: uL, u1: uR, v0: b.portico ? -OUT + T : T, v1: sF, linings: lined(T, sF, uL, uR) }, { kind: 'stair', u0: uL, u1: uR, v0: sB, v1: back, linings: lined(sB, back, uL, uR) });
     plan.doors.push({ line: 'v', at: spine, c: (uL + uR) / 2, w: 2.2, tall: true });
   }
-  // A wing: rooms of one, two or three bays; and the other wing its mirror.
-  const sizes: number[] = [];
-  for (let left = middle - flank; left > 0;) {
+  // A wing: rooms of one, two or three bays; and the other wing its mirror. (With a carriage way through its end, the outermost two
+  // bays are one, the way on the ground storey and a pair of rooms over it on every other.)
+  const sizes: number[] = [], arch = !!b.arch && middle - flank >= 2 && !b.wings?.length;
+  for (let left = middle - flank - (arch ? 2 : 0); left > 0;) {
     const take = left <= 3 && rng.chance(0.45) ? left : Math.min(left, rng.pick([1, 2, 2, 3]));
     sizes.push(take);
     left -= take;
   }
+  if (arch) sizes.push(2);
   for (const side of [-1, 1]) {
     let bay = side < 0 ? middle - flank : middle + flank + 1;
     for (const size of sizes) {
       const first = side < 0 ? bay - size : bay, last = side < 0 ? bay : bay + size;
       const u0 = lo(first), u1 = hi(last), inner = side < 0 ? last : first, atMiddle = side < 0 ? last === middle - flank : first === middle + flank + 1;
-      plan.rooms.push({ kind: 'front', u0, u1, v0: front, v1: sF, linings: lined(front, sF, u0, u1) }, { kind: 'back', u0, u1, v0: sB, v1: back, linings: lined(sB, back, u0, u1) });
-      plan.doors.push({ line: 'u', at: edge[inner], c: front + 1.25, w: 1.1 });
-      // (Beside a passage the back rooms are reached from the front rooms: the passage's far end is its stair.)
-      if (!atMiddle || broad === 3) plan.doors.push({ line: 'u', at: edge[inner], c: atMiddle ? sB + 0.9 : back - 1.25, w: 1.0 });
-      plan.doors.push({ line: 'v', at: spine, c: (u0 + u1) / 2, w: 1.0 });
+      // (The carriage way: on the ground storey one room from the front wall to the back, entered from neither neighbour; over it the
+      // rooms are as anywhere else, and so named storey by storey.)
+      const through = arch && side === b.arch!.side && (side < 0 ? first === 0 : last === bays);
+      const storeys = through ? Array.from({ length: b.storeys - 1 }, (_, n) => n + 1) : [undefined];
+      if (through) plan.rooms.push({ kind: 'carriage', u0, u1, v0: front, v1: back, linings: lined(front, back, u0, u1), storey: 0 });
+      for (const storey of storeys) {
+        const on = storey === undefined ? {} : { storey };
+        plan.rooms.push({ kind: 'front', u0, u1, v0: front, v1: sF, linings: lined(front, sF, u0, u1), ...on }, { kind: 'back', u0, u1, v0: sB, v1: back, linings: lined(sB, back, u0, u1), ...on });
+        plan.doors.push({ line: 'u', at: edge[inner], c: front + 1.25, w: 1.1, ...on });
+        // (Beside a passage the back rooms are reached from the front rooms: the passage's far end is its stair.)
+        if (!atMiddle || broad === 3) plan.doors.push({ line: 'u', at: edge[inner], c: atMiddle ? sB + 0.9 : back - 1.25, w: 1.0, ...on });
+        plan.doors.push({ line: 'v', at: spine, c: (u0 + u1) / 2, w: 1.0, ...on });
+      }
       bay += side * size;
     }
   }
@@ -162,6 +180,19 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
     plan.doors.push({ line: 'v', at: D - (T - CLASSICAL.skin) / 2, c: door, w: 1.1, through: T + CLASSICAL.skin });
   }
   return plan;
+}
+
+/**
+ * The carriage way's arch, where a classical building has one: its middle across the front (`u`), how broad it is, and how high its
+ * crown and its springing stand over the ground before the building. It stands between the two windows of the end bays, and as the
+ * front's, so the back's, at the same `u`.
+ */
+export function classicalArch(b: Building): { u: number; w: number; crown: number; spring: number } | null {
+  const room = b.plan?.rooms.find((r) => r.kind === 'carriage');
+  if (!room) return null;
+  const { windows } = classicalFront(b), n = b.arch!.side < 0 ? 0 : b.bays - 2;
+  const u = (windows[n] + windows[n + 1]) / 2, w = Math.min(3.3, windows[n + 1] - windows[n] + 0.9, 2 * Math.min(u - room.u0, room.u1 - u) - 0.3), crown = Math.min(CLASSICAL.plinth + b.heights[0] - 0.35, 4.1);
+  return { u, w, crown, spring: crown - w / 2 };
 }
 
 /**

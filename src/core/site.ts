@@ -273,7 +273,7 @@ export interface BuildingPlan {
    * next room's or the rendered skin outside, in the order front, back, left, right (as `v0`,
    * `v1`, `u0`, `u1`): half a wall between rooms, all of an outer wall within its skin.
    */
-  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing' | 'carriage'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
   /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
   doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number; storey?: number }[];
   /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
@@ -310,6 +310,11 @@ export interface Building {
   /** Of a timber house: burnt out. Its roof and glass are gone, its timbers charred and its walls smoke-blackened; its stone chimney stands. */
   burnt?: boolean;
   portico?: boolean;
+  /**
+   * Of a classical building in a closed block: a carriage way through its ground storey from the street to the yard behind, under a
+   * round arch in the front and the back, through the two bays at its left end (-1) or its right (1) as one stands before it.
+   */
+  arch?: { side: -1 | 1 };
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
   /**
@@ -356,6 +361,8 @@ export interface Town {
   sea: number;
   /** The box the town's own land is made over: beyond it the country is the frame's, seen and not walked. */
   land: { x0: number; x1: number; z0: number; z1: number };
+  /** The house's level ground, at the forecourt's floor: the terrace at the head of the square. */
+  level: { x0: number; x1: number; z0: number; z1: number };
   /** The quay: its edge runs along `x` at `z`, from `x0` to `x1`, its top at `y`; the waterfront behind it is `apron` deep. */
   quay: { x0: number; x1: number; z: number; y: number; apron: number };
   /** The market square: its ground falls from `yN` at its north side to `yS` at its south, where it opens onto the waterfront. */

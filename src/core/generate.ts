@@ -888,14 +888,15 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
           delete b.wings;
         }
       }
+      // (Its variations: storeys of other heights, a middle without its pediment, towers at the corners of an L or a U. From a
+      // stream of their own, and before anything that reads its storeys' heights.)
+      classicalVariations(b, rng.fork('variations'));
       // About two in five of the taller ones are set into rising ground: the lowest storey open to the front and buried at the back.
       const cut = rng.fork('sunk');
       if (b.storeys >= 3 && cut.chance(0.45)) {
         b.sunk = round(floorOf(b, 1) - 0.2);
         b.backDoor = round(classicalFront(b).windows[(b.bays >> 1) + (b.portico || b.bays >= 7 ? 2 : 1)]);
       }
-      // (Its variations: a middle without its pediment, towers at the corners of an L or a U. From a stream of their own.)
-      classicalVariations(b, rng.fork('variations'));
       b.plan = planClassical(b, rng.fork('plan'));
     }
   }
