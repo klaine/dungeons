@@ -223,11 +223,23 @@ for (let n = 0; n < townCount; n++) {
     if (!solve(site).ok) throw new Error('cannot be completed');
     const tally3 = (k: string) => towns.set(k, (towns.get(k) ?? 0) + 1);
     const ground = (x: number, z: number) => townGround(t, F, x, z);
-    // (Outlines as boxes: the town's buildings stand square to its streets.)
+    // (Outlines as boxes, to find the pairs worth looking at; then their footprints, turned as they stand, tested exactly: a town's
+    // streets need not run square to the world, and boxes about buildings on a slanting street overlap where the buildings do not.)
+    // How far two convex outlines sink into each other: the least overlap of their shadows on the normals of all their sides.
+    const sunk = (a: [number, number][], c: [number, number][]) => {
+      let least = Infinity;
+      for (const poly of [a, c]) for (let k = 0; k < poly.length; k++) {
+        const [px, pz] = poly[k], [qx, qz] = poly[(k + 1) % poly.length], l = Math.hypot(qx - px, qz - pz) || 1, nx = -(qz - pz) / l, nz = (qx - px) / l;
+        const span = (pts: [number, number][]) => { const d = pts.map(([x, z]) => x * nx + z * nz); return [Math.min(...d), Math.max(...d)]; };
+        const [a0, a1] = span(a), [c0, c1] = span(c);
+        least = Math.min(least, Math.min(a1, c1) - Math.max(a0, c0));
+      }
+      return least;
+    };
     const boxes = t.buildings.map((b) => { const pts = outlineOf(b).flat(); return { b, x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), z0: Math.min(...pts.map((p) => p[1])), z1: Math.max(...pts.map((p) => p[1])) }; });
     for (const q of boxes) {
       if (ground(q.b.x, q.b.z) < t.sea + 0.5) throw new Error(`a building in the water at ${q.b.x}, ${q.b.z}`);
-      for (const o of boxes) if (o !== q && Math.min(q.x1, o.x1) - Math.max(q.x0, o.x0) > 0.35 && Math.min(q.z1, o.z1) - Math.max(q.z0, o.z0) > 0.35 && outlineOf(q.b).some((r) => outlineOf(o.b).some((r2) => { const a = { x0: Math.min(...r.map((p) => p[0])), x1: Math.max(...r.map((p) => p[0])), z0: Math.min(...r.map((p) => p[1])), z1: Math.max(...r.map((p) => p[1])) }, c = { x0: Math.min(...r2.map((p) => p[0])), x1: Math.max(...r2.map((p) => p[0])), z0: Math.min(...r2.map((p) => p[1])), z1: Math.max(...r2.map((p) => p[1])) }; return Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0) > 0.35 && Math.min(a.z1, c.z1) - Math.max(a.z0, c.z0) > 0.35; }))) throw new Error(`two buildings overlap at ${q.b.x}, ${q.b.z} and ${o.b.x}, ${o.b.z}`);
+      for (const o of boxes) if (o !== q && Math.min(q.x1, o.x1) - Math.max(q.x0, o.x0) > 0.35 && Math.min(q.z1, o.z1) - Math.max(q.z0, o.z0) > 0.35 && outlineOf(q.b).some((r) => outlineOf(o.b).some((r2) => sunk(r, r2) > 0.35))) throw new Error(`two buildings overlap at ${q.b.x}, ${q.b.z} and ${o.b.x}, ${o.b.z}`);
     }
     for (const s of t.streets) {
       for (let k = 1; k < s.line.length; k++) {

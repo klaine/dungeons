@@ -396,7 +396,10 @@ export interface Town {
   /** Streets, lanes, stepped lanes and tracks, as lines of points `[x, z, y]`, `width` across. */
   streets: { line: [number, number, number][]; width: number; kind: 'street' | 'lane' | 'track' | 'path' }[];
   /** Blocks of the town between its streets, and which of its three kinds of building each is built up with. */
-  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber' }[];
+  /** What kind of plan the town's streets are laid on: square and straight, following the shore, fanning out from the harbour, or crooked as an old town's. */
+  plan?: 'planned' | 'shore' | 'fan' | 'old';
+  /** The blocks of buildings: each its four corners, south-west, south-east, north-east, north-west (south being towards the sea), and the box about them. */
+  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber'; corners?: [number, number][] }[];
   /** The buildings of the blocks and the farms: each with its `turn` and its `y`. */
   buildings: Building[];
   /**

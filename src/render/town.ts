@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { Building, Site, Town } from '../core/site';
-import { frameAt, inBuilding, inHarbour, nearLine, outsideBuilt, outsideRect, squareY, townGround, townLand } from '../core/town';
+import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, squareY, townGround, townLand } from '../core/town';
 import { footprintOf } from '../core/building';
 import { MeshBuilder } from './geom/meshBuilder';
 import { alongSheet, carveRock } from './geom/rock';
@@ -68,7 +68,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         zone[k] = Z.field; fieldOf[k] = n;
       });
     });
-    for (const blk of t.blocks) paint(blk, (k) => { zone[k] = Z.yard; });
+    for (const blk of t.blocks) paint(blk, (k, x, z) => { if (outsideBlock(blk, x, z) === 0) zone[k] = Z.yard; });
     for (const s of t.streets) {
       const xs = s.line.map((q) => q[0]), zs = s.line.map((q) => q[1]), half = s.width / 2;
       paint({ x0: Math.min(...xs) - half - 1, x1: Math.max(...xs) + half + 1, z0: Math.min(...zs) - half - 1, z1: Math.max(...zs) + half + 1 }, (k, x, z) => {
@@ -417,7 +417,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     if (zn !== Z.wild) return 0;
     const y = ground(x, z), above = y - sea;
     if (above < 5) return 0;
-    const fromTown = Math.min(...[t.square, ...t.blocks].map((r) => outsideRect(r, x, z)));
+    const fromTown = Math.min(outsideRect(t.square, x, z), ...t.blocks.map((r) => outsideBlock(r, x, z)));
     const stand = smooth((fbm2(x * 0.011 + s1, z * 0.011 - s2, 3) - 0.42 + 0.12 * smooth((above - 30) / 60)) / 0.12);
     return stand * smooth((fromTown - 30) / 30) * smooth((above - 5) / 10);
   }
@@ -1281,7 +1281,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       const wood = woodAt(px, pz);
       if (wood > 0.5) { if (qq.chance(0.5)) { pl.tuft(pl.ferns, px, y - 0.05, pz, qq.range(0.7, 1.2), qq.range(0.6, 1.0), yaw, season === 'autumn' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('ferns'); } continue; }
       if (above < 3 && dist > 60) { if (fine > 0.45) { pl.tuft(cropSet('marram'), px, y - 0.05, pz, qq.range(0.7, 1.1), qq.range(0.5, 0.85), yaw, [0.33, 0.33, 0.2]); count('marram'); } continue; }
-      const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(...[t.square, ...t.blocks].map((r) => outsideRect(r, px, pz))) - 5) / 30);
+      const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(outsideRect(t.square, px, pz), ...t.blocks.map((r) => outsideBlock(r, px, pz))) - 5) / 30);
       if (zn === Z.yard && fine < 0.45) continue;
       const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25) * (mown ? 0.45 : 1), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
       pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), tall, yaw, [(0.17 + 0.16 * dried) * c[0] * tone, 0.3 * c[1] * tone, (0.05 + 0.05 * dried) * c[2] * tone]);
