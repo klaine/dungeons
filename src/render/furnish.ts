@@ -22,6 +22,13 @@ const board: MasonryStyle = { ...plank, tint: [0.95, 0.9, 0.84] };
 const stave: MasonryStyle = { ...plank, course: [3, 3], length: [0.11, 0.15], tint: [0.9, 0.82, 0.7] };
 const straw: MasonryStyle = { ...plank, course: [3, 3], length: [3, 3], tint: [1.7, 1.45, 0.85], bevel: 0.03, proud: 0.01 };
 
+type Colour = [number, number, number];
+const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
+/** Turned wood, from pale ash to old dark oak; earthenware and stoneware; bindings of calf, of dyed leather, of vellum. */
+const WOODS: Colour[] = [[0.62, 0.45, 0.28], [0.5, 0.34, 0.2], [0.38, 0.25, 0.15], [0.66, 0.52, 0.36]];
+const POTS: Colour[] = [[0.55, 0.28, 0.16], [0.48, 0.3, 0.2], [0.6, 0.55, 0.47], [0.4, 0.38, 0.33], [0.62, 0.36, 0.2]];
+const LEATHER: Colour[] = [[0.35, 0.18, 0.09], [0.28, 0.14, 0.08], [0.42, 0.26, 0.13], [0.33, 0.07, 0.06], [0.12, 0.2, 0.12], [0.1, 0.12, 0.22], [0.7, 0.62, 0.48], [0.2, 0.12, 0.07]];
+
 export class Furnisher {
   /** How many pieces were placed, and why others were not; for tuning. */
   readonly tally = { placed: 0, outside: 0, overlap: 0, lost: 0, blocksWay: 0 };
@@ -33,9 +40,13 @@ export class Furnisher {
    * `keepClear` is floor nothing may stand on; `solids` are things already standing; `doors` are
    * points just inside each doorway, which must all stay reachable from one another.
    */
+  /** The small things set on tables and shelves are chosen from a stream of their own, so that adding them moved nothing else. */
+  private small: Rng;
+
   constructor(private kit: Kit, private p: Place, private rng: Rng, keepClear: Rect[], private sparse: number, private doors: [number, number][] = [], solids: Rect[] = []) {
     this.taken = [...keepClear, ...solids];
     this.solid = [...solids];
+    this.small = rng.fork('small things');
   }
 
   /** Whether someone could still walk between all the doorways if `extra` were added. */
@@ -168,6 +179,165 @@ export class Furnisher {
     return true;
   }
 
+  /**
+   * A turned thing, closed top and foot: a bowl, a jug, a pot, a candle. `profile` is radius and height pairs from the foot up;
+   * the sides are smooth, the top and the foot flat, and the top may be another colour (what is in it).
+   */
+  private turned(material: string, x: number, y: number, z: number, profile: [number, number][], colour: Colour, top: Colour = colour, sides = 12): void {
+    const m = this.kit.mesh(material), n = profile.length;
+    // The slope of the side at each point of the profile, from the points either side of it.
+    const normals = profile.map((_, j) => {
+      const [r0, h0] = profile[Math.max(0, j - 1)], [r1, h1] = profile[Math.min(n - 1, j + 1)];
+      const l = Math.hypot(h1 - h0, r1 - r0) || 1;
+      return [(h1 - h0) / l, -(r1 - r0) / l];
+    });
+    const rows: number[][] = profile.map(([r, h], j) => Array.from({ length: sides + 1 }, (_, k) => {
+      const a = (k / sides) * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a), [nr, nh] = normals[j];
+      return m.addVertex(x + r * c, y + h, z + r * sn, nr * c, nh, nr * sn, (a * 0.08) / 0.5, h * 2, colour[0], colour[1], colour[2]);
+    }));
+    for (let j = 0; j + 1 < n; j++) for (let k = 0; k < sides; k++) {
+      const a = rows[j][k], b = rows[j][k + 1], c = rows[j + 1][k + 1], d = rows[j + 1][k];
+      m.addTriangle(a, c, b);
+      m.addTriangle(a, d, c);
+    }
+    for (const [j, up] of [[0, -1], [n - 1, 1]] as const) {
+      const [r, h] = profile[j], tone = up > 0 ? top : colour;
+      const centre = m.addVertex(x, y + h, z, 0, up, 0, 0, 0, tone[0], tone[1], tone[2]);
+      const rim = Array.from({ length: sides + 1 }, (_, k) => {
+        const a = (k / sides) * Math.PI * 2;
+        return m.addVertex(x + r * Math.cos(a), y + h, z + r * Math.sin(a), 0, up, 0, r * Math.cos(a), r * Math.sin(a), tone[0], tone[1], tone[2]);
+      });
+      for (let k = 0; k < sides; k++) if (up > 0) m.addTriangle(centre, rim[k + 1], rim[k]); else m.addTriangle(centre, rim[k], rim[k + 1]);
+    }
+  }
+
+  /** A squared small thing: a book, a board, a box. */
+  private block(material: string, x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, colour: Colour): void {
+    const m = this.kit.mesh(material);
+    const P = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+    const faces: [number[], number[]][] = [[[0, 3, 2, 1], [0, -1, 0]], [[4, 5, 6, 7], [0, 1, 0]], [[0, 1, 5, 4], [0, 0, -1]], [[2, 3, 7, 6], [0, 0, 1]], [[1, 2, 6, 5], [1, 0, 0]], [[3, 0, 4, 7], [-1, 0, 0]]];
+    for (const [ids, nm] of faces) {
+      const v = ids.map((i) => m.addVertex(P[i][0], P[i][1], P[i][2], nm[0], nm[1], nm[2], (nm[0] ? P[i][2] : P[i][0]) * 2, (nm[1] ? P[i][2] : P[i][1]) * 2, colour[0], colour[1], colour[2]));
+      m.addTriangle(v[0], v[2], v[1]);
+      m.addTriangle(v[0], v[3], v[2]);
+    }
+  }
+
+  // The things themselves. Turned wood is pale and warm, earthenware red-brown or grey, iron near black.
+  private bowl(x: number, y: number, z: number): void {
+    const q = this.small, wood: Colour = q.pick(WOODS), k = q.range(0.85, 1.15);
+    this.turned('wood', x, y, z, [[0.045 * k, 0], [0.07 * k, 0.012], [0.095 * k, 0.04], [0.1 * k, 0.055]], wood, q.chance(0.5) ? [0.3, 0.2, 0.09] : shade(wood, 0.7));
+  }
+  private cup(x: number, y: number, z: number): void {
+    const q = this.small;
+    this.turned('plaster', x, y, z, [[0.032, 0], [0.036, 0.01], [0.04, 0.085], [0.042, 0.09]], q.pick(POTS), [0.12, 0.08, 0.05], 10);
+  }
+  private jug(x: number, y: number, z: number): void {
+    const q = this.small, k = q.range(0.85, 1.2);
+    this.turned('plaster', x, y, z, [[0.06 * k, 0], [0.075 * k, 0.02], [0.088 * k, 0.08 * k], [0.075 * k, 0.15 * k], [0.045 * k, 0.2 * k], [0.04 * k, 0.225 * k], [0.05 * k, 0.24 * k]], q.pick(POTS), [0.06, 0.05, 0.04]);
+  }
+  private pot(x: number, y: number, z: number): void {
+    const q = this.small, k = q.range(0.9, 1.3);
+    this.turned('metal', x, y, z, [[0.07 * k, 0], [0.12 * k, 0.04 * k], [0.14 * k, 0.11 * k], [0.13 * k, 0.17 * k], [0.135 * k, 0.18 * k]], [0.045, 0.042, 0.04], [0.16, 0.11, 0.06]);
+  }
+  private crock(x: number, y: number, z: number, k: number): void {
+    const q = this.small;
+    this.turned('plaster', x, y, z, [[0.05 * k, 0], [0.075 * k, 0.03 * k], [0.085 * k, 0.12 * k], [0.06 * k, 0.19 * k], [0.055 * k, 0.21 * k]], q.pick(POTS), [0.25, 0.22, 0.18]);
+  }
+  private loaf(x: number, y: number, z: number): void {
+    this.turned('plaster', x, y, z, [[0.07, 0], [0.09, 0.02], [0.085, 0.055], [0.055, 0.08], [0.02, 0.09]], [0.55, 0.36, 0.17], [0.5, 0.33, 0.15], 10);
+  }
+  /** A candle in a dish: lit, unless the house is forsaken. */
+  private candle(x: number, y: number, z: number): void {
+    const q = this.small, tall = q.range(0.08, 0.2);
+    this.turned('metal', x, y, z, [[0.05, 0], [0.055, 0.008], [0.05, 0.016]], [0.12, 0.09, 0.05]);
+    this.turned('plaster', x, y + 0.016, z, [[0.016, 0], [0.016, tall], [0.012, tall + 0.008]], [0.9, 0.86, 0.72], [0.9, 0.86, 0.72], 8);
+    if (!this.sparse) this.turned('lamp', x, y + 0.016 + tall + 0.012, z, [[0.006, 0], [0.009, 0.015], [0.002, 0.04]], [1, 0.85, 0.5], [1, 0.85, 0.5], 6);
+  }
+  /** A book lying open: two leaves of pale parchment in a binding, and a quill and ink by it. */
+  private openBook(x: number, y: number, z: number, alongX: boolean): void {
+    const q = this.small, cover: Colour = q.pick(LEATHER), page: Colour = [0.8, 0.74, 0.6];
+    const [hw, hd] = alongX ? [0.17, 0.12] : [0.12, 0.17];
+    this.block('plaster', x - hw - 0.01, y, z - hd - 0.01, x + hw + 0.01, y + 0.012, z + hd + 0.01, cover);
+    this.block('plaster', x - hw, y + 0.012, z - hd, x + hw, y + 0.03, z + hd, page);
+    const ix = x + (alongX ? hw + 0.09 : 0.1), iz = z + (alongX ? 0.08 : hd + 0.09);
+    this.turned('plaster', ix, y, iz, [[0.025, 0], [0.028, 0.035], [0.012, 0.045], [0.014, 0.05]], [0.05, 0.05, 0.06], [0.01, 0.01, 0.015], 8);
+    this.block('plaster', ix - 0.004, y + 0.04, iz - 0.004, ix + 0.004, y + 0.2, iz + 0.004, [0.85, 0.83, 0.78]);
+  }
+
+  /**
+   * What is set on a table, by what the room is for: bowls and cups at the places down either side, a jug, a loaf and a candle
+   * down the middle of a refectory's; a book open on a desk; a pot, bowls and a loaf on a kitchen's. A forsaken house has less.
+   */
+  private setTable(r: Rect, kind: 'meal' | 'desk' | 'kitchen'): void {
+    const q = this.small, y = this.p.floor + 0.78, alongX = r.x1 - r.x0 >= r.z1 - r.z0;
+    const a0 = alongX ? r.x0 : r.z0, a1 = alongX ? r.x1 : r.z1, mid = alongX ? (r.z0 + r.z1) / 2 : (r.x0 + r.x1) / 2, half = alongX ? (r.z1 - r.z0) / 2 : (r.x1 - r.x0) / 2;
+    const at = (a: number, b: number): [number, number] => (alongX ? [a, mid + b] : [mid + b, a]);
+    const keep = () => q.next() > this.sparse * 1.2;
+    if (kind === 'meal') {
+      for (const side of [-1, 1]) for (let a = a0 + 0.35; a < a1 - 0.25; a += 0.62) {
+        if (!keep() || q.chance(0.25)) continue;
+        const [x, z] = at(a + q.range(-0.05, 0.05), side * (half - 0.2));
+        this.bowl(x, y, z);
+        if (q.chance(0.55)) { const [cx, cz] = at(a + 0.17, side * (half - 0.15)); this.cup(cx, y, cz); }
+      }
+      for (let a = a0 + 0.6; a < a1 - 0.4; a += q.range(0.8, 1.3)) {
+        if (!keep()) continue;
+        const [x, z] = at(a, q.range(-0.06, 0.06)), what = q.int(0, 3);
+        if (what === 0) this.jug(x, y, z); else if (what === 1) this.loaf(x, y, z); else if (what === 2) this.candle(x, y, z);
+      }
+    } else if (kind === 'desk') {
+      const [x, z] = at((a0 + a1) / 2 - 0.08, 0);
+      if (keep()) this.openBook(x, y, z, alongX);
+      const [cx, cz] = at(a0 + 0.12, -half + 0.12);
+      if (keep()) this.candle(cx, y, cz);
+    } else {
+      const [px, pz] = at(a0 + (a1 - a0) * q.range(0.25, 0.4), 0);
+      if (keep()) this.pot(px, y, pz);
+      for (let a = (a0 + a1) / 2; a < a1 - 0.2; a += 0.3) if (keep() && q.chance(0.6)) { const [x, z] = at(a, q.range(-half + 0.15, half - 0.15)); this.bowl(x, y, z); }
+      if (keep()) { const [x, z] = at(a0 + 0.25, half - 0.2); this.loaf(x, y, z); }
+      if (keep()) { const [x, z] = at(a1 - 0.2, -half + 0.18); this.jug(x, y, z); }
+    }
+  }
+
+  /** What a shelf holds: books standing in runs, a few lying in a pile; or crocks, jugs and bowls. Not every board is full. */
+  private stock(r: Rect, fill: 'books' | 'stores'): void {
+    const q = this.small, y = this.p.floor, alongX = r.x1 - r.x0 >= r.z1 - r.z0;
+    const a0 = (alongX ? r.x0 : r.z0) + 0.07, a1 = (alongX ? r.x1 : r.z1) - 0.07, b0 = alongX ? r.z0 : r.x0, b1 = alongX ? r.z1 : r.x1;
+    const box = (u0: number, u1: number, v0: number, v1: number, h0: number, h1: number, c: Colour) =>
+      alongX ? this.block('plaster', u0, h0, v0, u1, h1, v1, c) : this.block('plaster', v0, h0, u0, v1, h1, u1, c);
+    // (The wall is on the side of the rectangle nearer the room's edge: things stand back against it.)
+    const p = this.p, wallLow = alongX ? r.z0 - p.z0 < p.z1 - r.z1 : r.x0 - p.x0 < p.x1 - r.x1;
+    for (const h of [0.28, 0.76, 1.24]) {
+      const floor = y + h + 0.04;
+      if (q.next() < 0.15 + this.sparse) continue;
+      let a = a0 + q.range(0, 0.15);
+      while (a < a1 - 0.05) {
+        if (q.chance(0.08)) { a += q.range(0.1, 0.3); continue; }
+        if (fill === 'books') {
+          // A run of books, of a height and a depth of their own, standing against the back; now and then a short pile lying flat.
+          if (q.chance(0.08) && a + 0.3 < a1) {
+            let top = floor;
+            for (let k = q.int(2, 5); k > 0; k--) { const t = q.range(0.03, 0.06); box(a, a + 0.26, wallLow ? b0 + 0.04 : b1 - 0.24, wallLow ? b0 + 0.24 : b1 - 0.04, top, top + t, q.pick(LEATHER)); top += t; }
+            a += 0.3;
+            continue;
+          }
+          const w = q.range(0.025, 0.065), tall = q.range(0.18, 0.32), deep = q.range(0.15, 0.24);
+          if (a + w > a1) break;
+          const tone = q.range(0.75, 1.15), c = q.pick(LEATHER);
+          box(a, a + w, wallLow ? b0 + 0.03 : b1 - 0.03 - deep, wallLow ? b0 + 0.03 + deep : b1 - 0.03, floor, floor + Math.min(tall, 0.42), shade(c, tone));
+          a += w + (q.chance(0.85) ? 0.003 : q.range(0.02, 0.06));
+        } else {
+          const k = q.range(0.7, 1.15), rad = 0.09 * k;
+          if (a + rad * 2 > a1) break;
+          const u = a + rad, v = (b0 + b1) / 2, [x, z] = alongX ? [u, v] : [v, u], what = q.int(0, 4);
+          if (what <= 1) this.crock(x, floor, z, k); else if (what === 2) this.jug(x, floor, z); else this.bowl(x, floor, z);
+          a += rad * 2 + q.range(0.04, 0.12);
+        }
+      }
+    }
+  }
+
   /** A rectangle against one wall: `at` along it, `width` wide, reaching `depth` into the room. */
   private against(side: 'n' | 's' | 'e' | 'w', at: number, width: number, depth: number, gap = 0.14): Rect {
     const p = this.p;
@@ -199,11 +369,11 @@ export class Furnisher {
       this.barrel(x + sx * 0.1, z + sz * 0.66);
       if (rng.chance(0.6)) this.crate(x + sx * 0.75, z + sz * 0.78, 0.6, rng.chance(0.5));
     };
-    const shelves = (count: number) => {
+    const shelves = (count: number, fill?: 'books' | 'stores') => {
       for (const side of ['n', 's', 'w', 'e'] as const) {
         if (count <= 0) break;
-        const [a, b] = along(side);
-        if (this.shelf(this.against(side, a + (b - a) * rng.range(0.3, 0.7), Math.min(1.8, (b - a) * 0.4), 0.34))) count--;
+        const [a, b] = along(side), r = this.against(side, a + (b - a) * rng.range(0.3, 0.7), Math.min(1.8, (b - a) * 0.4), 0.34);
+        if (this.shelf(r)) { count--; if (fill) this.stock(r, fill); }
       }
     };
 
@@ -232,6 +402,7 @@ export class Furnisher {
           const tables: Rect[] = [];
           centreRow(shift, Math.min(2.6, long - 3), 0.86, 0.05, (r) => { const ok = this.table(r); if (ok) tables.push(r); return ok; });
           for (const t of tables) {
+            this.setTable(t, 'meal');
             const [a0, a1] = alongX ? [t.x0, t.x1] : [t.z0, t.z1];
             const b = alongX ? (t.z0 + t.z1) / 2 : (t.x0 + t.x1) / 2;
             this.bench(rectAlong(a0 + 0.15, a1 - 0.15, b + 0.65, b + 0.97));
@@ -248,6 +419,7 @@ export class Furnisher {
             // (Shortened a little at each end, as a bench is.)
             const trim = (q: Rect): Rect => (side === 'n' || side === 's' ? { ...q, x0: q.x0 + 0.15, x1: q.x1 - 0.15 } : { ...q, z0: q.z0 + 0.15, z1: q.z1 - 0.15 });
             if (!this.table(r)) return false;
+            this.setTable(r, 'meal');
             this.bench(trim(inner));
             return true;
           }, 0.3);
@@ -270,16 +442,18 @@ export class Furnisher {
         const side = rng.pick(longWalls);
         wallRow(side, 1.1, 0.62, 0.8, (desk) => {
           if (!this.table(desk)) return false;
+          this.setTable(desk, 'desk');
           this.crate((desk.x0 + desk.x1) / 2 + (alongX ? 0 : side === 'w' ? 0.75 : -0.75), (desk.z0 + desk.z1) / 2 + (alongX ? (side === 'n' ? 0.75 : -0.75) : 0), 0.36);
           return true;
         }, 0.5);
-        shelves(2);
+        shelves(2, 'books');
         break;
       }
       case 'kitchen': {
-        if (!centreRow(0, Math.min(2.4, long - 3), 1.0, 9, (r) => this.table(r))) centreRow(rng.pick([1.3, -1.3]), Math.min(2.4, long - 3), 1.0, 9, (r) => this.table(r));
+        const laid = (r: Rect) => { if (!this.table(r)) return false; this.setTable(r, 'kitchen'); return true; };
+        if (!centreRow(0, Math.min(2.4, long - 3), 1.0, 9, laid)) centreRow(rng.pick([1.3, -1.3]), Math.min(2.4, long - 3), 1.0, 9, laid);
         cluster(rng.int(0, 3));
-        shelves(1);
+        shelves(1, 'stores');
         break;
       }
       case 'store':
@@ -288,7 +462,7 @@ export class Furnisher {
         cluster(order[0]);
         cluster(order[1]);
         if (rng.chance(0.5)) cluster(order[2]);
-        shelves(1);
+        shelves(1, 'stores');
         break;
       }
       case 'workshop': {
@@ -309,7 +483,7 @@ export class Furnisher {
       case 'vestry':
       case 'reliquary':
       case 'antechamber': {
-        shelves(2);
+        shelves(2, 'books');
         break;
       }
       // An undercroft is where a house keeps what it lays by: barrels and crates gathered in its corners, shelves along a wall.
@@ -319,7 +493,7 @@ export class Furnisher {
         cluster(order[0]);
         cluster(order[1]);
         cluster(order[2]);
-        shelves(2);
+        shelves(2, 'stores');
         break;
       }
       // What someone hid away: a chest or two and a shelf of things, left in the dust.
@@ -327,7 +501,7 @@ export class Furnisher {
         const [x, z] = corners[rng.int(0, 3)];
         this.crate(x + (x < cx ? 0.25 : -0.25), z + (z < cz ? 0.25 : -0.25), 0.7, rng.chance(0.4));
         this.crate(cx + rng.range(-0.6, 0.6), cz + rng.range(-0.6, 0.6), 0.55);
-        shelves(1);
+        shelves(1, 'books');
         break;
       }
       default:
