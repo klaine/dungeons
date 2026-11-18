@@ -148,6 +148,8 @@ export interface SceneDescription {
   far?: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number] };
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
+  /** Where sheep graze: about a point, within so many metres of it, so many of them. */
+  flocks?: { x: number; z: number; r: number; count: number }[];
   /** The sea of cloud, if the place is a mountain top: the level of its top, and how high its billows stand above and below that. Drawn with the air. */
   deck?: {
     level: number; billow: number;

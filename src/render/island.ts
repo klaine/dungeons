@@ -56,6 +56,7 @@ export interface IslandResult {
   /** Space under the cliff, out of doors: the sea cave, where no mist lies. */
   unders: { min: Vector3; max: Vector3 }[];
   birds: { x: number; y: number; z: number }[];
+  flocks: { x: number; z: number; r: number; count: number }[];
   /** The lighthouse's lamp, where its beam turns. */
   lamp?: { x: number; y: number; z: number };
   /** Running water, and where it falls, for the water's drawing: as `SceneDescription.streams` and `falls`. */
@@ -613,6 +614,22 @@ export function buildIsland(b: IslandBuild): IslandResult {
     lamp: coast.lamp,
     streams: streamLines,
     falls: fallsAt,
+    // Sheep on the pasture: two to four flocks, well in from the cliffs, off the track and the paths, away from the house and the
+    // cottages and the lighthouse, on ground not too steep, and a good way apart. (An island of grass with nothing on it to graze it was
+    // a lawn kept by nobody.)
+    flocks: (() => {
+      const q = rng.fork('flocks'), want = q.int(2, 4), out: { x: number; z: number; r: number; count: number }[] = [];
+      for (let tries = 0; tries < 300 && out.length < want; tries++) {
+        const a = q.range(0, Math.PI * 2), x = o.x + Math.cos(a) * coastAt(o, a) * q.range(0.15, 0.8), z = o.z + Math.sin(a) * coastAt(o, a) * q.range(0.15, 0.8);
+        if (inland(o, x, z) < 26 || Math.abs(trackOff(x, z)) < 12 || offFoot(x, z) < 6) continue;
+        if (x > o.level.x0 - 25 && x < o.level.x1 + 25 && z > o.level.z0 - 25 && z < o.level.z1 + 25) continue;
+        if (o.cottages.some((c) => Math.hypot(c.x - x, c.z - z) < 28) || (o.lighthouse && Math.hypot(o.lighthouse.x - x, o.lighthouse.z - z) < 30)) continue;
+        if (Math.hypot(ground(x + 4, z) - ground(x - 4, z), ground(x, z + 4) - ground(x, z - 4)) / 8 > 0.3 || out.some((f) => Math.hypot(f.x - x, f.z - z) < 60)) continue;
+        out.push({ x, z, r: q.range(14, 24), count: q.int(4, 9) });
+      }
+      b.planting.crop(out);
+      return out;
+    })(),
     // Gulls: off the cliffs at the height of their tops, off the stacks, and over the cove.
     birds: [
       ...Array.from({ length: 4 }, (_, k) => { const a = (k / 4) * Math.PI * 2 + s1, r = coastAt(o, a) + 14; return { x: o.x + Math.cos(a) * r, y: F + 4, z: o.z + Math.sin(a) * r }; }),

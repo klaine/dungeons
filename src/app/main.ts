@@ -28,6 +28,7 @@ import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms }
 import { Water } from '../render/water';
 import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
+import { Flocks } from '../render/creatures';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { inside as onMountain } from '../core/mountain';
@@ -439,6 +440,20 @@ async function start(): Promise<void> {
   merged.setAttribute('position', new BufferAttribute(solidPositions, 3));
   merged.setIndex(new BufferAttribute(solidIndex, 1));
   const bvh = new MeshBVH(merged);
+  // Sheep, where the place has pasture for them: stood on what the body walks on, and kept out of the house, the water and the sea.
+  const flocks = desc.flocks?.length ? (() => {
+    const down = new Vector3(0, -1, 0), from = new Vector3(), ray = new Ray(from, down);
+    const groundAtFlock = (x: number, z: number): number => { from.set(x, 400, z); const hit = bvh.raycastFirst(ray, DoubleSide); return hit ? hit.point.y : -1000; };
+    const houses = (site?.places ?? []).map((q) => [q.x0 - 2, q.x1 + 2, q.z0 - 2, q.z1 + 2]);
+    const free = (x: number, z: number): boolean => {
+      if (houses.some((b) => x > b[0] && x < b[1] && z > b[2] && z < b[3])) return false;
+      if ((desc.water ?? []).some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 1.5)) return false;
+      return !desc.sea || groundAtFlock(x, z) > desc.sea.level + 0.8;
+    };
+    const made = new Flocks(desc.flocks, seed, groundAtFlock, free);
+    scene.add(made.group);
+    return made;
+  })() : null;
 
   // Growths that glow in the caves. Each cluster sits on the rock, found by looking along its line.
   const glowLights: { pos: [number, number, number]; intensity: [number, number, number] }[] = [];
@@ -980,6 +995,7 @@ async function start(): Promise<void> {
     water.update(time, camera);
     sea?.update(time);
     birds?.update(time);
+    flocks?.update(dt, time, player.position);
     beacon?.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));

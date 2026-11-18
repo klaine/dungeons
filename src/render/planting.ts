@@ -57,6 +57,25 @@ export class Planting {
   }
 
   /** A tuft standing on the ground: grass, or flowers on their stems. Lit as the ground is. */
+  /**
+   * Grass grazed short where sheep feed: every tuft of grass (and, less, of flowers) within `r` of a flock's ground is cut down, the
+   * more the nearer its middle. (Left as it grew, the meadow stood knee-deep and hid the sheep in it.)
+   */
+  crop(flocks: { x: number; z: number; r: number }[]): void {
+    for (const [set, least] of [[this.grass, 0.32], [this.flowers, 0.55]] as const) {
+      const m = set.matrices;
+      for (let k = 0; k < m.length; k += 16) {
+        const x = m[k + 12], z = m[k + 14];
+        let keep = 1;
+        for (const f of flocks) {
+          const d = Math.hypot(x - f.x, z - f.z) / (f.r + 6);
+          if (d < 1) keep = Math.min(keep, least + (1 - least) * Math.max(0, (d - 0.75) / 0.25));
+        }
+        if (keep < 1) for (let c = 4; c < 8; c++) m[k + c] *= keep;
+      }
+    }
+  }
+
   tuft(set: CardSet, x: number, y: number, z: number, width: number, height: number, yaw: number, colour: Colour): void {
     M.compose(P.set(x, y, z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(width, height, width));
     this.push(set, colour, x, y - 1000, z);

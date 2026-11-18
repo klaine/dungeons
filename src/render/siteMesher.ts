@@ -62,6 +62,8 @@ export function meshSite(site: Site): SceneDescription {
   const places = site.places;
   const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint } = stoneStyles(site.setting.stone);
   const sky = SKIES[site.setting.hour];
+  // Where sheep graze, if anywhere: worked out with the planting of each kind of place.
+  let flockSpots: { x: number; z: number; r: number; count: number }[] | undefined;
 
   // ------------------------------------------------------------------ helpers
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
@@ -2611,6 +2613,19 @@ export function meshSite(site: Site): SceneDescription {
         }
       }
     }
+    // Sheep: a flock or two on the open ground of the valley, away from the house, the track, the paths, the woods and the water, on
+    // ground not too steep. (A valley of pasture with nothing on it to graze it was a lawn kept by nobody.)
+    {
+      const q = rng.fork('flocks'), want = q.chance(0.8) ? q.int(1, 2) : 0, out: { x: number; z: number; r: number; count: number }[] = [];
+      for (let tries = 0; tries < 400 && out.length < want; tries++) {
+        const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1);
+        if (!inGrounds(x, z, 10) || inHouse(x, z, 18) || offTrack(x, z) < 8 || offFoot(x, z) < 4 || shadeAt(x, z) > 0.12 || clearOfFeatures(x, z) < 8) continue;
+        if (waterOver(x, z, ground(x, z)) > -1 || slopeOf(ground, x, z, 3) > 0.25 || out.some((f) => Math.hypot(f.x - x, f.z - z) < 50)) continue;
+        out.push({ x, z, r: q.range(10, 18), count: q.int(3, 8) });
+      }
+      flockSpots = out;
+      planting.crop(out);
+    }
     // Nettles and docks: rank green growth on the enriched ground about a ruin.
     for (const f of ruins) {
       for (let k = 0; k < 70; k++) {
@@ -3367,6 +3382,7 @@ export function meshSite(site: Site): SceneDescription {
     censuses.push(made.planted);
     unders.push(...made.unders);
     birdSpots = made.birds;
+    flockSpots = made.flocks;
     beacon = made.lamp;
     flows.push(...made.streams);
     falls.push(...made.falls);
@@ -4038,6 +4054,7 @@ export function meshSite(site: Site): SceneDescription {
     ...(rockSharp !== undefined ? { rockSharp } : {}),
     ...(cloudDeck ? { deck: cloudDeck, snow: site.setting.season === 'winter' ? 1 : 0.24, snowLine: [approach.floor + 22, site.setting.season === 'winter' ? 0 : 0.4] as [number, number] } : {}),
     birds: birdSpots,
+    flocks: flockSpots,
     beacon,
     finds,
   };

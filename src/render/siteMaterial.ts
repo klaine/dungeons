@@ -380,6 +380,20 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
  * light bake, and left to themselves they would be lit by the open sky wherever they are, indoors
  * included. Here they get a faint fixed ambient instead, and otherwise only the real lights.
  */
+/**
+ * For what moves about out of doors, sheep and the like, which the bake knows nothing of: their colour per vertex (and per animal,
+ * if the mesh gives each its own), lit by the sun as everything is, and by the sky's light as the stand-in for the bake has it,
+ * more from above than below. Matt: wool and hide do not shine.
+ */
+export function makeCreatureMaterial(): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
+  // (The normal as each animal is turned, not as its mesh was made.)
+  const n: N = normalize((TSL as N).normalWorld);
+  // (Wool scatters light through itself: what faces away from the sky is not much darker than what faces it.)
+  lit(m, { irradiance: uFallback.mul(float(0.8).add(n.y.mul(0.2))).mul(1.9) });
+  return m;
+}
+
 export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({
     color: o.color, roughness: o.roughness, metalness: o.metalness,
