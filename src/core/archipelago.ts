@@ -96,12 +96,13 @@ export function islandFrame(s: { u: number; v: number; turn: number }, hx: numbe
  * from its middle, with a place on it where that ground can be levelled with little cut or fill, 18 to
  * 34 metres over the sea, well in from the cliffs, nearer one end of the island than its middle.
  */
-export function findIslands(a: Archipelago, w: number, d: number, radius: number, rng: Rng, why?: Record<string, number>): IslandSpot[] {
+export function findIslands(a: Archipelago, w: number, d: number, radius: number, rng: Rng, why?: Record<string, number>, seas?: number[]): IslandSpot[] {
   const no = (k: string) => { if (why) why[k] = (why[k] ?? 0) + 1; };
   const f = a.inner, nx = f.nx, nz = f.nz, cell = f.cell;
   // Sea levels to try: between the middle of the land's heights and its upper quarter, from the frame's own heights.
-  const sorted = Array.from(f.data).sort((p, q) => p - q);
-  const levels = Array.from({ length: 20 }, (_, k) => sorted[Math.floor(sorted.length * (0.4 + k * 0.026))]);
+  // (Unless the sea is given: in a world (`world.ts`) it stands at one level for every island.)
+  const sorted = seas ? [] : Array.from(f.data).sort((p, q) => p - q);
+  const levels = seas ?? Array.from({ length: 20 }, (_, k) => sorted[Math.floor(sorted.length * (0.4 + k * 0.026))]);
   const want = Math.PI * radius * radius, half = Math.min(w, d) / 2;
   const found: { spot: IslandSpot; score: number }[] = [];
   const label = new Int32Array(nx * nz), far = new Float32Array(nx * nz);
