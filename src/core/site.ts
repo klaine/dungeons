@@ -418,6 +418,12 @@ export interface Town {
   walls: { line: [number, number][]; gaps: [number, number][]; fallen: [number, number][]; height: number }[];
   /** The outlook on the headland beside the town: a level place at the cliff's edge, with a parapet towards the sea and a belvedere. */
   outlook?: { x: number; z: number; y: number; facing: number };
+  /**
+   * A great hall cut in the rock of a hill or a headland outside the town, of the same make as a mountain top's (see `Mountain`):
+   * where a cliff stands high over the sea, its windows look out through the cliff's face; deep in a hill it has none. Its stair comes
+   * down to it from a portal in the open ground, which a path leads to.
+   */
+  hall?: NonNullable<Mountain['hall']>;
 }
 
 /**

@@ -12,6 +12,7 @@ import { CardSet } from './scene';
 import { anyAngle, layBoat } from './coast';
 import { buildBuilding } from './buildings';
 import { layWall } from './walls';
+import { hallGeometry } from './greatHall';
 import type { IslandBuild, IslandResult } from './island';
 
 /**
@@ -116,6 +117,23 @@ export function buildTown(b: IslandBuild): IslandResult {
   // carved as the island's cliffs are, in tiles
   const strata = new Strata(rockKind, rng.fork('strata'), sea, { fold: 6, faults: 4, around: [(L.x0 + L.x1) / 2, (L.z0 + L.z1) / 2, 600] });
   const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
+  // The great hall in the rock, if the town has one, and the stair down to it: their air, as the mountain top's.
+  const H = t.hall, hallGeo = H ? hallGeometry(H) : null;
+  const hallAir = (x: number, y: number, z: number) => (hallGeo ? hallGeo.air(x, y, z) : -9);
+  const stairLine = H?.stair ?? [], stairBox = stairLine.length ? { x0: Math.min(...stairLine.map((p0) => p0[0])) - 6, x1: Math.max(...stairLine.map((p0) => p0[0])) + 6, z0: Math.min(...stairLine.map((p0) => p0[1])) - 6, z1: Math.max(...stairLine.map((p0) => p0[1])) + 6 } : null;
+  const stairAt = { x: NaN, z: NaN, off: Infinity, y: 0 };
+  const stairAir = (x: number, y: number, z: number): number => {
+    if (!stairBox || x < stairBox.x0 || x > stairBox.x1 || z < stairBox.z0 || z > stairBox.z1) return -9;
+    if (x !== stairAt.x || z !== stairAt.z) { stairAt.x = x; stairAt.z = z; const n = nearLine(stairLine, x, z); stairAt.off = n.off; stairAt.y = n.y; }
+    if (stairAt.off > 3.2) return -9;
+    const rough = (fbm3(x * 0.45, y * 0.45, z * 0.45, 2) - 0.5) * 0.4;
+    return Math.min(1.4 - stairAt.off + rough, y - stairAt.y, stairAt.y + 3.0 - (stairAt.off / 1.4) ** 2 * 0.8 - y + rough);
+  };
+  /** Whether a point across the ground is near the hall or its stair, so that the rock there is carved with them. */
+  const nearHall = (x: number, z: number, m: number) => {
+    if (hallGeo) { const { u, v } = hallGeo.inHall(x, z); if (u > -27 - m && u < hallGeo.frame.L + 4 + m && Math.abs(v) < hallGeo.frame.half + 22 + m) return true; }
+    return !!stairBox && x > stairBox.x0 - m && x < stairBox.x1 + m && z > stairBox.z0 - m && z < stairBox.z1 + m && nearLine(stairLine, x, z).off < 5 + m;
+  };
   const CELL = 0.4, SHEET = 1.2, TILE = 9.6;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(L.x0 + 4, true), x1: snap(L.x1 - 4, false), z0: snap(L.z0 + 4, true), z1: snap(L.z1 - 4, false) };
@@ -127,7 +145,7 @@ export function buildTown(b: IslandBuild): IslandResult {
       // (Nothing the town made is rock: not the harbour's quay or its dug basin, nor ground levelled under a building.)
       const zn = zoneAt(x, z);
       if (zn === Z.harbour || zn === Z.flags || zn === Z.built || zn === Z.street || zn === Z.quay) continue;
-      any = steepAt(x, z) && ground(x, z) > sea - 4;
+      any = (steepAt(x, z) && ground(x, z) > sea - 4) || nearHall(x, z, 0);
     }
     tiles[j * tilesX + i] = any ? 1 : 0;
   }
@@ -224,6 +242,7 @@ export function buildTown(b: IslandBuild): IslandResult {
     return (y - land.at(sx, sz)) / steepness.at(sx, sz);
   };
 
+  const landAir = density, carving = H ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), hallAir(x, y, z), stairAir(x, y, z)) : landAir;
   // ---- colours: the rock by the sea, the ground and what lies on it
   const outcrop: Colour = [0.5 + 0.5 * tint[0], 0.52 + 0.5 * tint[1], 0.56 + 0.5 * tint[2]];
   const blotSeed = rng.fork('blot').int(1, 9999);
@@ -241,6 +260,8 @@ export function buildTown(b: IslandBuild): IslandResult {
     mixC(c, [c[0] * 0.45, c[1] * 0.42, c[2] * 0.4], seep * 0.7);
     const patch = fbm3(q.x * 0.21 + 3, q.y * 0.35, q.z * 0.21, 3, blotSeed + 11), fleck = fbm3(q.x * 1.1, q.y * 1.1, q.z * 1.1, 2, blotSeed + 5);
     field[0] = Math.min(1, up * 0.6 + soft * 0.3 * (1 - open)); field[1] = 0;
+    // (In the hall and on its stair, under the rock, there are no bands of the tide, and the torches have sooted it.)
+    if (H && (hallAir(q.x, q.y, q.z) > -0.8 || stairAir(q.x, q.y, q.z) > -0.8)) { field[2] = 1; field[3] = 0.25 + 0.75 * rockKind.bedded; return c; }
     if (h < 0.2) { mixC(c, [0.05, 0.06, 0.035], 0.75); field[1] = 1; field[0] = 0.7; }
     else if (h < 1.6) { mixC(c, [c[0] * 0.45, c[1] * 0.45, c[2] * 0.42], 0.8); mixC(c, fleck > 0.5 ? [0.09, 0.075, 0.03] : [0.06, 0.06, 0.03], smooth((patch - 0.38) / 0.12) * (1 - smooth((h - 1.1) / 0.5))); field[1] = 1 - smooth((h - 0.8) / 0.8) * 0.5; }
     else if (h < 4.2) { mixC(c, [0.035, 0.035, 0.035], (1 - smooth((h - 2.6 - patch * 1.4) / 0.9)) * 0.8); field[1] = 0.25 * (1 - smooth((h - 2) / 1.5)); }
@@ -324,10 +345,12 @@ export function buildTown(b: IslandBuild): IslandResult {
     let lo = Infinity, hi = -Infinity;
     const REACH = 4.5;
     for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
-    carveRock(rockMesh, density, {
+    // (Deep enough for the hall's chasm, and for the stair where it runs under the tile.)
+    if (H && nearHall((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2, TILE)) lo = Math.min(lo, H.floor - H.chasm.depth - 2.5, ...stairLine.filter(([x, z]) => x > c.x0 - 6 && x < c.x1 + 6 && z > c.z0 - 6 && z < c.z1 + 6).map((p0) => p0[2] - 1.5));
+    carveRock(rockMesh, carving, {
       min: V(c.x0, Math.floor(Math.max(lo - 2, sea - 4.8) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((Math.max(hi, sea - 3) + 2.8) / CELL) * CELL, c.z1),
       cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
-      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 && at.y > sea + 0.6 ? screeMesh : turfMesh) : null),
+      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(H && (hallAir(at.x, at.y + 0.6, at.z) > 0 || (stairAir(at.x, at.y + 0.6, at.z) > 0 && ground(at.x, at.z) - at.y > 1.5))) ? (loose.at(at.x, at.z) > 0.3 && at.y > sea + 0.6 ? screeMesh : turfMesh) : null),
       shade: (q, n, field, other, open) => {
         if (other === turfMesh) { const col = turfAt(q.x, q.z, q.y); field[0] = lay.code; field[1] = lay.wet; field[2] = lay.bare; field[3] = lay.litter; return col; }
         if (other === screeMesh) return earth(q.x, q.z);
@@ -817,6 +840,54 @@ export function buildTown(b: IslandBuild): IslandResult {
     b.finds.push({ at: V(o.x, o.y + 1.4, o.z), what: 'the outlook on the headland: the town, its harbour and the coast laid out below' });
   }
 
+  // ---- the hall: steps down its stair and up the stair in its wall to the gallery; torches in brackets down its walls, its side halls
+  // and its stair where that is under the rock; fires in iron bowls either side of the bridge; a portal of dressed stone where the stair
+  // goes in under the ground; and something left in it.
+  const torches: IslandResult['torches'] = [];
+  if (H && hallGeo) {
+    const begun = new Map(['stone', 'metal'].map((mm) => [mm, mesh(mm).vertexCount]));
+    const f = hallGeo.frame, hat = (u: number, v: number, y: number) => V(f.ox + f.ux * u - f.uz * v, y, f.oz + f.uz * u + f.ux * v);
+    const steps = (line: [number, number, number][], width: number) => {
+      for (let k = 0; k + 1 < line.length; k++) {
+        const [ax, az, ay] = line[k], [bx, bz, by] = line[k + 1], run = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.ceil(Math.abs(by - ay) / 0.17));
+        if (run < 0.05) continue;
+        const at = frame(ax, az, 0, Math.atan2(bz - az, bx - ax));
+        for (let i = 0; i < n; i++) { const y = ay + ((by - ay) * (i + (by < ay ? 0 : 1))) / n; box(at, 'stone', -width / 2, width / 2, Math.min(ay, by) - 0.6, y, (run * i) / n - 0.01, (run * (i + 1)) / n + 0.01, shade(stone, 0.8 + 0.12 * ((i + k) % 3) / 2), 0.4); }
+      }
+    };
+    steps(stairLine, 2.3);
+    const gs = H.gallery.side, gl: [number, number, number][] = [];
+    for (let k = 0; k <= 12; k++) { const u = f.L - 3 - k * 2, v = gs * (f.half + 6), p0 = hat(u, v, H.floor + 11 * Math.min(1, (k * 2) / 24)); gl.push([p0.x, p0.z, p0.y]); }
+    steps(gl, 2.2);
+    const bracket = (pos: Vector3, out: Vector3) => { torches.push({ position: pos, out }); box(frame(pos.x - out.x * 0.12, pos.z - out.z * 0.12, pos.y - 0.28, Math.atan2(out.z, out.x)), 'metal', -0.025, 0.025, 0, 0.3, -0.025, 0.025, [0.14, 0.13, 0.12]); };
+    for (let u = 4; u < f.L - 2; u += 9) for (const side of [-1, 1]) {
+      if (Math.abs(u - H.chasm.at) < H.chasm.width / 2 + 1.5 || H.sides.some((sh) => sh.side === side && Math.abs(u - sh.at) < 4.5)) continue;
+      bracket(hat(u, side * (f.half - 0.6), H.floor + 3.2), V(f.uz * side, 0, -f.ux * side));
+    }
+    for (const end of [-1, 1]) {
+      const p0 = hat(H.chasm.at + end * (H.chasm.width / 2 + 1.8), 3.2, H.floor), at = frame(p0.x, p0.z, H.floor, 0);
+      box(at, 'stone', -0.4, 0.4, -0.1, 1.05, -0.4, 0.4, shade(stone, 0.7));
+      box(at, 'metal', -0.5, 0.5, 1.05, 1.27, -0.5, 0.5, [0.05, 0.045, 0.04]);
+      torches.push({ position: V(p0.x, H.floor + 1.2, p0.z), out: V(0, 1, 0), fire: 0.85 });
+    }
+    for (let u = 8.2; u < f.L - 7; u += 9) bracket(hat(u, gs * (f.half + 3.6), H.floor + 13.2), V(f.uz * gs, 0, -f.ux * gs));
+    for (const sh of H.sides) for (const e of [-sh.wide * 0.25, sh.wide * 0.25]) bracket(hat(sh.at + e, sh.side * (f.half + sh.long - 0.6), H.floor + 2.8), V(f.uz * sh.side, 0, -f.ux * sh.side));
+    for (let k = 4; k < stairLine.length - 2; k += 6) {
+      const [x, z, y] = stairLine[k], [nx2, nz2] = stairLine[k + 1], dx = nx2 - x, dz = nz2 - z, l = Math.hypot(dx, dz) || 1, px = -dz / l, pz = dx / l;
+      if (ground(x, z) - y < 4) continue;
+      torches.push({ position: V(x + px * 1.0, y + 1.9, z + pz * 1.0), out: V(-px, 0, -pz) });
+    }
+    const mouth = stairLine.findIndex(([x, z, y]) => ground(x, z) - y > 3.6);
+    if (mouth > 0) {
+      const [x, z, y] = stairLine[mouth], [px2, pz2] = stairLine[mouth - 1], at = frame(x, z, y, Math.atan2(z - pz2, x - px2));
+      for (const side of [-1, 1]) box(at, 'stone', side * 1.75 - 0.38, side * 1.75 + 0.38, -0.3, 3.25, -0.45, 0.45, shade(stone, 1.05));
+      box(at, 'stone', -2.2, 2.2, 3.2, 3.9, -0.5, 0.5, shade(stone, 1.1));
+    }
+    const last = H.sides[H.sides.length - 1];
+    if (last) { const p0 = hat(last.at, last.side * (f.half + last.long - 1.4), H.floor); b.finds.push({ at: V(p0.x, H.floor + 0.35, p0.z), what: 'an iron-bound coffer, its lid broken open, at the end of a side hall in the rock' }); }
+    for (const [mm, from] of begun) mesh(mm).setOpenBy((x, y, z) => (ground(x, z) - y > 2.5 ? 0.12 : 1), from);
+  }
+
   // ---- what grows: grass where nothing is built or paved, crops in the fields, trees in the woods and the orchards
   const planted = plantTown();
   function plantTown(): Record<string, number> {
@@ -931,7 +1002,11 @@ export function buildTown(b: IslandBuild): IslandResult {
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && reach[jj * nx + ii]) touches = true; }
       if (!touches) continue;
       const x = gx0 + i * C, z = gz0 + j * C;
-      b.fences.push({ min: V(x - C / 2, Math.min(sea - 8, worn(x, z) - 4), z - C / 2), max: V(x + C / 2, F + 140, z + C / 2) });
+      let floor = Math.min(sea - 8, worn(x, z) - 4);
+      // (Over the hall and its stair, above their roofs: whoever is in them walks under it.)
+      if (H && hallGeo) { const { u, v } = hallGeo.inHall(x, z); if (u > -27 && u < hallGeo.frame.L + 4 && Math.abs(v) < hallGeo.frame.half + 22) floor = Math.max(floor, H.floor + H.high + 2.5); }
+      if (stairLine.length) { const n = nearLine(stairLine, x, z); if (n.off < 3.5) floor = Math.max(floor, n.y + 4); }
+      b.fences.push({ min: V(x - C / 2, floor, z - C / 2), max: V(x + C / 2, F + 140, z + C / 2) });
     }
   }
 
@@ -952,7 +1027,7 @@ export function buildTown(b: IslandBuild): IslandResult {
   const sx = hx + ((px2 - hx) / ml) * 8, sz = hz + ((pz2 - hz) / ml) * 8;
   const look = { x: (t.square.x0 + t.square.x1) / 2 - sx, z: (t.square.z0 + t.square.z1) / 2 - sz };
   return {
-    torches: [],
+    torches,
     spawn: V(sx, lm.y + 1.75, sz),
     yaw: Math.atan2(-look.x, -look.z),
     track: [...(site.track ?? [])].reverse().slice(1, -1) as [number, number][],
@@ -974,7 +1049,11 @@ export function buildTown(b: IslandBuild): IslandResult {
     planted,
     lamp,
     streams: [], falls: [],
-    unders: [],
+    // (The hall and its stair are under the rock: no mist lies in them, nor any shadow of the sun or the clouds.)
+    unders: H && hallGeo ? [(() => {
+      const f = hallGeo.frame, pts = [[-27, -f.half - 22], [f.L + 4, -f.half - 22], [-27, f.half + 22], [f.L + 4, f.half + 22]].map(([u, v]) => [f.ox + f.ux * u - f.uz * v, f.oz + f.uz * u + f.ux * v]);
+      return { min: V(Math.min(...pts.map((p0) => p0[0])), H.floor - H.chasm.depth - 1, Math.min(...pts.map((p0) => p0[1]))), max: V(Math.max(...pts.map((p0) => p0[0])), H.floor + H.high + 2, Math.max(...pts.map((p0) => p0[1]))) };
+    })(), { min: V(stairBox!.x0, Math.min(...stairLine.map((p0) => p0[2])) - 1, stairBox!.z0), max: V(stairBox!.x1, Math.max(...stairLine.map((p0) => p0[2])) + 3, stairBox!.z1) }] : [],
     // Sheep in the pastures.
     flocks: (() => {
       const fq = rng.fork('flocks'), out: { x: number; z: number; r: number; count: number }[] = [];

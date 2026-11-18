@@ -783,6 +783,10 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     }
   }
 
+  // ---- the great hall in the rock: under the headland, its windows through the sea cliff, where the land stands high enough over
+  // the water; otherwise deep in the highest hill, without windows. Its stair comes down from a portal in the open ground.
+  layHall(t, F, rng.fork('hall'), nat, level);
+
   // ---- tracks out of the town: along the shore either way from the waterfront's ends, and up from the town's top to the fields
   // above it; and the path to the outlook. Routed over the land by least effort, as tracks are worn.
   {
@@ -805,6 +809,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       // (Its level: the land's, smoothed along it so that it climbs evenly.)
       const ys = line.map(([x, z]) => nat(x, z));
       const even = ys.map((_, k) => { let s = 0, n = 0; for (let d = -3; d <= 3; d++) { const v = ys[k + d]; if (v !== undefined) { s += v; n++; } } return s / n; });
+      // (And never steeper than a path can be, where smoothing has left a short steep stretch.)
+      for (let k = 1; k < even.length; k++) { const run = Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]); even[k] = Math.min(even[k - 1] + run * 0.45, Math.max(even[k - 1] - run * 0.45, even[k])); }
       t.streets.push({ line: line.map(([x, z], k) => [round(x), round(z), Math.round(Math.max(sea + 0.6, even[k]) * 100) / 100]), width, kind });
     };
     // Along the shore, from each end of the waterfront, as far as the land goes.
@@ -818,6 +824,13 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     const topStreet = t.streets.filter((s) => s.kind === 'street').reduce((m, s) => (Math.min(...s.line.map((p) => p[1])) < Math.min(...m.line.map((p) => p[1])) ? s : m), t.streets[0]);
     const top = topStreet.line.reduce((m, p) => (p[1] < m[1] ? p : m));
     route([top[0], top[1]], [top[0] + rng.fork('up').range(-80, 80), box.z0 + 60], 3.4, 'track');
+    // To the hall's portal, from the nearest end of a street or track.
+    if (t.hall) {
+      const [px, pz] = t.hall.stair[0];
+      let from: [number, number] = [qx, qz - apron / 2], fd = Infinity;
+      for (const s of t.streets) for (const p of [s.line[0], s.line[s.line.length - 1]]) { const d = Math.hypot(p[0] - px, p[1] - pz); if (d < fd) { fd = d; from = [p[0], p[1]]; } }
+      route(from, [px, pz], 2, 'path');
+    }
     // To the outlook, from the nearest end of a street or track.
     if (t.outlook) {
       let from: [number, number] = [qx, qz - apron / 2], fd = Infinity;
@@ -835,7 +848,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // From the door: down the stair, across the square, out along the quay to the root of the mole, and along it to its head.
   const mid = (t.stair.x0 + t.stair.x1) / 2;
   site.track = [[doorX, meadow.z0], [mid, meadow.z1 - 2], [mid, t.square.z1], [mid, qz - apron / 2], [lm.line[0][0], qz - apron / 2], ...lm.line.slice(1).map(([x, z]) => [x, z] as [number, number])].map(([x, z]) => [round(x), round(z)] as [number, number]);
-  site.paths = t.streets.filter((s) => s.kind === 'path').map((s) => ({ points: s.line.map(([x, z]) => [x, z] as [number, number]), to: 'summit' as const }));
+  site.paths = t.streets.filter((s) => s.kind === 'path').map((s) => ({ points: s.line.map(([x, z]) => [x, z] as [number, number]), to: t.hall && Math.hypot(s.line[s.line.length - 1][0] - t.hall.stair[0][0], s.line[s.line.length - 1][1] - t.hall.stair[0][1]) < 3 ? 'gallery' as const : 'summit' as const }));
 }
 
 // ---- for maps
@@ -865,4 +878,105 @@ export function coastLine(t: Town, floor: number, x0: number, x1: number, z0: nu
 /** A building's outline on the ground, wings and all, as polygons of the site's points. */
 export function outlineOf(b: Building): [number, number][][] {
   return footprintOf(b).map((r) => [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]].map(([u, v]) => fromBuilding(b, u, v)));
+}
+
+/**
+ * A great hall in the rock outside the town, laid out as a mountain top's is (`layHall` in `mountain.ts`), but found otherwise: first
+ * where the sea has cut a cliff high enough into a headland that a hall's vault can stand behind its face with rock over it, its
+ * windows cut through the face over the water; failing that, deep under the highest hill in the town's country, with no windows. Its
+ * stair comes down from a portal in the open ground, away from the town, at no more than one in two.
+ */
+function layHall(t: Town, F: number, rng: Rng, nat: (x: number, z: number) => number, level: Rect): void {
+  // (As large a hall as the rock will hold: the largest first, down to one just tall enough for its gallery.)
+  for (const [wide, high, long] of [[20, 21, 50], [18, 19, 42], [16, 17, 34]]) {
+    if (layHallOf(t, F, rng.fork(`hall${long}`), nat, level, round(wide + rng.range(-1, 1)), round(high + rng.range(0, 1)), round(long + rng.range(-4, 4)))) return;
+  }
+}
+function layHallOf(t: Town, F: number, rng: Rng, nat: (x: number, z: number) => number, level: Rect, WIDE: number, HIGH: number, LONG: number): boolean {
+  const L = t.land, sea = t.sea, ground = (x: number, z: number) => nat(x, z), SLOPE = 0.48;
+  void F;
+  const away = (x: number, z: number, m: number) => !t.blocks.some((b) => outsideRect(b, x, z) < m) && outsideRect(level, x, z) > m && !t.buildings.some((b) => outsideBuilt(b, x, z) < m) && !t.storehouses.some((q) => Math.hypot(q.x - x, q.z - z) < m + 6) && !t.shacks.some((q) => Math.hypot(q.x - x, q.z - z) < m);
+  const inLand = (x: number, z: number, m: number) => x > L.x0 + m && x < L.x1 - m && z > L.z0 + m && z < L.z1 - m;
+  type Try = { ox: number; oz: number; a: number; floor: number; windows: boolean; score: number };
+  const tries: Try[] = [];
+  // Rock enough over the hall and its side halls, for a hall whose window end is at (ox, oz), running in along bearing `a`.
+  const covered = (ox: number, oz: number, a: number, floor: number, long: number) => {
+    const ux = Math.cos(a), uz = Math.sin(a), at = (u: number, v: number): [number, number] => [ox + ux * u - uz * v, oz + uz * u + ux * v];
+    for (let u = 2; u <= long; u += 4) for (const v of [-WIDE / 2 - 2, 0, WIDE / 2 + 2]) { const [x, z] = at(u, v); if (!inLand(x, z, 30) || ground(x, z) < floor + HIGH + 3 || !away(x, z, 12)) return false; }
+    for (const side of [-1, 1]) for (let d = 0; d <= 14; d += 3.5) { const [x, z] = at(long * 0.5, side * (WIDE / 2 + d)); if (ground(x, z) < floor + 10) return false; }
+    return true;
+  };
+  // In a headland: along the coast, wherever the cliff stands high, a hall running in from its face.
+  for (let x = L.x0 + 60; x < L.x1 - 60; x += 6) {
+    let z = L.z1 - 40;
+    while (z > L.z0 + 40 && ground(x, z) < sea) z -= 1;
+    if (z <= L.z0 + 40 || ground(x, z - 8) < sea + HIGH + 4) continue;
+    if (inHarbour(t, x, z + 4) || Math.abs(x - (t.quay.x0 + t.quay.x1) / 2) < (t.quay.x1 - t.quay.x0) / 2 + 40) continue;
+    // (In along the land's rise from the face.)
+    const gx = ground(x + 6, z - 8) - ground(x - 6, z - 8), gz = ground(x, z - 2) - ground(x, z - 14);
+    const a = Math.atan2(-Math.abs(gz) - 0.3, gx * 0.6);
+    const floor = round(sea + rng.range(3.5, 6)), ox = x + Math.cos(a) * 1.5, oz = z + Math.sin(a) * 1.5;
+    // (The windows look out over the water, or at least over ground well below them.)
+    if (ground(ox - Math.cos(a) * 6, oz - Math.sin(a) * 6) > floor + 0.5) continue;
+    if (covered(ox, oz, a, floor, LONG)) tries.push({ ox, oz, a, floor, windows: true, score: ground(x, z - 8) - sea + rng.range(0, 6) });
+  }
+  // In a hill: under the highest ground in the country, with no windows, its floor deep enough.
+  if (!tries.length) for (let k = 0; k < 400; k++) {
+    const ox = rng.range(L.x0 + 80, L.x1 - 80), oz = rng.range(L.z0 + 80, L.z1 - 80), a = rng.range(0, Math.PI * 2);
+    const ux = Math.cos(a), uz = Math.sin(a);
+    let low = Infinity;
+    for (let u = 0; u <= LONG; u += 8) for (const v of [-WIDE / 2 - 2, WIDE / 2 + 2]) low = Math.min(low, ground(ox + ux * u - uz * v, oz + uz * u + ux * v));
+    const floor = round(low - HIGH - 5);
+    if (floor < sea + 2) continue;
+    if (covered(ox, oz, a, floor, LONG)) tries.push({ ox, oz, a, floor, windows: false, score: -floor * 0.1 + rng.range(0, 4) });
+  }
+  for (const best of tries.sort((p, q) => q.score - p.score).slice(0, 12)) {
+    const { ox, oz, a, floor } = best, ux = Math.cos(a), uz = Math.sin(a), at = (u: number, v: number): [number, number] => [ox + ux * u - uz * v, oz + uz * u + ux * v];
+    const [ix, iz] = at(LONG, 0);
+    // (Its chasm no deeper than to a metre over the sea: below that the sea's own face would show in it.)
+    const chasm = { at: round(LONG * rng.range(0.44, 0.54)), width: LONG < 40 ? 6 : 7, depth: round(Math.max(3, Math.min(14, floor - t.sea - 1))) };
+    const first: -1 | 1 = rng.chance(0.5) ? 1 : -1;
+    const sides: NonNullable<Town['hall']>['sides'] = [
+      { at: round(chasm.at * 0.45), side: first, long: round(rng.range(10, 14)), wide: round(Math.min(LONG * 0.22, rng.range(9, 11))) },
+      { at: round(chasm.at + (LONG - chasm.at) * 0.5), side: first === 1 ? -1 : 1, long: round(rng.range(10, 14)), wide: round(Math.min(LONG * 0.22, rng.range(9, 11))) },
+    ];
+    // A shaft of daylight down into a side hall, where open ground lies over it.
+    for (const sh of sides) { const [x, z] = at(sh.at, sh.side * (WIDE / 2 + sh.long / 2)); if (away(x, z, 14) && (!t.outlook || Math.hypot(t.outlook.x - x, t.outlook.z - z) > 14)) { sh.shaft = 2.2; break; } }
+    // The stair: from open ground, down to a turn beside the hall's near end, and from there in to it.
+    let done = false;
+    for (const turn of [-1, 1]) {
+      if (done) break;
+      const [tx, tz] = at(LONG + 6, turn * (WIDE / 2 + 6));
+      const options: { x: number; z: number; y: number; score: number }[] = [];
+      for (let k = 0; k < 24; k++) {
+        const b2 = a + ((k / 24) * 2 - 1) * (Math.PI / 1.6);
+        for (const run of [40, 50, 62, 76]) {
+          const sx = tx + Math.cos(b2) * run, sz = tz + Math.sin(b2) * run, sy = ground(sx, sz), total = run + Math.hypot(tx - ix, tz - iz);
+          if (!inLand(sx, sz, 40) || sy < sea + 2 || (sy - floor) / total > SLOPE || !away(sx, sz, 10)) continue;
+          if (Math.abs(ground(sx + Math.cos(b2) * 4, sz + Math.sin(b2) * 4) - sy) > 1.6) continue;
+          options.push({ x: sx, z: sz, y: sy, score: -run - Math.abs(k - 11.5) * 0.6 + rng.next() * 4 });
+        }
+      }
+      for (const o of options.sort((p, q) => q.score - p.score)) {
+        const legs: [number, number][] = [[o.x, o.z], [tx, tz], [ix, iz]];
+        const total = Math.hypot(tx - o.x, tz - o.z) + Math.hypot(ix - tx, iz - tz), stair: [number, number, number][] = [];
+        let walked = 0;
+        for (let leg = 0; leg < 2; leg++) {
+          const [ax, az] = legs[leg], [bx, bz] = legs[leg + 1], l = Math.hypot(bx - ax, bz - az), n = Math.max(2, Math.round(l / 2));
+          for (let i = leg ? 1 : 0; i <= n; i++) { const s = i / n, d = walked + l * s; stair.push([round(ax + (bx - ax) * s), round(az + (bz - az) * s), round(o.y + (floor - o.y) * (d / total))]); }
+          walked += l;
+        }
+        // (Never out of the ground on the way down, once it is under it; nor under anything built near the surface.)
+        if (stair.some(([x, z, y]) => !away(x, z, 3) && ground(x, z) - y < 8)) continue;
+        let under = false, bad = false;
+        for (const [x, z, y] of stair) { const cover = ground(x, z) - y; if (cover > 4) under = true; else if (under && cover < 3.2) bad = true; }
+        if (bad) continue;
+        t.hall = { out: [round(ox), round(oz)], in: [round(ix), round(iz)], floor, wide: WIDE, high: HIGH, long: LONG, stair, windows: best.windows ? [-WIDE * 0.32, 0, WIDE * 0.32].map(round) : [], chasm, sides, gallery: { side: first } };
+        done = true;
+        break;
+      }
+    }
+    if (done) return true;
+  }
+  return false;
 }

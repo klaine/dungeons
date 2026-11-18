@@ -240,6 +240,16 @@ for (let n = 0; n < townCount; n++) {
     const onMole = (x: number, z: number) => t.moles.some((m) => nearLine(m.line.map(([a, c]) => [a, c, 0] as [number, number, number]), x, z).off < m.width / 2 + 0.5);
     for (const [x, z] of site.track ?? []) if (ground(x, z) < t.sea + 0.3 && !onMole(x, z)) throw new Error(`the way to the door in the water at ${x}, ${z}`);
     for (const s of t.storehouses) if (ground(s.x, s.z) < t.sea + 0.5) throw new Error(`a storehouse in the water at ${s.x}, ${s.z}`);
+    // The hall's stair, if there is one: no gaps, no steeper than a stair, and it reaches the hall's floor.
+    if (t.hall) {
+      const st = t.hall.stair;
+      for (let k = 1; k < st.length; k++) {
+        const run = Math.hypot(st[k][0] - st[k - 1][0], st[k][1] - st[k - 1][1]), rise = Math.abs(st[k][2] - st[k - 1][2]);
+        if (run > 4.5 || rise > run * 0.55 + 0.1) throw new Error(`the hall's stair breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+      }
+      if (Math.abs(st[st.length - 1][2] - t.hall.floor) > 0.2) throw new Error("the hall's stair does not come down to its floor");
+    }
+    tally3(`hall=${t.hall ? (t.hall.windows.length ? 'windows' : 'deep') : 'none'}`);
     const kinds = (k: string) => t.buildings.filter((b) => b.style === k).length;
     tally3(`coast=${t.terrain.seed}`);
     tally3(`classical=${Math.round(kinds('imperial') / 5) * 5}`);
