@@ -433,20 +433,80 @@ function wornCountryAt(m: Mountain, floor: number, x: number, z: number): { y: n
   // (Near this mountain, from a finer lattice worn at its own scale, so that the faces nearest have their gullies and ribs; beyond
   // it, from the coarse one with the detail laid on. This mountain's own flanks are in them, its top on a lattice of its own.)
   const near = nearCountryOf(m, floor), top = fieldOf(m, floor);
-  const y = top.holds(x, z) ? landAt(m, floor, x, z, false) : near.holds(x, z) ? near.smoothAt(x, z) : countryDetailed(m, floor, x, z);
+  // (The rock of the great horns' faces is laid on as the land is read, after all the wearing: worn with the rest, the frost, which
+  // knocks back what is steeper than its faces already are, rubbed it away.)
+  const y = top.holds(x, z) ? landAt(m, floor, x, z, false) : (near.holds(x, z) ? near.smoothAt(x, z) : countryDetailed(m, floor, x, z)) + hornRelief(m, x, z, detailOctaves(m, x, z), m.terrain!.seed);
   const lake = m.deck - 610;
   return y < lake ? { y: lake, water: true } : { y, water: false };
+}
+
+/** How many octaves of detail the country is given at a point: seven near this mountain, down to a finest of ten metres; two and a half far off, where the mesh is a hundred metres coarse. */
+function detailOctaves(m: Mountain, x: number, z: number): number {
+  return Math.min(7, Math.max(2.5, 7 - Math.log2(Math.max(Math.hypot(x - m.x, z - m.z), 300) / 300)));
 }
 
 /** The coarse worn country with its detail laid on: in fewer octaves the further a point lies from this mountain. */
 function countryDetailed(m: Mountain, floor: number, x: number, z: number): number {
   const field = countryOf(m, floor), seed = m.terrain!.seed;
   const base = field.holds(x, z) ? field.smoothAt(x, z) : countryShape(m, floor, x, z);
-  const out = Math.hypot(x - m.x, z - m.z);
-  // (Seven octaves near, down to a finest of ten metres; two and a half far off, where the mesh is a hundred metres coarse.)
-  const octaves = Math.min(7, Math.max(2.5, 7 - Math.log2(Math.max(out, 300) / 300)));
   const rel = Math.max(0, base - (m.deck - 690));
-  return base + (12 + 0.05 * rel) * erodedFbmLod(x / 620 + 3.3, z / 620 - 1.1, octaves, seed + 77);
+  return base + (12 + 0.05 * rel) * erodedFbmLod(x / 620 + 3.3, z / 620 - 1.1, detailOctaves(m, x, z), seed + 77);
+}
+
+/** Where a point lies on the faces of the horn of the range's mountain `k`, as `hornFace` gives it. Reused, not made anew. */
+const FACE = { th: 0, th2: 0, ax: 1, az: 0 };
+/**
+ * Where a point lies on the faces of the horn of the range's mountain `k`: `th`, how far out on the face it is furthest out on
+ * (0 at the summit, 1 at the foot), and `th2` the same for the next face, so that where the two are nearly equal is an arête; and
+ * which way that face looks (`ax`, `az`). Its faces are planes, each cut back by the ice a distance of its own and turned a little
+ * from where an even pyramid would have it, so that no two are alike and the arêtes between them do not meet the summit at even
+ * angles; a point belongs to whichever face it is furthest out on, as on a solid cut by planes.
+ */
+function hornFace(m: Mountain, k: number, x: number, z: number, seed: number): typeof FACE {
+  const q = m.range[k], reach = q.r * 1.15, faces = 3 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
+  const px = x - q.x, pz = z - q.z, base = reach * 0.95 * Math.cos(sector / 2);
+  let th = -Infinity, th2 = -Infinity, ax = 1, az = 0;
+  for (let f = 0; f < faces; f++) {
+    const a = turn + f * sector + 0.3 * Math.sin(k * 4.1 + f * 2.3), cut = base * (0.84 + 0.28 * (0.5 + 0.5 * Math.sin(k * 7.3 + f * 3.7)));
+    const t = (px * Math.cos(a) + pz * Math.sin(a)) / cut;
+    if (t > th) { th2 = th; th = t; ax = Math.cos(a); az = Math.sin(a); } else if (t > th2) th2 = t;
+  }
+  FACE.th = th; FACE.th2 = th2; FACE.ax = ax; FACE.az = az;
+  return FACE;
+}
+
+/**
+ * The rock of a great horn's faces, in metres to add to the land: what makes a face of a real mountain, seen from a mile or two,
+ * a face of rock and not a smooth slope. Buttresses and ribs standing out, and gullies cut between them, running down the face as
+ * its fall line does, some tens of metres deep and a hundred or so apart, joining and parting as they go down; and the arêtes
+ * broken into towers and gaps. It is laid on after the country is worn, so that the lattices do not smooth it away, and in fewer
+ * octaves the further off a point lies (`octaves` is the country's own count there). (Without it a face held almost no relief
+ * finer than a hundred and fifty metres: a few metres across a face half a mile high, which reads as a cast, or as glass.)
+ */
+function hornRelief(m: Mountain, x: number, z: number, octaves: number, seed: number): number {
+  let best = 0, out = 0;
+  for (let k = 0; k < m.range.length; k++) {
+    const q = m.range[k];
+    if (q.height < 180) continue;
+    const reach = q.r * 1.15, dx = x - q.x, dz = z - q.z;
+    if (dx * dx + dz * dz > reach * reach * 1.7) continue;
+    const { th, th2, ax, az } = hornFace(m, k, x, z, seed);
+    if (th >= 1) continue;
+    // (The horn that stands highest over this point has it.)
+    const stands = (1 - th) * (q.height + 690);
+    if (stands <= best) continue;
+    best = stands;
+    const across = -dx * az + dz * ax, fall = dx * ax + dz * az, arete = 1 - smooth((th - th2) / 0.06);
+    const w = Math.min(150, Math.max(50, reach * 0.085)), face = smooth(th / 0.05) * smooth((1 - th) / 0.35);
+    // Ribs and gullies: ridged noise drawn out down the fall line, its lines warped so that they wander, join and part.
+    const u = across / w + 0.9 * fbmd(across / (w * 4) + k, fall / (w * 4), 2, seed + 61), v = fall / (w * 2.6);
+    const oct = Math.max(1, Math.min(4, Math.ceil(octaves - 2.5)));
+    const rib = ridgedFbm(u, v, oct, seed + 63);
+    // The arêtes: towers and gaps along them, as high as the ribs are deep.
+    const tower = ridgedFbm(fall / (w * 0.7) + k * 3.3, th2 * 3 + k, Math.min(3, oct), seed + 65);
+    out = face * ((rib - 0.42) * 0.9 * w * (1 - 0.7 * arete) + arete * (tower - 0.45) * 0.8 * w);
+  }
+  return out;
 }
 
 /**
@@ -479,17 +539,8 @@ function countryShape(m: Mountain, floor: number, x: number, z: number): number 
     // and not a needle either, its faces at forty-five degrees and more but not much more. Only the
     // mountains that stand well over the cloud have one; the rest are what the noise makes of them.)
     if (q.height < 180 || d > reach * 1.6) continue;
-    // Its faces are planes, each cut back by the ice a distance of its own and turned a little from where an even pyramid would have
-    // it, so that no two are alike and the arêtes between them do not meet the summit at even angles; the height is reckoned from
-    // whichever face a point is furthest out on, as a solid cut by planes is. Each face hollowed, steeper towards the summit.
-    const faces = 3 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
-    const px = x - q.x, pz = z - q.z, base = reach * 0.95 * Math.cos(sector / 2);
-    let th = -Infinity, th2 = -Infinity, ax = 1, az = 0;
-    for (let f = 0; f < faces; f++) {
-      const a = turn + f * sector + 0.3 * Math.sin(k * 4.1 + f * 2.3), cut = base * (0.84 + 0.28 * (0.5 + 0.5 * Math.sin(k * 7.3 + f * 3.7)));
-      const t = (px * Math.cos(a) + pz * Math.sin(a)) / cut;
-      if (t > th) { th2 = th; th = t; ax = Math.cos(a); az = Math.sin(a); } else if (t > th2) th2 = t;
-    }
+    // Its faces are planes of their own depth and turn (`hornFace`), each hollowed, steeper towards the summit.
+    const { th, th2, ax, az } = hornFace(m, k, x, z, seed), px = x - q.x, pz = z - q.z;
     if (th >= 1) continue;
     // Down each face, couloirs: gullies the rock falls and the snow slides down, running straight down the face as its fall line
     // does, a little wandering, a few to a face; cut deepest across the middle of the face, and fading out towards the summit,

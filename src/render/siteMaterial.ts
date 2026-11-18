@@ -678,6 +678,8 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   m.colorNode = vec4(mix(land.mul(mix(gullied, 1, snow.mul(0.7))), uFallback.mul(vec3(0.16, 0.24, 0.3)).add(vec3(0.012, 0.02, 0.028)), water), 1);
   m.roughnessNode = mix(float(1), 0.16, water);
   m.normalNode = transformNormalToView(normalize(mix(farN, vec3(0, 1, 0), water)));
-  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
+  // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
+  // field other materials use for damp. Sheets that do not reckon it say none.)
+  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
   return m;
 }

@@ -1394,11 +1394,66 @@ function plantMountain(c: MountainPlanting): Record<string, number> {
  * the far material reads for where rock gives way to snow: in winter everything over the cloud
  * is white but the steep faces; in summer only the high peaks keep their snow.
  */
+/** The range's sheet: points round each ring, and how far out from one ring the next lies. */
+const RANGE_AROUND = 1280;
+const rangeStep = (r: number) => 1 + r * 0.006;
+
+/**
+ * How far each point of the range lies in the shadow of the land between it and the sun, from 0 (in the sun) to 1. The sun's
+ * shadow map covers only the site; out here, without this, no ridge threw its shadow into the gully beside it, nor one peak on the
+ * next, and every face was lit only by which way it faced, smooth as a cast. The sun does not move, so it is reckoned once: from
+ * each point that stands over the cloud, along the ground towards the sun, rising as the sun's ray does, reading the range's own
+ * heights as it goes; the shadow's edge is softer the further off what throws it, as the sun's disc makes it.
+ */
+function shadeOfRange(site: Site, radii: number[], around: number, X: Float32Array, Z: Float32Array, H: Float32Array, from: number): Float32Array {
+  const m = site.mountain!, cx = m.x, cz = m.z, rings = radii.length, out = new Float32Array(rings * around);
+  const [sx0, sy0, sz0] = site.sun, flat = Math.hypot(sx0, sz0);
+  if (sy0 <= 0.02 || flat < 1e-4) return out;
+  const sx = sx0 / flat, sz = sz0 / flat, rise = sy0 / flat;
+  let top = -Infinity;
+  for (let q = 0; q < H.length; q++) if (H[q] > top) top = H[q];
+  /** The height of the range at a point, between its rings and round them; nothing beyond its last ring. */
+  const heightAt = (x: number, z: number): number => {
+    const r = Math.hypot(x - cx, z - cz);
+    if (r <= radii[0] || r >= radii[rings - 1]) return -Infinity;
+    let lo = 0, hi = rings - 1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (radii[mid] <= r) lo = mid; else hi = mid; }
+    const fr = (r - radii[lo]) / (radii[hi] - radii[lo]);
+    let fa = (Math.atan2(z - cz, x - cx) / (Math.PI * 2)) * around;
+    fa = ((fa % around) + around) % around;
+    const k0 = Math.floor(fa), k1 = (k0 + 1) % around, fk = fa - k0;
+    const a = H[lo * around + k0] + (H[lo * around + k1] - H[lo * around + k0]) * fk, b = H[hi * around + k0] + (H[hi * around + k1] - H[hi * around + k0]) * fk;
+    return a + (b - a) * fr;
+  };
+  for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
+    const q = ri * around + k;
+    if (H[q] < from) continue;
+    const x0 = X[q], z0 = Z[q], y0 = H[q] + 1.5;
+    let t = 0, seen = 1;
+    for (;;) {
+      const r = Math.hypot(x0 + sx * t - cx, z0 + sz * t - cz);
+      // (Steps a little under the lattice's own spacing where the ray is, and longer the further it has gone, since what it
+      // passes far off throws only a soft shadow.)
+      t += Math.max(2, 0.45 * Math.min((Math.PI * 2 * r) / around, rangeStep(r)), 0.015 * t);
+      const ray = y0 + rise * t;
+      if (ray > top || t > 5000) break;
+      const h = heightAt(x0 + sx * t, z0 + sz * t);
+      if (h === -Infinity) break;
+      seen = Math.min(seen, (ray - h) / (0.03 * t + 1.5));
+      if (seen <= 0) { seen = 0; break; }
+    }
+    out[q] = 1 - Math.max(0, Math.min(1, seen));
+  }
+  return out;
+}
+
 function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean): void {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
-  // (A notch finer than first made: half as many points again round each ring, and the rings closer.)
-  const around = 1280, radii: number[] = [];
-  for (let r = 60; r <= 6900; r += 1.8 + r * 0.011) radii.push(r);
+  // (A notch finer than first made: half as many points again round each ring. And the rings about as close as the points round
+  // them are far apart: twice as far apart, they drew a face looking this way, down which they run, in rows forty metres apart, and
+  // no rib or gully on it could be drawn.)
+  const around = RANGE_AROUND, radii: number[] = [];
+  for (let r = 60; r <= 6900; r += rangeStep(r)) radii.push(r);
   // (The land is the core's: `countryAt`. Here it is only drawn.)
   const wet = new Uint8Array(radii.length * around);
   const rings = radii.length, H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
@@ -1412,6 +1467,7 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
     H[q] = land.y; wet[q] = land.water ? 1 : 0;
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
+  const shade = shadeOfRange(site, radii, around, X, Z, H, deck - 45);
   const ids = new Int32Array(rings * around).fill(-1);
   const id = (ri: number, k: number) => {
     const q = at(ri, k);
@@ -1429,7 +1485,7 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
     // in it; in winter the woods are below a snow line some way down.)
     const up = H[q] - deck, h = winter ? (up > 0 ? 0.78 + up / 220 : 0.78 + up / 260) : (up > 0 ? 0.48 + up / 420 : 0.44 + up / 300);
     const r = 0.37 * (0.6 + 0.4 * stone[0]), gg = 0.37 * (0.6 + 0.4 * stone[1]), bl = 0.4 * (0.6 + 0.4 * stone[2]);
-    return (ids[q] = mesh.addVertex(X[q], H[q], Z[q], nx, ny, nz, X[q] * 0.012, Z[q] * 0.012, r, gg, bl, wet[q], 0, hollow, h));
+    return (ids[q] = mesh.addVertex(X[q], H[q], Z[q], nx, ny, nz, X[q] * 0.012, Z[q] * 0.012, r, gg, bl, wet[q], shade[q], hollow, h));
   };
   for (let ri = 0; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
     const qa = at(ri, k), qb = at(ri, k + 1), qc = at(ri + 1, k + 1), qd = at(ri + 1, k);
