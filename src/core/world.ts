@@ -147,8 +147,14 @@ function upliftAt(p: WorldPlan, x: number, z: number): number {
 
 /** How the land is lifted and worn: on a lattice of 24 metres, over some seven million years in steps of fifty thousand; rivers from two and a half hectares of ground draining. */
 export const LIFT = { cell: 24, steps: 140, dt: 5e4, k: 2.2e-5, m: 0.5, creep: 0.012, channel: 2.5e4 };
-/** How high the land is made to stand: so that the highest summits come to some six or seven hundred metres (the highest three in a thousand points at 650). */
-const TOP = 650;
+/**
+ * How high the land is made to stand: the highest three points in a thousand at `TOP`; then the ground
+ * over `STRETCH_FROM` raised, the more the higher, until the highest summit stands at `HIGHEST`. So the
+ * mountains rise higher over the fells and valleys they are seen from, and the coast, the low country
+ * and the fells stay as they were. ("Should the maximum mountain height be scaled to around 800m for
+ * more dramatic looks?" Raising every height alike made the fells steeper and rockier, and moved the places.)
+ */
+const TOP = 650, STRETCH_FROM = 250, HIGHEST = 800;
 
 /**
  * How far the sea has come up over the land since it was made: nothing inland of the coast, more out
@@ -419,11 +425,16 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
     g.data[k] = outlet[k] ? 0 : 1 + Math.max(0, d0) * 0.002 + 3 * (0.5 + fbmd(x / 600, z / 600, 3, p.n + 86));
   }
   liftAndErode(g, uplift, outlet, LIFT);
-  // (Brought to the height wanted: the highest three points in a thousand at `TOP`. Every height in the same proportion, so the
-  // rivers' courses and the falls along them stay as they were made.)
+  // (Brought to the height wanted: the highest three points in a thousand at `TOP`, every height in the same proportion, so the
+  // rivers' courses and the falls along them stay as they were made; then the mountains raised, the ground over `STRETCH_FROM` the
+  // more the higher it stands, until the highest summit is at `HIGHEST`. Raising only ever adds, the more the higher, so nothing
+  // that drained stops draining.)
   {
     const sorted = Float32Array.from(g.data).sort(), top = sorted[Math.floor(sorted.length * 0.997)], scale = TOP / Math.max(1, top);
-    for (let k = 0; k < g.data.length; k++) g.data[k] *= scale;
+    let high = 0;
+    for (let k = 0; k < g.data.length; k++) { g.data[k] *= scale; high = Math.max(high, g.data[k]); }
+    const over = Math.max(1e-6, Math.pow((high - STRETCH_FROM) / 400, 1.5)), raise = Math.max(0, (HIGHEST - high) / over);
+    for (let k = 0; k < g.data.length; k++) if (g.data[k] > STRETCH_FROM) g.data[k] += raise * Math.pow((g.data[k] - STRETCH_FROM) / 400, 1.5);
   }
   lap('lift');
   yield 'Shaping the land';
@@ -761,7 +772,6 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
       }
     }
     if (joined) { no('joined to higher over the cloud'); continue; }
-    if (y > 700) { no('too high'); continue; }
     let low = Infinity;
     for (let a = 0; a < 24; a++) for (const r of [700, 900, 1100]) low = Math.min(low, f.at(x + Math.cos((a / 24) * TAU) * r, z + Math.sin((a / 24) * TAU) * r));
     if (y - low < 180) { no('not standing high'); continue; }
@@ -779,7 +789,7 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
         if (t <= 400) for (const side of [-1, 1]) sides = Math.min(sides, ly - f.smoothAt(lx - cz * side * 100, lz + cx * side * 100));
       }
       const fallen = y - prev;
-      if (!ok || sides < 6 || fallen < 40 || fallen > 260) continue;
+      if (!ok || sides < 6 || fallen < 40 || fallen > 320) continue;
       const score = Math.min(sides, 60) / 20 - Math.abs(fallen - 130) / 60;
       if (!best || score > best.score) best = { angle: a, score };
     }

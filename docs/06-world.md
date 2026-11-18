@@ -3,7 +3,7 @@
 A world is one stretch of country, six kilometres east and west by ten from the sea to the hills (its
 size is a setting: `?size=8x8` on the world page, `SIZE=8x8` before `tools/world.ts`), in which every
 kind of place is found rather than drawn, as many as the land holds up to four of each: islands in its sea, valley heads in its upland, mountain tops in its
-range, and later other kinds in its low country. Its hills are four to six hundred metres high. Each
+range, and later other kinds in its low country. Its mountains stand up to 800 metres. Each
 place keeps its own detailed land, made when someone goes there; the world is what lies between
 them and round about them, and what is seen from them.
 
@@ -64,11 +64,16 @@ place asks for it.
   only along the lattice's eight ways and the ridges came out squared to them); a river wears only where
   two and a half hectares or more drain through, and above that it is hillside, which only creeps (wearing
   every point, the hillsides were cut into combs of gullies). Then every height is brought in proportion
-  so that the highest three points in a thousand stand at 650 metres.
+  so that the highest three points in a thousand stand at 650 metres; and then the mountains are raised,
+  the ground over 250 metres the more the higher it stands (as the cube of the square root of its height
+  over that), until the highest summit stands at 800, so that the coast, the low country and the fells
+  stay as they were and only the mountains rise higher over them ("should the maximum mountain height be
+  scaled to around 800m for more dramatic looks?"; raising every height alike, tried, made the fells a
+  quarter steeper and rockier and moved the places found).
 
   | Zone | How fast it rises | What comes of it |
   |---|---|---|
-  | Range | 0.6 to 1.6 millimetres a year, more in some stretches, so its mountains stand in massifs | branching valleys and sharp ridges; summits 550 to 730 m, the floors of its valleys 100 to 250 |
+  | Range | 0.6 to 1.6 millimetres a year, more in some stretches, so its mountains stand in massifs | branching valleys and sharp ridges; summits 650 to 800 m, the highest at 800, the floors of its valleys 100 to 250 |
   | Upland | about 0.3, uneven | fells cut by the range's rivers and their own; tops 250 to 400 |
   | Low country | about 0.07 | gentle ground the rivers cross, 0 to 80 m |
   | Shelf | 0.03, and more in patches at two sizes, some 700 and 260 metres across | the patches rise into hills, which the sea leaves as an archipelago, islands of every size |
