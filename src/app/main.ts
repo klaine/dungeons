@@ -25,6 +25,7 @@ import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
+import { tileGeometry } from '../render/geom/tiles';
 import { Water } from '../render/water';
 import { Sea, swellAt } from '../render/sea';
 import { Birds } from '../render/birds';
@@ -321,6 +322,8 @@ async function start(): Promise<void> {
   // whole sky, written into the same attributes the bake fills for everything else.
   const scenic: Mesh[] = [];
   const solidScenery: Mesh[] = [];
+  // How large the tiles are that what lies beyond the site is cut into, in metres; `?tiles=0` leaves each material one mesh, as it was.
+  const tiling = num('tiles', 64);
   for (const [key, builder] of desc.scenery?.meshes ?? []) {
     // Keyed as the site's own meshes are, by group and material.
     const material = key.split('|').pop()!;
@@ -342,17 +345,23 @@ async function start(): Promise<void> {
       for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * open, 0, (Math.PI / 2) * L[c] * 0.8 * open, 0);
       bk.setXY(i, open, 0.6);
     }
-    const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
-    mesh.name = `scenery:${material}`;
-    mesh.userData.group = key.split('|')[0];
-    mesh.receiveShadow = true;
-    // (Glass throws no shadow: the sun comes in at windows.)
-    mesh.castShadow = material !== 'glass' && material !== 'window';
-    mesh.matrixAutoUpdate = false;
-    scene.add(mesh);
-    scenic.push(mesh);
-    // Twigs, roots and low boughs are drawn but stop nobody.
-    if (!key.startsWith('soft|')) solidScenery.push(mesh);
+    // (Cut into tiles of the ground, so that what is out of view is left out of the frame: see `tileGeometry`. Not a boat, which
+    // rides the swell as one; and the far country in larger tiles, as it reaches some kilometres.)
+    const group = key.split('|')[0], box = geometry.boundingBox!, reach = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+    const pieces = /^boat/.test(group) || !tiling ? [geometry] : tileGeometry(geometry, Math.max(tiling, reach / 12));
+    for (const piece of pieces) {
+      const mesh = new Mesh(piece, materials[material] ?? materials.stone);
+      mesh.name = `scenery:${material}`;
+      mesh.userData.group = group;
+      mesh.receiveShadow = true;
+      // (Glass throws no shadow: the sun comes in at windows.)
+      mesh.castShadow = material !== 'glass' && material !== 'window';
+      mesh.matrixAutoUpdate = false;
+      scene.add(mesh);
+      scenic.push(mesh);
+      // Twigs, roots and low boughs are drawn but stop nobody.
+      if (!key.startsWith('soft|')) solidScenery.push(mesh);
+    }
   }
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
@@ -983,7 +992,7 @@ async function start(): Promise<void> {
   // In a software-rendered test run, drawing starves the bake workers; this draws rarely until the bake is done.
   const bakeFirst = params.has('bakefirst');
   let last = performance.now();
-  let frames = 0, fpsAt = last;
+  let frames = 0, fpsAt = last, drawn = 0;
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
 
   const frame = (now: number) => {
@@ -1127,6 +1136,11 @@ async function start(): Promise<void> {
     }
 
     frames++;
+    // (The sun's shadow is drawn once, not every frame; but the first frames are drawn while the graphics card is still preparing
+    // what it draws with, which it does only once something asks to draw with it, and whatever is not ready is left out of the
+    // shadow. At an evening hour that was the hills' long shadow over a whole town. So it is drawn again every thirty frames over
+    // the first six hundred, by when all of it is ready.)
+    if (++drawn <= 600 && drawn % 30 === 2) sun.shadow.needsUpdate = true;
     if (now - fpsAt > 500) {
       document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
       frames = 0;
@@ -1365,6 +1379,8 @@ async function start(): Promise<void> {
     // (The renderer draws the scene once to a frame of the browser's, however often it is asked; a capture is a frame of its own.)
     const fresh = () => (renderer as any)._nodes?.nodeFrame?.update();
     fresh();
+    // (And a picture draws the sun's shadow afresh, so that one taken soon after the start does not miss what was not ready.)
+    sun.shadow.needsUpdate = true;
     if (pose) {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
       // Let the torch lights finish moving to the new position before the picture is taken.
