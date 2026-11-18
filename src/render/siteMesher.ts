@@ -2470,7 +2470,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         tree(x, z, f(x, z), Math.max(0, 1 - out / 50));
       }
     };
-    const inFine = (x: number, z: number) => x > fine.x0 && x < fine.x1 && z > fine.z0 && z < fine.z1;
+    // (Where the woods beyond the valley begin: the fine sheet's area as it lies for a cell of 1.2, whatever the cell, so that a finer
+    // sheet changes the ground and nothing that grows on it.)
+    const near = { x0: snap(g.x0 - 34, false), x1: snap(g.x1 + 34, true), z0: snap(Math.min(houseZ0 - 40, g.z0 - 34), false), z1: snap(g.z1 + 34, true) };
+    const inFine = (x: number, z: number) => x > near.x0 && x < near.x1 && z > near.z0 && z < near.z1;
     // An island carries a tree of its own: a pine or a spruce, small, as trees are on a rock in the water.
     for (const f of ponds) {
       if (!f.isle) continue;
