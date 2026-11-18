@@ -6,7 +6,7 @@ import { Namer } from './names';
 
 /**
  * A world: one stretch of country, six kilometres by ten unless asked otherwise (`WORLD_SIZE`), in
- * which every kind of place is found rather than drawn, four of each. From the sea's side: open sea; a shelf with islands on it; the
+ * which every kind of place is found rather than drawn: up to four of each, as many as the land holds. From the sea's side: open sea; a shelf with islands on it; the
  * coast; low country of fields and woods; an upland cut by glens; and at the back a high range,
  * with a few great peaks standing over it. One sea level for all of it, heights in metres over
  * the sea. Its mountains are hills of four to six hundred metres, its great peaks a little over that:
@@ -54,12 +54,6 @@ export interface WorldPlan {
   /** The great peaks of the range: the landmarks, seen from everywhere. */
   peaks: { x: number; z: number; r: number; height: number }[];
   /**
-   * Summits planned in the range for mountain tops, as the islands are on the shelf: where each stands, how broad and how high, and
-   * which way its ridge runs down (an angle from east towards south). (The range is narrow in a world this size, and of the
-   * summits its noise makes few stand alone with a ridge to come up by.)
-   */
-  tops: { x: number; z: number; r: number; height: number; spur: number }[];
-  /**
    * A great bay, the coast pushed inland: where its middle lies along the coast (metres from the
    * world's middle, eastward when inland is north), how broad it is at its mouth, and how far inland
    * it reaches.
@@ -67,12 +61,6 @@ export interface WorldPlan {
   bay: { at: number; width: number; depth: number };
   /** The shelf's islands: how far its land is lowered to stand at the sea (`sea`), and lowered further towards the shelf's outer edge (`fall`). */
   isles: { sea: number; fall: number };
-  /**
-   * Islands planned on the shelf, as the great peaks are in the range: where each stands, how far its coast lies from its
-   * middle, how high it stands over the sea, and how it is drawn out and turned. (The shelf's own noise makes islets by the
-   * hundred at one sea level, but few of the size a house's island is: the islands' frames find theirs by trying twenty levels.)
-   */
-  islands: { x: number; z: number; r: number; top: number; squash: number; turn: number; lobe: number; hill: number }[];
   /** Fjords, where the coast is high ground: how deeply they are cut (0 to 1), and how far inland of the coast they run. */
   fjords: { strength: number; reach: number };
 }
@@ -94,23 +82,14 @@ export function planWorld(seed: string, size: { x: number; z: number } = WORLD_S
     coast: -span + 800 * k + shelf, shelf,
     // (Broad in some worlds, a strip in others, and in places none at all: there the upland comes down to the sea.)
     // (The range takes what is left, some third of the world: with more, it filled half of it and the rest was squeezed.)
-    plains: q.range(600, 1800) * k, upland: q.range(2400, 3200) * k, peaks: [], tops: [],
-    bay: { at: 0, width: 0, depth: 0 }, fjords: { strength: 0, reach: 0 }, isles: { sea: ISLE_SEA, fall: 50 }, islands: [],
+    plains: q.range(600, 1800) * k, upland: q.range(2400, 3200) * k, peaks: [],
+    bay: { at: 0, width: 0, depth: 0 }, fjords: { strength: 0, reach: 0 }, isles: { sea: ISLE_SEA, fall: 50 },
   };
   // The bay: somewhere along the coast, not hard by the world's edge; broad, and reaching well inland, past the low country into
   // the upland, where its sides and its head are fjord coast. (From a stream of its own, so the rest of the plan stays as it was.)
   const b = rng.fork('bay');
   p.bay = { at: Math.round(b.range(-0.4, 0.4) * hx), width: Math.round(Math.min(b.range(1500, 2500), hx * 0.8)), depth: Math.round(b.range(1800, 3000) * k) };
   p.fjords = { strength: Math.round(b.range(0.6, 1) * 100) / 100, reach: Math.round(b.range(900, 1800)) };
-  // The planned islands: seven to nine, out on the shelf, in from the world's edge and well apart.
-  const il = rng.fork('islands'), wantIsles = il.int(7, 9);
-  for (let tries = 0; tries < 900 && p.islands.length < wantIsles; tries++) {
-    const x = il.range(-hx + 500, hx - 500), z = il.range(-hz + 500, hz - 500), zn = zonesAt(p, x, z);
-    if (zn.d0 > -0.12 * p.shelf || zn.d0 < -0.75 * p.shelf) continue;
-    const r = il.range(150, 210);
-    if (p.islands.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.6 + 250)) continue;
-    p.islands.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), top: Math.round(il.range(34, 52)), squash: Math.round(il.range(0.6, 0.95) * 100) / 100, turn: Math.round(il.range(0, Math.PI) * 100) / 100, lobe: Math.round(il.range(0, Math.PI * 2) * 100) / 100, hill: Math.round(il.range(0, Math.PI * 2) * 100) / 100 });
-  }
   // The great peaks: one to three, well back in the range and well apart.
   const g = rng.fork('peaks'), want = g.int(1, 3);
   for (let tries = 0; tries < 600 && p.peaks.length < want; tries++) {
@@ -119,16 +98,6 @@ export function planWorld(seed: string, size: { x: number; z: number } = WORLD_S
     const r = g.range(300, 450);
     if (p.peaks.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.15)) continue;
     p.peaks.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), height: Math.round(g.range(650, 800)) });
-  }
-  // The planned summits: five, in the range, clear of the great peaks and of one another, each with its ridge running down towards
-  // the coast, more or less, where the way up would come from.
-  const tp = rng.fork('tops');
-  for (let tries = 0; tries < 900 && p.tops.length < 5; tries++) {
-    const x = tp.range(-hx + 450, hx - 450), z = tp.range(-hz + 450, hz - 450), zn = zonesAt(p, x, z);
-    if (zn.d0 - zn.U < 250) continue;
-    const r = tp.range(240, 320);
-    if (p.peaks.some((o) => Math.hypot(o.x - x, o.z - z) < o.r * 1.6 + r + 300) || p.tops.some((o) => Math.hypot(o.x - x, o.z - z) < 1000)) continue;
-    p.tops.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), height: Math.round(tp.range(480, 600)), spur: Math.round((p.inland + Math.PI + tp.range(-1, 1)) * 100) / 100 });
   }
   return p;
 }
@@ -177,7 +146,7 @@ export const ISLE_SEA = 24;
 /** The shelf: the archipelago's land (`archipelago.ts`), standing in the world's sea, lower and sparser further out, and beyond it the open sea. */
 function islesAt(p: WorldPlan, x: number, z: number, d: number, fine: boolean): number {
   const n = p.n;
-  // (The shelf, the islands and the hills on them, as the archipelago has them; then lowered to the sea, and the planned islands.)
+  // (The shelf, the islands and the hills on them, as the archipelago has them; then lowered to the sea.)
   const shelf = fbmd(x / 1500 + 1.3, z / 1500 - 0.7, 3, n + 11);
   const wu = x / 520 + 0.45 * fbmd(x / 700, z / 700, 3, n + 12), wv = z / 520 + 0.45 * fbmd(x / 700 + 5.2, z / 700, 3, n + 13);
   const isles = fbmd(wu, wv, fine ? 5 : 4, n + 14);
@@ -186,23 +155,6 @@ function islesAt(p: WorldPlan, x: number, z: number, d: number, fine: boolean): 
   h += 18 * Math.min(1.4, up) * (r - 0.25);
   const out = clamp01(-d / p.shelf);
   h = h - p.isles.sea - p.isles.fall * out * out - 60 * smooth((-d - p.shelf) / 600);
-  // The planned islands: a cliffed coast, a broad shoulder at the height a house stands at on an island, a hill on it; the coast
-  // wandering, so no two are alike and none is a ring.
-  for (const q of p.islands) {
-    const dx = x - q.x, dz = z - q.z;
-    if (Math.abs(dx) > q.r * 2 || Math.abs(dz) > q.r * 2) continue;
-    const c = Math.cos(q.turn), sn = Math.sin(q.turn), a = (dx * c + dz * sn) / q.r, b = (-dx * sn + dz * c) / (q.r * q.squash);
-    // (A lobe pushed out on one side, and the coast worn into points and coves at two sizes: an oval with a ring round it, drawn
-    // first, looked like an egg in a pan.)
-    const la = Math.cos(q.lobe) * 0.75, lb = Math.sin(q.lobe) * 0.75 * q.squash, lobe = Math.hypot(a - la, b - lb) / 0.55;
-    const rr = Math.min(Math.hypot(a, b), lobe) * (1 + 0.22 * fbmd(x / 160 + q.x, z / 160, 3, n + 16) + 0.12 * fbmd(x / 45, z / 45 + q.z, 2, n + 18));
-    if (rr > 1.45) continue;
-    // (Its hill stands off to one side, as on the islands' own frames, where the house's shoulder is towards one end.)
-    const hr = Math.hypot(a - Math.cos(q.hill) * 0.35, b - Math.sin(q.hill) * 0.35 * q.squash);
-    const land = -14 + (q.top + 14) * smooth((1.06 - rr) / 0.22) * (0.62 + 0.38 * smooth((0.6 - hr) / 0.55)) + 3 * fbmd(x / 90, z / 90, fine ? 4 : 2, n + 17);
-    const w = smooth((1.45 - rr) / 0.35);
-    h = h * (1 - w) + land * w;
-  }
   return h;
 }
 
@@ -270,16 +222,6 @@ function rangeAt(p: WorldPlan, x: number, z: number, d: number, U: number, fine:
     big = softMax(big, (q.height - fl - 110) * e, 60);
     mass = Math.max(mass, e);
   }
-  // The planned summits: a mass as the great peaks have, drawn out down the way its ridge runs, so the ridge falls gently that way.
-  let calm = 0;
-  for (const q of p.tops) {
-    const dx = x - q.x, dz = z - q.z;
-    if (dx * dx + dz * dz > q.r * q.r * 12) continue;
-    const along = dx * Math.cos(q.spur) + dz * Math.sin(q.spur), across = -dx * Math.sin(q.spur) + dz * Math.cos(q.spur);
-    const tt = Math.hypot(along / (along > 0 ? 2.4 : 1), across / 0.8) / q.r * (1 + 0.25 * fbmd(x / 200 + q.x * 1e-3, z / 200, 2, n + 47)), e = Math.exp(-tt * tt);
-    big = softMax(big, (q.height - fl - 110) * e, 60);
-    mass = Math.max(mass, e); calm = Math.max(calm, e);
-  }
   // (The great valleys broad-floored, as ice leaves them; the side valleys branching, as the upland's glens do.)
   const great = Math.max(mass, valleyLines(p, x, z, 1300, 1.2, n + 46));
   const su = x / 400 + 0.45 * fbmd(x / 520 - 3.3, z / 520, 3, n + 50), sv = z / 400 + 0.45 * fbmd(x / 520, z / 520 + 6.1, 3, n + 51);
@@ -288,9 +230,7 @@ function rangeAt(p: WorldPlan, x: number, z: number, d: number, U: number, fine:
   const crest = ridgedFbm(u, v, fine ? 7 : 5, n + 44);
   // (Along each ridge between valleys, massifs and the cols between them.)
   const massif = Math.max(mass, clamp01(0.5 + 1.2 * fbmd(x / 900 + 5.1, z / 900 - 2.3, 3, n + 53)));
-  // (On a planned summit's mass the side valleys and the crests are quieter, so that its ridge comes down whole and is not notched
-  // across by them; a way could not come up it otherwise.)
-  return fl + big * great * (0.45 + 0.55 * massif) + 130 * side * Math.sqrt(great) * (1 - 0.8 * calm) + 35 * crest * great * (1 - 0.5 * calm);
+  return fl + big * great * (0.45 + 0.55 * massif) + 130 * side * Math.sqrt(great) + 35 * crest * great;
 }
 
 /** How far apart the upland's straths lie, which the fjords follow down to the sea. */
