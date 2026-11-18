@@ -406,6 +406,9 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
 
   // ---- boats, drawn up on the beach or riding in the cove
   o.boats.forEach((bt, n) => {
+    // (A boat riding in the cove is a mesh of its own, `boat` and its number, so that it can rise and fall with the swell.)
+    const was = wild.group;
+    if (bt.afloat) wild.group = `boat${n}`;
     const q = rng.fork(`boat${n}`), L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
     const y = bt.afloat ? sea - depth * 0.45 : c.ground(bt.x, bt.z) + 0.08;
     const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
@@ -438,6 +441,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
       const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
       solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
     }
+    wild.group = was;
   });
 
   // ---- the lighthouse

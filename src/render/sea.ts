@@ -32,6 +32,18 @@ const one = (x: N): N => float(1).sub(x);
  */
 const SWELL: [number, number, number, number][] = [[0.11, 0.05, 1.08, 0.42], [-0.04, 0.13, 1.13, 0.3], [0.21, -0.12, 1.55, 0.1]];
 
+/**
+ * The swell at a point at a time, as the sea's surface is lifted by it (see `positionNode` below): how high it stands there, and
+ * how steeply it slopes across x and across z. For whatever floats on it. `depth` is how deep the water is there: the swell is
+ * lower where it is shallow, as the surface's is.
+ */
+export function swellAt(x: number, z: number, time: number, depth: number): { h: number; dx: number; dz: number } {
+  const k = Math.min(1, Math.max(0, depth / 3)), scale = (k * k * (3 - 2 * k)) * 0.6 + 0.4;
+  let h = 0, dx = 0, dz = 0;
+  for (const [kx, kz, w, a] of SWELL) { const ph = x * kx + z * kz - time * w; h -= Math.cos(ph) * a; dx += Math.sin(ph) * a * kx; dz += Math.sin(ph) * a * kz; }
+  return { h: h * scale, dx: dx * scale, dz: dz * scale };
+}
+
 export class Sea {
   readonly mesh: Mesh;
   private readonly material = new NodeMaterial();

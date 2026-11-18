@@ -2,7 +2,7 @@ import {
   ACESFilmicToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
   Material, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Ray, Scene, SRGBColorSpace,
-  Vector2, Vector3,
+  Vector2, Vector3, Matrix4, Quaternion,
 } from 'three';
 import { CubeRenderTarget, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { rtt } from 'three/tsl';
@@ -26,7 +26,7 @@ import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { Water } from '../render/water';
-import { Sea } from '../render/sea';
+import { Sea, swellAt } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
 import { Rain, Snowfall } from '../render/rain';
@@ -340,6 +340,7 @@ async function start(): Promise<void> {
     }
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.name = `scenery:${material}`;
+    mesh.userData.group = key.split('|')[0];
     mesh.receiveShadow = true;
     // (Glass throws no shadow: the sun comes in at windows.)
     mesh.castShadow = material !== 'glass' && material !== 'window';
@@ -400,6 +401,17 @@ async function start(): Promise<void> {
     foam: [0, 1, 2].map((c) => 0.55 * SKY.horizon[c] + 0.1 * SUN_COLOR.toArray()[c] * SUN_INTENSITY),
   }) : null;
   if (sea) { scene.add(sea.mesh); scenic.push(sea.mesh); }
+  // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
+  // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
+  const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
+  if (sea && site?.island) {
+    const isle = site.island;
+    scene.traverse((m) => {
+      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? isle.boats[Number(n[1])] : undefined;
+      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: isle.sea });
+    });
+  }
+  const floatTilt = new Quaternion(), floatUp = new Vector3(0, 1, 0), floatN = new Vector3(), floatTurn = new Matrix4(), floatBack = new Matrix4();
   // Gulls over the cliffs, white in the light of the hour.
   // (Over a mountain they are choughs, black against the cloud.)
   const birds = desc.birds?.length ? new Birds(desc.birds, seed, desc.deck ? 0.04 : SUN_INTENSITY * 0.55 + 0.4, desc.birdKind) : null;
@@ -1041,6 +1053,13 @@ async function start(): Promise<void> {
     cullCards(cardMeshes, camera.position);
     water.update(time, camera);
     sea?.update(time);
+    for (const f of floats) {
+      // (Tilted with the water's slope, but less: a hull spans the smaller waves. The cove is taken as deep.)
+      const s = swellAt(f.x, f.z, time, 3);
+      floatTilt.setFromUnitVectors(floatUp, floatN.set(-s.dx * 0.6, 1, -s.dz * 0.6).normalize());
+      f.mesh.matrix.makeTranslation(f.x, f.y + s.h, f.z).multiply(floatTurn.makeRotationFromQuaternion(floatTilt)).multiply(floatBack.makeTranslation(-f.x, -f.y, -f.z));
+      f.mesh.matrixWorldNeedsUpdate = true;
+    }
     birds?.update(time);
     flocks?.update(dt, time, player.position);
     {

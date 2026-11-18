@@ -1095,7 +1095,9 @@ export function meshSite(site: Site): SceneDescription {
         if (q.hall) {
           // A hall: only its doorway and the head of its stair lie in the rock that is carved with the land.
           if (t < -0.5 || t > q.hall0 + 1 || Math.abs(off) > 2.2 || y > q.y0 + 5 || y < q.y0 - q.hall.drop - 1) continue;
-          const a = hallAir(q, t, off, y);
+          // (Past the doorway a little more than the hall's own walls, so that this rock lies behind them: cut to the same faces, the
+          // two lay one on the other and flickered, and the land's rock showed through in bright jagged pieces.)
+          const a = hallAir(q, t, off, y) + 0.25 * smooth((t - 0.6) / 1.2);
           if (a > air) { air = a; grottoDeep = smooth((t - 2.6) / 3.2); }
           continue;
         }
@@ -2539,6 +2541,8 @@ export function meshSite(site: Site): SceneDescription {
         // (Nothing grows in the ruts of the track; what would have is drawn all the same and thrown away.)
         planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
         if (!keep(x, z)) continue;
+        // (Nor in front of the mouth of a grotto, where the ground is cut away to the door: a tuft there stood in the air.)
+        if (grottoes.some((q) => { const inside = (x - q.edge) * q.inw; return inside > -7 && inside < 3 && Math.abs(z - q.z) < 4; })) continue;
         const off = offTrack(x, z);
         if (off < 0.12 || !plant.chance(0.3 + 0.7 * Math.min(1, off / 1.4))) continue;
         if (slopeOf(ground, x, z, 0.3) > 0.55 || !clearOfStones(x, z, -0.15)) continue;

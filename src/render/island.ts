@@ -506,6 +506,12 @@ export function buildIsland(b: IslandBuild): IslandResult {
       cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
       meshFor: (n, at) => {
         if (!(n.y > 0.74 && rocky.at(at.x, at.z) < 0.5)) return null;
+        // (Nor in the sea cave, nor on the ledges at its mouth: there the floor is the rock too. As ground it was shingle where the rock
+        // was not marked rocky and rock where it was, square by square in the carving's cells, and the ledges were flat brown slabs.)
+        if (cave && at.y < caveFloor + 3) {
+          const ux = Math.cos(cave.heading), uz = Math.sin(cave.heading), a = (at.x - cave.x) * ux + (at.z - cave.z) * uz, c = -(at.x - cave.x) * uz + (at.z - cave.z) * ux;
+          if (a > -12 && a < cave.length + 6 && Math.abs(c) < 9) return null;
+        }
         // (Under the island, the caverns' floors are the rock.)
         if (systemAir && systemAir(at.x, at.y + 0.6, at.z) > 0 && plain(at.x, at.z) - at.y > 1.5) return null;
         // (Not in the stair's cut: the ledge either side of the steps, and the floor they stand on, are the rock they are cut in. As
@@ -697,8 +703,10 @@ export function buildIsland(b: IslandBuild): IslandResult {
     for (let k = 0; k < 4; k++) box('wood', kx + q.range(-1.4, 1.4), ky - 0.05, kz + q.range(-1.4, 1.4), 0.6, 0.6, q.range(0.55, 0.85), q.range(0, 3), [0.62, 0.45, 0.28]);
     box('wood', kx + 1.9, ky - 0.05, kz - 0.6, 1.1, 0.7, 0.7, q.range(0, 3), [0.55, 0.4, 0.25]);
     b.finds.push({ at: V(kx, ky + 0.4, kz), what: 'a tarred keg of brandy and a coil of rope, the smugglers\' cache in the cavern under the island' });
-    const up = CV.upper, mouth = up.findIndex(([x, z, y]) => plain(x, z) - y < 3.4);
-    if (mouth > 0) {
+    // (On each passage that comes up into a cutting: the way out, and on an island without a sea cave the way in too.)
+    for (const up of [CV.upper, [...CV.lower].reverse()]) {
+      const mouth = up.findIndex(([x, z, y]) => plain(x, z) - y < 3.4);
+      if (mouth <= 0) continue;
       const [x, z, y] = up[mouth], [x0, z0] = up[mouth - 1], yaw = Math.atan2(z - z0, x - x0) + Math.PI / 2, cc = Math.cos(yaw), ss = Math.sin(yaw);
       for (const side of [-1, 1]) box('stone', x + cc * side * 1.8, y - 0.3, z + ss * side * 1.8, 0.6, 0.8, 3.3, yaw, [0.6 * tint[0], 0.58 * tint[1], 0.55 * tint[2]]);
       box('stone', x, y + 3.0, z, 4.3, 0.9, 0.6, yaw, [0.6 * tint[0], 0.58 * tint[1], 0.55 * tint[2]]);
