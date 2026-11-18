@@ -332,6 +332,12 @@ export interface Building {
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
   /**
+   * Of a classical building: walls of bare brown brick instead of a wash. `stucco`: its dressings (cornices, bands, surrounds,
+   * pilasters, corner strips) stay stuccoed white, and its ground storey is stucco the colour of stone, rusticated; `bare`: all of it
+   * is brick, dressings included, laid a little paler as moulded brick is.
+   */
+  brick?: 'stucco' | 'bare';
+  /**
    * Of a classical building with wings: towers at its corners, rising `extra` storeys over its cornice, each `size` metres square
    * and standing on the corner named: the ends of the front (`front`), the far ends of the wings (`wing`), or the back corner of an end
    * that has no wing (`back`), on the left (-1) or right (1) as one stands before the front.

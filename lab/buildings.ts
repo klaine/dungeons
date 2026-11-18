@@ -1,7 +1,8 @@
 // The building lab: buildings of the town's two styles made by the game's own generator and shown plainly, lit by a sun and a sky,
 // for judging their shapes without building a whole place. Open /lab/buildings.html on the dev server. The address chooses:
 // `?style=imperial|timber`, `bays`, `storeys`, `heights=4.8,3.3,3.3`, `wings=0|1|2`, `towers=0|1|2|3`, `extra` (storeys of the towers),
-// `pediment=0`, `arch=-1|1` (a carriage way at that end), `entrances=3,9` (the bays of its doors), and `seed`; with none, a row of classical buildings is dealt their variations as the town deals them. `turn` turns them all, in degrees.
+// `pediment=0`, `arch=-1|1` (a carriage way at that end), `entrances=3,9` (the bays of its doors), `brick=stucco|bare` (in the row, every
+// other building), and `seed`; (brick is drawn here in a plain brown, without the game's texture); with none, a row of classical buildings is dealt their variations as the town deals them. `turn` turns them all, in degrees.
 import { AmbientLight, BufferGeometry, Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Scene, SRGBColorSpace, WebGLRenderer } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildBuilding } from '../src/render/buildings';
@@ -28,14 +29,14 @@ scene.add(sun);
 const ground = new Mesh(new PlaneGeometry(600, 600), new MeshStandardMaterial({ color: 0x8a8670, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-const looks: Record<string, { roughness: number; metalness?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 } };
+const looks: Record<string, { roughness: number; metalness?: number; color?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 }, brick: { roughness: 0.9, color: 0x6e4430 } };
 /** Builds a building at the origin facing -x (its own way), and lays it in the scene turned to face `turn` at (`x`, `z`). */
 function show(b: Building, x: number, z: number, turn: number, rng: Rng) {
   const meshes = new Map<string, MeshBuilder>();
   buildBuilding({ ...b, x: 0, z: 0, faces: 'w' }, 0, (m) => { if (!meshes.has(m)) meshes.set(m, new MeshBuilder()); return meshes.get(m)!; }, rng, [0.8, 0.78, 0.72], false);
   for (const [name, m] of meshes) {
     const g: BufferGeometry = m.build();
-    const mesh = new Mesh(g, new MeshStandardMaterial({ vertexColors: true, roughness: looks[name]?.roughness ?? 0.85, metalness: looks[name]?.metalness ?? 0 }));
+    const mesh = new Mesh(g, new MeshStandardMaterial({ vertexColors: true, roughness: looks[name]?.roughness ?? 0.85, metalness: looks[name]?.metalness ?? 0, color: looks[name]?.color ?? 0xffffff }));
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.rotation.y = -(turn - Math.PI); mesh.position.set(x, 0, z);
     scene.add(mesh);
@@ -73,6 +74,7 @@ if (style === 'wooden') {
   if (q.has('arch')) b.arch = { side: num('arch', 1) < 0 ? -1 : 1 };
   if (q.has('entrances')) b.entrances = q.get('entrances')!.split(',').map(Number);
   if (q.has('heights')) { b.heights = q.get('heights')!.split(',').map(Number); b.storeys = b.heights.length; }
+  if (q.get('brick') === 'stucco' || q.get('brick') === 'bare') b.brick = q.get('brick') as 'stucco' | 'bare';
   const n = num('towers', 0), extra = num('extra', 2);
   if (n) b.towers = [{ corner: 'front', side: -1, size: 6, extra }, { corner: 'front', side: 1, size: 6, extra }, { corner: 'wing', side: 1, size: 6, extra: Math.min(3, extra + 1) }].slice(0, n) as Building['towers'];
   b.plan = planClassical(b, r.fork('plan'));
@@ -85,9 +87,10 @@ if (style === 'wooden') {
     if (r.chance(0.6)) b.wings = (r.chance(0.6) ? [-1, 1] as const : [r.chance(0.5) ? -1 : 1] as const).map((side) => ({ side: side as -1 | 1, width: 7.2, length: r.range(8, 13) }));
     classicalVariations(b, r.fork('variations'));
     if (!b.wings && r.chance(0.6)) b.arch = { side: r.chance(0.5) ? -1 : 1 };
+    if ((q.get('brick') === 'stucco' || q.get('brick') === 'bare') && k % 2 === 0) b.brick = q.get('brick') as 'stucco' | 'bare';
     b.plan = planClassical(b, r.fork('plan'));
     show(b, ((k % 3) - 1) * 42, Math.floor(k / 3) * 46 - 23, turn, r);
-    made.push(`${k}: ${bays} bays, storeys ${b.heights.join('/')}${b.wings ? `, ${b.wings.length === 2 ? 'U' : 'L'}` : ''}${b.arch ? ', carriage way' : ''}${b.entrances ? `, doors in bays ${b.entrances.join(' ')}` : ''}${b.pediment === false ? ', no pediment' : ''}${b.towers ? `, towers ${b.towers.map((t) => `${t.corner}${t.side > 0 ? 'R' : 'L'}+${t.extra}`).join(' ')}` : ''}`);
+    made.push(`${k}: ${bays} bays, storeys ${b.heights.join('/')}${b.wings ? `, ${b.wings.length === 2 ? 'U' : 'L'}` : ''}${b.arch ? ', carriage way' : ''}${b.entrances ? `, doors in bays ${b.entrances.join(' ')}` : ''}${b.pediment === false ? ', no pediment' : ''}${b.brick ? `, brick (${b.brick})` : ''}${b.towers ? `, towers ${b.towers.map((t) => `${t.corner}${t.side > 0 ? 'R' : 'L'}+${t.extra}`).join(' ')}` : ''}`);
   }
 }
 document.getElementById('note')!.textContent = made.join(' · ');

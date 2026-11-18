@@ -249,7 +249,9 @@ function makeLand(t: Town, floor: number, house: Rect): HeightField {
 function classical(rng: Rng, bays: number, d: number, colour: [number, number, number]): Omit<Building, 'x' | 'z' | 'faces'> {
   const storeys = rng.pick([2, 3, 3, 3, 4, 4, 5]), tall = rng.fork('heights');
   const heights = [round(tall.range(3.4, 4.2)), round(tall.range(3.8, 4.8)), ...Array.from({ length: storeys - 2 }, (_, n) => round(tall.range(2.9, 3.4) - n * 0.1))];
-  return { style: 'imperial', w: round(bays * 2.55 + 1.6), d: round(d), storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && rng.chance(0.4)) };
+  // (About one in three is of bare brick, half of those with their dressings in stucco; from a stream of its own, so that nothing else changes.)
+  const bk = rng.fork('brick'), brick = bk.chance(0.32) ? (bk.chance(0.5) ? 'stucco' as const : 'bare' as const) : undefined;
+  return { style: 'imperial', w: round(bays * 2.55 + 1.6), d: round(d), storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && rng.chance(0.4)), ...(brick ? { brick } : {}) };
 }
 /** A timber house of the town's kind: narrow to the street, gable or eaves to it, two to four storeys. */
 function timber(rng: Rng, w: number, d: number, colour: [number, number, number]): Omit<Building, 'x' | 'z' | 'faces'> {

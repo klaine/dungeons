@@ -132,7 +132,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -173,6 +173,8 @@ async function start(): Promise<void> {
   const plaster = generateTextureSet('plaster', texSize, 41);
   const thatch = generateTextureSet('thatch', texSize, 47);
   const tile = generateTextureSet('tile', texSize, 43);
+  // (Brick is only in towns, on some of the classical buildings.)
+  const brick = place === 'town' ? generateTextureSet('brick', texSize, 79) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? generateTextureSet('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -201,6 +203,7 @@ async function start(): Promise<void> {
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
     plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8 }),
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
+    ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3 }) } : {}),
     metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
     glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
     // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.

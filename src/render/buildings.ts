@@ -38,7 +38,9 @@ export function litRoom(x: number, y: number, z: number, share = 0.38): Colour |
 }
 
 /** The tools: where things are, and solids to build with. */
-function tools(b: Building, base: number, mesh: (material: string) => MeshBuilder) {
+/** Turns what a builder lays in one material and colour into another, while `active`: how a classical building's walls become brick. */
+type Dress = { active: boolean; map: (material: string, colour: Colour) => [string, Colour] | null };
+function tools(b: Building, base: number, mesh: (material: string) => MeshBuilder, dress?: Dress) {
   const turn = b.faces === 'w' ? 1 : -1;
   // From the building's own measures (along its front, up, back from its front) to the world.
   const at = (u: number, y: number, v: number) => new Vector3(b.x - (turn * b.d) / 2 + turn * v, base + y, b.z + turn * u);
@@ -46,6 +48,7 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
   const A = new Vector3(), B = new Vector3(), N = new Vector3(), U = new Vector3(), V = new Vector3();
   /** One flat face of a solid, through the given corners, facing `out`. `grain` lays the texture along its longer way, as timber wants. */
   const poly = (material: string, pts: Vector3[], colour: Colour, out: Vector3, grain = false, scale = 0.5) => {
+    if (dress?.active) { const r = dress.map(material, colour); if (r) [material, colour] = r; }
     const m = mesh(material);
     N.crossVectors(A.subVectors(pts[1], pts[0]), B.subVectors(pts[2], pts[0])).normalize();
     const list = N.dot(out) < 0 ? [...pts].reverse() : pts;
@@ -63,6 +66,8 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
   const block = (material: string, a: Vector3, c: Vector3, colour: Colour, grain = false) => {
     const x0 = Math.min(a.x, c.x), x1 = Math.max(a.x, c.x), y0 = Math.min(a.y, c.y), y1 = Math.max(a.y, c.y), z0 = Math.min(a.z, c.z), z1 = Math.max(a.z, c.z);
     if (x1 - x0 < 1e-4 || y1 - y0 < 1e-4 || z1 - z0 < 1e-4) return;
+    // (Turned before it is shaded, so that the hook knows the colour it was given; `poly` is then given another, and leaves it alone.)
+    if (dress?.active) { const r = dress.map(material, colour); if (r) [material, colour] = r; }
     const col = shade(colour, 0.94 + 0.12 * (((count++ * 7919) % 13) / 13)), scale = grain ? 0.9 : 0.5;
     const p = (x: number, y: number, z: number) => new Vector3(x, y, z);
     poly(material, [p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1), p(x1, y0, z1)], col, p(1, 0, 0), grain, scale);
@@ -77,7 +82,10 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
   /** A block set in a wall. */
   const on = (f: Face, material: string, s0: number, s1: number, y0: number, y1: number, t0: number, t1: number, colour: Colour, grain = false) => block(material, f.P(s0, y0, t0), f.P(s1, y1, t1), colour, grain);
   /** A squared length of timber from one point to another. */
-  const stick = (from: Vector3, to: Vector3, thick: number, broad: number, colour: Colour, material = 'wood') => layBeam(mesh(material), from, to, thick, broad, shade(colour, 0.92 + 0.16 * (((count++ * 104729) % 11) / 11)), count * 0.173);
+  const stick = (from: Vector3, to: Vector3, thick: number, broad: number, colour: Colour, material = 'wood') => {
+    if (dress?.active) { const r = dress.map(material, colour); if (r) [material, colour] = r; }
+    return layBeam(mesh(material), from, to, thick, broad, shade(colour, 0.92 + 0.16 * (((count++ * 104729) % 11) / 11)), count * 0.173);
+  };
   /** The four walls of a storey whose front stands at `front` (less than nothing if it stands out over the street). */
   const walls = (front: number, w = b.w, d = b.d): Face[] => [
     { L: w, P: (s, y, t) => at(-w / 2 + s, y, front + t) },
@@ -528,7 +536,18 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
  * tiles in the corner.
  */
 function imperialHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, tops?: Vector3[]): void {
-  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
+  // Brick: everything laid in plaster of the wash outside becomes brick, and in a building of bare brick the white dressings too, a
+  // little paler, as moulded brick is. The inside is left as it is (the hook is turned off before the rooms are built).
+  const bk = rng.fork('brick'), brickTone: Colour = bk.pick([[1, 1, 1], [1.08, 0.98, 0.92], [0.86, 0.84, 0.82], [1.12, 1.04, 0.96]] as Colour[]);
+  const dressTone: Colour = shade([brickTone[0] * 1.12, brickTone[1] * 1.05, brickTone[2] * 1.0], 1);
+  const same = (a: Colour, c: Colour) => a[0] === c[0] && a[1] === c[1] && a[2] === c[2];
+  const dress: Dress = {
+    active: !!b.brick,
+    map: (material, colour) => material !== 'plaster' ? null : same(colour, b.colour) ? ['brick', brickTone] : b.brick === 'bare' && same(colour, WHITE) ? ['brick', dressTone] : null,
+  };
+  const k = tools(b, base, mesh, dress), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
+  // (Over brick with stucco dressings the ground storey is stucco the colour of stone, rusticated, as a basement storey is.)
+  const groundWash: Colour = b.brick === 'stucco' ? [0.8, 0.77, 0.7] : b.colour, rustic = b.brick === 'bare' ? 0 : 0.44;
   // (`T` is the rendered skin of an outer wall, which carries its windows; the rest of its thickness is the linings of the rooms inside.)
   const W = b.w, D = b.d, T = CLASSICAL.skin, FULL = CLASSICAL.outer, PLINTH = CLASSICAL.plinth, N = b.storeys, H0 = b.heights[0], wash = b.colour, granite = shade(stone, 0.62);
   const floorY = (storey: number) => floorOf(b, storey);
@@ -566,7 +585,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     }));
     pierced(f, 'stone', -0.07, f.L + 0.07, 0, PLINTH, -0.07, T, granite, rows[0].filter((g) => g.kind === 'arch'));
     // (A building of one storey is all principal storey: smooth, not rusticated, and its windows dressed as the principal storey's are.)
-    pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, wash, rows[0], N > 1 ? 0.44 : 0);
+    pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, groundWash, rows[0], N > 1 ? rustic : 0);
     for (let storey = 1; storey < N; storey++) pierced(f, 'plaster', 0, f.L, floorY(storey), floorY(storey + 1), 0.02, T, wash, rows[storey]);
     if (N > 1) {
       // The band between the ground storey and the one above, and a thin one under its windows; broken where a door goes through them.
@@ -772,7 +791,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const stacks = b.bays >= 7 ? 4 : 2;
     for (let n = 0; n < stacks; n++) {
       const u = (-0.5 + (n + 0.5) / stacks) * Math.max(1.5, W - D * 0.9), v = D / 2 + (n % 2 ? 1.5 : -1.5);
-      box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, shade(wash, 0.92));
+      box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, b.brick ? wash : shade(wash, 0.92));
       box('plaster', u - 0.52, u + 0.52, y + rise + 0.95, y + rise + 1.07, v - 0.37, v + 0.37, WHITE);
       tops?.push(at(u, y + rise + 1.07, v));
     }
@@ -833,6 +852,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     box('metal', mu - 0.11, mu + 0.11, ey + rise + 0.55, ey + rise + 0.77, mv - 0.11, mv + 0.11, [0.62, 0.5, 0.2]);
   }
   // ------------------------------------------------------------------ inside
+  dress.active = false;
   // The rooms are as the site document plans them; this builds them. Each is its clear floor, and
   // its walls are linings standing out from it into the wall about it: half of a wall shared with
   // the next room, and of an outer wall all of it within the rendered skin. Two linings back to
