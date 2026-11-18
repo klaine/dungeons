@@ -150,12 +150,37 @@ const apronY = (t: Town, back: number, z: number) => t.quay.y + (back - t.quay.y
 
 /** Whether a point is in the harbour's water, inside the moles and before the quay. */
 export function inHarbour(t: Town, x: number, z: number): boolean {
+  if (t.harbour) {
+    // (Within its outline: the quay's edge, the moles and the mouths between their heads.)
+    if (z < t.quay.z) return false;
+    let inside = false;
+    const h = t.harbour;
+    for (let a = 0, c = h.length - 1; a < h.length; c = a++) { const [xa, za] = h[a], [xc, zc] = h[c]; if ((za > z) !== (zc > z) && x < ((xc - xa) * (z - za)) / (zc - za) + xa) inside = !inside; }
+    return inside;
+  }
   if (z < t.quay.z || x < t.quay.x0 - 2 || x > t.quay.x1 + 2) return false;
   // (Between the two moles' lines, which run out from the quay's ends and turn in towards each other.)
   const [w, e] = t.moles;
   const reach = (m: Town['moles'][number]) => m.line[m.line.length - 1][1];
   return z < Math.max(reach(w), reach(e)) + 1 && x > lineX(w.line, z) && x < lineX(e.line, z);
 }
+/**
+ * Where a point is beside the town's river, if it has one: how far from its middle line, half its breadth there, its water's level
+ * there, whether it runs between walls there, and how far along its line (the index of the stretch, and the share of it).
+ */
+export function riverAt(t: Town, x: number, z: number): { off: number; half: number; y: number; walled: boolean; k: number; along: number } {
+  const r = t.river;
+  if (!r) return { off: Infinity, half: 0, y: 0, walled: false, k: 0, along: 0 };
+  let off = Infinity, best = 0, share = 0;
+  for (let k = 0; k + 1 < r.line.length; k++) {
+    const [ax, az] = r.line[k], [bx, bz] = r.line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+    const tt = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)), d = Math.hypot(x - ax - dx * tt, z - az - dz * tt);
+    if (d < off) { off = d; best = k; share = tt; }
+  }
+  const k = best, k1 = Math.min(r.line.length - 1, k + 1);
+  return { off, half: (r.width[k] * (1 - share) + r.width[k1] * share) / 2, y: r.line[k][2] * (1 - share) + r.line[k1][2] * share, walled: r.walled[k] && r.walled[k1], k, along: share };
+}
+
 /** Where a mole's line crosses a given z (its x there, or its nearest end's). */
 function lineX(line: [number, number][], z: number): number {
   for (let k = 0; k + 1 < line.length; k++) {
@@ -252,8 +277,21 @@ function makeLand(t: Town, floor: number, house: Rect): HeightField {
   }
   // The outlook: level ground on the headland.
   if (t.outlook) { const o = t.outlook; each({ x0: o.x - 8, x1: o.x + 8, z0: o.z - 8, z1: o.z + 8 }, 4, (k, x, z) => ease(k, o.y, 1 - smooth((Math.hypot(x - o.x, z - o.z) - 5.5) / 4))); }
+  // The river: its bed cut under its water, deep between walls in the town and shallower in the hills, where banks of earth slope
+  // down to it; under every bridge too (the way was laid across above, and the bridge carries it over).
+  if (t.river) {
+    const rv = t.river, reach = Math.max(...rv.width) / 2 + 8;
+    each(boxOf(rv.line), reach, (k, x, z) => {
+      const r = riverAt(t, x, z);
+      if (r.off > r.half + 7) return;
+      const bed = r.y - (r.walled ? 1.7 : 0.9) - 0.3 * smooth(1 - r.off / Math.max(1, r.half));
+      if (r.off < r.half + (r.walled ? 0.4 : 0)) M.data[k] = Math.min(M.data[k], bed);
+      else if (!r.walled) M.data[k] = Math.min(M.data[k], r.y + 0.3 + (M.data[k] - r.y - 0.3) * smooth((r.off - r.half) / 6));
+    });
+  }
   // The harbour, dug out to a depth that ships can lie in, before the quay's edge and inside the moles.
-  each({ x0: t.quay.x0 - 4, x1: t.quay.x1 + 4, z0: t.quay.z - 1, z1: Math.max(...t.moles.map((m) => m.line[m.line.length - 1][1])) + 6 }, 0, (k, x, z) => {
+  const hb = t.harbour ?? t.moles.flatMap((m) => m.line);
+  each({ x0: Math.min(t.quay.x0, ...hb.map((p) => p[0])) - 4, x1: Math.max(t.quay.x1, ...hb.map((p) => p[0])) + 4, z0: t.quay.z - 1, z1: Math.max(...hb.map((p) => p[1])) + 6 }, 0, (k, x, z) => {
     if (inHarbour(t, x, z)) M.data[k] = Math.min(M.data[k], t.sea - 3.6 + (fbm2(x / 9, z / 9, 2, 3) - 0.5) * 0.6);
   });
   return M;
@@ -344,27 +382,89 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       }
       if (side < 0) t.quay.x0 = round(qx - reach); else t.quay.x1 = round(qx + reach);
     }
-    // The moles: out from the quay's ends into the sea, then turning in towards each other, leaving a mouth between their heads.
-    const long = q.chance(0.5) ? -1 : 1, width = round(q.range(6.5, 8.5)), top = round(quayY + q.range(0.4, 0.7));
-    const span = t.quay.x1 - t.quay.x0, mouth = q.range(26, 36);
-    const outW = round(q.range(60, 95) + (long < 0 ? 25 : 0)), outE = round(q.range(60, 95) + (long > 0 ? 25 : 0));
-    const inW = round(Math.max(10, (span - mouth) * (long < 0 ? q.range(0.5, 0.65) : q.range(0.25, 0.4)))), inE = round(Math.max(10, span - mouth - inW));
-    // (Each an arm: out from the quay's end leaning a little away from the harbour, then sweeping round in a curve towards the
-    // other, in a dozen straight lengths, as moles are built.)
-    const arm = (x0: number, side: -1 | 1, out: number, inward: number): [number, number][] => {
+    // How the coast lies either side of the quay: how far the land stands out to sea, beyond each end of it, within three hundred metres.
+    const standsOut = (side: -1 | 1) => {
+      let most = -30;
+      for (let u = (side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx) + 20; u < 320; u += 8) {
+        const x = qx + side * u;
+        let z = qz - 30;
+        while (z < qz + 220 && nat(x, z) >= sea) z += 3;
+        most = Math.max(most, z - qz);
+      }
+      return most;
+    };
+    const outW = standsOut(-1), outE = standsOut(1), bay = outW > 40 && outE > 40, lee: 0 | -1 | 1 = !bay && Math.max(outW, outE) > 40 ? (outW > outE ? -1 : 1) : 0;
+    // The harbour's form, from that. In a bay, which shelters it already, short piers or short arms. Where a headland stands on one
+    // hand, one long breakwater from the other, the open side, curving or bent across the harbour's front, and a short pier from the
+    // headland's end. On an open coast, any of these, or a breakwater standing off in the sea with two mouths and a short pier from
+    // each end of the quay. (Every harbour had been the same two arms curving towards each other.)
+    type Form = 'arms' | 'breakwater' | 'piers' | 'detached' | 'dogleg';
+    // (Nearly every coast found is a bay, since bays are sought; so every form comes in a bay too, piers a little oftener.)
+    const form: Form = bay ? q.pick(['piers', 'piers', 'arms', 'breakwater', 'dogleg', 'detached'] as Form[]) : lee ? q.pick(['breakwater', 'breakwater', 'dogleg', 'arms', 'detached', 'piers'] as Form[]) : q.pick(['arms', 'breakwater', 'detached', 'detached', 'dogleg'] as Form[]);
+    const open: -1 | 1 = lee ? (-lee as -1 | 1) : q.chance(0.5) ? -1 : 1;
+    t.harbourForm = form;
+    const width = round(q.range(6.5, 8.5)), top = round(quayY + q.range(0.4, 0.7)), span = t.quay.x1 - t.quay.x0, mouth = q.range(26, 38);
+    const xs = (side: -1 | 1) => (side < 0 ? t.quay.x0 : t.quay.x1);
+    // (An arm: out from the quay's end leaning a little away from the harbour, then sweeping round in a curve towards the other side,
+    // in a dozen straight lengths, as moles are built.)
+    const arm = (x0: number, inwardDir: -1 | 1, out: number, inward: number): [number, number][] => {
       const lean = q.range(0.05, 0.25) * out, pts: [number, number][] = [[x0, qz - 1]];
       for (let k = 1; k <= 12; k++) {
-        const a = (k / 12) * (Math.PI / 2), x = x0 + side * (-lean * Math.sin(a * 2) * 0.5 + (inward + lean * 0.3) * (1 - Math.cos(a))), z = qz + out * Math.sin(a);
+        const a = (k / 12) * (Math.PI / 2), x = x0 + inwardDir * (-lean * Math.sin(a * 2) * 0.5 + (inward + lean * 0.3) * (1 - Math.cos(a))), z = qz + out * Math.sin(a);
         pts.push([round(x), round(z)]);
       }
       return pts;
     };
-    t.moles = [
-      { line: arm(t.quay.x0, 1, outW, inW), width, y: top },
-      { line: arm(t.quay.x1, -1, outE, inE), width, y: top },
-    ];
-    // The harbour light, at the head of the longer mole.
-    const m = t.moles[long < 0 ? 0 : 1], [hx, hz] = m.line[m.line.length - 1], [px, pz] = m.line[m.line.length - 2];
+    // (A straight run of mole from one point to another, in lengths of about eight metres.)
+    const straight = (pts: [number, number][]): [number, number][] => {
+      const out: [number, number][] = [pts[0]];
+      for (let k = 1; k < pts.length; k++) {
+        const [ax, az] = pts[k - 1], [bx, bz] = pts[k], n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 8));
+        for (let m = 1; m <= n; m++) out.push([round(ax + ((bx - ax) * m) / n), round(az + ((bz - az) * m) / n)]);
+      }
+      return out;
+    };
+    let lightOn = 0;
+    if (form === 'arms') {
+      const long = q.chance(0.5) ? -1 : 1, oW = round(q.range(55, 95) + (long < 0 ? 25 : 0)), oE = round(q.range(55, 95) + (long > 0 ? 25 : 0));
+      const inW = round(Math.max(10, (span - mouth) * (long < 0 ? q.range(0.5, 0.65) : q.range(0.25, 0.4)))), inE = round(Math.max(10, span - mouth - inW));
+      t.moles = [{ line: arm(t.quay.x0, 1, oW, inW), width, y: top }, { line: arm(t.quay.x1, -1, oE, inE), width, y: top }];
+      lightOn = long < 0 ? 0 : 1;
+    } else if (form === 'breakwater') {
+      // One long arm from the open side's end across most of the harbour's front; a short pier from the other end.
+      const out = round(q.range(75, 115)), stubOut = round(q.range(18, 34)), stubIn = round(q.range(3, 9)), across = round(Math.max(20, span - mouth - stubIn));
+      const longArm = arm(xs(open), (-open) as -1 | 1, out, across), stub = straight([[xs((-open) as -1 | 1), qz - 1], [xs((-open) as -1 | 1) + open * stubIn, qz + stubOut]]);
+      t.moles = open < 0 ? [{ line: longArm, width, y: top }, { line: stub, width, y: top }] : [{ line: stub, width, y: top }, { line: longArm, width, y: top }];
+      lightOn = open < 0 ? 0 : 1;
+    } else if (form === 'dogleg') {
+      // Straight out from the open side's end, then turned square to run along before the harbour; a short pier from the other end.
+      const out = round(q.range(60, 95)), stubOut = round(q.range(18, 30)), along = round(Math.max(25, span - mouth - q.range(4, 12))), x0 = xs(open), lean = q.range(-6, 6);
+      const longArm = straight([[x0, qz - 1], [x0 + lean, qz + out], [x0 + lean - open * along, qz + out + q.range(-8, 8)]]);
+      const stub = straight([[xs((-open) as -1 | 1), qz - 1], [xs((-open) as -1 | 1) + open * q.range(2, 8), qz + stubOut]]);
+      t.moles = open < 0 ? [{ line: longArm, width, y: top }, { line: stub, width, y: top }] : [{ line: stub, width, y: top }, { line: longArm, width, y: top }];
+      lightOn = open < 0 ? 0 : 1;
+    } else if (form === 'piers') {
+      // Two piers, straight out from the quay's ends and leaning in, the mouth between their heads broad: the bay keeps off the sea.
+      // (Leaning in towards each other, or now and then straight out side by side.)
+      const outP = round(q.range(45, 75)), inP = q.chance(0.35) ? q.range(0, 6) : Math.max(6, (span - q.range(50, 80)) / 2);
+      const w = straight([[t.quay.x0, qz - 1], [t.quay.x0 + inP, qz + outP + q.range(-8, 8)]]), e = straight([[t.quay.x1, qz - 1], [t.quay.x1 - inP, qz + outP + q.range(-8, 8)]]);
+      t.moles = [{ line: w, width, y: top }, { line: e, width, y: top }];
+      lightOn = q.chance(0.5) ? 0 : 1;
+    } else {
+      // A breakwater standing off before the harbour, parallel to the quay, a mouth between each of its ends and a pier from that end of
+      // the quay. (The light is on the longer pier, whose head is where one arrives: the breakwater cannot be walked to.)
+      const off = round(q.range(70, 100)), stubW = round(q.range(26, 40)), stubE = round(q.range(26, 40)), gap = q.range(24, 34);
+      const w = straight([[t.quay.x0, qz - 1], [t.quay.x0 + q.range(4, 12), qz + stubW]]), e = straight([[t.quay.x1, qz - 1], [t.quay.x1 - q.range(4, 12), qz + stubE]]);
+      const bw = straight([[w[w.length - 1][0] - gap * 0.4, qz + off + q.range(-6, 6)], [e[e.length - 1][0] + gap * 0.4, qz + off + q.range(-6, 6)]]);
+      t.moles = [{ line: w, width, y: top }, { line: e, width, y: top }, { line: bw, width: round(width * 1.1), y: top }];
+      lightOn = stubW > stubE ? 0 : 1;
+    }
+    // The harbour's water: the quay's edge, out along the first mole, across the mouth (or over the breakwater, between its two
+    // mouths), back along the second.
+    const [mw, me] = t.moles, bwl = t.moles[2]?.line;
+    t.harbour = [[t.quay.x0, qz], ...mw.line.slice(1), ...(bwl ?? []), ...me.line.slice(1).reverse(), [t.quay.x1, qz]].map(([x, z]) => [round(x), round(z)] as [number, number]);
+    // The harbour light, at the head of the mole it stands on.
+    const m = t.moles[lightOn], [hx, hz] = m.line[m.line.length - 1], [px, pz] = m.line[m.line.length - 2];
     const along = Math.atan2(hz - pz, hx - px);
     t.light = { x: round(hx - Math.cos(along) * 3), z: round(hz - Math.sin(along) * 3), y: top, r: round(q.range(2.2, 2.8)), height: round(q.range(9, 13)), door: along + Math.PI };
   }
@@ -383,6 +483,14 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     const sx = Math.min(meadow.x1 - 2 - sw / 2, Math.max(meadow.x0 + 2 + sw / 2, doorX));
     t.stair = { x0: round(sx - sw / 2), x1: round(sx + sw / 2), z0: meadow.z1, z1: round(meadow.z1 + run) };
   }
+
+  // ---- the river: in some towns a river comes down out of the hills, through the open ground behind the house, and bending round
+  // the back of the house's terrace runs straight down beside the square, between stone embankments with quays along their tops, into
+  // the harbour. That side's blocks stand back across the far quay. (Its course, levels and bridges are laid below, once the streets are.)
+  const rq = rng.fork('river'), hasRiver = rq.chance(0.45), riverSide: -1 | 1 = rq.chance(0.5) ? -1 : 1;
+  const riverW = round(rq.range(9, 13.5)), riverQuay = round(rq.range(4.5, 6.5)), corridor = hasRiver ? riverW + 2 * riverQuay : 0;
+  const squareEdge = (side: number) => (side < 0 ? t.square.x0 : t.square.x1);
+  const riverX = squareEdge(riverSide) + (riverSide * corridor) / 2;
 
   // ---- the plan: blocks either side of the square and back from the waterfront, between streets; but not every town's on a strict
   // grid. The streets are lines through points, a line of them along the shore at every row and up from it at every column, and
@@ -410,7 +518,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // edge (`vL`); with the half breadth of the street on each (none on the square's edge, nor on the waterfront's back, which are edges).
   const uL: Record<number, number[]> = {}, uH: Record<number, number[]> = {}, vL: number[] = [apron], vH: number[] = [0];
   for (const side of [-1, 1]) {
-    uL[side] = [Wsq / 2]; uH[side] = [0];
+    uL[side] = [Wsq / 2 + (side === riverSide ? corridor : 0)]; uH[side] = [0];
     for (let k = 1; k <= nC; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, w = bw0 * pq.range(0.85, 1.18); uL[side].push(uL[side][k - 1] + uH[side][k - 1] + w + hw); uH[side].push(hw); }
   }
   for (let k = 1; k <= nR; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, d = bd0 * pq.range(0.85, 1.18); vL.push(vL[k - 1] + vH[k - 1] + d + hw); vH.push(hw); }
@@ -439,6 +547,10 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     colTilt[side] = Array.from({ length: nC + 1 }, (_, i) => (i >= 2 ? pq.range(-tilt, tilt) * deg : 0));
     rowTilt[side] = Array.from({ length: nR + 1 }, (_, j) => (j >= 2 ? pq.range(-tilt, tilt) * deg : 0));
   }
+  // (The crossings about the classical quarter's blocks are left where they fall, neither tilted nor jittered: classical buildings
+  // stand along straight streets, laid out at a stroke, whatever the plan of the rest.)
+  const classicAt = (i: number, j: number) => (i === 0 && j < cr) || (j === 0 && i < cw);
+  const trueNode = (i: number, j: number) => [[i - 1, j - 1], [i, j - 1], [i - 1, j], [i, j]].some(([a, c]) => a >= 0 && c >= 0 && classicAt(a, c));
   const nodes: Record<number, [number, number][][]> = {};
   for (const side of [-1, 1]) {
     nodes[side] = [];
@@ -451,10 +563,13 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
         // fanned town bow back from the water towards their ends, as an amphitheatre does about its stage.)
         x += side * Math.max(0, v - (i <= 1 ? vCore : vL[0])) * Math.tan(fan * i * deg);
         if (i > 0 && !(j === 0 && u < (side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx) + 5)) z -= bow * (u - uL[side][0]) ** 2;
-        x += side * (v - vL[0]) * Math.tan(colTilt[side][i]);
-        z += (u - uL[side][0]) * Math.tan(rowTilt[side][j]);
+        const straight = trueNode(i, j);
+        if (!straight) {
+          x += side * (v - vL[0]) * Math.tan(colTilt[side][i]);
+          z += (u - uL[side][0]) * Math.tan(rowTilt[side][j]);
+        }
         z += shoreFollow * shoreDz(side * u);
-        const reach = side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, still = i === 0 || (j === 0 && u < reach + 5);
+        const reach = side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, still = i === 0 || (j === 0 && u < reach + 5) || straight;
         if (!still) { const amount = i <= 1 && j <= 1 ? 0.2 : 1; x += jq.range(-jitter, jitter) * amount; z += jq.range(-jitter, jitter) * amount; }
         nodes[side][i].push([x, z]);
       }
@@ -514,7 +629,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     const corners = cellOf(side, i, j);
     if (!corners) continue;
     const r = { ...boxOf(corners), corners };
-    const kind = (i === 0 && j < cr) || (j === 0 && i < cw) ? 'classical' : i < ti && j < tj && !(cutCorner && i === ti - 1 && j === tj - 1) ? 'timber' : null;
+    const kind = classicAt(i, j) ? 'classical' : i < ti && j < tj && !(cutCorner && i === ti - 1 && j === tj - 1) ? 'timber' : null;
     const cell = { side, i, j, corners, built: false };
     cells.push(cell);
     if (kind && !near(r, 0) && blockOk(r)) want.push({ cell, kind, rank: (kind === 'classical' ? 0 : 10) + i + j + pq.fork(`rank${side}.${i}.${j}`).range(0, 0.9), around: corners.reduce((sum, q0, k) => sum + Math.hypot(corners[(k + 1) % 4][0] - q0[0], corners[(k + 1) % 4][1] - q0[1]), 0) });
@@ -577,43 +692,57 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     };
     // The waterfront, the length of the quay.
     t.streets.push({ line: lineAt([[t.quay.x0 + 2, qz - apron / 2], [t.quay.x1 - 2, qz - apron / 2]]), width: apron, kind: 'street' });
-    // Along the rows and up the columns: each line's crossing points, in runs over the stretches that have a block beside them.
-    const runs = (pts: [number, number][], along: boolean[]): [number, number][][] => {
-      const out: [number, number][][] = [];
-      let cur: [number, number][] = [];
-      along.forEach((on, k) => {
-        if (on) { if (!cur.length) cur.push(pts[k]); cur.push(pts[k + 1]); }
-        else if (cur.length) { out.push(cur); cur = []; }
-      });
-      if (cur.length) out.push(cur);
-      return out;
-    };
+    // Along the rows and up the columns: each line's crossing points, over the stretches that have a block beside them.
     const has = (side: number, i: number, j: number) => builtAt.has(`${side},${i},${j}`);
+    // What each stretch is laid with: flags beside the classical quarter; elsewhere, setts or beaten earth, the line's own (more
+    // earth further out, and in an old town most of all). (A town's streets were all setts.)
+    const kindAt = (side: number, i: number, j: number) => (has(side, i, j) ? (classicAt(i, j) ? 'classical' : 'timber') : null);
+    const earthy = planKind === 'old' ? 0.55 : planKind === 'planned' ? 0.15 : 0.3;
+    const lineSurface = (side: number, axis: 'u' | 'v', k: number): 'setts' | 'dirt' => (pq.fork(`surface${side}.${axis}.${k}`).chance(Math.min(0.9, earthy + (k >= 3 ? 0.3 : k >= 2 ? 0.12 : 0))) ? 'dirt' : 'setts');
+    /** A line's runs, each cut where what it is laid with changes, as streets. */
+    const lay = (pts: [number, number][], along: (string | null)[], width: number) => {
+      let cur: [number, number][] = [], kind: string | null = null;
+      const flush = () => { if (cur.length > 1) t.streets.push({ line: lineAt(cur), width, kind: 'street', surface: kind as 'flags' | 'setts' | 'dirt' }); cur = []; };
+      along.forEach((surf, k) => {
+        if (surf !== kind) { flush(); kind = surf; if (surf) cur.push(pts[k]); }
+        if (surf) cur.push(pts[k + 1]);
+      });
+      flush();
+    };
     let behind: number | null = null;
     for (const side of [-1, 1]) {
       // Between the rows: out from the square's edge (or from beside the house, where the row reaches the house's ground: then it
       // runs on to the lane beside it).
       for (let j = 1; j <= nR; j++) {
         const pts = Array.from({ length: nC + 1 }, (_, i) => nodes[side][i][j]);
-        const along = Array.from({ length: nC }, (_, i) => has(side, i, j - 1) || has(side, i, j));
-        for (const run of runs(pts, along)) {
-          const [x0, z0] = run[0];
-          if (Math.abs(x0 - (side < 0 ? t.square.x0 : t.square.x1)) < 0.5) {
-            if (z0 > level.z0 - 3 && z0 < level.z1 + 3) run.unshift([side < 0 ? level.x0 - 3 : level.x1 + 3, z0]);
-            else if (z0 < level.z0 && (behind === null || z0 > behind)) behind = z0;
-          }
-          t.streets.push({ line: lineAt(run), width: round(hw(side, 'v', j) * 2), kind: 'street' });
+        const own = lineSurface(side, 'v', j);
+        const along = Array.from({ length: nC }, (_, i) => { const a = kindAt(side, i, j - 1), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
+        const [x0, z0] = pts[0];
+        // (Out from the square's edge; or from beside the house, where the row reaches the house's ground: then it runs on to the lane.)
+        if (along[0]) {
+          if (z0 > level.z0 - 3 && z0 < level.z1 + 3) { pts.unshift([side < 0 ? level.x0 - 3 : level.x1 + 3, z0]); along.unshift(along[0]); }
+          // (Across the river, by a bridge, to the square's edge, where the row meets the square.)
+          else if (corridor && side === riverSide && z0 > t.square.z0 && z0 < t.square.z1) { pts.unshift([squareEdge(side), z0]); along.unshift(along[0]); }
+          else if (z0 < level.z0 && (behind === null || z0 > behind)) behind = z0;
         }
+        lay(pts, along, round(hw(side, 'v', j) * 2));
       }
       // Up the columns: from the waterfront, where the column reaches it, up to the last block.
       for (let i = 1; i <= nC; i++) {
-        const pts = nodes[side][i].slice();
-        const along = Array.from({ length: nR }, (_, j) => has(side, i - 1, j) || has(side, i, j));
-        for (const run of runs(pts, along)) {
-          const [x0, z0] = run[0];
-          if (Math.abs(z0 - (qz - apron)) < 0.5 && x0 > t.quay.x0 && x0 < t.quay.x1) run.unshift([x0, qz - apron + 0.5]);
-          t.streets.push({ line: lineAt(run), width: round(hw(side, 'u', i) * 2), kind: 'street' });
-        }
+        const pts = nodes[side][i].slice(), own = lineSurface(side, 'u', i);
+        const along = Array.from({ length: nR }, (_, j) => { const a = kindAt(side, i - 1, j), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
+        // (From the waterfront, where the column reaches it.)
+        const [x0, z0] = pts[0];
+        if (along[0] && Math.abs(z0 - (qz - apron)) < 0.5 && x0 > t.quay.x0 && x0 < t.quay.x1) { pts.unshift([x0, qz - apron + 0.5]); along.unshift(along[0]); }
+        lay(pts, along, round(hw(side, 'u', i) * 2));
+      }
+    }
+    // The quays along the river, on each bank, from the waterfront up to where the river bends away behind the house.
+    if (corridor) {
+      const zTop = Math.min(level.z0 - 14, t.square.z0 - 20), classicBeside = t.blocks.some((b) => b.kind === 'classical' && outsideRect(b, riverX + riverSide * (corridor / 2 + 2), (b.z0 + b.z1) / 2) < 3);
+      for (const bank of [-1, 1]) {
+        const x = riverX + bank * (riverW / 2 + riverQuay / 2);
+        t.streets.push({ line: lineAt([[x, qz - apron + 0.5], [x, zTop]]), width: riverQuay, kind: 'street', surface: classicBeside ? 'flags' : 'setts' });
       }
     }
     // Lanes either side of the house, from the square up to the street behind it, if any.
@@ -627,7 +756,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   /** Whether a classical building can have a carriage way through its end: two bays free of the middle, and no wing behind them. */
   const archable = (b: Building) => b.style === 'imperial' && !b.wings?.length && freeAtEnds(b) >= 2;
   /** Whether a block stands beside the square, fronting it. */
-  const blocksBySquare = (r: Rect) => (Math.abs(r.x0 - t.square.x1) < 0.2 || Math.abs(r.x1 - t.square.x0) < 0.2) && r.z1 > t.square.z0 && r.z0 < t.square.z1;
+  // (Across the river from it, where there is one: such a block fronts the river and the square beyond it.)
+  const blocksBySquare = (r: Rect) => (Math.abs(r.x0 - t.square.x1 - (riverSide > 0 ? corridor : 0)) < 0.2 || Math.abs(r.x1 - t.square.x0 + (riverSide < 0 ? corridor : 0)) < 0.2) && r.z1 > t.square.z0 && r.z0 < t.square.z1;
   // ---- the buildings of the blocks: along every side of a block that fronts a street or the square, close together, their
   // fronts on the block's edge. The long sides first, corner to corner; the short sides between them.
   {
@@ -780,6 +910,50 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     }
   }
 
+  // The river's course: straight down beside the square from behind the house to the harbour, between its embankments; above that,
+  // bending into the open ground behind the house and on up into the hills, each step taking the lowest of a few ways north, swinging
+  // slowly from side to side, and held between the two sides' blocks while it is among them.
+  if (corridor) {
+    const zTop = Math.min(level.z0 - 14, t.square.z0 - 20), townTop = Math.min(...t.blocks.map((b) => b.z0)) - 10;
+    const lo = squareEdge(-1) - (riverSide < 0 ? corridor : 0) + riverW, hi = squareEdge(1) + (riverSide > 0 ? corridor : 0) - riverW;
+    const down: [number, number][] = [];
+    for (let z = qz + 6; z > zTop; z -= 6) down.push([riverX, z]);
+    down.push([riverX, zTop]);
+    let x = riverX, z = zTop, phase = rq.range(0, 6.28), swing = rq.range(8, 20);
+    const up: [number, number][] = [];
+    while (z > box.z0 + 45) {
+      z -= 8;
+      phase += rq.range(0.12, 0.3);
+      const among = z > townTop, a = among ? lo : qx - 260, b = among ? hi : qx + 260, aim = x + Math.sin(phase) * swing * 0.25;
+      let best = x, cost = Infinity;
+      for (const d of [-6, -3, 0, 3, 6]) {
+        const cx = Math.min(b, Math.max(a, x + d)), c = nat(cx, z) + 0.06 * Math.abs(cx - aim) + (up.length < 4 ? 0.1 * Math.abs(cx - riverX) : 0);
+        if (c < cost) { cost = c; best = cx; }
+      }
+      x = best;
+      up.push([x, z]);
+    }
+    // (Smoothed, so that it bends and does not zigzag; then from the hills down to the sea, as it flows.)
+    const sm = up.map((p0, k) => { let sx = 0, n = 0; for (let d = -2; d <= 2; d++) { const q0 = up[k + d]; if (q0) { sx += q0[0]; n++; } } return [sx / n, p0[1]] as [number, number]; });
+    const course = [...sm.reverse(), ...down.reverse()];
+    // Its breadth: the full breadth from where it reaches the town down to the sea, narrowing up into the hills. Walled where the town is.
+    const n = course.length, width = course.map(([, cz]) => round(cz >= townTop ? riverW : riverW * (0.45 + 0.55 * smooth((cz - (box.z0 + 45)) / Math.max(1, townTop - box.z0 - 45))))), walled = course.map(([, cz]) => cz >= zTop - 30);
+    // Its levels: from the sea upward, as high as its banks allow (under the quays by nearly two metres in town, by about one in the
+    // hills), never falling as it goes up; where the banks rise faster than it can, a weir or a fall.
+    const ys = new Array<number>(n);
+    let y = sea;
+    for (let k = n - 1; k >= 0; k--) {
+      const [cx, cz] = course[k], half = width[k] / 2, step = k < n - 1 ? Math.hypot(course[k + 1][0] - cx, course[k + 1][1] - cz) : 0;
+      const bank = walled[k] ? Math.min(townY(cx - half - 1.5, cz), townY(cx + half + 1.5, cz)) : Math.min(nat(cx - half - 2.5, cz), nat(cx + half + 2.5, cz));
+      const want = bank - (walled[k] ? 1.9 : 1.1);
+      y = want - y > 0.9 ? Math.max(y, want - rq.range(0, 0.25)) : Math.max(y, Math.min(want, y + 0.003 * step));
+      ys[k] = round(Math.max(sea, k >= n - 2 ? sea : y) * 100) / 100;
+    }
+    t.river = { line: course.map(([cx, cz], k) => [round(cx), round(cz), ys[k]] as [number, number, number]), width, walled, quay: riverQuay, side: riverSide, bridges: [] };
+  }
+  /** Whether a point is in the river or on its banks, within a margin. */
+  const nearRiver = (x: number, z: number, m: number) => !!t.river && riverAt(t, x, z).off < riverAt(t, x, z).half + m;
+
   // ---- shacks: along the shore beyond the quay's ends, facing the water, some on posts at its edge; and on the fringes of the town
   {
     const q = rng.fork('shacks');
@@ -853,22 +1027,57 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
         if (q.chance(0.5) && !onPosts) t.boats.push({ x: round(x + q.range(-3, 3)), z: round(z + q.range(0.5, 2.5)), heading: q.range(1.2, 1.9), length: round(q.range(3.8, 5.4)), afloat: false });
       }
     }
-    // On the fringes: in the cells of the grid next to the built blocks that were not built themselves, a few each, on gentle ground.
-    let fringe = 0;
-    for (const cell of cells) {
-      const b = { ...boxOf(cell.corners), corners: cell.corners };
-      if (cell.built || near(b, 4) || fringe > 22) continue;
-      if (!t.blocks.some((k) => outsideBlock(k, (b.x0 + b.x1) / 2, (b.z0 + b.z1) / 2) < 45)) continue;
-      const want = q.int(1, 4);
-      for (let tries = 0, made = 0; tries < 20 && made < want; tries++) {
-        const x = q.range(b.x0 + 3, b.x1 - 3), z = q.range(b.z0 + 3, b.z1 - 3);
-        if (outsideBlock(b, x, z) > 0 || outsideBlock({ ...b, x0: b.x0 + 3, x1: b.x1 - 3, z0: b.z0 + 3, z1: b.z1 - 3 }, x, z) > 0) continue;
-        if (nat(x, z) < sea + 1.2 || slopeAt(x, z) > 0.28 || !clear(x, z, 3)) continue;
-        // (Facing the nearest street, near enough.)
-        let best = 0, bd = Infinity;
-        for (const s of t.streets) { const n = nearLine(s.line, x, z); if (n.off < bd) { bd = n.off; const p = s.line.reduce((m, p0) => (Math.hypot(p0[0] - x, p0[1] - z) < Math.hypot(m[0] - x, m[1] - z) ? p0 : m)); best = Math.atan2(p[1] - z, p[0] - x); } }
-        shack(x, z, Math.round((best + q.range(-0.3, 0.3)) * 100) / 100, 0);
-        made++; fringe++;
+    // On the fringes: lanes of beaten earth or gravel wandering out from the outer ends of the town's streets, each step taking the
+    // way that climbs least, so that they follow the lie of the land and not the grid; and shacks along them, on either hand, facing
+    // the lane. (Shacks had stood about in the empty blocks of the grid, each turned to the nearest street.)
+    {
+      const lq = rng.fork('lanes'), centre = { x: qx, z: qz - apron - 60 };
+      const starts: { x: number; z: number; a: number }[] = [];
+      for (const st of t.streets) {
+        if (st.kind !== 'street' || st.line.length < 2 || Math.abs(st.width - apron) < 0.01) continue;
+        for (const [end, prev] of [[st.line[0], st.line[1]], [st.line[st.line.length - 1], st.line[st.line.length - 2]]]) {
+          const other = end === st.line[0] ? st.line[st.line.length - 1] : st.line[0];
+          if (Math.hypot(end[0] - centre.x, end[1] - centre.z) - Math.hypot(other[0] - centre.x, other[1] - centre.z) < 10) continue;
+          starts.push({ x: end[0], z: end[1], a: Math.atan2(end[1] - prev[1], end[0] - prev[0]) });
+        }
+      }
+      for (let k = starts.length - 1; k > 0; k--) { const m = lq.int(0, k); [starts[k], starts[m]] = [starts[m], starts[k]]; }
+      const open = (x: number, z: number) => x > box.x0 + 40 && x < box.x1 - 40 && z > box.z0 + 40 && nat(x, z) > sea + 1.5 && !inHarbour(t, x, z)
+        && Math.hypot(x - centre.x, z - centre.z) < 380 && !t.blocks.some((b) => outsideBlock(b, x, z) < 3) && !t.buildings.some((b) => outsideBuilt(b, x, z) < 3)
+        && outsideRect(level, x, z) > 5 && outsideRect(t.square, x, z) > 3 && !t.storehouses.some((o) => Math.hypot(o.x - x, o.z - z) < 12) && !nearRiver(x, z, 5);
+      let lanes = 0;
+      const want = lq.int(3, 6);
+      for (const st of starts) {
+        if (lanes >= want) break;
+        const pts: [number, number][] = [[st.x, st.z]];
+        let x = st.x, z = st.z, dir = st.a;
+        const long = lq.range(50, 140);
+        for (let walked = 0; walked < long; walked += 4) {
+          let best: [number, number, number] | null = null, cost = Infinity;
+          for (const turn of [-0.55, -0.28, 0, 0.28, 0.55]) {
+            const a2 = dir + turn + lq.range(-0.12, 0.12), nx = x + Math.cos(a2) * 4, nz = z + Math.sin(a2) * 4;
+            if (!open(nx, nz) || (walked > 6 && t.streets.some((o) => nearLine(o.line, nx, nz).off < o.width / 2 + 2))) continue;
+            const grade = Math.abs(nat(nx, nz) - nat(x, z)) / 4, c = grade * 12 + Math.abs(turn) * 0.5 + lq.next() * 0.35;
+            if (grade < 0.22 && c < cost) { cost = c; best = [nx, nz, a2]; }
+          }
+          if (!best) break;
+          [x, z, dir] = best;
+          pts.push([x, z]);
+        }
+        if (pts.length < 10) continue;
+        // (Its level: the land's, smoothed along it and held to one in five.)
+        const ys = pts.map(([px, pz]) => nat(px, pz)), even = ys.map((_, k) => { let sum = 0, n = 0; for (let d = -2; d <= 2; d++) { const v = ys[k + d]; if (v !== undefined) { sum += v; n++; } } return sum / n; });
+        for (let k = 1; k < even.length; k++) even[k] = Math.min(even[k - 1] + 0.8, Math.max(even[k - 1] - 0.8, even[k]));
+        const width = round(lq.range(3.2, 4.2));
+        t.streets.push({ line: pts.map(([px, pz], k) => [round(px), round(pz), Math.round(Math.max(sea + 0.6, even[k]) * 100) / 100]), width, kind: 'track', surface: lq.chance(0.4) ? 'gravel' : 'dirt' });
+        lanes++;
+        // The shacks: every two or three steps along it, on one hand or the other, set back a stride from its edge, facing it.
+        for (let k = 3; k < pts.length - 1; k += lq.int(2, 3)) {
+          const [ax, az] = pts[k - 1], [bx, bz] = pts[k], l = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / l, nz = (bx - ax) / l, hand = lq.chance(0.5) ? -1 : 1;
+          const off = width / 2 + 3.6, sx = bx + nx * hand * off, sz = bz + nz * hand * off;
+          if (nat(sx, sz) < sea + 1.2 || slopeAt(sx, sz) > 0.3 || !clear(sx, sz, 2.4) || t.shacks.some((o) => Math.hypot(o.x - sx, o.z - sz) < 6.5)) continue;
+          shack(sx, sz, Math.round(Math.atan2(-nz * hand, -nx * hand) * 100) / 100, 0);
+        }
       }
     }
   }
@@ -877,7 +1086,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   {
     const q = rng.fork('boats');
     // A schooner lying along the quay, and two or three smacks, each decked and with a mast; then the open boats in the gaps.
-    const taken: [number, number][] = [], vq = rng.fork('vessels');
+    // (Nothing moors across the river's mouth.)
+    const taken: [number, number][] = t.river ? [[riverX - riverW / 2 - 3, riverX + riverW / 2 + 3]] : [], vq = rng.fork('vessels');
     const moor = (length: number, masts: number) => {
       for (let tries = 0; tries < 20; tries++) {
         const x = vq.range(t.quay.x0 + length / 2 + 5, t.quay.x1 - length / 2 - 5);
@@ -934,7 +1144,10 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       const c: [number, number][] = [[x, z], [x + fx, z], [x + fx, z + fz], [x, z + fz]].map(([a, b]) => [round(a + q.range(-4, 4)), round(b + q.range(-4, 4))]);
       const mx = x + fx / 2, mz = z + fz / 2;
       if (outsideRect(townBox, mx, mz) < Math.max(fx, fz) * 0.55 || t.shacks.some((s) => Math.hypot(s.x - mx, s.z - mz) < fx * 0.6)) continue;
+      // (Nor across a lane through the shacks.)
+      if (t.streets.some((s) => s.kind === 'track' && [...c, [mx, mz] as [number, number]].some(([px, pz]) => nearLine(s.line, px, pz).off < s.width / 2 + 4) || s.kind === 'track' && s.line.some(([px, pz]) => px > Math.min(...c.map((p0) => p0[0])) && px < Math.max(...c.map((p0) => p0[0])) && pz > Math.min(...c.map((p0) => p0[1])) && pz < Math.max(...c.map((p0) => p0[1]))))) continue;
       if (t.outlook && Math.hypot(t.outlook.x - mx, t.outlook.z - mz) < 60) continue;
+      if ([...c, [mx, mz] as [number, number]].some(([px, pz]) => nearRiver(px, pz, 8))) continue;
       let ok = true;
       for (const [px, pz] of [...c, [mx, mz] as [number, number]]) if (nat(px, pz) < sea + 2 || slopeAt(px, pz, 6) > 0.17) ok = false;
       if (!ok || q.chance(0.12)) continue;
@@ -1017,6 +1230,23 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // ---- what the rest of the program reads: the walkable box, the way from the door to where the player arrives, the paths
   site.town = t;
   site.grounds = { x0: box.x0 + 30, x1: box.x1 - 30, z0: box.z0 + 30, z1: box.z1 - 30 };
+  // ---- bridges: wherever a street, a track or a path crosses the river, at the way's own level: of stone for a street or a lane, of
+  // timber for a track or a path.
+  if (t.river) {
+    const rl = t.river.line;
+    for (const st of t.streets) for (let k = 0; k + 1 < st.line.length; k++) {
+      const [ax, az, ay] = st.line[k], [bx, bz, by] = st.line[k + 1];
+      for (let r = 0; r + 1 < rl.length; r++) {
+        const [cx, cz] = rl[r], [dx, dz] = rl[r + 1], den = (bx - ax) * (dz - cz) - (bz - az) * (dx - cx);
+        if (Math.abs(den) < 1e-9) continue;
+        const u = ((cx - ax) * (dz - cz) - (cz - az) * (dx - cx)) / den, v = ((cx - ax) * (bz - az) - (cz - az) * (bx - ax)) / den;
+        if (u < 0 || u > 1 || v < 0 || v > 1) continue;
+        const x = ax + (bx - ax) * u, z = az + (bz - az) * u, w = t.river.width[r], stone = st.kind === 'street' || st.kind === 'lane';
+        if (t.river.bridges.some((o) => Math.hypot(o.x - x, o.z - z) < 4)) continue;
+        t.river.bridges.push({ x: round(x), z: round(z), y: Math.round(Math.max(ay + (by - ay) * u, rl[r][2] + 1.4) * 100) / 100, heading: Math.round(Math.atan2(bz - az, bx - ax) * 1000) / 1000, span: round(w + (t.river.walled[r] ? 0.6 : 4)), width: round(Math.max(3, st.width)), kind: stone ? 'stone' : 'timber' });
+      }
+    }
+  }
   const lm = t.light ? t.moles.reduce((m, q) => (Math.hypot(q.line[q.line.length - 1][0] - t.light!.x, q.line[q.line.length - 1][1] - t.light!.z) < Math.hypot(m.line[m.line.length - 1][0] - t.light!.x, m.line[m.line.length - 1][1] - t.light!.z) ? q : m)) : t.moles[0];
   // From the door: down the stair, across the square, out along the quay to the root of the mole, and along it to its head.
   const mid = (t.stair.x0 + t.stair.x1) / 2;

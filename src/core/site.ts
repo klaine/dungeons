@@ -394,8 +394,28 @@ export interface Town {
   /** The harbour light at the end of a mole, which can be climbed. */
   light?: { x: number; z: number; y: number; r: number; height: number; door: number };
   /** Streets, lanes, stepped lanes and tracks, as lines of points `[x, z, y]`, `width` across. */
-  streets: { line: [number, number, number][]; width: number; kind: 'street' | 'lane' | 'track' | 'path' }[];
+  /**
+   * The ways of the town: `street`s and `lane`s at their own levels, `track`s and `path`s cut to the land; and what each is laid with,
+   * if not what its kind is usually laid with (setts for a street or a lane, beaten earth for a track, a trodden line for a path):
+   * `flags` (dressed stone, as beside the classical quarter), `setts`, `gravel`, or `dirt` (beaten earth, with ruts).
+   */
+  streets: { line: [number, number, number][]; width: number; kind: 'street' | 'lane' | 'track' | 'path'; surface?: 'flags' | 'setts' | 'gravel' | 'dirt' }[];
   /** Blocks of the town between its streets, and which of its three kinds of building each is built up with. */
+  /** The form of the harbour: two arms curving towards each other, one long breakwater, straight piers, a breakwater standing off with two mouths, or a mole bent square. */
+  harbourForm?: 'arms' | 'breakwater' | 'piers' | 'detached' | 'dogleg';
+  /**
+   * A river, if the town has one: its middle line from the hills down to the harbour, each point `[x, z, y]` with the level of its
+   * water there (never falling as it goes up; a step where it rises sharply is a weir, or in the hills a fall); its breadth at each
+   * point; whether it runs between stone walls there (in the town) or between banks of earth; the breadth of the quay along the top of
+   * each wall; the side of the square it runs down (-1 west, 1 east); and its bridges, each at a way's crossing, at the way's level,
+   * facing along the way, spanning the water, as broad as the way, of stone or of timber.
+   */
+  river?: {
+    line: [number, number, number][]; width: number[]; walled: boolean[]; quay: number; side: -1 | 1;
+    bridges: { x: number; z: number; y: number; heading: number; span: number; width: number; kind: 'stone' | 'timber' }[];
+  };
+  /** The outline of the harbour's water: the quay's edge, the moles' lines and the mouths between their heads. */
+  harbour?: [number, number][];
   /** What kind of plan the town's streets are laid on: square and straight, following the shore, fanning out from the harbour, or crooked as an old town's. */
   plan?: 'planned' | 'shore' | 'fan' | 'old';
   /** The blocks of buildings: each its four corners, south-west, south-east, north-east, north-west (south being towards the sea), and the box about them. */

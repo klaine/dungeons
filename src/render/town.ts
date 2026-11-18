@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { Building, Site, Town } from '../core/site';
-import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, squareY, townGround, townLand } from '../core/town';
+import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, riverAt, squareY, townGround, townLand } from '../core/town';
 import { footprintOf } from '../core/building';
 import { MeshBuilder } from './geom/meshBuilder';
 import { alongSheet, carveRock } from './geom/rock';
@@ -36,7 +36,9 @@ const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
 type P3 = [number, number, number];
 
 /** What the ground is at each point of the town, on a lattice: so that the sheet, the planting and the walls ask once. */
-const Z = { wild: 0, street: 1, flags: 2, built: 3, yard: 4, track: 5, path: 6, shack: 7, field: 8, quay: 9, harbour: 10 } as const;
+const Z = { wild: 0, street: 1, flags: 2, built: 3, yard: 4, track: 5, path: 6, shack: 7, field: 8, quay: 9, harbour: 10, river: 11 } as const;
+/** What a way of the town is laid with: its own surface, or its kind's usual one (setts for a street or lane, earth for a track, a trodden line for a path). */
+const surfaceOf = (s: Town['streets'][number]) => s.surface ?? (s.kind === 'street' || s.kind === 'lane' ? 'setts' : s.kind === 'track' ? 'dirt' : 'foot');
 
 export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[] } {
   const { site, p, kit, wild } = b;
@@ -53,7 +55,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   const ZC = 1, zx0 = L.x0, zz0 = L.z0, znx = Math.round((L.x1 - L.x0) / ZC) + 1, znz = Math.round((L.z1 - L.z0) / ZC) + 1;
   const zone = new Uint8Array(znx * znz), fieldOf = new Int16Array(znx * znz).fill(-1), offWay = new Float32Array(znx * znz).fill(99);
   // (And how far in from the paving's edge each point is, less than nothing outside it, and whether it is flags or setts.)
-  const pave = new Float32Array(znx * znz).fill(-9), flagsAt = new Uint8Array(znx * znz);
+  const pave = new Float32Array(znx * znz).fill(-9), flagsAt = new Uint8Array(znx * znz), trodden = new Uint8Array(znx * znz);
   {
     const paint = (r: { x0: number; x1: number; z0: number; z1: number }, fn: (k: number, x: number, z: number) => void) => {
       const i0 = Math.max(0, Math.floor((r.x0 - zx0) / ZC)), i1 = Math.min(znx - 1, Math.ceil((r.x1 - zx0) / ZC)), j0 = Math.max(0, Math.floor((r.z0 - zz0) / ZC)), j1 = Math.min(znz - 1, Math.ceil((r.z1 - zz0) / ZC));
@@ -74,19 +76,24 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       paint({ x0: Math.min(...xs) - half - 1, x1: Math.max(...xs) + half + 1, z0: Math.min(...zs) - half - 1, z1: Math.max(...zs) + half + 1 }, (k, x, z) => {
         const n = nearLine(s.line, x, z);
         if (n.off > half) return;
-        const kind = s.kind === 'street' || s.kind === 'lane' ? Z.street : s.kind === 'track' ? Z.track : Z.path;
+        // (What it is laid with decides how it is drawn: stone of any kind, and gravel, as paving; beaten earth as a track, with ruts.)
+        const surf = surfaceOf(s), kind = surf === 'foot' ? Z.path : surf === 'dirt' ? Z.track : Z.street;
         if (kind === Z.street || zone[k] !== Z.street) { zone[k] = kind; offWay[k] = n.off; }
+        // (A street or a lane of beaten earth is trodden bare across its breadth, not two ruts in the grass as a track out in the fields is.)
+        if (surf === 'dirt' && s.width > 3 && n.off < half - 0.4) trodden[k] = 1;
       });
     }
     paint(t.square, (k) => { zone[k] = Z.flags; });
     paint({ x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z }, (k) => { zone[k] = Z.flags; });
     paint(p, (k) => { zone[k] = Z.flags; });
-    // The paving: streets and lanes in setts, the square, the waterfront and the forecourt in flags.
-    for (const s of t.streets) if (s.kind === 'street' || s.kind === 'lane') {
-      const xs = s.line.map((q) => q[0]), zs = s.line.map((q) => q[1]), half = s.width / 2;
+    // The paving: each street as it is laid (setts, flags or gravel; earth is not paving), the square, the waterfront and the forecourt in flags.
+    for (const s of t.streets) {
+      const surf = surfaceOf(s);
+      if (surf === 'dirt' || surf === 'foot') continue;
+      const xs = s.line.map((q) => q[0]), zs = s.line.map((q) => q[1]), half = s.width / 2, kind = surf === 'flags' ? 1 : surf === 'gravel' ? 2 : 0;
       paint({ x0: Math.min(...xs) - half - 3, x1: Math.max(...xs) + half + 3, z0: Math.min(...zs) - half - 3, z1: Math.max(...zs) + half + 3 }, (k, x, z) => {
         const d = half - nearLine(s.line, x, z).off;
-        if (d > pave[k]) { pave[k] = d; flagsAt[k] = 0; }
+        if (d > pave[k]) { pave[k] = d; flagsAt[k] = kind; }
       });
     }
     for (const r of [t.square, { x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z + 0.6 }, { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 + 0.3 }]) paint({ x0: r.x0 - 3, x1: r.x1 + 3, z0: r.z0 - 3, z1: r.z1 + 3 }, (k, x, z) => {
@@ -101,9 +108,18 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // (The storehouses and the decks before them.)
     for (const s of t.storehouses) { const r = s.d / 2 + 3, fx = Math.cos(s.turn), fz = Math.sin(s.turn); paint({ x0: s.x - r, x1: s.x + r, z0: s.z - r, z1: s.z + r }, (k, x, z) => { const f = (x - s.x) * fx + (z - s.z) * fz, a = -(x - s.x) * fz + (z - s.z) * fx; if (Math.abs(a) < s.w / 2 + 0.4 && f > -s.d / 2 - 0.4 && f < s.d / 2 + 2.4) zone[k] = Z.built; }); }
     paint({ x0: t.quay.x0 - 20, x1: t.quay.x1 + 20, z0: t.quay.z, z1: t.quay.z + 200 }, (k, x, z) => { if (inHarbour(t, x, z)) zone[k] = Z.harbour; });
+    // The river, its bed and the foot of its banks, over whatever lay there: no paving and nothing growing in it.
+    if (t.river) {
+      const xs = t.river.line.map((q0) => q0[0]), zs = t.river.line.map((q0) => q0[1]), wide = Math.max(...t.river.width) / 2 + 3;
+      paint({ x0: Math.min(...xs) - wide, x1: Math.max(...xs) + wide, z0: Math.min(...zs) - wide, z1: Math.max(...zs) + wide }, (k, x, z) => {
+        const r = riverAt(t, x, z);
+        if (r.off < r.half + (r.walled ? 0.3 : 1.2)) { zone[k] = Z.river; pave[k] = -9; }
+      });
+    }
   }
   const zoneAt = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? Z.wild : zone[j * znx + i]; };
   const fieldAt = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? -1 : fieldOf[j * znx + i]; };
+  const earthAt = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i >= 0 && j >= 0 && i < znx && j < znz && trodden[j * znx + i] === 1; };
   const wayOff = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? 99 : offWay[j * znx + i]; };
   /** How far in from the paving's edge a point is (less than nothing outside it), read between the lattice's points; and whether it is flags. */
   const paveAt = (x: number, z: number): { d: number; flags: boolean; gravel: boolean } => {
@@ -376,6 +392,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     const shore = 1 - smooth((above - 1.1) / 0.8);
     // (Paving, and the ground within a stride or two of it, carries how far in from the paving's edge it is, so that the material can
     // draw the edge where it truly is, and the paving's colour, which on the ground beside it is the dust of the street.)
+    if (zn === Z.river) { lay.wet = 1; lay.bare = 1; return shade(c, 0.6); }
     const pv = paveAt(x, z);
     if (pv.d > -2.4) {
       // (How far in, in one band for every kind; and the kind in the litter channel, which paving has no other use for. See the
@@ -392,6 +409,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     if (zn === Z.track || zn === Z.path) {
       const off = wayOff(x, z);
       lay.code = zn === Z.track ? 100 + off * (fbm2(x * 0.3, z * 0.3, 2) > 0.5 ? 1 : -1) : 200 + off;
+      if (earthAt(x, z)) lay.bare = 0.8 + 0.15 * fbm2(x * 0.25, z * 0.25, 2);
     }
     if (zn === Z.built || zn === Z.shack || zn === Z.yard) lay.bare = zn === Z.yard ? 0.25 + 0.4 * smooth((fbm2(x * 0.2, z * 0.2, 2) - 0.45) / 0.2) : 0.75;
     let tintC: Colour = [1, 1, 1];
@@ -495,19 +513,27 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     const h = rng.fork('quay'), at = frame((q.x0 + q.x1) / 2, q.z, 0, -Math.PI / 2);
     // (In this frame the quay's face looks out to sea, which is +z: forward is -z, back into the quay; `a` runs west along it.)
     const half = (q.x1 - q.x0) / 2, bed = sea - 4;
-    masonry(at, -half, half, bed, deck - 0.3, 1.6, h, stone, sea + 0.4);
-    // The coping: long stones laid across the edge, standing a little out over the face.
-    for (let a = -half; a < half - 0.05;) {
-      const len = h.range(1.1, 1.9), e = Math.min(half, a + len);
-      box(at, 'stone', a + 0.02, e - 0.02, deck - 0.3, deck, -0.12, 0.9, shade(stone, h.range(0.95, 1.12)), 0.4);
-      a = e;
+    // (Where a river comes through the quay into the harbour, its face is open across the river's breadth, and its walls turn in.)
+    const mouth = t.river ? [riverAt(t, t.river.line[t.river.line.length - 1][0], q.z).half, t.river.line[t.river.line.length - 1][0] - (q.x0 + q.x1) / 2] : null;
+    const spans: [number, number][] = mouth ? [[-half, mouth[1] - mouth[0] - 0.3], [mouth[1] + mouth[0] + 0.3, half]] : [[-half, half]];
+    const open = (a: number, m: number) => !!mouth && Math.abs(a - mouth[1]) < mouth[0] + m;
+    for (const [a0, a1] of spans) {
+      masonry(at, a0, a1, bed, deck - 0.3, 1.6, h, stone, sea + 0.4);
+      // The coping: long stones laid across the edge, standing a little out over the face.
+      for (let a = a0; a < a1 - 0.05;) {
+        const len = h.range(1.1, 1.9), e = Math.min(a1, a + len);
+        box(at, 'stone', a + 0.02, e - 0.02, deck - 0.3, deck, -0.12, 0.9, shade(stone, h.range(0.95, 1.12)), 0.4);
+        a = e;
+      }
     }
     // Bollards of iron along the edge, and now and then steps down the face into the water.
     for (let a = -half + 6; a < half - 4; a += h.range(9, 15)) {
+      if (open(a, 2)) continue;
       const [bx, , bz] = at(a, 0, 0.55);
       bollard(bx, bz, deck, h);
     }
     for (const a of [-half * h.range(0.3, 0.6), half * h.range(0.3, 0.6)]) {
+      if (open(a, 4) || open(a + 3, 4)) continue;
       // (Let into the face: each step a block from the face out, the flight running along it down to the water.)
       for (let k = 0; k < 9; k++) {
         const y = deck - 0.3 - k * 0.27;
@@ -571,13 +597,16 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         solid('stone', [r(-s / 2, -s, -s / 2), r(s / 2, -s, -s / 2), r(s / 2, -s, s / 2), r(-s / 2, -s, s / 2), r(-s / 2 + tip, s * 0.4, -s / 2), r(s / 2, s * 0.45 + tip, -s / 2), r(s / 2 - tip, s * 0.4, s / 2), r(-s / 2, s * 0.35, s / 2)], shade(stone, h.range(0.5, 0.75)), 0.4);
       }
     }
-    // Its head: rounded off in a ring of blocks about the end.
-    const [ex, ez] = m.line[m.line.length - 1];
-    for (let n = 0; n < 12; n++) {
-      const a = (n / 12) * Math.PI * 2, r = frame(ex, ez, 0, a);
-      box(r, 'stone', -half * 0.28, half * 0.28, sea - 3, m.y - 0.02, half * 0.55, half, shade(stone, h.range(0.8, 1)), 0.4);
+    // Its head: rounded off in a ring of blocks about the end; and about its start too, if it stands off in the sea and does not
+    // begin at the quay.
+    const free = Math.abs(m.line[0][1] - q.z) > 4;
+    for (const [ex, ez] of free ? [m.line[m.line.length - 1], m.line[0]] : [m.line[m.line.length - 1]]) {
+      for (let n = 0; n < 12; n++) {
+        const a = (n / 12) * Math.PI * 2, r = frame(ex, ez, 0, a);
+        box(r, 'stone', -half * 0.28, half * 0.28, sea - 3, m.y - 0.02, half * 0.55, half, shade(stone, h.range(0.8, 1)), 0.4);
+      }
+      box(frame(ex, ez, 0, 0), 'stone', -half * 0.75, half * 0.75, sea - 3, m.y - 0.02, -half * 0.75, half * 0.75, shade(stone, 0.9), 0.4);
     }
-    box(frame(ex, ez, 0, 0), 'stone', -half * 0.75, half * 0.75, sea - 3, m.y - 0.02, -half * 0.75, half * 0.75, shade(stone, 0.9), 0.4);
   });
   // The harbour light: a round tower of stone on the head of the longer mole, white-washed, with a gallery and a lantern.
   let lamp: { x: number; y: number; z: number } | undefined;
@@ -664,7 +693,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     };
     for (let x = q.x0 + 9; x < q.x1 - 9; x += h.range(16, 26)) {
       if (x > t.square.x0 + 6 && x < t.square.x1 - 6 && h.chance(0.6)) continue;
-      heap(x, q.z - h.range(3.4, 4.6));
+      // (Within two to four metres of the quay's edge: further back they lay across the way along the waterfront, where one walks in
+      // from the harbour light; and none on the bridge over a river's mouth.)
+      if (t.river && Math.abs(x - t.river.line[t.river.line.length - 1][0]) < t.river.width[t.river.width.length - 1] / 2 + 4) continue;
+      heap(x, q.z - h.range(2.9, 3.2));
     }
     // The crane: on a block of stone at the quay's edge beside the ship, a mast with a jib raked up from low on it and out over the
     // water, held up by a rope from the mast's head; a winch at its foot, and a crate in a sling hanging from the jib's end.
@@ -706,6 +738,135 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
   }
 
+  // ---- the river: its water, a ribbon falling as its levels fall, white where it drops over a weir; in the town, walls of dressed
+  // stone either side from its bed up to the quays, coped, with an iron railing along the top; boardwalks of timber at the foot of the
+  // walls, on posts in the water, with a rail and a stair down to them from the quay; and its bridges, of stone in the town, a
+  // segmental arch between abutments with a moulded ring, flagged and walled along its deck, and of timber out of it.
+  const streams: { line: number[]; width: number; banks?: number[] }[] = [], falls: { x: number; y: number; z: number; height: number; width: number }[] = [];
+  // (Where one may walk over or down in the river: its bridges' decks, its boardwalks and their stairs. Each a rectangle about a
+  // point, turned to a bearing: half its length along the bearing, half its breadth across. The edge of the world leaves them open.)
+  const decks: { x: number; z: number; heading: number; along: number; across: number }[] = [];
+  const onDeck = (x: number, z: number) => decks.some((d) => { const c = Math.cos(d.heading), sn = Math.sin(d.heading), dx = x - d.x, dz = z - d.z; return Math.abs(dx * c + dz * sn) < d.along && Math.abs(-dx * sn + dz * c) < d.across; });
+  if (t.river) {
+    const rv = t.river, h = rng.fork('river'), L2 = rv.line, n = L2.length, iron: Colour = [0.05, 0.05, 0.055], oak: Colour = [0.33, 0.24, 0.16];
+    // The water: every point at its level, its banks at the walls in the town (a hand into them), its breadth out of it.
+    streams.push({ line: L2.flatMap(([x, z, y]) => [x, y + 0.02, z]), width: rv.width[0], banks: L2.flatMap((_, k) => { const w = rv.width[k] / 2 + (rv.walled[k] ? 0.15 : 0.6); return [w, w]; }) });
+    for (let k = 0; k + 1 < n; k++) {
+      const drop = L2[k][2] - L2[k + 1][2];
+      if (drop > 0.9) falls.push({ x: L2[k + 1][0], y: L2[k + 1][2], z: L2[k + 1][1], height: drop, width: rv.width[k] * 0.8 });
+    }
+    // Where along the river each bridge stands, and how broad it is there (to keep walls' railings and the boardwalks clear of it).
+    const alongOf = (x: number, z: number) => { const r = riverAt(t, x, z); let d = 0; for (let k = 0; k < r.k; k++) d += Math.hypot(L2[k + 1][0] - L2[k][0], L2[k + 1][1] - L2[k][1]); return d + r.along * Math.hypot(L2[Math.min(n - 1, r.k + 1)][0] - L2[r.k][0], L2[Math.min(n - 1, r.k + 1)][1] - L2[r.k][1]); };
+    const crossings = rv.bridges.map((b) => ({ at: alongOf(b.x, b.z), half: b.width / 2 + 0.4 }));
+    const byBridge = (d: number, m = 0) => crossings.some((c) => Math.abs(c.at - d) < c.half + m);
+    const sides = (rv.side ? [-1, 1] : [-1, 1]) as (-1 | 1)[];
+    const walkSides = h.chance(0.5) ? [-1, 1] : [h.chance(0.5) ? -1 : 1];
+    let total = 0;
+    for (let k = 0; k + 1 < n; k++) total += Math.hypot(L2[k + 1][0] - L2[k][0], L2[k + 1][1] - L2[k][1]);
+    // The boardwalks: on one bank or both, in stretches between the bridges, each with a stair down to it from the quay at its upper end.
+    const walled = (d: number) => { let acc = 0; for (let k = 0; k + 1 < n; k++) { const l = Math.hypot(L2[k + 1][0] - L2[k][0], L2[k + 1][1] - L2[k][1]); if (d <= acc + l) return rv.walled[k] && rv.walled[k + 1] && L2[k][1] < q.z - q.apron - 1; acc += l; } return false; };
+    const pointAt = (d: number) => { let acc = 0; for (let k = 0; k + 1 < n; k++) { const l = Math.hypot(L2[k + 1][0] - L2[k][0], L2[k + 1][1] - L2[k][1]); if (d <= acc + l || k + 2 === n) { const f = Math.min(1, Math.max(0, (d - acc) / l)); return { x: L2[k][0] + (L2[k + 1][0] - L2[k][0]) * f, z: L2[k][1] + (L2[k + 1][1] - L2[k][1]) * f, y: L2[k][2] + (L2[k + 1][2] - L2[k][2]) * f, dx: (L2[k + 1][0] - L2[k][0]) / l, dz: (L2[k + 1][1] - L2[k][1]) / l, half: rv.width[k] / 2 }; } acc += l; } return { x: 0, z: 0, y: 0, dx: 1, dz: 0, half: 1 }; };
+    const runs: { side: -1 | 1; from: number; to: number }[] = [];
+    for (const side of walkSides) {
+      let from = -1;
+      for (let d = 0; d <= total; d += 1) {
+        const ok = walled(d) && !byBridge(d, 1.5);
+        if (ok && from < 0) from = d;
+        if ((!ok || d + 1 > total) && from >= 0) { if (d - from > 14) runs.push({ side: side as -1 | 1, from: from + 0.5, to: d - 0.5 }); from = -1; }
+      }
+    }
+    function stairAt(side: number, d: number) { return runs.some((r) => r.side === side && d > r.from - 0.3 && d < r.from + 3.4); }
+    let d0 = 0;
+    for (let k = 0; k + 1 < n; k++) {
+      const [ax, az, ay] = L2[k], [bx, bz, by] = L2[k + 1], len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
+      const dStart = d0;
+      d0 += len;
+      if (!rv.walled[k] || !rv.walled[k + 1] || az > q.z + 0.5) continue;
+      const half = rv.width[k] / 2, water = Math.min(ay, by);
+      for (const side of sides) {
+        // (A frame with its origin on the wall's face at the stretch's start, `f` into the bank, `a` along the river.)
+        const nx = -dz * side, nz = dx * side, ox = ax + nx * half, oz = az + nz * half, facing = Math.atan2(nz, nx);
+        const at = frame(ox, oz, 0, facing), sign = (-Math.sin(facing) * dx + Math.cos(facing) * dz) > 0 ? 1 : -1;
+        const a0 = sign > 0 ? 0 : -len, a1 = sign > 0 ? len : 0;
+        // (The quay's level read well back from the wall: the ground falls into the river's cut over the ground's own spacing, so just
+        // behind the wall it has already dipped; a band of flags along the coping covers that, and the bridges reach over it.)
+        const top = Math.min(ground(ox + nx * 2.6, oz + nz * 2.6), ground(ox + nx * 2.6 + dx * len, oz + nz * 2.6 + dz * len));
+        masonry(at, a0 - 0.05, a1 + 0.05, water - 2.1, top - 0.25, 1.1, h.fork(`wall${k}.${side}`), stone, water + 0.15);
+        box(at, 'stone', a0, a1, top - 0.25, top + 0.05, -0.1, 0.55, shade(stone, h.range(1, 1.12)), 0.4);
+        box(at, 'stone', a0, a1, top - 0.6, top + 0.02, 0.55, 2.1, shade(stone, h.range(0.88, 0.98)), 0.4);
+        // The railing: posts every two metres and two rails; none where a bridge meets the wall or a stair goes down.
+        for (let a = 0.6; a < len; a += 2) {
+          const dd = dStart + a;
+          if (byBridge(dd, 0.3) || stairAt(side, dd)) continue;
+          const aa = sign > 0 ? a : -a;
+          box(at, 'metal', aa - 0.03, aa + 0.03, top + 0.05, top + 1.05, 0.12, 0.18, iron);
+          const seg = Math.min(2, len - a);
+          if (!byBridge(dd + seg, 0.3) && !stairAt(side, dd + seg)) for (const yy of [top + 0.5, top + 1.0]) box(at, 'metal', Math.min(aa, aa + sign * seg), Math.max(aa, aa + sign * seg), yy, yy + 0.05, 0.13, 0.17, iron);
+        }
+      }
+    }
+    for (const r of runs) {
+      const W = 2.3, level = (dd: number) => pointAt(dd).y + 0.5;
+      // (Planks across, on joists along both edges, on posts down into the bed.)
+      for (let dd = r.from; dd < r.to; dd += 1) {
+        const p0 = pointAt(dd), nx = -p0.dz * r.side, nz = p0.dx * r.side, mid = p0.half - W / 2;
+        decks.push({ x: p0.x + nx * mid, z: p0.z + nz * mid, heading: Math.atan2(p0.dz, p0.dx), along: 0.7, across: W / 2 });
+      }
+      for (let dd = r.from; dd < r.to; dd += 0.32) {
+        const p0 = pointAt(dd), nx = -p0.dz * r.side, nz = p0.dx * r.side, y = level(dd), at = frame(p0.x, p0.z, y, Math.atan2(nz, nx));
+        box(at, 'wood', -0.15, 0.15, -0.06, 0, p0.half - W, p0.half - 0.02, shade(oak, h.range(0.85, 1.15)), 0.9);
+      }
+      for (let dd = r.from; dd < r.to; dd += 2.4) {
+        const p0 = pointAt(dd), nx = -p0.dz * r.side, nz = p0.dx * r.side, y = level(dd), at = frame(p0.x, p0.z, y, Math.atan2(nz, nx));
+        for (const f of [p0.half - W + 0.1, p0.half - 0.15]) box(at, 'wood', -0.09, 0.09, -2.4, -0.06, f - 0.09, f + 0.09, shade(oak, 0.8), 0.9);
+        // The rail on the water's side.
+        box(at, 'wood', -0.05, 0.05, 0, 1.0, p0.half - W + 0.05, p0.half - W + 0.15, oak, 0.9);
+        const p1 = pointAt(Math.min(r.to, dd + 2.4)), at1 = frame(p1.x, p1.z, level(Math.min(r.to, dd + 2.4)), Math.atan2(nz, nx));
+        const [x0, , z0] = at(0, 0.95, p0.half - W + 0.1), [x1, , z1] = at1(0, 0.95, p1.half - W + 0.1);
+        if (dd + 0.5 < r.to) solid('wood', [[x0, y + 0.9, z0 - 0.04], [x1, level(Math.min(r.to, dd + 2.4)) + 0.9, z1 - 0.04], [x1 + 0.04, level(Math.min(r.to, dd + 2.4)) + 0.9, z1 + 0.04], [x0 + 0.04, y + 0.9, z0 + 0.04], [x0, y + 1.0, z0 - 0.04], [x1, level(Math.min(r.to, dd + 2.4)) + 1.0, z1 - 0.04], [x1 + 0.04, level(Math.min(r.to, dd + 2.4)) + 1.0, z1 + 0.04], [x0 + 0.04, y + 1.0, z0 + 0.04]], oak, 0.9);
+      }
+      // The stair down from the quay at its upper end: steps along the wall, from the quay's level to the deck's.
+      { const pm = pointAt(r.from + 1.6), nx0 = -pm.dz * r.side, nz0 = pm.dx * r.side; decks.push({ x: pm.x + nx0 * (pm.half - 0.6), z: pm.z + nz0 * (pm.half - 0.6), heading: Math.atan2(pm.dz, pm.dx), along: 1.8, across: 0.6 }); }
+      const ps = pointAt(r.from), nx = -ps.dz * r.side, nz = ps.dx * r.side, topY = ground(ps.x + nx * (ps.half + 1.5), ps.z + nz * (ps.half + 1.5)), deckY = level(r.from), steps = Math.max(2, Math.round((topY - deckY) / 0.2));
+      for (let s2 = 0; s2 < steps; s2++) {
+        const dd = r.from + 3.2 - (s2 + 1) * (3.2 / steps), p0 = pointAt(dd), at = frame(p0.x, p0.z, 0, Math.atan2(nz, nx)), y = topY - (s2 + 1) * ((topY - deckY) / steps);
+        box(at, 'stone', -3.2 / steps / 2, 3.2 / steps / 2, deckY - 0.3, y, p0.half - 1.2, p0.half - 0.02, shade(stone, h.range(0.85, 1.05)), 0.4);
+      }
+    }
+    // The bridges.
+    rv.bridges.forEach((b, bi) => {
+      const hq = h.fork(`bridge${bi}`), at = frame(b.x, b.z, 0, b.heading), half = b.span / 2, hw = b.width / 2, water = riverAt(t, b.x, b.z).y;
+      decks.push({ x: b.x, z: b.z, heading: b.heading, along: half + 2.1, across: hw - 0.4 });
+      if (b.kind === 'stone') {
+        // (A segmental arch springing a little over the water, as high as the deck allows; the fill over it to the deck.)
+        const spring = water + 0.25, rise = Math.max(0.5, Math.min(b.y - 0.6 - spring, b.span * 0.32)), R = (half * half + rise * rise) / (2 * rise), cy = spring + rise - R, N = 18;
+        const tone = shade(stone, 1.02);
+        for (let i = 0; i < N; i++) {
+          const f0 = -half + (b.span * i) / N, f1 = f0 + b.span / N, fm = (f0 + f1) / 2, under = cy + Math.sqrt(Math.max(0, R * R - fm * fm));
+          box(at, 'stone', -hw, hw, under, b.y - 0.12, f0, f1 + 0.01, tone, 0.4);
+          for (const sd of [-1, 1]) box(at, 'stone', sd < 0 ? -hw - 0.06 : hw - 0.3, sd < 0 ? -hw + 0.3 : hw + 0.06, under - 0.02, under + 0.42, f0, f1 + 0.01, shade(stone, 1.12), 0.4);
+        }
+        // Abutments, from the bed up under the arch's springing, a little into each bank.
+        for (const e of [-1, 1]) box(at, 'stone', -hw - 0.1, hw + 0.1, water - 2.2, spring + 0.05, e < 0 ? -half - 1.2 : half - 0.05, e < 0 ? -half + 0.05 : half + 1.2, shade(stone, 0.9), 0.4);
+        // The deck, flagged; and walls along it, coped, over the water's breadth.
+        box(at, 'stone', -hw, hw, b.y - 0.6, b.y + 0.01, -half - 2.1, half + 2.1, shade(stone, 0.95), 0.4);
+        for (const sd of [-1, 1]) {
+          box(at, 'stone', sd < 0 ? -hw : hw - 0.38, sd < 0 ? -hw + 0.38 : hw, b.y, b.y + 0.85, -half - 0.3, half + 0.3, shade(stone, hq.range(0.92, 1.05)), 0.4);
+          box(at, 'stone', sd < 0 ? -hw - 0.06 : hw - 0.44, sd < 0 ? -hw + 0.44 : hw + 0.06, b.y + 0.85, b.y + 1.0, -half - 0.36, half + 0.36, shade(stone, 1.15), 0.4);
+        }
+      } else {
+        // Timber: two beams across on trestles at each bank, planks across them, and a handrail either side.
+        for (const sd of [-1, 1]) box(at, 'wood', sd * hw - 0.12, sd * hw + 0.12, b.y - 0.42, b.y - 0.12, -half - 2.1, half + 2.1, oak, 0.9);
+        for (let f = -half - 2.1; f < half + 2.1; f += 0.3) box(at, 'wood', -hw - 0.1, hw + 0.1, b.y - 0.12, b.y, f + 0.01, f + 0.28, shade(oak, hq.range(0.85, 1.15)), 0.9);
+        for (const e of [-1, 1]) for (const sd of [-1, 1]) box(at, 'wood', sd * hw - 0.1, sd * hw + 0.1, water - 1.2, b.y - 0.42, e * half - 0.1, e * half + 0.1, shade(oak, 0.8), 0.9);
+        for (const sd of [-1, 1]) {
+          for (const f of [-half - 0.5, 0, half + 0.5]) box(at, 'wood', sd * hw - 0.05, sd * hw + 0.05, b.y, b.y + 1.0, f - 0.05, f + 0.05, oak, 0.9);
+          box(at, 'wood', sd * hw - 0.05, sd * hw + 0.05, b.y + 0.92, b.y + 1.0, -half - 0.55, half + 0.55, oak, 0.9);
+        }
+      }
+    });
+  }
+
   // ---- the house's terrace over the square: a wall of dressed stone along its front, with a balustrade, and the stair down
   {
     const h = rng.fork('terrace'), sq = t.square, lv = t.level, st = t.stair;
@@ -737,18 +898,20 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       box(at, 'stone', a0, a1, F, F + 0.35, -0.1, 0.5, shade(stone, 1.05));
     }
     // The stair: steps of stone from the terrace down into the square, as broad as the stair, between cheeks that carry the balustrade on down.
-    const drop = F - yN, steps = Math.max(2, Math.ceil(drop / 0.16)), rise = drop / steps, run = (st.z1 - st.z0) / steps;
+    // (Down to the square's ground at the stair's foot, not at the square's top edge: where the square falls steeply to the sea, the last
+    // step stood two hands over the ground before it, too high to climb.)
+    const foot = Math.min(yN, squareY(t, st.z1)), drop = F - foot, steps = Math.max(2, Math.ceil(drop / 0.16)), rise = drop / steps, run = (st.z1 - st.z0) / steps;
     const at = frame((st.x0 + st.x1) / 2, st.z0, 0, Math.PI / 2), half = (st.x1 - st.x0) / 2;
     for (let k = 0; k < steps; k++) {
       const y = F - (k + 1) * rise;
-      box(at, 'stone', -half, half, Math.min(yN, squareY(t, st.z1)) - 0.6, y + 0.0, k * run - 0.02, (k + 1) * run, shade(stone, h.range(0.9, 1.05)), 0.4);
+      box(at, 'stone', -half, half, foot - 0.6, y + 0.0, k * run - 0.02, (k + 1) * run, shade(stone, h.range(0.9, 1.05)), 0.4);
       box(at, 'stone', -half, half, y - 0.04, y + 0.02, k * run - 0.04, k * run + 0.04, shade(stone, 1.12), 0.4);
     }
     for (const side of [-1, 1]) {
-      box(at, 'stone', side < 0 ? -half - 0.6 : half, side < 0 ? -half : half + 0.6, yN - 0.6, F + 0.2, -0.1, st.z1 - st.z0, shade(stone, 0.95));
+      box(at, 'stone', side < 0 ? -half - 0.6 : half, side < 0 ? -half : half + 0.6, foot - 0.6, F + 0.2, -0.1, st.z1 - st.z0, shade(stone, 0.95));
       box(at, 'stone', side < 0 ? -half - 0.66 : half - 0.06, side < 0 ? -half + 0.06 : half + 0.66, F + 0.2, F + 0.32, -0.1, 0.4, shade(stone, 1.1));
       // (A post at the foot of each cheek, with a ball on it.)
-      box(at, 'stone', side < 0 ? -half - 0.65 : half - 0.05, side < 0 ? -half + 0.05 : half + 0.65, yN, yN + 1.2, st.z1 - st.z0 - 0.7, st.z1 - st.z0, shade(stone, 1.02));
+      box(at, 'stone', side < 0 ? -half - 0.65 : half - 0.05, side < 0 ? -half + 0.05 : half + 0.65, foot, foot + 1.2, st.z1 - st.z0 - 0.7, st.z1 - st.z0, shade(stone, 1.02));
     }
     // The forecourt, flagged from wall to wall.
     kit.group = `p${p.id}`;
@@ -825,7 +988,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   };
   {
     const h = rng.fork('lamps'), sq = t.square;
-    const clearOf = (x: number, z: number) => !t.buildings.some((bd) => Math.abs(bd.x - x) < 30 && Math.abs(bd.z - z) < 30 && outsideBuilt(bd, x, z) < 1.1) && !t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 2.5) && (!t.fountain || Math.hypot(t.fountain.x - x, t.fountain.z - z) > t.fountain.r + 1.5);
+    const clearOf = (x: number, z: number) => !(t.river && riverAt(t, x, z).off < riverAt(t, x, z).half + 1.5) && !t.buildings.some((bd) => Math.abs(bd.x - x) < 30 && Math.abs(bd.z - z) < 30 && outsideBuilt(bd, x, z) < 1.1) && !t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 2.5) && (!t.fountain || Math.hypot(t.fountain.x - x, t.fountain.z - z) > t.fountain.r + 1.5);
     // (Along the waterfront by the quay's edge, between the bollards; round the square's edges; and along the streets, by turns on either side.)
     for (let x = q.x0 + 5; x < q.x1 - 5; x += 15) if (clearOf(x, q.z - 1.5)) lampAt(x, q.z - 1.5, h);
     for (const side of [-1, 1]) for (let z = t.stair.z1 + 2; z < sq.z1 - 1; z += 12) { const x = side < 0 ? sq.x0 + 1.4 : sq.x1 - 1.4; if (clearOf(x, z)) lampAt(x, z, h); }
@@ -1255,10 +1418,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       if (dist > 380) continue;
       if (dist > 220 && qq.next() > 0.45) continue;
       const px = x + qq.range(-0.4, 0.4), pz = z + qq.range(-0.4, 0.4), zn = zoneAt(px, pz);
-      if (zn === Z.street || zn === Z.flags || zn === Z.built || zn === Z.shack || zn === Z.harbour || zn === Z.quay || bedAt(px, pz)) continue;
+      if (zn === Z.street || zn === Z.flags || zn === Z.built || zn === Z.shack || zn === Z.harbour || zn === Z.quay || zn === Z.river || bedAt(px, pz)) continue;
       const y = ground(px, pz), above = y - sea;
       if (above < 1.4 || (rocky.holds(px, pz) && rocky.at(px, pz) > 0.35) || insideOuter(px, pz, 0.5)) continue;
-      if ((zn === Z.track && wayOff(px, pz) < 1.5) || (zn === Z.path && wayOff(px, pz) < 0.6)) continue;
+      if ((zn === Z.track && (wayOff(px, pz) < 1.5 || earthAt(px, pz))) || (zn === Z.path && wayOff(px, pz) < 0.6)) continue;
       const yaw = qq.range(0, Math.PI * 2), fine = fbm2(px * 0.4 - s1, pz * 0.4 + s2, 2);
       if (zn === Z.field) {
         const f = t.fields[fieldAt(px, pz)];
@@ -1411,7 +1574,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       let lo = y, hi = y;
       for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, -0.7], [0.7, -0.7], [-0.7, 0.7]]) { const hh = worn(x + dx * 1.1, z + dz * 1.1); lo = Math.min(lo, hh); hi = Math.max(hi, hh); }
       const zn = zoneAt(x, z);
-      ok[j * nx + i] = (hi - lo < 1.7 && y > sea - 0.35 && lo > sea - 0.6 && zn !== Z.harbour) || onMole(x, z) || zn === Z.built || zn === Z.street || zn === Z.flags || (zn === Z.shack) ? 1 : 0;
+      ok[j * nx + i] = (hi - lo < 1.7 && y > sea - 0.35 && lo > sea - 0.6 && zn !== Z.harbour && zn !== Z.river) || onMole(x, z) || onDeck(x, z) || zn === Z.built || (zn === Z.street && !(t.river && riverAt(t, x, z).off < riverAt(t, x, z).half)) || zn === Z.flags || (zn === Z.shack) ? 1 : 0;
     }
     const reach = new Uint8Array(nx * nz), queue: number[] = [];
     const start = Math.round((p.z1 - 2 - gz0) / C) * nx + Math.round(((p.x0 + p.x1) / 2 - gx0) / C);
@@ -1500,7 +1663,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     },
     planted,
     lamp,
-    streams: [], falls: [],
+    streams, falls,
     // (The hall and its stair are under the rock: no mist lies in them, nor any shadow of the sun or the clouds.)
     unders: H && hallGeo ? [(() => {
       const f = hallGeo.frame, pts = [[-27, -f.half - 22], [f.L + 4, -f.half - 22], [-27, f.half + 22], [f.L + 4, f.half + 22]].map(([u, v]) => [f.ox + f.ux * u - f.uz * v, f.oz + f.uz * u + f.ux * v]);
