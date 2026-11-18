@@ -221,6 +221,40 @@ export class Sound {
     osc.stop(now + seconds + 0.05);
   }
 
+  /**
+   * A sheep's bleat (or, `goat`, a goat's, higher and shorter), `near` 0 for out of hearing to 1 close by. A voice of a few hundred
+   * cycles, rough, through two bands where the mouth shapes an "aa", wavering fast as a bleat does, and falling a little at its end.
+   */
+  bleat(near: number, goat = false): void {
+    const ctx = this.ctx, master = this.master;
+    if (!ctx || !master || near <= 0.01) return;
+    const now = ctx.currentTime, long = goat ? 0.45 + Math.random() * 0.2 : 0.65 + Math.random() * 0.35, pitch = (goat ? 420 : 260) * (0.85 + Math.random() * 0.3);
+    const voice = ctx.createOscillator();
+    voice.type = 'sawtooth';
+    voice.frequency.setValueAtTime(pitch, now);
+    voice.frequency.linearRampToValueAtTime(pitch * 0.86, now + long);
+    // The waver: the loudness shaken several times a second.
+    const shake = ctx.createOscillator(), depth = ctx.createGain(), level = ctx.createGain();
+    shake.frequency.value = goat ? 11 : 7 + Math.random() * 2;
+    depth.gain.value = 0.45;
+    shake.connect(depth).connect(level.gain);
+    const peak = 0.05 * near * near;
+    level.gain.setValueAtTime(0, now);
+    level.gain.linearRampToValueAtTime(peak, now + 0.06);
+    level.gain.setValueAtTime(peak, now + long * 0.7);
+    level.gain.linearRampToValueAtTime(0, now + long);
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    for (const [f, q, g] of [[goat ? 900 : 750, 6, 1], [goat ? 1700 : 1250, 8, 0.6], [goat ? 2900 : 2500, 10, 0.25]] as const) {
+      const band = ctx.createBiquadFilter(), gain = ctx.createGain();
+      band.type = 'bandpass'; band.frequency.value = f; band.Q.value = q; gain.gain.value = g;
+      voice.connect(band).connect(gain).connect(level);
+    }
+    level.connect(out).connect(master);
+    voice.start(now); shake.start(now);
+    voice.stop(now + long + 0.05); shake.stop(now + long + 0.05);
+  }
+
   play(event: SoundEvent): void {
     if (!this.ctx) return;
     switch (event) {

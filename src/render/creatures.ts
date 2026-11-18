@@ -35,6 +35,9 @@ export class Flocks {
   private readonly v = new Vector3();
   private readonly s = new Vector3();
   private readonly o = new Object3D();
+  /** Called when one of them bleats, with how near it is to whoever is listening (0 out of hearing, 1 at hand). */
+  onBleat: ((near: number) => void) | null = null;
+  private calls: number[] = [];
 
   /**
    * `groundAt` says how high the ground is at a point; `free` whether a sheep may stand there (not in water, on a track's stones,
@@ -57,6 +60,7 @@ export class Flocks {
       }
       const f = this.flocks.length;
       this.flocks.push({ x: spot.x, z: spot.z, r: spot.r, grid, x0, z0, n, ok });
+      this.calls.push(r.range(2, 10));
       for (let c = 0; c < spot.count; c++) {
         let x = spot.x, z = spot.z;
         for (let tries = 0; tries < 30; tries++) {
@@ -129,6 +133,8 @@ export class Flocks {
       const near = Math.hypot(player.x - sh.x, player.z - sh.z);
       // Whoever comes within a few strides is trotted away from; and not let near again until they have gone some way off.
       if (near < 6.5 && sh.mode !== 'flee') {
+        // (Startled, it calls as it goes, now and then.)
+        if (r.chance(0.35)) this.onBleat?.(Math.max(0, 1 - near / 70));
         const away = Math.atan2(sh.z - player.z, sh.x - player.x) + r.range(-0.5, 0.5);
         for (let tries = 0; tries < 8; tries++) {
           const d = r.range(8, 13), tx = sh.x + Math.cos(away) * d, tz = sh.z + Math.sin(away) * d;
@@ -192,6 +198,14 @@ export class Flocks {
       this.o.rotation.set(0, -sh.heading + Math.PI / 2, 0);
       this.o.updateMatrix();
       this.shadows.setMatrixAt(i, this.o.matrix);
+    });
+    // Now and then one of a flock calls, heard as far as seventy metres off.
+    this.flocks.forEach((fl, f) => {
+      this.calls[f] -= dt;
+      if (this.calls[f] > 0) return;
+      this.calls[f] = r.range(4, 16);
+      const d = Math.hypot(player.x - fl.x, player.z - fl.z);
+      if (d < 70) this.onBleat?.(1 - d / 70);
     });
     // A little apart from one another: two that come within a stride are eased apart.
     for (let a = 0; a < this.sheep.length; a++) for (let b = a + 1; b < this.sheep.length; b++) {

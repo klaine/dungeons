@@ -454,6 +454,7 @@ async function start(): Promise<void> {
       return !desc.sea || groundAtFlock(x, z) > desc.sea.level + 0.8;
     };
     const made = new Flocks(desc.flocks, seed, groundAtFlock, free, desc.flockKind);
+    made.onBleat = (near) => sound.bleat(near, desc.flockKind === 'goat');
     scene.add(made.group);
     return made;
   })() : null;
