@@ -5,7 +5,7 @@
 import { generateSite } from '../src/core/generate';
 import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
-import { inland } from '../src/core/island';
+import { inland, landAt } from '../src/core/island';
 import { inside } from '../src/core/mountain';
 
 const count = Number(process.argv[2] ?? 200), only = process.argv[3];
@@ -89,6 +89,16 @@ for (let n = 0; n < (only && only !== 'island' ? 0 : Math.ceil(count / 4)); n++)
     tally2(`castle=${!!o.castle}`);
     tally2(`mansion=${o.mansion ? `${o.mansion.building.bays} bays x${o.mansion.building.storeys}` : 'none'}`);
     tally2(`cave=${!!o.seaCave}`);
+    // The strand of shingle to the sea cave lies at its own level all the way, not buried under the cliff or the stair nor left in
+    // the water, and climbs gently. (Its last few metres are the cave's own floor, cut into the cliff by the builder.)
+    if (o.strand && o.seaCave) {
+      const F = site.places.find((p) => p.role === 'approach')!.floor, l = o.strand.filter(([x, z]) => Math.hypot(x - o.seaCave!.x, z - o.seaCave!.z) > 6.5);
+      for (let k = 0; k < l.length; k++) {
+        const [x, z, y] = l[k], g = landAt(o, F, x, z);
+        if (g > y + 0.6 || g < y - 0.05) throw new Error(`the strand stands ${(g - y).toFixed(1)} off its level at ${x}, ${z}`);
+        if (k && Math.abs(g - landAt(o, F, l[k - 1][0], l[k - 1][1])) > Math.hypot(x - l[k - 1][0], z - l[k - 1][1]) * 0.45 + 0.05) throw new Error(`the strand climbs too steeply at ${x}, ${z}`);
+      }
+    }
     tally2(`stacks=${o.stacks.length}`);
     // The caverns, if there are any: their passages climb no more steeply than the way does, without a break, from the sea cave to
     // the cavern and from it to the open ground, which they come out on.

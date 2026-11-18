@@ -496,6 +496,11 @@ export interface Island {
   /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
   seaCave?: { x: number; z: number; heading: number; length: number };
   /**
+   * The strand of shingle to the sea cave, from the end of the beach or from the quay: a line of points `[x, z, y]` along the foot
+   * of the cove's cliff, each with the strand's level there. The ground is raised to it a couple of metres either side.
+   */
+  strand?: [number, number, number][];
+  /**
    * Caverns under the island, where it has a sea cave: from the end of the sea cave a passage (`lower`, points `[x, z, y]`) climbs
    * gently inland to a cavern under the hill (`hall`: its middle, its floor `y`, its half-breadths `rx` and `rz` turned by `turn`,
    * its roof `high` over the floor at its highest, with columns of dripstone in it), and from the cavern another (`upper`) climbs to

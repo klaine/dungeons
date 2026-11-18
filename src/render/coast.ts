@@ -206,9 +206,13 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // Nobody steps off the jetty into the water: the boxes nobody sees, along both sides beyond the beach and across the end.
     // (Nor across the strand of shingle that leaves the quay for the sea cave.)
     const onStrand = (x: number, z: number) => {
-      if (!o.seaCave || o.landing !== 'stair') return false;
-      const [sx, sz] = o.jetty.from, dx = o.seaCave.x - sx, dz = o.seaCave.z - sz, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - sx) * dx + (z - sz) * dz) / l2));
-      return Math.hypot(x - sx - dx * t, z - sz - dz * t) < 2.4;
+      if (!o.strand || o.landing !== 'stair') return false;
+      const l = o.strand;
+      for (let k = 0; k + 1 < l.length; k++) {
+        const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
+        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 2.4) return true;
+      }
+      return false;
     };
     const fence = (a: number, f: number) => { const p = at(a, 0, f); if (onStair(o, p[0], p[2]).off < 1.7 || onStrand(p[0], p[2])) return; c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
     // (From a beach the first strides are over sand; from the foot of a cliff the water is deep from the first.)
