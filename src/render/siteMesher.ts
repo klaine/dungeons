@@ -1186,7 +1186,9 @@ export function meshSite(site: Site): SceneDescription {
         const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : free ? out : north + (out - north) * t;
         const stands = 0.55 + 0.9 * fbm2(x * 0.008 + s2 + 9, z * 0.008 - s1, 2);
         // (A valley that was found has the land it was found in beyond its sides, rising behind the crags: not hills made up.)
-        if (vale.terrain) { if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6)); }
+        // (Behind its crags too the ground goes on up, as behind a drawn valley's, a little less; under that the land it was found in.
+        // Where that land rose less than the crag stood, the top of the crag was left as a level shelf: the rim of a quarry.)
+        if (vale.terrain) { y += smooth((beyond - 2) / 90) * 15 * stands; if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6)); }
         else y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
       // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
@@ -1884,7 +1886,7 @@ export function meshSite(site: Site): SceneDescription {
     };
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
     const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: (x: number, z: number) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; }, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
-    layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), eased, {
+    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), eased, {
       ...terrain, area: fine, cell: 1.2,
       // Not where the land is carved, and not over the house: there it is the turf of the hill
       // above the vaults, left open over every court. Carved patches end on this sheet's own
@@ -1955,14 +1957,14 @@ export function meshSite(site: Site): SceneDescription {
       kit.box('stone', V(o.x1, y0, o.z0), V(o.x1 + k, y1, o.z1), coping, coping, `kerbe${o.id}`);
     }
     const reach = 246;
-    layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), ground, {
+    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), ground, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 3,
       // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
       // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
       // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)
       // (Where the valley was found its hills are the land's own, with long slopes of forty and fifty degrees that are turf and
       // trees in such country; at six metres to a cell they came out as grey slabs. There only the steepest is bare.)
-      bare: vale?.terrain ? 0.58 : 0.8,
+      bare: vale?.terrain ? 0.42 : 0.8,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
     // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
@@ -1973,7 +1975,13 @@ export function meshSite(site: Site): SceneDescription {
     // cards with a whole tree painted on it, in the colours of the season.
     // What stands on the hills: each on the highest ground at its bearing, in its range, on a hilltop levelled for it.
     // (A valley that was found has for hills the land it was found in, with detail in fewer octaves the further off.)
-    const hills = vale?.terrain ? (x: number, z: number) => valleyLand(vale, p.floor, p, x, z, Math.hypot(x - cxA, z - czA)) : farHeights(cxA, czA, p.floor + 30, s2);
+    // (And beyond it, from half a mile or so, the ranges a drawn valley has: the land it was found in is an upland of low hills, and
+    // with nothing behind them the valley stood in a plain to the horizon.)
+    const ranges = farHeights(cxA, czA, p.floor + 30, s2);
+    const hills = vale?.terrain ? (x: number, z: number) => {
+      const out = Math.hypot(x - cxA, z - czA), found = valleyLand(vale, p.floor, p, x, z, out), w = smooth((out - 480) / 650);
+      return w <= 0 ? found : found + (Math.max(found, ranges(x, z)) - found) * w;
+    } : ranges;
     const landmarks = (site.landmarks ?? []).map((l) => {
       const top = crestAt(hills, cxA, czA, (l.angle * Math.PI) / 180, l.range === 'near' ? 255 : 400, l.range === 'near' ? 330 : 540);
       return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
@@ -1999,7 +2007,8 @@ export function meshSite(site: Site): SceneDescription {
         const tops: number[][] = [];
         for (let t = 0, n = own.int(1, 3); t < n; t++) {
           const a = own.range(0, Math.PI * 2), d = t === 0 ? 0 : own.range(18, 38);
-          tops.push([x0 + Math.cos(a) * d, z0 + Math.sin(a) * d, (t === 0 ? own.range(42, 82) : own.range(22, 48)), (t === 0 ? own.range(30, 46) : own.range(16, 28))]);
+          // (Lower and broader than they were: at forty to eighty metres on a base of thirty or forty, each stood as a pyramid on its hill.)
+          tops.push([x0 + Math.cos(a) * d, z0 + Math.sin(a) * d, (t === 0 ? own.range(26, 48) : own.range(14, 30)), (t === 0 ? own.range(32, 48) : own.range(18, 30))]);
         }
         const reachC = Math.max(...tops.map((t) => Math.hypot(t[0] - x0, t[1] - z0) + t[3])) + 16, high = Math.max(...tops.map((t) => t[2])) + 12;
         // The hill it stands on, read once on a lattice: the hills' own reckoning is too slow to ask at every point of the carving.
@@ -2014,7 +2023,8 @@ export function meshSite(site: Site): SceneDescription {
         /** How high the stone stands over the hill at a spot: nothing beyond its foot, and steepest there. */
         const stands = (x: number, z: number): number => {
           let h = 0;
-          for (const t of tops) { const u = Math.hypot(x - t[0], z - t[1]) / t[3]; if (u < 1) h = Math.max(h, t[2] * Math.pow(1 - u, 0.7) * (0.8 + 0.4 * fbm2(x * 0.03 + seedC, z * 0.03, 2))); }
+          // (Steep at its sides and broad over the top, as a tor is: a heap of blocks, not a cone.)
+          for (const t of tops) { const u = Math.hypot(x - t[0], z - t[1]) / t[3]; if (u < 1) h = Math.max(h, t[2] * Math.pow(1 - u * u, 0.6) * (0.8 + 0.4 * fbm2(x * 0.03 + seedC, z * 0.03, 2))); }
           return h;
         };
         const air = (x: number, y: number, z: number): number => {

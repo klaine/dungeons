@@ -44,7 +44,7 @@ for (let k = 0; k < count; k++) {
           if (x1 > box[0] && x0 < box[1] && y1 > box[2] && y0 < box[3] && z1 > box[4] && z0 < box[5]) blocking++;
         }
       }
-      if (key.endsWith('rock')) rockTriangles += mesh.triangleCount;
+      if (key.endsWith('rock') || key.endsWith('rockSheet')) rockTriangles += mesh.triangleCount;
       if (bad) problems.push(`${where} ${key}: ${bad} vertices that are not numbers`);
       if (blocking) problems.push(`${where} ${key}: ${blocking} triangles across the doorway`);
     }

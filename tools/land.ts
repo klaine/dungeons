@@ -12,7 +12,8 @@ const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'land';
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
-  const site = generateSite(seed);
+  // (`TERRAIN=eroded` before the command builds valleys found in worn land, as `?terrain=eroded` does in the browser.)
+  const site = generateSite(seed, 'valley', process.env.TERRAIN === 'eroded' ? { terrain: 'eroded' } : process.env.TERRAIN === 'plain' ? { terrain: 'plain' } : {});
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;
@@ -42,7 +43,7 @@ for (let k = 0; k < count; k++) {
           if (x1 > box[0] && x0 < box[1] && y1 > box[2] && y0 < box[3] && z1 > box[4] && z0 < box[5]) blocking++;
         }
       }
-      if (key.endsWith('rock')) rockTriangles += mesh.triangleCount;
+      if (key.endsWith('rock') || key.endsWith('rockSheet')) rockTriangles += mesh.triangleCount;
       if (bad) problems.push(`${where} ${key}: ${bad} vertices that are not numbers`);
       if (blocking) problems.push(`${where} ${key}: ${blocking} triangles across the doorway`);
     }

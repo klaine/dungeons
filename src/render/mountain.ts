@@ -576,7 +576,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     if (y === undefined) kept.set(key, (y = ground(x, z)));
     return y;
   };
-  layTerrain(turfMesh, rockMesh, groundKept, {
+  layTerrain(turfMesh, wild.mesh('rockSheet'), groundKept, {
     area, cell: SHEET, seed: s1, stone: tint, turfScale: 2.3, rockScale: 0.4, bare: 0.62,
     colour: (x, z) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; },
     rock: (tone) => rockColour(tone * 0.8),

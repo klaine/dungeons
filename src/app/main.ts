@@ -128,7 +128,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -180,6 +180,8 @@ async function start(): Promise<void> {
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
     rock: makeRockMaterial(rock, moss),
+    // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
+    rockSheet: makeRockMaterial(rock, moss, { relief: true }),
     far: makeFarMaterial(),
     scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true }),
     // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)

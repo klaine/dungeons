@@ -231,7 +231,8 @@ const snowOn = (P: N, up: N): N => {
   return smoothstep(0, 0.12, mix(-1.15, 0.75, cover).add(higher).add(up.sub(0.8).mul(2.4)).add(drift.sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, cover)).mul(below);
 };
 /** Snow's own colour: white, a little blue, and darker and greyer where it has been trodden. */
-const SNOW: [number, number, number] = [0.84, 0.87, 0.93];
+// (A little under what fresh snow reflects: in a clear sun anything brighter was drawn as flat white, its shading lost.)
+const SNOW: [number, number, number] = [0.79, 0.83, 0.9];
 
 export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: Vector3 }; uBare: { value: Vector4 } } = {
   uGrassRange: uniform(80) as N, uSward: uniform(new Vector3(0.225, 0.3, 0.066)) as N,
@@ -361,10 +362,14 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
       const q: N = vec2(at0.x.mul(0.8).add(at0.y.mul(0.35)), at0.y.mul(2.6).sub(at0.x.mul(0.5))).mul(k);
       return vec2(farNoise(q.add(vec2(e, 0))).sub(farNoise(q.sub(vec2(e, 0)))), farNoise(q.add(vec2(0, e))).sub(farNoise(q.sub(vec2(0, e))))).div(e * 2);
     };
-    const drifted: N = rip(0.9, 0.08).mul(0.09).add(rip(0.16, 0.05).mul(0.35)).mul(one(smoothstep(20, 90, far))).toVar();
+    // (Three sizes: the long swells of drift; ridges a stride or two apart, sharp on their lee side, as the wind cuts old snow; and
+    // ripples a hand apart, near the eye. With the two larger alone, and faint, a snowfield in the sun was flat white paint.)
+    const drifted: N = rip(0.9, 0.08).mul(0.16).add(rip(0.16, 0.05).mul(0.35)).add(rip(2.7, 0.03).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))).toVar();
     m.normalNode = normalMap(vec3(n.xy.mul(steep).mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), n.z).mul(0.5).add(0.5));
   }
-  m.roughnessNode = mix(m.roughnessNode as N, 0.66, snowy);
+  // (And here and there a grain of it catches the sun: a glint, near the eye, from a crystal turned just so.)
+  const glint: N = step(0.992, fract(sin(dot(floor(positionWorld.mul(26)), vec3(12.9898, 78.233, 37.719))).mul(43758.5453))).mul(one(smoothstep(4, 14, far))).toVar();
+  m.roughnessNode = mix(m.roughnessNode as N, mix(0.66, 0.08, glint), snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), 0.55, snowy) });
   return m;
@@ -405,7 +410,7 @@ export const rockUniforms: { uRockBroad: { value: number }; uRockFacet: { value:
  *  - moss and damp from the per-vertex fields, as on masonry.
  * Light comes from the bake where there is one, and from the open sky where there is not.
  */
-export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number] } = {}): MeshStandardNodeMaterial {
+export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number]; relief?: boolean } = {}): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
   const P: N = positionWorld, rockN: N = normalize(normalWorldGeometry);
@@ -547,7 +552,18 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // The grooves between beds and the runnels down the face bend the light as their slopes would.
   const up: N = vec3(0, 1, 0).sub(rockN.mul(rockN.y));
   const worn: N = up.mul(lip.mul(1.1)).add(vec3(fluteZ, 0, fluteX).mul(fluteNear).mul(1.6));
-  const bent: N = normalize(mix(normalize(mix(bentSmooth, flat, facetW.mul(0.2)).sub(worn)), rockN, snowy.mul(0.75))).toVar();
+  let bent: N = normalize(mix(normalize(mix(bentSmooth, flat, facetW.mul(0.2)).sub(worn)), rockN, snowy.mul(0.75))).toVar();
+  // Rock laid as a plain sheet, not carved: its buttresses, gullies and ledges drawn on it, as on far land (`rockRelief`), or a steep
+  // bank of it was one smooth face, plaster with beds painted on.
+  let sheetCavity: N = float(1);
+  if (o.relief) {
+    const grainR: N = max(length(dFdx(P.xz)), length(dFdy(P.xz))).toVar();
+    // (Stronger than on far land: seen from nearer, and with no sheet-scale relief of its own to add to it.)
+    const r = rockRelief(P, rockN, bent, grainR, steep.mul(one(snowy.mul(0.6))), 8, 0.42);
+    bent = r.normal;
+    sheetCavity = r.cavity;
+    m.colorNode = vec4((m.colorNode as N).xyz.mul(mix(1, sheetCavity, one(snowy))), 1);
+  }
   m.normalNode = transformNormalToView(bent);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
@@ -558,7 +574,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // Rough rock gleams little, and less where it is dry.
   // (The sky's light is reckoned for the surface as its grain turns it, not for the smooth surface under the grain: most of a cliff is in
   // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
-  lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
+  lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao).mul(mix(1, sheetCavity, 0.8)), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
   return m;
 }
 
@@ -588,6 +604,45 @@ const farFbm: N = Fn(([p0]: [N]) => {
 });
 // The crowns of a wood seen from above: how high the nearest crown stands at a point (0 between
 // trees, 1 at a top), which way it slopes there, and a number of its own for each tree.
+/**
+ * The rock of a steep face, finer than the sheet it is drawn on can hold: gullies some twenty metres apart and ribs some seven,
+ * running down the face and wandering; the ledges where its beds come out across it, every ten metres or so; and the chips and
+ * edges of the rock. As light and shade (the normal `base` bent by it, where `weight` says) and as how dark its hollows are. Each
+ * size is let go only when it is smaller than four or five points of the picture (`grain`, metres to a point), so a face a mile
+ * off still has its rock and none of it glitters. Used for far land and for rock laid as a plain sheet. (Without it such a face
+ * was smooth between the sheet's points: a cast, not a mountain.)
+ */
+const rockRelief = (P: N, n0: N, base: N, grain: N, weight: N, strength = 3.4, dark = 0.55): { normal: N; cavity: N } => {
+  const flatOut: N = vec2(n0.x, n0.z).toVar();
+  const outward: N = flatOut.div(max(length(flatOut), 0.001)).toVar();
+  const alongDir: N = vec2(outward.y.negate(), outward.x).toVar();
+  const sAt: N = dot(P.xz, alongDir).toVar();
+  const o1: N = one(smoothstep(2.2, 4.5, grain)).toVar(), o2: N = one(smoothstep(0.9, 1.8, grain)).toVar(), o3: N = one(smoothstep(0.35, 0.7, grain)).toVar();
+  const ridgeOf = (q: N): N => { const v = one(abs(farNoise(q).mul(2).sub(1))); return v.mul(v); };
+  const reliefAt = (sx: N, y: N): N => {
+    const w = farNoise(vec2(sx.div(37), y.div(61)).add(5.3));
+    const gully = ridgeOf(vec2(sx.div(19).add(w.mul(1.6)), y.div(48)).add(1.7)).mul(o1);
+    const rib = ridgeOf(vec2(sx.div(7.3).add(w.mul(2.4)), y.div(17)).add(8.2)).mul(0.5).mul(o2);
+    // (The beds dip, and fold a little, and are of all thicknesses; and a ledge comes and goes along each, as the rock breaks. Even
+    // and unbroken, they drew a face as a model drawn in contours.)
+    const bedY = y.add(sx.mul(0.09)).add(farNoise(vec2(sx.div(70), y.div(90)).add(2.1)).mul(16)).toVar();
+    const bedK = floor(bedY.div(11)), beds = fract(bedY.div(11)).toVar();
+    const thick = farNoise(vec2(bedK.mul(0.73), 7.7));
+    const ledge = smoothstep(0.55, 0.9, beds).mul(one(smoothstep(0.9, 1, beds))).mul(0.45).mul(o2)
+      .mul(smoothstep(0.42, 0.72, farNoise(vec2(sx.div(17), bedK.mul(1.31)).add(4.4)))).mul(step(0.35, thick));
+    const chip = farNoise(vec2(sx.div(2.6), y.div(3.1)).add(3.3)).mul(0.25).mul(o3);
+    return gully.add(rib).add(ledge).add(chip);
+  };
+  const r0: N = reliefAt(sAt, P.y).toVar();
+  const rs: N = reliefAt(sAt.add(1.2), P.y).sub(r0).div(1.2), ry: N = reliefAt(sAt, P.y.add(1.2)).sub(r0).div(1.2);
+  const upFace: N = normalize(vec3(0, 1, 0).sub(n0.mul(n0.y)).add(vec3(0, 0.0001, 0))).toVar();
+  const normal: N = normalize(base.sub(vec3(alongDir.x, 0, alongDir.y).mul(rs).add(upFace.mul(ry.mul(upFace.y))).mul(strength).mul(weight))).toVar();
+  // (Darker down in the gullies and cracks, paler on the ribs; the sky's light reaches less far into them, so a face in the shade,
+  // which has no sun to model it, still shows its rock.)
+  const cavity: N = mix(1, mix(dark, 1.18, smoothstep(0.05, 1.1, r0)), weight.mul(0.9)).toVar();
+  return { normal, cavity };
+};
+
 const farCrowns: N = Fn(([p]: [N]) => {
   const i: N = floor(p).toVar(), f: N = fract(p).toVar();
   const best: N = float(9).toVar(), id: N = float(0).toVar(), to: N = vec2(0).toVar();
@@ -674,34 +729,9 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (Only on the heights: the low country seen far below through a break in the cloud is wood and pasture, and the rock drawn on it
   // there came out as ripples.)
   const rocky: N = sstep(0.86, 0.6, n0.y).mul(one(wood)).mul(smoothstep(0.3, 0.55, high)).toVar();
-  const flatOut: N = vec2(n0.x, n0.z).toVar();
-  const outward: N = flatOut.div(max(length(flatOut), 0.001)).toVar();
-  const alongDir: N = vec2(outward.y.negate(), outward.x).toVar();
-  const sAt: N = dot(fp, alongDir).toVar();
-  // (Each size kept while it is at least four or five points of the picture across.)
-  const o1: N = one(smoothstep(2.2, 4.5, grain)).toVar(), o2: N = one(smoothstep(0.9, 1.8, grain)).toVar(), o3: N = one(smoothstep(0.35, 0.7, grain)).toVar();
-  const ridgeOf = (q: N): N => { const v = one(abs(farNoise(q).mul(2).sub(1))); return v.mul(v); };
-  const reliefAt = (sx: N, y: N): N => {
-    const w = farNoise(vec2(sx.div(37), y.div(61)).add(5.3));
-    const gully = ridgeOf(vec2(sx.div(19).add(w.mul(1.6)), y.div(48)).add(1.7)).mul(o1);
-    const rib = ridgeOf(vec2(sx.div(7.3).add(w.mul(2.4)), y.div(17)).add(8.2)).mul(0.5).mul(o2);
-    // (The beds dip, and fold a little, and are of all thicknesses; and a ledge comes and goes along each, as the rock breaks. Even
-    // and unbroken, they drew a face as a model drawn in contours.)
-    const bedY = y.add(sx.mul(0.09)).add(farNoise(vec2(sx.div(70), y.div(90)).add(2.1)).mul(16)).toVar();
-    const bedK = floor(bedY.div(11)), beds = fract(bedY.div(11)).toVar();
-    const thick = farNoise(vec2(bedK.mul(0.73), 7.7));
-    const ledge = smoothstep(0.55 + 0.0, 0.9, beds).mul(one(smoothstep(0.9, 1, beds))).mul(0.45).mul(o2)
-      .mul(smoothstep(0.42, 0.72, farNoise(vec2(sx.div(17), bedK.mul(1.31)).add(4.4)))).mul(step(0.35, thick));
-    const chip = farNoise(vec2(sx.div(2.6), y.div(3.1)).add(3.3)).mul(0.25).mul(o3);
-    return gully.add(rib).add(ledge).add(chip);
-  };
-  const r0: N = reliefAt(sAt, P.y).toVar();
-  const rs: N = reliefAt(sAt.add(1.2), P.y).sub(r0).div(1.2), ry: N = reliefAt(sAt, P.y.add(1.2)).sub(r0).div(1.2);
-  const upFace: N = normalize(vec3(0, 1, 0).sub(n0.mul(n0.y)).add(vec3(0, 0.0001, 0))).toVar();
-  const faceN: N = normalize(farN.sub(vec3(alongDir.x, 0, alongDir.y).mul(rs).add(upFace.mul(ry.mul(upFace.y))).mul(3.4).mul(rocky))).toVar();
-  // (And darker down in the gullies and cracks, paler on the ribs; and the sky's light reaches less far into them, so a face in the
-  // shade, which has no sun to model it, still shows its rock. In the shade it had looked as smooth as ever.)
-  const cavity: N = mix(1, mix(0.55, 1.18, smoothstep(0.05, 1.1, r0)), rocky.mul(0.9)).toVar();
+  const relief = rockRelief(P, n0, farN, grain, rocky);
+  const faceN: N = relief.normal;
+  const cavity: N = relief.cavity;
   land = land.mul(cavity);
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
   // (On a face too steep to hold it, snow still lodges in the gullies and on the ledges of the beds, and lies down the face in
