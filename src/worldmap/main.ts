@@ -48,7 +48,9 @@ function make(seed: string): void {
     worker?.terminate(); worker = null;
   };
   worker.onerror = (e) => { status.textContent = `The world could not be made: ${e.message}`; };
-  worker.postMessage({ seed });
+  // (`?size=8x8` for a world of that many kilometres east and west by north and south; six by ten unless asked.)
+  const sz = (params.get('size') ?? '').split('x').map(Number);
+  worker.postMessage({ seed, size: sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined });
   status.textContent = 'Starting…';
 }
 

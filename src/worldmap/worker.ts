@@ -4,8 +4,8 @@ import { worldSteps } from '../core/world';
  * Makes a world away from the page, which would otherwise hold still for the half minute or more
  * it takes: says what it is doing at each stage, then hands over what the map needs.
  */
-self.onmessage = (e: MessageEvent<{ seed: string }>) => {
-  const steps = worldSteps(e.data.seed);
+self.onmessage = (e: MessageEvent<{ seed: string; size?: { x: number; z: number } }>) => {
+  const steps = worldSteps(e.data.seed, e.data.size);
   for (;;) {
     const s = steps.next();
     if (!s.done) { self.postMessage({ type: 'progress', text: s.value }); continue; }

@@ -5,8 +5,8 @@ import { findValleys, ValleySpot } from './highlands';
 import { Namer } from './names';
 
 /**
- * A world: one stretch of country, eight kilometres square, in which every kind of place is
- * found rather than drawn, four of each. From the sea's side: open sea; a shelf with islands on it; the
+ * A world: one stretch of country, six kilometres by ten unless asked otherwise (`WORLD_SIZE`), in
+ * which every kind of place is found rather than drawn, four of each. From the sea's side: open sea; a shelf with islands on it; the
  * coast; low country of fields and woods; an upland cut by glens; and at the back a high range,
  * with a few great peaks standing over it. One sea level for all of it, heights in metres over
  * the sea. Its mountains are hills of four to six hundred metres, its great peaks a little over that:
@@ -39,8 +39,9 @@ export interface WorldPlan {
   seed: string;
   /** A number for the noise, from the seed. */
   n: number;
-  /** Half the world's breadth: it runs from -half to half both ways. */
-  half: number;
+  /** Half the world's breadth east and west (`hx`), and north and south (`hz`): it runs from -hx to hx, and -hz to hz. */
+  hx: number;
+  hz: number;
   /** Which way is inland, as an angle from east towards south: the sea lies the other way. */
   inland: number;
   /** Where the coast lies along that way, in metres from the middle, before it wanders. */
@@ -71,45 +72,49 @@ export interface WorldPlan {
    * middle, how high it stands over the sea, and how it is drawn out and turned. (The shelf's own noise makes islets by the
    * hundred at one sea level, but few of the size a house's island is: the islands' frames find theirs by trying twenty levels.)
    */
-  islands: { x: number; z: number; r: number; top: number; squash: number; turn: number }[];
+  islands: { x: number; z: number; r: number; top: number; squash: number; turn: number; lobe: number; hill: number }[];
   /** Fjords, where the coast is high ground: how deeply they are cut (0 to 1), and how far inland of the coast they run. */
   fjords: { strength: number; reach: number };
 }
 
-export function planWorld(seed: string): WorldPlan {
+/** How large a world is unless asked otherwise: six kilometres east and west, ten from the sea to the hills, as asked (a world as deep as it is long gives each zone room, the range most). */
+export const WORLD_SIZE = { x: 6000, z: 10000 };
+
+export function planWorld(seed: string, size: { x: number; z: number } = WORLD_SIZE): WorldPlan {
   const rng = new Rng(`world/${seed}`), q = rng.fork('plan');
-  const half = 4000;
+  const hx = size.x / 2, hz = size.z / 2;
   // (Inland is north, turned a little: the sea and its islands to the south, the mountains to the north, as asked.)
   const inland = -Math.PI / 2 + q.range(-0.3, 0.3);
-  const span = half * (Math.abs(Math.cos(inland)) + Math.abs(Math.sin(inland)));
-  const shelf = q.range(1300, 1900);
+  const span = hx * Math.abs(Math.cos(inland)) + hz * Math.abs(Math.sin(inland));
+  // (The zones' depths are shares of the world's depth from the sea to the hills, set for ten kilometres.)
+  const k = hz / 5000, shelf = q.range(1700, 2300) * k;
   const p: WorldPlan = {
-    seed, n: 1000 + Math.floor(q.next() * 90000), half, inland,
-    // (Some seven hundred metres of open sea beyond the shelf, at the world's edge.)
-    coast: -span + 700 + shelf, shelf,
+    seed, n: 1000 + Math.floor(q.next() * 90000), hx, hz, inland,
+    // (Some eight hundred metres of open sea beyond the shelf, at the world's edge.)
+    coast: -span + 800 * k + shelf, shelf,
     // (Broad in some worlds, a strip in others, and in places none at all: there the upland comes down to the sea.)
     // (The range takes what is left, some third of the world: with more, it filled half of it and the rest was squeezed.)
-    plains: q.range(400, 1400), upland: q.range(1800, 2600), peaks: [], tops: [],
+    plains: q.range(600, 1800) * k, upland: q.range(2400, 3200) * k, peaks: [], tops: [],
     bay: { at: 0, width: 0, depth: 0 }, fjords: { strength: 0, reach: 0 }, isles: { sea: ISLE_SEA, fall: 50 }, islands: [],
   };
   // The bay: somewhere along the coast, not hard by the world's edge; broad, and reaching well inland, past the low country into
   // the upland, where its sides and its head are fjord coast. (From a stream of its own, so the rest of the plan stays as it was.)
   const b = rng.fork('bay');
-  p.bay = { at: Math.round(b.range(-0.45, 0.45) * half), width: Math.round(b.range(1500, 2500)), depth: Math.round(b.range(1500, 2600)) };
+  p.bay = { at: Math.round(b.range(-0.4, 0.4) * hx), width: Math.round(Math.min(b.range(1500, 2500), hx * 0.8)), depth: Math.round(b.range(1800, 3000) * k) };
   p.fjords = { strength: Math.round(b.range(0.6, 1) * 100) / 100, reach: Math.round(b.range(900, 1800)) };
-  // The planned islands: six to eight, out on the shelf, in from the world's edge and well apart.
-  const il = rng.fork('islands'), wantIsles = il.int(6, 8);
+  // The planned islands: seven to nine, out on the shelf, in from the world's edge and well apart.
+  const il = rng.fork('islands'), wantIsles = il.int(7, 9);
   for (let tries = 0; tries < 900 && p.islands.length < wantIsles; tries++) {
-    const x = il.range(-half + 500, half - 500), z = il.range(-half + 500, half - 500), zn = zonesAt(p, x, z);
-    if (zn.d > -0.25 * p.shelf || zn.d < -0.9 * p.shelf) continue;
+    const x = il.range(-hx + 500, hx - 500), z = il.range(-hz + 500, hz - 500), zn = zonesAt(p, x, z);
+    if (zn.d > -0.12 * p.shelf || zn.d < -0.75 * p.shelf) continue;
     const r = il.range(150, 210);
     if (p.islands.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.6 + 250)) continue;
-    p.islands.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), top: Math.round(il.range(34, 52)), squash: Math.round(il.range(0.65, 1) * 100) / 100, turn: Math.round(il.range(0, Math.PI) * 100) / 100 });
+    p.islands.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), top: Math.round(il.range(34, 52)), squash: Math.round(il.range(0.6, 0.95) * 100) / 100, turn: Math.round(il.range(0, Math.PI) * 100) / 100, lobe: Math.round(il.range(0, Math.PI * 2) * 100) / 100, hill: Math.round(il.range(0, Math.PI * 2) * 100) / 100 });
   }
   // The great peaks: one to three, well back in the range and well apart.
   const g = rng.fork('peaks'), want = g.int(1, 3);
   for (let tries = 0; tries < 600 && p.peaks.length < want; tries++) {
-    const x = g.range(-half * 0.9, half * 0.9), z = g.range(-half * 0.9, half * 0.9), zn = zonesAt(p, x, z);
+    const x = g.range(-hx * 0.9, hx * 0.9), z = g.range(-hz * 0.9, hz * 0.9), zn = zonesAt(p, x, z);
     if (zn.d0 - zn.U < 700) continue;
     const r = g.range(300, 450);
     if (p.peaks.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.15)) continue;
@@ -119,7 +124,7 @@ export function planWorld(seed: string): WorldPlan {
   // the coast, more or less, where the way up would come from.
   const tp = rng.fork('tops');
   for (let tries = 0; tries < 900 && p.tops.length < 5; tries++) {
-    const x = tp.range(-half + 450, half - 450), z = tp.range(-half + 450, half - 450), zn = zonesAt(p, x, z);
+    const x = tp.range(-hx + 450, hx - 450), z = tp.range(-hz + 450, hz - 450), zn = zonesAt(p, x, z);
     if (zn.d0 - zn.U < 250) continue;
     const r = tp.range(240, 320);
     if (p.peaks.some((o) => Math.hypot(o.x - x, o.z - z) < o.r * 1.6 + r + 300) || p.tops.some((o) => Math.hypot(o.x - x, o.z - z) < 1000)) continue;
@@ -145,8 +150,10 @@ export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
   // The great bay: the coast pushed back inland, furthest along its middle, which wanders; rounded at its head. Only the coast is
   // moved: the upland and the range stand where they would without it, so where it reaches them its shores are high ground.
   const B = p.bay, lat = -x * Math.sin(p.inland) + z * Math.cos(p.inland);
-  const across = (lat - B.at + 300 * fbmd(d0 / 1400 + 2.7, 0.4, 2, n + 6)) / (B.width / 2);
-  const d = d0 - B.depth * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(across), 1.6)), 0.6);
+  // (Its sides wander too, in and out, as its middle does.)
+  const across = (lat - B.at + 300 * fbmd(d0 / 1400 + 2.7, 0.4, 2, n + 6)) / (B.width / 2) + 0.18 * fbmd(x / 700 - 1.9, z / 700 + 0.6, 3, n + 7);
+  // (Its sides slope: drawn first with a profile that rose nearly upright at its edge, its sides were long straight walls.)
+  const d = d0 - B.depth * Math.pow(Math.max(0, 1 - across * across), 1.1);
   const P = p.plains + 900 * fbmd(x / 2500 + 3.3, z / 2500 - 1.2, 2, n + 3);
   const U = Math.max(P, -100) + p.upland + 600 * fbmd(x / 2500 - 4.1, z / 2500 + 2.2, 2, n + 4);
   const a = smooth((d + 250) / 650), b = smooth((d0 - P + 300) / 600), c = smooth((d0 - U + 500) / 1000);
@@ -174,11 +181,16 @@ function islesAt(p: WorldPlan, x: number, z: number, d: number, fine: boolean): 
   // wandering, so no two are alike and none is a ring.
   for (const q of p.islands) {
     const dx = x - q.x, dz = z - q.z;
-    if (Math.abs(dx) > q.r * 1.6 || Math.abs(dz) > q.r * 1.6) continue;
+    if (Math.abs(dx) > q.r * 2 || Math.abs(dz) > q.r * 2) continue;
     const c = Math.cos(q.turn), sn = Math.sin(q.turn), a = (dx * c + dz * sn) / q.r, b = (-dx * sn + dz * c) / (q.r * q.squash);
-    const rr = Math.hypot(a, b) * (1 + 0.16 * fbmd(x / 140 + q.x, z / 140, 3, n + 16));
+    // (A lobe pushed out on one side, and the coast worn into points and coves at two sizes: an oval with a ring round it, drawn
+    // first, looked like an egg in a pan.)
+    const la = Math.cos(q.lobe) * 0.75, lb = Math.sin(q.lobe) * 0.75 * q.squash, lobe = Math.hypot(a - la, b - lb) / 0.55;
+    const rr = Math.min(Math.hypot(a, b), lobe) * (1 + 0.22 * fbmd(x / 160 + q.x, z / 160, 3, n + 16) + 0.12 * fbmd(x / 45, z / 45 + q.z, 2, n + 18));
     if (rr > 1.45) continue;
-    const land = -14 + (q.top + 14) * smooth((1.06 - rr) / 0.22) * (0.66 + 0.34 * smooth((0.55 - rr) / 0.5)) + 3 * fbmd(x / 90, z / 90, fine ? 4 : 2, n + 17);
+    // (Its hill stands off to one side, as on the islands' own frames, where the house's shoulder is towards one end.)
+    const hr = Math.hypot(a - Math.cos(q.hill) * 0.35, b - Math.sin(q.hill) * 0.35 * q.squash);
+    const land = -14 + (q.top + 14) * smooth((1.06 - rr) / 0.22) * (0.62 + 0.38 * smooth((0.6 - hr) / 0.55)) + 3 * fbmd(x / 90, z / 90, fine ? 4 : 2, n + 17);
     const w = smooth((1.45 - rr) / 0.35);
     h = h * (1 - w) + land * w;
   }
@@ -201,9 +213,9 @@ function plainsAt(p: WorldPlan, x: number, z: number, d: number, P: number, fine
  * round hills, and a valley in a ring has nowhere to drain: the range was full of hollows a hundred
  * metres deep and more. One family alone combed the land into ridges, all alike.)
  */
-function valleyLines(p: WorldPlan, x: number, z: number, apart: number, shape: number, seed: number): number {
+function valleyLines(p: WorldPlan, x: number, z: number, apart: number, shape: number, seed: number, one = false): number {
   let v = 1;
-  for (const [turn, k] of [[-0.42, 0], [0.38, 1]] as const) {
+  for (const [turn, k] of one ? ([[-0.42, 0]] as const) : ([[-0.42, 0], [0.38, 1]] as const)) {
     const a = p.inland + turn, along = -x * Math.sin(a) + z * Math.cos(a), s = seed + k * 10;
     const f = along / (apart * 1.5) + 0.6 * fbmd(x / (apart * 3) + 1.3, z / (apart * 3), 3, s) + 0.15 * fbmd(x / (apart * 0.87), z / (apart * 0.87) - 2.6, 2, s + 1);
     v = Math.min(v, 2 * Math.abs(f - Math.round(f)));
@@ -289,7 +301,9 @@ export function worldShape(p: WorldPlan, x: number, z: number, fine = false): nu
   // as the ice left them, run on under the sea for a kilometre or two inland, shallowing towards their heads, between walls.
   const F = p.fjords, reach = 1 - smooth((d - F.reach) / 500);
   if (F.strength > 0 && d > -400 && reach > 0 && up > 0.05 && high < 0.95) {
-    const v = valleyLines(p, x, z, STRATHS, 1, p.n + 36), w = Math.pow(Math.max(0, 1 - v / 0.45), 1.5) * up * (1 - high) * F.strength * reach;
+    // (Down one family of straths only: where the two families cross, a fjord cut down both made planes meeting at the crossing,
+    // which drew as a fan of flat wedges at the bay's head. Fjords do not cross.)
+    const v = valleyLines(p, x, z, STRATHS, 1, p.n + 36, true), w = smooth(1 - v / 0.45) * up * (1 - high) * F.strength * reach;
     if (w > 0) h -= w * (70 + 0.75 * Math.max(0, h));
   }
   return h;
@@ -297,8 +311,10 @@ export function worldShape(p: WorldPlan, x: number, z: number, fine = false): nu
 
 /** How the world's lattice is worn: deep for its size, so that rivers cut real valleys into the upland and the range. */
 export const WORLD_WEAR: Wear = {
-  cut: 40, fill: 18,
-  water: { drops: 1.0, life: 90, inertia: 0.15, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.012, gravity: 4, radius: 2, most: 1.5 },
+  // (Building up no more than six metres anywhere, and putting down less: with eighteen, the rivers built fans where they came out
+  // into the bay, all at that height, which drew as flat wedges fanning out from the bay's head.)
+  cut: 40, fill: 6,
+  water: { drops: 1.0, life: 90, inertia: 0.15, capacity: 0.5, erode: 0.15, deposit: 0.15, evaporate: 0.012, gravity: 4, radius: 2, most: 1.5 },
   frost: { passes: 2, repose: 1.3, rate: 0.4 },
 };
 /** How a tile is worn: as an island's or a valley's own frame is. */
@@ -357,8 +373,8 @@ export interface World {
   why: Record<string, Record<string, number>>;
 }
 
-/** The world's lattice: 8 metres, a thousand and one points a side. */
-const CELL = 8, N = 1001;
+/** The world's lattice: 8 metres (751 points by 1,251 for a world of six kilometres by ten). */
+const CELL = 8;
 /** A river on the map from forty hectares of ground draining through it. */
 export const RIVER = 4e5;
 
@@ -483,11 +499,11 @@ export const TILE = { cell: 5, n: 481, stride: 2000, over: 200 };
 const TILES = new Map<string, Tile>();
 /** The tile at (`i`, `j`) of a world: made when first asked for, and kept. */
 export function worldTile(w: World, i: number, j: number): Tile {
-  const key = `${w.plan.seed}/${i},${j}`;
+  const key = `${w.plan.seed}/${w.plan.hx}x${w.plan.hz}/${i},${j}`;
   let t = TILES.get(key);
   if (t) return t;
   const p = w.plan, half = ((TILE.n - 1) * TILE.cell) / 2;
-  const ox = -p.half + TILE.stride / 2 + i * TILE.stride, oz = -p.half + TILE.stride / 2 + j * TILE.stride;
+  const ox = -p.hx + TILE.stride / 2 + i * TILE.stride, oz = -p.hz + TILE.stride / 2 + j * TILE.stride;
   const f = new HeightField(-half, -half, TILE.cell, TILE.n, TILE.n), keep = new Float32Array(TILE.n * TILE.n);
   // Its shape: the world's fine shape, with what the world's wear did to the coarse one laid on it; so the rivers keep their valleys.
   for (let jj = 0; jj < TILE.n; jj++) for (let ii = 0; ii < TILE.n; ii++) {
@@ -514,22 +530,23 @@ const SEARCH = { isleTiles: 8, uplandTiles: 8, keep: 4 };
 const WORLDS = new Map<string, World>();
 
 /** The world of a seed: made when first asked for, and kept. */
-export function world(seed: string): World {
-  const steps = worldSteps(seed);
+export function world(seed: string, size: { x: number; z: number } = WORLD_SIZE): World {
+  const steps = worldSteps(seed, size);
   for (;;) { const s = steps.next(); if (s.done) return s.value; }
 }
 
 /** The world made a stage at a time: each `yield` says what is being done next, so a page can paint between stages. */
-export function* worldSteps(seed: string): Generator<string, World> {
-  const had = WORLDS.get(seed);
+export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD_SIZE): Generator<string, World> {
+  const key = `${seed}@${size.x}x${size.z}`, had = WORLDS.get(key);
   if (had) return had;
-  const p = planWorld(seed), rng = new Rng(`world/${seed}`), timing: Record<string, number> = {}, why: Record<string, Record<string, number>> = { island: {}, valley: {}, mountain: {} };
+  const p = planWorld(seed, size), rng = new Rng(`world/${seed}`), timing: Record<string, number> = {}, why: Record<string, Record<string, number>> = { island: {}, valley: {}, mountain: {} };
   let t0 = performance.now();
   const lap = (k: string) => { const t = performance.now(); timing[k] = Math.round(t - t0); t0 = t; };
   yield 'Shaping the land';
-  const f = new HeightField(-p.half, -p.half, CELL, N, N), keep = new Float32Array(N * N);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const x = f.x0 + i * CELL, z = f.z0 + j * CELL, k = j * N + i;
+  const NX = Math.round((2 * p.hx) / CELL) + 1, NZ = Math.round((2 * p.hz) / CELL) + 1;
+  const f = new HeightField(-p.hx, -p.hz, CELL, NX, NZ), keep = new Float32Array(NX * NZ);
+  for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
+    const x = f.x0 + i * CELL, z = f.z0 + j * CELL, k = j * NX + i;
     f.data[k] = worldShape(p, x, z);
     // (The shelf is spared on this lattice: its islands are a few points across here, and are worn in the tiles instead. So is the
     // floor of the sea wherever it is, fjords' too: what the water brought down would build sills across them.)
@@ -540,16 +557,16 @@ export function* worldSteps(seed: string): Generator<string, World> {
   const shaped = wear(f, rng.fork('wear'), WORLD_WEAR, keep);
   lap('wear');
   yield 'Following the water';
-  const n = N * N, h = f.data, sea = new Uint8Array(n);
+  const n = NX * NZ, h = f.data, sea = new Uint8Array(n);
   {
     // The sea: whatever lies below its level and is joined to the world's edge by more of the same.
     const q: number[] = [];
-    for (let k = 0; k < n; k++) { const i = k % N, j = (k - i) / N; if ((i === 0 || j === 0 || i === N - 1 || j === N - 1) && h[k] < 0) { sea[k] = 1; q.push(k); } }
+    for (let k = 0; k < n; k++) { const i = k % NX, j = (k - i) / NX; if ((i === 0 || j === 0 || i === NX - 1 || j === NZ - 1) && h[k] < 0) { sea[k] = 1; q.push(k); } }
     for (let c = 0; c < q.length; c++) {
-      const k = q[c], i = k % N, j = (k - i) / N;
+      const k = q[c], i = k % NX, j = (k - i) / NX;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const ii = i + di, jj = j + dj, m = jj * N + ii;
-        if (ii < 0 || jj < 0 || ii >= N || jj >= N || sea[m] || h[m] >= 0) continue;
+        const ii = i + di, jj = j + dj, m = jj * NX + ii;
+        if (ii < 0 || jj < 0 || ii >= NX || jj >= NZ || sea[m] || h[m] >= 0) continue;
         sea[m] = 1; q.push(m);
       }
     }
@@ -567,10 +584,10 @@ export function* worldSteps(seed: string): Generator<string, World> {
       const cells = [s];
       seen[s] = 1;
       for (let c = 0; c < cells.length; c++) {
-        const k = cells[c], i = k % N, j = (k - i) / N;
+        const k = cells[c], i = k % NX, j = (k - i) / NX;
         for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          const ii = i + di, jj = j + dj, m = jj * N + ii;
-          if (ii < 0 || jj < 0 || ii >= N || jj >= N || seen[m] || !lake[m]) continue;
+          const ii = i + di, jj = j + dj, m = jj * NX + ii;
+          if (ii < 0 || jj < 0 || ii >= NX || jj >= NZ || seen[m] || !lake[m]) continue;
           seen[m] = 1; cells.push(m);
         }
       }
@@ -586,11 +603,11 @@ export function* worldSteps(seed: string): Generator<string, World> {
 
   // ---- the places
   // Islands and valley heads, in the tiles where the shelf has land and where the upland is.
-  const tiles = Math.round((2 * p.half) / TILE.stride);
+  const tilesX = Math.round((2 * p.hx) / TILE.stride), tilesZ = Math.round((2 * p.hz) / TILE.stride);
   const isleTiles: { i: number; j: number; score: number }[] = [], uplandTiles: { i: number; j: number; score: number }[] = [];
-  for (let j = 0; j < tiles; j++) for (let i = 0; i < tiles; i++) {
+  for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
     let isle = 0, up = 0, all = 0;
-    const cx = -p.half + TILE.stride / 2 + i * TILE.stride, cz = -p.half + TILE.stride / 2 + j * TILE.stride;
+    const cx = -p.hx + TILE.stride / 2 + i * TILE.stride, cz = -p.hz + TILE.stride / 2 + j * TILE.stride;
     for (let z = cz - TILE.stride / 2; z < cz + TILE.stride / 2; z += 80) for (let x = cx - TILE.stride / 2; x < cx + TILE.stride / 2; x += 80) {
       const zn = zonesAt(p, x, z), y = f.at(x, z);
       all++;
@@ -604,7 +621,7 @@ export function* worldSteps(seed: string): Generator<string, World> {
   const isles: WorldPlace[] = [], valleys: WorldPlace[] = [];
   // (Only in the tile's own two kilometres, what lies in its overlap being the neighbour's; and four hundred metres in from the world's
   // edge at least, so that what is seen from a place is the world's own.)
-  const core = (t: Tile, x: number, z: number) => Math.abs(x - t.ox) <= TILE.stride / 2 && Math.abs(z - t.oz) <= TILE.stride / 2 && Math.max(Math.abs(x), Math.abs(z)) < p.half - 400;
+  const core = (t: Tile, x: number, z: number) => Math.abs(x - t.ox) <= TILE.stride / 2 && Math.abs(z - t.oz) <= TILE.stride / 2 && Math.abs(x) < p.hx - 400 && Math.abs(z) < p.hz - 400;
   /** The islands found so far, one to an island. */
   const islands = () => isles.filter((q, k) => !isles.slice(0, k).some((o) => Math.hypot(o.island!.cu - q.island!.cu, o.island!.cv - q.island!.cv) < 400));
   for (const { i, j } of isleTiles.slice(0, SEARCH.isleTiles)) {
@@ -658,7 +675,7 @@ export function* worldSteps(seed: string): Generator<string, World> {
   w.peakNames = p.peaks.map(() => namer.name('peak'));
   for (const t of w.towns) t.name = namer.name(t.kind);
   for (const q of w.places) q.name = namer.name(q.kind);
-  WORLDS.set(seed, w);
+  WORLDS.set(key, w);
   return w;
 }
 
@@ -734,17 +751,17 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
   const f = w.field, h = f.data, p = w.plan, out: WorldPlace[] = [];
   // (Four hundred metres in from the world's edge, as the other places are; the window the ground joined to it is looked over in
   // stops at the edge. Kept a window's breadth from the edge, as first written for a larger world, half the range was never looked at.)
-  const R = Math.round(300 / CELL), W = Math.round(1200 / CELL), E = Math.round(400 / CELL), mark = new Int32Array(N * N);
+  const NX = f.nx, NZ = f.nz, R = Math.round(300 / CELL), W = Math.round(1200 / CELL), E = Math.round(400 / CELL), mark = new Int32Array(NX * NZ);
   let stamp = 0;
-  for (let j = E; j < N - E; j++) for (let i = E; i < N - E; i++) {
-    const k = j * N + i, y = h[k];
+  for (let j = E; j < NZ - E; j++) for (let i = E; i < NX - E; i++) {
+    const k = j * NX + i, y = h[k];
     if (y < 250) continue;
     let top = true;
-    for (let dj = -1; dj <= 1 && top; dj++) for (let di = -1; di <= 1; di++) if ((di || dj) && h[k + dj * N + di] > y) { top = false; break; }
+    for (let dj = -1; dj <= 1 && top; dj++) for (let di = -1; di <= 1; di++) if ((di || dj) && h[k + dj * NX + di] > y) { top = false; break; }
     if (!top) continue;
     const x = f.x0 + i * CELL, z = f.z0 + j * CELL;
     if (zonesAt(p, x, z).wR < 0.5) { no('not in the range'); continue; }
-    for (let dj = -R; dj <= R && top; dj++) for (let di = -R; di <= R; di++) if (di * di + dj * dj <= R * R && h[k + dj * N + di] > y) { top = false; break; }
+    for (let dj = -R; dj <= R && top; dj++) for (let di = -R; di <= R; di++) if (di * di + dj * dj <= R * R && h[k + dj * NX + di] > y) { top = false; break; }
     if (!top) { no('higher near'); continue; }
     // It must stand alone over the cloud, which lies some forty metres under the top: the ground joined to it above that must hold
     // nothing higher, within twelve hundred metres.
@@ -752,10 +769,10 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
     mark[k] = ++stamp;
     let joined = false;
     for (let c = 0; c < q.length && !joined; c++) {
-      const m = q[c], mi = m % N, mj = (m - mi) / N;
-      for (const o of [m - 1, m + 1, m - N, m + N]) {
-        if (o < 0 || o >= N * N) continue;
-        const oi = o % N, oj = (o - oi) / N;
+      const m = q[c], mi = m % NX, mj = (m - mi) / NX;
+      for (const o of [m - 1, m + 1, m - NX, m + NX]) {
+        if (o < 0 || o >= NX * NZ) continue;
+        const oi = o % NX, oj = (o - oi) / NX;
         if (mark[o] === stamp || h[o] <= cloud) continue;
         if (Math.abs(oi - i) > W || Math.abs(oj - j) > W || Math.abs(oi - mi) > 1) continue;
         if (h[o] > y) { joined = true; break; }
@@ -803,18 +820,19 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
  */
 function settle(w: World, rng: Rng): Town[] {
   const f = w.field, h = f.data, p = w.plan, towns: Town[] = [];
-  const at = (k: number) => ({ x: f.x0 + (k % N) * CELL, z: f.z0 + Math.floor(k / N) * CELL, y: h[k] });
-  const slopeAt = (k: number) => { const i = k % N, j = (k - i) / N; if (i < 1 || j < 1 || i > N - 2 || j > N - 2) return 1; return Math.hypot(h[k + 1] - h[k - 1], h[k + N] - h[k - N]) / (2 * CELL); };
+  const NX = f.nx, NZ = f.nz, all = NX * NZ;
+  const at = (k: number) => ({ x: f.x0 + (k % NX) * CELL, z: f.z0 + Math.floor(k / NX) * CELL, y: h[k] });
+  const slopeAt = (k: number) => { const i = k % NX, j = (k - i) / NX; if (i < 1 || j < 1 || i > NX - 2 || j > NZ - 2) return 1; return Math.hypot(h[k + 1] - h[k - 1], h[k + NX] - h[k - NX]) / (2 * CELL); };
   const isles = w.places.filter((q) => q.kind === 'island');
   const ix = isles.length ? isles.reduce((s, q) => s + q.x, 0) / isles.length : 0, iz = isles.length ? isles.reduce((s, q) => s + q.z, 0) / isles.length : 0;
   // The harbour: a river's mouth, the larger the river and the nearer the islands the better.
   let harbour = -1, best = -Infinity;
-  for (let k = 0; k < N * N; k++) {
+  for (let k = 0; k < all; k++) {
     if (w.acc[k] < RIVER || w.sea[k] || w.down[k] < 0 || !w.sea[w.down[k]]) continue;
     const { x, z } = at(k), score = Math.log(w.acc[k]) * 2 - (isles.length ? Math.hypot(x - ix, z - iz) / 500 : 0);
     if (score > best) { best = score; harbour = k; }
   }
-  if (harbour < 0) for (let k = 0; k < N * N; k++) {
+  if (harbour < 0) for (let k = 0; k < all; k++) {
     // (No river comes out to the sea: then the gentlest shore.)
     if (w.cover[k] !== COVER.shore) continue;
     const { x, z } = at(k), score = -slopeAt(k) * 50 - (isles.length ? Math.hypot(x - ix, z - iz) / 500 : 0);
@@ -824,7 +842,7 @@ function settle(w: World, rng: Rng): Town[] {
   const clear = (x: number, z: number, d: number) => towns.every((t) => Math.hypot(t.x - x, t.z - z) >= d);
   // Market towns: on a river in the low country, on gentle ground; the largest rivers first, well apart.
   const sites: number[] = [];
-  for (let k = 0; k < N * N; k++) if (w.acc[k] >= 2 * RIVER && !w.sea[k] && !w.lake[k] && h[k] > 2 && h[k] < 120 && slopeAt(k) < 0.05) sites.push(k);
+  for (let k = 0; k < all; k++) if (w.acc[k] >= 2 * RIVER && !w.sea[k] && !w.lake[k] && h[k] > 2 && h[k] < 120 && slopeAt(k) < 0.05) sites.push(k);
   sites.sort((a, b) => w.acc[b] - w.acc[a]);
   for (const k of sites) {
     const t = at(k);
@@ -834,7 +852,7 @@ function settle(w: World, rng: Rng): Town[] {
   }
   // Villages: by water, on fields or pasture, eight hundred metres apart and more.
   const near: number[] = [];
-  for (let k = 0; k < N * N; k += 3) if ((w.cover[k] === COVER.fields || w.cover[k] === COVER.pasture) && w.acc[k] > 3e4 && slopeAt(k) < 0.08) near.push(k);
+  for (let k = 0; k < all; k += 3) if ((w.cover[k] === COVER.fields || w.cover[k] === COVER.pasture) && w.acc[k] > 3e4 && slopeAt(k) < 0.08) near.push(k);
   for (let tries = 0; tries < 4000 && near.length && towns.filter((q) => q.kind === 'village').length < 8; tries++) {
     const t = at(near[rng.int(0, near.length - 1)]);
     if (!clear(t.x, t.z, 800)) continue;
@@ -852,18 +870,18 @@ function settle(w: World, rng: Rng): Town[] {
  */
 function layWays(w: World): WorldWay[] {
   // (On a lattice of twice the world's: a way finer than sixteen metres is not seen on a map of eight kilometres.)
-  const S = 2, n = Math.floor((N - 1) / S) + 1, cell = CELL * S, f = w.field, x0 = f.x0, z0 = f.z0;
-  const H = new Float32Array(n * n), water = new Uint8Array(n * n), river = new Uint8Array(n * n), made = new Uint8Array(n * n), madeList: number[] = [];
+  const f = w.field, S = 2, n = Math.floor((f.nx - 1) / S) + 1, m2 = Math.floor((f.nz - 1) / S) + 1, cell = CELL * S, x0 = f.x0, z0 = f.z0;
+  const H = new Float32Array(n * m2), water = new Uint8Array(n * m2), river = new Uint8Array(n * m2), made = new Uint8Array(n * m2), madeList: number[] = [];
   // (Ground that is a little worse or better going, in patches some hundreds of metres across, for what a lattice cannot know: a
   // farm in the way, a bog, a ford. On the flat it makes a way wander, as ways do, where otherwise it ran ruled along the lattice.)
-  const going = new Float32Array(n * n);
-  for (let g = 0; g < n * n; g++) going[g] = 0.7 + 0.6 * valueNoise2((x0 + (g % n) * cell) / 250, (z0 + Math.floor(g / n) * cell) / 250, w.plan.n + 71);
+  const going = new Float32Array(n * m2);
+  for (let g = 0; g < n * m2; g++) going[g] = 0.7 + 0.6 * valueNoise2((x0 + (g % n) * cell) / 250, (z0 + Math.floor(g / n) * cell) / 250, w.plan.n + 71);
   const mark = (g: number) => { if (!made[g]) { made[g] = 1; madeList.push(g); } };
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-    const k = j * S * N + i * S, g = j * n + i;
+  for (let j = 0; j < m2; j++) for (let i = 0; i < n; i++) {
+    const k = j * S * f.nx + i * S, g = j * n + i;
     H[g] = f.data[k]; water[g] = w.sea[k] || w.lake[k] ? 1 : 0; river[g] = w.acc[k] >= RIVER * 3 ? 1 : 0;
   }
-  const idx = (x: number, z: number) => Math.min(n - 1, Math.max(0, Math.round((z - z0) / cell))) * n + Math.min(n - 1, Math.max(0, Math.round((x - x0) / cell)));
+  const idx = (x: number, z: number) => Math.min(m2 - 1, Math.max(0, Math.round((z - z0) / cell))) * n + Math.min(n - 1, Math.max(0, Math.round((x - x0) / cell)));
   const pt = (g: number): [number, number] => [x0 + (g % n) * cell, z0 + Math.floor(g / n) * cell];
   const ways: WorldWay[] = [];
   // What a step costs, for each kind of way: how steep it may be before it pays heavily, and what a bridge costs.
@@ -877,7 +895,7 @@ function layWays(w: World): WorldWay[] {
       if (river[b] && !river[a]) c += o.bridge;
       return made[b] ? c * o.reuse : c;
     };
-    const line = leastPath(x0, z0, cell, n, n, from, to, cost);
+    const line = leastPath(x0, z0, cell, n, m2, from, to, cost);
     if (!line) return null;
     for (const [x, z] of line) mark(idx(x, z));
     return line;
@@ -938,7 +956,7 @@ function layWays(w: World): WorldWay[] {
       for (let r = 0; r < 20; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
         if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
         const i = ci + di, j = cj + dj;
-        if (i < 0 || j < 0 || i >= n || j >= n || !water[j * n + i]) continue;
+        if (i < 0 || j < 0 || i >= n || j >= m2 || !water[j * n + i]) continue;
         return pt(j * n + i);
       }
       return null;
@@ -948,7 +966,7 @@ function layWays(w: World): WorldWay[] {
       if (q.kind !== 'island' || !from) continue;
       const to = wet(q.island!.cu, q.island!.cv);
       if (!to) continue;
-      const line = leastPath(x0, z0, cell, n, n, from, to, seaCost);
+      const line = leastPath(x0, z0, cell, n, m2, from, to, seaCost);
       if (line) ways.push({ kind: 'ferry', points: smoothLine([[harbour.x, harbour.z], ...line], 3) });
     }
   }

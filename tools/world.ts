@@ -12,7 +12,7 @@
  */
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { COVER, world, worldSteps, World } from '../src/core/world';
+import { COVER, world, worldSteps, World, WORLD_SIZE } from '../src/core/world';
 
 const arg = process.argv[2] ?? '2', out = process.argv[3] ?? 'world-pictures', px = Number(process.argv[4] ?? 4);
 const seeds = /^\d+$/.test(arg) ? Array.from({ length: Number(arg) }, (_, k) => `w${k}`) : [arg];
@@ -37,11 +37,11 @@ const COLOUR: Record<number, [number, number, number]> = {
 };
 
 function draw(w: World): Buffer {
-  const f = w.field, half = w.plan.half, W = Math.round((2 * half) / px), rgb = new Uint8Array(W * W * 3);
-  const H = new Float32Array((W + 2) * (W + 2));
-  for (let j = 0; j < W + 2; j++) for (let i = 0; i < W + 2; i++) H[j * (W + 2) + i] = f.smoothAt(-half + (i - 1) * px, -half + (j - 1) * px);
-  for (let j = 0; j < W; j++) for (let i = 0; i < W; i++) {
-    const k = (j + 1) * (W + 2) + i + 1, x = -half + i * px, z = -half + j * px;
+  const f = w.field, hx = w.plan.hx, hz = w.plan.hz, W = Math.round((2 * hx) / px), WH = Math.round((2 * hz) / px), rgb = new Uint8Array(W * WH * 3);
+  const H = new Float32Array((W + 2) * (WH + 2));
+  for (let j = 0; j < WH + 2; j++) for (let i = 0; i < W + 2; i++) H[j * (W + 2) + i] = f.smoothAt(-hx + (i - 1) * px, -hz + (j - 1) * px);
+  for (let j = 0; j < WH; j++) for (let i = 0; i < W; i++) {
+    const k = (j + 1) * (W + 2) + i + 1, x = -hx + i * px, z = -hz + j * px;
     const gx = (H[k + 1] - H[k - 1]) / (2 * px), gz = (H[k + W + 2] - H[k - W - 2]) / (2 * px);
     // (Light from the north-west, high, as maps are shaded; a little exaggerated, so the low country's swells show.)
     const nl = Math.hypot(gx * 2, 1, gz * 2), shade = Math.max(0, (gx * 2 * 0.5 + 0.75 + gz * 2 * 0.43) / nl);
@@ -54,10 +54,10 @@ function draw(w: World): Buffer {
     for (let q = 0; q < 3; q++) rgb[o + q] = Math.max(0, Math.min(255, col[q] * lit * deep));
   }
   const dot = (x: number, z: number, c: [number, number, number], r = 0) => {
-    const ci = Math.round((x + half) / px), cj = Math.round((z + half) / px);
+    const ci = Math.round((x + hx) / px), cj = Math.round((z + hz) / px);
     for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
       const i = ci + di, j = cj + dj;
-      if (i < 0 || j < 0 || i >= W || j >= W || di * di + dj * dj > r * r + r) continue;
+      if (i < 0 || j < 0 || i >= W || j >= WH || di * di + dj * dj > r * r + r) continue;
       const o = (j * W + i) * 3; rgb[o] = c[0]; rgb[o + 1] = c[1]; rgb[o + 2] = c[2];
     }
   };
@@ -81,23 +81,25 @@ function draw(w: World): Buffer {
   for (const way of w.ways) line(way.points, WAY[way.kind].c, WAY[way.kind].r, WAY[way.kind].gap);
   for (const t of w.towns) dot(t.x, t.z, [10, 10, 10], t.kind === 'harbour' ? 6 : t.kind === 'town' ? 4 : 2);
   for (const q of w.places) {
-    const ci = (q.x + half) / px, cj = (q.z + half) / px, c: [number, number, number] = q.kind === 'island' ? [230, 40, 40] : q.kind === 'valley' ? [250, 150, 20] : [170, 60, 230];
+    const ci = (q.x + hx) / px, cj = (q.z + hz) / px, c: [number, number, number] = q.kind === 'island' ? [230, 40, 40] : q.kind === 'valley' ? [250, 150, 20] : [170, 60, 230];
     for (let a = 0; a < 64; a++) {
       const t = (a / 64) * Math.PI * 2;
-      if (q.kind === 'island') for (const r of [7, 8]) dot((ci + Math.cos(t) * r) * px - half, (cj + Math.sin(t) * r) * px - half, c);
+      if (q.kind === 'island') for (const r of [7, 8]) dot((ci + Math.cos(t) * r) * px - hx, (cj + Math.sin(t) * r) * px - hz, c);
     }
     if (q.kind === 'valley') for (let d = -6; d <= 6; d++) for (const e of [-6, 6]) { dot(q.x + d * px, q.z + e * px, c, 1); dot(q.x + e * px, q.z + d * px, c, 1); }
     if (q.kind === 'mountain') for (let d = 0; d <= 10; d++) { dot(q.x + (d - 10) * 0.6 * px, q.z + (d - 5) * px, c, 1); dot(q.x - (d - 10) * 0.6 * px, q.z + (d - 5) * px, c, 1); dot(q.x + (d - 5) * 1.2 * px, q.z + 5 * px, c, 1); }
   }
-  return png(W, W, rgb);
+  return png(W, WH, rgb);
 }
 
+// (`SIZE=8x8` before the command makes worlds of that many kilometres east and west by north and south.)
+const size = process.env.SIZE ? { x: Number(process.env.SIZE.split('x')[0]) * 1000, z: Number(process.env.SIZE.split('x')[1]) * 1000 } : WORLD_SIZE;
 for (const seed of seeds) {
   const t0 = performance.now();
   // (A stage at a time, so the time each took is seen as it goes.)
-  const steps = worldSteps(seed);
+  const steps = worldSteps(seed, size);
   for (let s = steps.next(); !s.done; s = steps.next()) process.stdout.write(`  ${s.value}\r`);
-  const w = world(seed), t1 = performance.now();
+  const w = world(seed, size), t1 = performance.now();
   const count = (k: string) => w.places.filter((q) => q.kind === k).length;
   const covers = Object.entries(COVER).map(([name, c]) => `${name} ${((100 * w.cover.filter((v) => v === c).length) / w.cover.length).toFixed(0)}%`).join(', ');
   const h = w.field.data;
@@ -106,7 +108,7 @@ for (const seed of seeds) {
   const stages = Object.entries(w.timing).filter(([k]) => !/ \d/.test(k)).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ');
   const tiles = Object.entries(w.timing).filter(([k]) => / \d/.test(k)), tileTime = tiles.reduce((s, [, v]) => s + v, 0);
   console.log(`${seed}: built in ${((t1 - t0) / 1000).toFixed(1)} s (${stages}; ${tiles.length} tiles ${(tileTime / 1000).toFixed(1)} s)`);
-  console.log(`  land ${lo.toFixed(0)} to ${hi.toFixed(0)} m; inland ${((w.plan.inland * 180) / Math.PI).toFixed(0)}°, plains ${(w.plan.plains / 1000).toFixed(1)} km, upland ${(w.plan.upland / 1000).toFixed(1)} km, ${w.plan.peaks.length} great peaks`);
+  console.log(`  ${2 * w.plan.hx / 1000} by ${2 * w.plan.hz / 1000} km; land ${lo.toFixed(0)} to ${hi.toFixed(0)} m; inland ${((w.plan.inland * 180) / Math.PI).toFixed(0)}°, plains ${(w.plan.plains / 1000).toFixed(1)} km, upland ${(w.plan.upland / 1000).toFixed(1)} km, ${w.plan.peaks.length} great peaks`);
   console.log(`  ${covers}`);
   console.log(`  found: ${count('island')} islands, ${count('valley')} valley heads, ${count('mountain')} mountain tops; ${w.towns.length} towns (${w.towns.filter((t) => t.kind !== 'village').length} not villages); ${w.rivers.length} rivers; ways ${['road', 'track', 'path', 'ferry'].map((k) => `${w.ways.filter((q) => q.kind === k).length} ${k}`).join(', ')}`);
   for (const [k, why] of Object.entries(w.why)) console.log(`  ${k} turned down: ${Object.entries(why).map(([a, b]) => `${a} ${b}`).join(', ') || 'none'}`);

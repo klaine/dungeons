@@ -1,7 +1,8 @@
 # 6. The world
 
-A world is one stretch of country, eight kilometres square, in which every kind of place is found
-rather than drawn, four of each: islands in its sea, valley heads in its upland, mountain tops in its
+A world is one stretch of country, six kilometres east and west by ten from the sea to the hills (its
+size is a setting: `?size=8x8` on the world page, `SIZE=8x8` before `tools/world.ts`), in which every
+kind of place is found rather than drawn, four of each: islands in its sea, valley heads in its upland, mountain tops in its
 range, and later other kinds in its low country. Its hills are four to six hundred metres high. Each
 place keeps its own detailed land, made when someone goes there; the world is what lies between
 them and round about them, and what is seen from them.
@@ -21,6 +22,7 @@ The notes, as given:
 - "would some kind of mesh optimization be good to have for the terrain? more triangles where there is detail and combine into larger triangles where there is little detail?"
 - "could we have mesh optimization AND way smaller total world size, lets say 8km x 8 km with 4 locations of each type? 8000x8000 1 pixel per meter?"
 - "maybe the overall scale would have to come down, from 1.5-2km tall mountains to 400-600m tall? ... no need to make all at once ... some kind of streaming / adaptive detail"
+- "would 6x10 rectangular instead of 8x8 straight square be better?", then "ok target default 6x10 and do the 1 m streaming"
 
 The answer given before starting: yes. Valleys and islands were already found, not drawn: each in
 a frame of its own made by noise and worn (`highlands.ts`, `archipelago.ts`), drawn from a pool of
@@ -30,7 +32,10 @@ finer near the mountain. What was missing was one land holding them all.
 
 The first world was forty-eight kilometres square, with mountains of two kilometres and twelve places
 of each kind. It was brought down to eight kilometres and hills of four to six hundred metres, as
-asked, so that its land can be had at a metre where it is walked (below).
+asked, so that its land can be had at a metre where it is walked (below); then made six kilometres by
+ten, the long way from the sea to the hills, so that each zone has more depth (the range most, which
+had been the tightest fit: 3.2 kilometres, not 2.6) and the world is a journey from the islands up to
+the summits.
 
 ## What a world holds
 
@@ -38,24 +43,28 @@ All in `src/core/world.ts`, decided from the world's seed alone; nothing in it d
 place asks for it.
 
 - **The plan** (`planWorld`): inland is north, turned up to 17 degrees either way, so the sea and its
-  islands lie to the south and the hills to the north; where the coast lies (some 700 metres of open
-  sea, then a shelf 1.3 to 1.9 kilometres broad); how broad the low country (0.4 to 1.4 kilometres)
-  and the upland (1.8 to 2.6) are, the range taking the rest; a great bay; how deep and how far
-  inland its fjords are cut; and what is planned rather than left to the noise: one to three great
-  peaks, six to eight islands and five summits (below).
+  islands lie to the south and the hills to the north; where the coast lies (some 800 metres of open
+  sea, then a shelf 1.7 to 2.3 kilometres broad); how broad the low country (0.6 to 1.8 kilometres)
+  and the upland (2.4 to 3.2) are, the range taking the rest, some 3.2 (these for a world ten kilometres
+  deep; for another, in proportion); a great bay; how deep and how far inland its fjords are cut; and
+  what is planned rather than left to the noise: one to three great peaks, seven to nine islands and
+  five summits (below).
 - **The zones.** Going inland: open sea; a shelf with islands on it; the coast; the low country;
   the upland; the range. Every point belongs to each zone in a share (`zonesAt`), the shares adding
   to one and blending over a few hundred metres where zones meet. The boundaries wander: the coast in
   bays and headlands a kilometre or two across, the foot of the upland so far that in places it comes
   down to the sea and the low country is gone.
 - **The great bay and the fjords.** The bay is the coast pushed back inland over a stretch 1.5 to
-  2.5 kilometres broad at its mouth and as deep, furthest along its middle (which wanders) and rounded
-  at its head. Only the coast is moved: the upland and the range stand where they would without it, so
+  2.5 kilometres broad at its mouth and 1.8 to 3 deep, furthest along its middle, its middle and its
+  sides wandering, its sides sloping (drawn first nearly upright at the edge, they were long straight
+  walls). Only the coast is moved: the upland and the range stand where they would without it, so
   the bay cuts past the low country into high ground, and its sides and head are steep. Its floor is
   reckoned as the shelf's near the coast, so it is shallow and has islands in it. Fjords are cut
   wherever the coast is high ground: the upland's straths, which run inland, are carried on under the
-  sea between their walls for 0.9 to 1.8 kilometres, deepest at their mouths; where low country lies in
-  front of one, its carved floor is cut off from the sea and holds a long loch instead.
+  sea between their walls for 0.9 to 1.8 kilometres, deepest at their mouths, their floors rounded;
+  where low country lies in front of one, its carved floor is cut off from the sea and holds a long loch
+  instead. They follow one family of the straths only: cut down both, they met where two straths cross
+  in planes fanning out from the crossing, which drew as a fan of flat wedges at the bay's head.
 - **The land**: each zone has a land of its own, and a point's height is each zone's land in the
   share it belongs to that zone (`worldShape`). One sea level for all of it; heights in metres over
   the sea.
@@ -71,15 +80,17 @@ place asks for it.
   world's one sea level but few of the size an island's house wants (200 to 400 metres across, a
   shoulder 18 to 34 metres over the sea, well in from the cliffs): the islands' own frames find theirs
   by trying twenty sea levels. And the range is narrow, and of the summits its noise makes few stand
-  alone with a ridge to come up by. So, as the great peaks were from the first, six to eight islands
-  and five summits are planned: an island a cliffed coast, a broad shoulder at a house's height and a
-  hill on it, its coast wandering so no two are alike; a summit a mass drawn out along the way its
+  alone with a ridge to come up by. So, as the great peaks were from the first, seven to nine islands
+  and five summits are planned, in among what the noise makes: an island a cliffed coast worn into
+  points and coves, a lobe pushed out on one side, a broad shoulder at a house's height and a hill off
+  to one side (an oval with a ring round it, drawn first, looked like an egg in a pan); a summit a mass drawn out along the way its
   ridge runs down towards the coast, the side valleys and crests quieter on it so the ridge comes down
   whole. The searches still find them, and turn down what does not suit.
-- **Worn**, on a lattice of 8 metres, a thousand and one points a side, by the same water and frost
-  as every other land (`terrain.ts`), so that rivers cut real valleys. The shelf and the floor of the
-  sea are spared here (its islands are worn in the tiles; and what the rivers bring down would build
-  sills across the fjords). Its shape from before the wear is kept too: the tiles need it.
+- **Worn**, on a lattice of 8 metres (751 points by 1,251), by the same water and frost as every other
+  land (`terrain.ts`), so that rivers cut real valleys. The shelf and the floor of the sea are spared
+  here (its islands are worn in the tiles; and what the rivers bring down would build sills across the
+  fjords), and nothing is built up more than six metres (with more, the rivers built fans at the bay's
+  head, all at the limit, flat). Its shape from before the wear is kept too: the tiles need it.
 - **Water.** The sea is whatever lies below its level joined to the world's edge. Then the water is
   followed: hollows are filled to where they would spill, each point drains to its steepest neighbour
   downhill, and what drains through each point is counted (`drain`). A hollow deeper than fifteen
@@ -92,8 +103,8 @@ place asks for it.
   woods down in its glens; heath above the trees (the treeline wanders about 300 metres); rock where it
   is steep or high; snow lying late only on the great peaks.
 - **Tiles**: a finer lattice, 5 metres (as the islands' and the valleys' own frames are), in tiles
-  2.4 kilometres square on a fixed grid, a tile every two kilometres, each reaching 200 metres over
-  its neighbours (`worldTile`). A tile is the world's fine shape (more octaves of each zone's noise)
+  2.4 kilometres square on a fixed grid, a tile every two kilometres (three by five), each reaching 200
+  metres over its neighbours (`worldTile`). A tile is the world's fine shape (more octaves of each zone's noise)
   with what the world's wear did laid on it, so the rivers keep their valleys; worn again at its own
   scale; and drained. Because the grid is the world's, a tile's land is the same whichever place asks.
 - **Places**, looked for where their kind of land is, four hundred metres in from the world's edge at
@@ -137,12 +148,13 @@ kilometre's scale; the frame barred every half kilometre. `?world=<seed>` names 
 
 ## Measured
 
-Without a browser, in a cloud container with four cores (`npx tsx tools/world.ts`), November 2026:
-a world builds in 24 to 30 seconds: its shape 1.6 to 2, the wear by water and frost on the world's
-lattice about 10, following the water 1, the cover 0.5, and five to eight tiles for islands and valley
-heads 11 to 16 (each some two seconds, nearly all of it the wear). In the browser (Chromium, headless,
-same machine) the world page makes and draws one in 23 to 28. Four worlds tried (`w0` to `w3`) each
-gave four islands, four valley heads and four mountain tops, ten or eleven towns and 24 to 30 rivers.
+Without a browser, in a cloud container with four cores (`npx tsx tools/world.ts`), November 2026,
+six kilometres by ten: a world builds in 20 to 28 seconds: its shape 1.7 to 1.9, the wear by water and
+frost on the world's lattice about 10, following the water 1, the cover 0.5, and three to seven tiles
+for islands and valley heads 7 to 15 (each some two seconds, nearly all of it the wear). Four worlds
+tried (`w0` to `w3`) each gave four islands, four valley heads and four mountain tops, eleven towns and
+20 to 28 rivers. (At eight kilometres square, before: 24 to 30 seconds; in the browser, headless, the
+world page made and drew one in 23 to 28.)
 
 What the time goes on, nine tenths of it: the drops of water that wear the land, a million on the
 world's lattice and some quarter of a million on each tile. What could be done about it: keep a world
