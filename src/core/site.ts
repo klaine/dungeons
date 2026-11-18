@@ -260,7 +260,69 @@ export interface Grotto {
  * the market squares of the northern capitals. A rusticated ground storey, tall windows in even
  * rows above it, a heavy cornice and a low metal roof; with `portico`, the middle bays stand
  * forward under pilasters and a pediment.
+ *
+ * Of the style `brick`: a building of the brick towns of the Baltic and the North Sea coasts, as
+ * along the Trave in Lübeck or the harbours of Stralsund and Wismar; `brick` says which of that
+ * family it is and how it is made (see `BrickWork`). `colour` is the wash on a rendered front.
  */
+/**
+ * How a building of brick is made. There are four kinds:
+ *  - `gabled`: a merchant's house, narrow and deep, its steep gable to the street, a tall hall
+ *    for goods on the ground storey behind a broad door, living storeys over it, and lofts in
+ *    the roof reached by a hoist from the street;
+ *  - `eaves`: a broader house of later date with its eaves to the street, its front rendered and
+ *    washed, and over its middle bays a small gable of its own rising through the roof;
+ *  - `store`: a warehouse, gable to the street, of many low storeys, with a column of loading
+ *    doors up its middle under a hoist;
+ *  - `church`: a church of the brick Gothic, standing with its long side to the street: a nave
+ *    of `bays` bays (its length is the building's `w`, its breadth `d`, and `heights[0]` how high
+ *    its walls stand), buttressed, with tall pointed windows; a tower or two at one end, and a
+ *    choir at the other.
+ * Measures not given here follow by rule from these (see `src/core/brick.ts`).
+ */
+export interface BrickWork {
+  kind: 'gabled' | 'eaves' | 'store' | 'church';
+  /**
+   * The outline of the gable to the street (of an eaves house, of the small gable over its
+   * middle; of a church, of the gable at its east end): in `steps` steps a side; with piers that
+   * rise through it into pinnacles, `steps` spaces either side of the middle one; in `steps`
+   * tiers that narrow upward with scrolls at their sides; or a plain triangle.
+   */
+  gable: 'stepped' | 'piers' | 'volute' | 'plain';
+  steps: number;
+  /** The front is rendered and washed with the building's `colour`, and what is moulded on it is white; otherwise it is bare brick. */
+  rendered: boolean;
+  /**
+   * The clay the brick was burnt from, dug near the town as brick clay always was: `red` from clays with iron in them, as
+   * along the Baltic, or `buff`, pale yellow to ochre, from clays with lime in them, as in limestone country.
+   */
+  clay: 'red' | 'buff';
+  /** The brick's tone: its colour is multiplied by this, from dark brown to orange. */
+  tone: [number, number, number];
+  /** Bands of dark glazed brick run across the front, at the floors and under the gable. */
+  glazed: boolean;
+  /** The upper windows stand in tall pointed recesses, and the gable has rows of them: with their backs plastered white, of brick, or none. */
+  niches: 'white' | 'brick' | 'none';
+  /** Where the door is across the front, as a share of its breadth from its left end as one stands before it. */
+  door: number;
+  /** How steep the roof is, in degrees. */
+  pitch: number;
+  /** What the roof is covered with: red clay tiles, tiles glazed nearly black, or copper gone green. */
+  roof: 'red' | 'dark' | 'copper';
+  /**
+   * Of a church. `end` is the end its tower stands at (-1 the left as one stands before it, 1 the
+   * right): one tower, `side` metres square, in the middle of that end, or two filling it; the
+   * tower's walls stand `height` metres, and over them a `spire` of `spireHeight`: a tall
+   * octagonal needle; a pyramid with a spirelet at each corner; or a ridged roof between two
+   * gables. At the other end stands the choir, `choirLength` long and narrower than the nave,
+   * ending in a half-polygon (`apse`) or a flat wall with a gable (`flat`).
+   */
+  church?: {
+    end: -1 | 1; towers: 1 | 2; side: number; height: number; spire: 'needle' | 'corners' | 'saddle'; spireHeight: number;
+    choir: 'apse' | 'flat'; choirLength: number;
+  };
+}
+
 /**
  * The plan of a building's rooms: alike on every storey, except where a room or a door names the
  * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
@@ -281,8 +343,8 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), or a classical house of weatherboards on a stone basement (`wooden`). */
-  style: 'timber' | 'imperial' | 'wooden';
+  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), or Hanseatic brick (`brick`). */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick';
   x: number;
   z: number;
   w: number;
@@ -357,6 +419,8 @@ export interface Building {
    * inward; `length` is how far it reaches back beyond the main block. It has the main block's storeys.
    */
   wings?: { side: -1 | 1; width: number; length: number }[];
+  /** Of the style `brick`: which of the family it is, and how it is made. */
+  brickwork?: BrickWork;
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
 }
@@ -834,9 +898,10 @@ export interface Site {
   /**
    * What kind of settlement the valley has, decided before anything else is put in it: a
    * village along the track with a keep above it, a hamlet of a few houses, a manor house of
-   * the classical kind, or none.
+   * the classical kind, or none. Or a `town`: a street of brick houses along the track, close
+   * against one another, of the kinds in `BrickWork`, and where there is room a church of brick.
    */
-  settlement?: 'village' | 'hamlet' | 'manor';
+  settlement?: 'village' | 'hamlet' | 'manor' | 'town';
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
    * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,

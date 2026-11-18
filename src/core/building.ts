@@ -1,3 +1,4 @@
+import { brickFootprint } from './brick';
 import { Rng } from './rng';
 import { Building, BuildingPlan } from './site';
 
@@ -60,6 +61,7 @@ export function wingWindows(b: Building, wing: NonNullable<Building['wings']>[nu
 
 /** Where a building stands on the ground, as rectangles in its own measures: the main block, what stands forward of it, and its wings. */
 export function footprintOf(b: Building): { u0: number; u1: number; v0: number; v1: number }[] {
+  if (b.style === 'brick') return brickFootprint(b);
   const out = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
   if (b.style === 'imperial' && b.portico) { const f = classicalFront(b); out.push({ u0: f.standL, u1: f.standR, v0: -CLASSICAL.out, v1: 0 }); }
   for (const g of b.wings ?? []) out.push({ u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d - 0.01, v1: b.d + g.length });

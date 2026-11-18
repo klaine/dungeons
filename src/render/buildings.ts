@@ -4,6 +4,7 @@ import { buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classi
 import { Building } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
+import { buildBrick } from './brick';
 
 /**
  * Buildings that stand by themselves and are seen from outside. The site document says what a
@@ -40,7 +41,7 @@ export function litRoom(x: number, y: number, z: number, share = 0.38): Colour |
 /** The tools: where things are, and solids to build with. */
 /** Turns what a builder lays in one material and colour into another, while `active`: how a classical building's walls become brick. */
 type Dress = { active: boolean; map: (material: string, colour: Colour) => [string, Colour] | null };
-function tools(b: Building, base: number, mesh: (material: string) => MeshBuilder, dress?: Dress) {
+export function buildingTools(b: Building, base: number, mesh: (material: string) => MeshBuilder, dress?: Dress) {
   const turn = b.faces === 'w' ? 1 : -1;
   // From the building's own measures (along its front, up, back from its front) to the world.
   const at = (u: number, y: number, v: number) => new Vector3(b.x - (turn * b.d) / 2 + turn * v, base + y, b.z + turn * u);
@@ -184,7 +185,7 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     }
     return m;
   };
-  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, slope } = k;
+  const k = buildingTools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, slope } = k;
   const W = b.w, D = b.d, jetty = b.jetty ?? 0.35, T = 0.3, PLINTH = 0.3, H0 = b.heights[0];
   // How far behind the face of the posts each layer of a framed wall stands (see the storeys of framing).
   const RAIL = 0.015, BRACE = 0.028, CROSS = 0.04, PANEL = 0.06;
@@ -545,7 +546,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     active: !!b.brick,
     map: (material, colour) => material !== 'plaster' ? null : same(colour, b.colour) ? ['brick', brickTone] : b.brick === 'bare' && same(colour, WHITE) ? ['brick', dressTone] : null,
   };
-  const k = tools(b, base, mesh, dress), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
+  const k = buildingTools(b, base, mesh, dress), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
   // (Over brick with stucco dressings the ground storey is stucco the colour of stone, rusticated, as a basement storey is.)
   const groundWash: Colour = b.brick === 'stucco' ? [0.8, 0.77, 0.7] : b.colour, rustic = b.brick === 'bare' ? 0 : 0.44;
   // (`T` is the rendered skin of an outer wall, which carries its windows; the rest of its thickness is the linings of the rooms inside.)
@@ -1010,7 +1011,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
  * corner, the wing finished as the main block is. Its door is shut: it is seen, and not gone into.
  */
 function woodenHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, tops?: Vector3[]): void {
-  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, poly, wedge } = k;
+  const k = buildingTools(b, base, mesh), { at, box, on, stick, pierced, glazed, poly, wedge } = k;
   const W = b.w, D = b.d, Bm = b.basement ?? 1.1, N = b.storeys, paint = b.colour, T = 0.22;
   const floorY = (s: number) => Bm + b.heights.slice(0, s).reduce((sum, h) => sum + h, 0), top = floorY(N);
   const white: Colour = [0.9, 0.89, 0.85], backing = shade(paint, 0.35), roofTone: Colour = rng.pick([[0.11, 0.11, 0.12], [0.19, 0.2, 0.21], [0.27, 0.29, 0.3], [0.3, 0.19, 0.15]] as Colour[]);
@@ -1157,13 +1158,15 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
 
 /** Plain solids for other builders to use: a block between two corners, a squared length between two points, a sheet of roof. */
 export function solids(mesh: (material: string) => MeshBuilder) {
-  const t = tools({ x: 0, z: 0, w: 0, d: 0, faces: 'w' } as Building, 0, mesh);
+  const t = buildingTools({ x: 0, z: 0, w: 0, d: 0, faces: 'w' } as Building, 0, mesh);
   return { block: t.block, stick: t.stick, slope: t.slope };
 }
 
 /** Builds one building where the site document says it stands, on ground at the height `base`. `stone` is the tint of the country's stone. */
 /** Builds a building; `tops`, if given, is told where the top of each of its chimneys is, for smoke to rise from. */
 export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean, tops?: Vector3[]): void {
+  // (Brick buildings are shut, and seen only from outside: nothing in them is indoors.)
+  if (b.style === 'brick') { buildBrick(b, base, mesh, rng, stone); return; }
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
   const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };

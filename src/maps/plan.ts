@@ -478,6 +478,17 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         continue;
       }
       ctx.fillStyle = INK;
+      if (b.style === 'brick') {
+        // A building of brick is drawn by all its ground, a church's tower and choir with it; and its ridge, along it or across.
+        const turn = b.faces === 'w' ? 1 : -1, xs = (r: { v0: number; v1: number }) => [b.x - (turn * b.d) / 2 + turn * r.v0, b.x - (turn * b.d) / 2 + turn * r.v1];
+        for (const r of footprintOf(b)) { const x = xs(r), z = [b.z + turn * r.u0, b.z + turn * r.u1]; rect(Math.min(...x), Math.min(...z), Math.max(...x), Math.max(...z)); }
+        ctx.fillStyle = DARK;
+        for (const r of footprintOf(b)) { const x = xs(r), z = [b.z + turn * r.u0, b.z + turn * r.u1]; rect(Math.min(...x) + 0.35, Math.min(...z) + 0.35, Math.max(...x) - 0.35, Math.max(...z) - 0.35); }
+        ctx.fillStyle = INK;
+        if (b.brickwork?.kind === 'gabled' || b.brickwork?.kind === 'store') rect(b.x - b.d / 2, b.z - 0.12, b.x + b.d / 2, b.z + 0.12);
+        else rect(b.x - 0.12, b.z - b.w / 2, b.x + 0.12, b.z + b.w / 2);
+        continue;
+      }
       rect(b.x - b.d / 2, b.z - b.w / 2, b.x + b.d / 2, b.z + b.w / 2);
       ctx.fillStyle = DARK;
       rect(b.x - b.d / 2 + 0.35, b.z - b.w / 2 + 0.35, b.x + b.d / 2 - 0.35, b.z + b.w / 2 - 0.35);

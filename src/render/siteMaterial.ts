@@ -120,10 +120,10 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * comes round: which is what tells the eye that a thing has depth and is not paint.
  */
 /**
- * `tint`, if given, is the colour used in place of what each point carries: for the panes of windows that are lit after dark, whose
- * points carry the colour of their lamp, and which by day are glass like any other.
+ * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
+ * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; tint?: [number, number, number] } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number] } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -142,7 +142,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
   // Damp stone is darker; soot is darker still and matt.
-  let colour: N = stone.rgb.mul(o.tint ? vec3(...o.tint) : vertexColor().rgb).mul(mix(1, 0.5, wet));
+  let colour: N = stone.rgb.mul(o.paint ? vec3(...o.paint) : vertexColor().rgb).mul(mix(1, 0.5, wet));
   colour = mix(colour, mossTex.rgb, mossy);
   colour = mix(colour, vec3(0.012), f.z.mul(0.9));
   // Snow on what is built, out of doors: on roofs, copings, sills and the floors of open courts. What is out of doors is known only

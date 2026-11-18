@@ -1,8 +1,10 @@
 /**
  * Generates many sites and reports on them. Usage: npx tsx tools/sites.ts [count] [valley|island|mountain|town]
  * (With a kind of place named, only that kind: the whole takes some twenty minutes, now that land is made before it is laid out.)
+ * `SETTLE=town` (or `village`, `hamlet`, `manor`, `none`) before it gives every valley that settlement where there is room.
  */
-import { generateSite } from '../src/core/generate';
+import { generateSite, MakeOptions } from '../src/core/generate';
+import { footprintOf } from '../src/core/building';
 import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
 import { inland, landAt } from '../src/core/island';
@@ -16,7 +18,25 @@ let failures = 0;
 for (let n = 0; n < (only && only !== 'valley' ? 0 : count); n++) {
   const seed = `check-${n}`;
   try {
-    const site = generateSite(seed);
+    const site = generateSite(seed, 'valley', { settlement: process.env.SETTLE as MakeOptions['settlement'] });
+    bump(`settlement=${site.settlement ?? 'none'}`);
+    // Buildings stand clear of the track and of one another: a street's houses may touch, but none stands in another.
+    const ground = (site.buildings ?? []).map((b) => footprintOf(b).map((r) => {
+      const t = b.faces === 'w' ? 1 : -1, xs = [b.x - (t * b.d) / 2 + t * r.v0, b.x - (t * b.d) / 2 + t * r.v1], zs = [b.z + t * r.u0, b.z + t * r.u1];
+      return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+    }));
+    for (let i = 0; i < ground.length; i++) for (let j = i + 1; j < ground.length; j++) for (const a of ground[i]) for (const c of ground[j]) {
+      if (Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0) > 0.05 && Math.min(a.z1, c.z1) - Math.max(a.z0, c.z0) > 0.05) throw new Error(`buildings ${i} and ${j} stand in one another`);
+    }
+    const track = site.track ?? [];
+    for (const [i, rects] of ground.entries()) for (const r of rects) for (let k = 0; k < track.length - 1; k++) {
+      const [ax, az] = track[k], [bx, bz] = track[k + 1];
+      for (let q = 0; q <= 10; q++) {
+        const x = ax + ((bx - ax) * q) / 10, z = az + ((bz - az) * q) / 10;
+        if (x > r.x0 - 1.4 && x < r.x1 + 1.4 && z > r.z0 - 1.4 && z < r.z1 + 1.4) throw new Error(`building ${i} stands on the track`);
+      }
+    }
+    if (site.settlement === 'town') bump(`town houses=${Math.min(14, (site.buildings ?? []).filter((b) => b.brickwork?.kind !== 'church').length)}${(site.buildings ?? []).some((b) => b.brickwork?.kind === 'church') ? ' +church' : ''}`);
     const rooms = site.places.filter((p) => p.roof !== 'sky').length;
     bump(`rooms=${rooms}`);
     bump(`loops=${loopCount(site)}`);

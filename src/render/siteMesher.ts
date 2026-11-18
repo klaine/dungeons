@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { anyAngle } from './coast';
-import { Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
+import { Building, Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
@@ -57,7 +57,21 @@ function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, nu
   for (let k = 1; k < ids.length - 1; k++) mesh.addTriangle(ids[0], ids[k], ids[k + 1]);
 }
 
+/** Where the building has got to: said between its long steps, so that a page can show it and breathe while it waits. */
+export interface MeshStage { label: string; at: number }
+
+/** Builds the whole scene at once, for tools that wait for it. */
 export function meshSite(site: Site): SceneDescription {
+  const steps = meshSiteSteps(site);
+  for (;;) { const next = steps.next(); if (next.done) return next.value; }
+}
+
+/**
+ * The same, as a sequence of steps. It gives up control between rooms and caves; the caller may let the browser draw and answer the
+ * person before asking for the next. (Built in one run it holds a page still for ten seconds or more, and browsers offer to kill such pages.)
+ */
+export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescription, void> {
+  yield { label: 'Surveying the ground', at: 0 };
   const kit = new Kit(site.seed);
   const rng = new Rng(site.seed).fork('mesh');
   const T = site.wallThickness;
@@ -867,7 +881,10 @@ export function meshSite(site: Site): SceneDescription {
     // (The keep's tower stands on its promontory: built at the shelf's height, though the ground under it is levelled before the shelf is raised.)
     const towers = (site.grounds ? site.towers ?? [] : []).map((t, i) => { const lift = keepShelf && i === 0 && site.keep ? keepShelf.height : 0; return { ...t, base: swells(t.x, t.z) + lift, lift }; });
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
+    // (A building of brick stands in a street, deep from its front: it is set at the height of the ground before its door, so that the
+    // street runs level to its step; any other at the height of the ground under its middle.)
+    const frontOf = (b: Building) => { const turn = b.faces === 'w' ? 1 : -1; return swells(b.x - (turn * b.d) / 2 - turn * 1.2, b.z); };
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: b.style === 'brick' ? frontOf(b) : swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
     // Whether a point is under a building, within its outer walls.
     // Whether a point is under a building, within its outer walls (wings and all).
     const footprint = (b: (typeof houses)[number], x: number, z: number) => {
@@ -1716,6 +1733,21 @@ export function meshSite(site: Site): SceneDescription {
       // Where the track comes up to the flags before the door, the ruts die away.
       return off + (off < 0 ? -1 : 1) * 4 * (1 - smooth((z - p.z1 + 6) / 3));
     };
+    // The street of a town: the ground before each house of brick, from its front to beyond the middle of the track, and the lanes
+    // between; trodden bare, with nothing growing on it. 1 in the street, fading to 0 over a stride or two about it.
+    const lots = houses.filter((b) => b.style === 'brick' && b.brickwork?.kind !== 'church').map((b) => {
+      const turn = b.faces === 'w' ? 1 : -1, fx = b.x - (turn * b.d) / 2;
+      return { turn, fx, z0: b.z - b.w / 2 - 0.6, z1: b.z + b.w / 2 + 0.6, reach: Math.abs(fx - pathAt(b.z)) + 2.2 };
+    });
+    const street = (x: number, z: number): number => {
+      let s = 0;
+      for (const q of lots) {
+        const before = (q.fx - x) * q.turn;
+        if (before < -0.5 || before > q.reach + 2 || z < q.z0 - 2 || z > q.z1 + 2) continue;
+        s = Math.max(s, 1 - smooth(Math.max(q.z0 - z, z - q.z1, before - q.reach, 0) / 1.6));
+      }
+      return s;
+    };
     const clumpAt = (z: number) => Math.sin(z * 0.9 + 2.2 * Math.sin(z * 0.31));
     const rutted = (x: number, z: number): number => {
       const d = Math.abs(trackOff(x, z));
@@ -1745,6 +1777,8 @@ export function meshSite(site: Site): SceneDescription {
       }
       // on the spoil of a mine, which is broken stone;
       bare = Math.max(bare, Math.min(0.95, heapAt(x, z) * 3));
+      // in the street of a town, trodden earth and stones, greener at its edges and here and there;
+      if (lots.length) bare = Math.max(bare, street(x, z) * (0.72 + 0.22 * fbm2(x * 0.4 + s1, z * 0.4 - s2, 2)));
       lay.bare = bare;
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
@@ -2235,7 +2269,9 @@ export function meshSite(site: Site): SceneDescription {
       // The charcoal burners felled their clearing.
       if (site.camp) clear = Math.min(clear, Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 1.08);
       // (More of it about a large building than a cottage: it is meant to be seen.)
-      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' ? 4 : 1.8));
+      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' || b.brickwork?.kind === 'church' ? 4 : 1.8));
+      // Nothing stands in a town's street.
+      if (lots.length && street(x, z) > 0.05) clear = Math.min(clear, -1);
       // Nor before the mouth of the way through the hill.
       if (backWay && backWay.along(x) > -9 && backWay.along(x) < -1.5 && Math.abs(z - backWay.z) < 2.4) clear = Math.min(clear, -1);
       // Nor before the mouth of a grotto.
@@ -2509,6 +2545,8 @@ export function meshSite(site: Site): SceneDescription {
         if (f.kind === 'stones') w = Math.max(w, 0.6 * (1 - smooth((d - f.r * 0.9) / 2.5)));
         if (f.kind === 'ruin') w = Math.max(w, 0.45 * (1 - smooth((d - f.r * 0.5) / 2)));
       }
+      // The street of a town is walked all over.
+      if (lots.length) w = Math.max(w, street(x, z));
       // The floor of the burners' camp is trodden and scorched bare, nearly to its edge.
       if (site.camp) w = Math.max(w, 0.95 * (1 - smooth((Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 0.78) / 2.4)));
       return w;
@@ -2540,7 +2578,7 @@ export function meshSite(site: Site): SceneDescription {
       for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
         const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
         // (Nothing grows in the ruts of the track; what would have is drawn all the same and thrown away.)
-        planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
+        planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7) || (lots.length > 0 && street(x, z) > 0.55);
         if (!keep(x, z)) continue;
         // (Nor in front of the mouth of a grotto, where the ground is cut away to the door: a tuft there stood in the air.)
         if (grottoes.some((q) => { const inside = (x - q.edge) * q.inw; return inside > -7 && inside < 3 && Math.abs(z - q.z) < 4; })) continue;
@@ -2579,7 +2617,7 @@ export function meshSite(site: Site): SceneDescription {
     // covered, not dotted.
     for (let gz = g.z0 + 0.5; gz < g.z1; gz += 0.5) for (let gx = g.x0 + 1; gx < g.x1 - 1; gx += 0.5) {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
-      planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
+      planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7) || (lots.length > 0 && street(x, z) > 0.55);
       // The cheap questions first: most places are settled by them.
       if (!inGrounds(x, z, 0) || inHouse(x, z, 0.4)) continue;
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
@@ -3434,6 +3472,7 @@ export function meshSite(site: Site): SceneDescription {
   const trees: [number, number][] = [];
 
   // ------------------------------------------------------------------ caves
+  yield { label: 'Tracing the caves', at: 0.05 };
   // Chambers joined by clefts make one cave. Each is listed under every chamber it holds, first chamber first.
   const cavesOf = new Map<number, number[]>();
   for (const p of places) {
@@ -3619,6 +3658,11 @@ export function meshSite(site: Site): SceneDescription {
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
+    yield {
+      label: p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.town ? 'Laying out the town, its harbour, streets and buildings' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
+        : p.roof === 'cave' ? `Carving cave chamber ${p.id + 1} of ${places.length}` : `Laying stone: place ${p.id + 1} of ${places.length}`,
+      at: 0.1 + 0.8 * (places.indexOf(p) / places.length),
+    };
     if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.town) buildTownApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
@@ -4174,6 +4218,7 @@ export function meshSite(site: Site): SceneDescription {
   }
 
   // ------------------------------------------------------------------ the outside of a house that stands free
+  yield { label: 'Walling and roofing the house', at: 0.92 };
   if (free) {
     const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;
     const ox0 = Math.min(...outerRects.map((r) => r.x0)), ox1 = Math.max(...outerRects.map((r) => r.x1));

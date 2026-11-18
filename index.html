@@ -104,12 +104,24 @@
     body.touch #map.big { width: 78vmin; height: 78vmin; }
     body.touch #hint { margin-right: 148px; }
     kbd { font: inherit; padding: 0 5px; border: 1px solid rgba(232, 226, 214, .4); border-radius: 3px; }
+    #loader { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: #0b0a09; transition: opacity .5s; }
+    #loader[hidden] { display: none; }
+    #loader.gone { opacity: 0; pointer-events: none; }
+    #loader .box { width: min(80vw, 26em); text-align: center; }
+    #loader h2 { margin: 0 0 22px; font: 600 20px/1.2 ui-serif, Georgia, serif; letter-spacing: .24em; text-transform: uppercase; }
+    #loaderLabel { font: 16px/1.4 ui-serif, Georgia, serif; min-height: 1.4em; }
+    #loaderTrack { margin: 12px 0 10px; height: 3px; background: rgba(232, 226, 214, .15); border-radius: 2px; overflow: hidden; }
+    #loaderBar { height: 100%; background: #e0b070; transform-origin: 0 50%; transform: scaleX(0); transition: transform .25s ease-out; }
+    #loaderDetail { min-height: 1.45em; opacity: .62; font-size: 12.5px; }
+    #loaderTime { margin-top: 6px; opacity: .4; font-variant-numeric: tabular-nums; font-size: 12px; }
+    #loader.failed #loaderLabel { color: #e0856b; }
+    body.loading #hud, body.loading #map, body.loading #progress { visibility: hidden; }
     #progress { position: fixed; top: 0; left: 0; right: 0; pointer-events: none; }
     #bar { height: 2px; background: #e0b070; transform-origin: 0 50%; transform: scaleX(0); transition: transform .2s linear; }
     #status { padding: 8px 18px; opacity: .85; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
   </style>
 </head>
-<body>
+<body class="loading">
   <canvas id="view"></canvas>
   <canvas id="map" title="Plan of this place. Click to enlarge."></canvas>
   <div id="toast" role="status" aria-live="polite"></div>
@@ -129,6 +141,15 @@
       <option value="high">High</option>
     </select></label>
     <button id="begin" type="button">Begin</button>
+  </div>
+  <div id="loader" role="status" aria-live="polite">
+    <div class="box">
+      <h2>Dungeons</h2>
+      <div id="loaderLabel">Starting</div>
+      <div id="loaderTrack"><div id="loaderBar"></div></div>
+      <div id="loaderDetail"></div>
+      <div id="loaderTime"></div>
+    </div>
   </div>
   <div id="progress"><div id="bar"></div><div id="status">Starting</div></div>
   <div id="hud">
