@@ -378,6 +378,14 @@ export interface Valley {
    * that side as an arm, which closes at its head where the side comes back to the ridge.
    */
   ridge?: { x0: number; x1: number; z: number };
+  /**
+   * If present, the valley was found, not drawn: in an upland made by noise and worn by water and frost (`highlands.ts`, from the
+   * stream `seed`), the point (`u`, `v`) of that land's own frame lies under the middle of the meadow, the frame is turned by
+   * `turn` so that the valley runs south, and the land's height there, `base`, is the meadow's floor. The line down its middle is
+   * its stream's, and its sides lie where the land has risen four metres over that; its floor, its walls and the hills beyond are
+   * that land. Recorded so that whoever builds the place makes the same land.
+   */
+  terrain?: { seed: number; u: number; v: number; turn: number; base: number };
 }
 
 /**

@@ -184,12 +184,14 @@ export function layMountains(
    * much as fifty metres above the ground it begins on, and the edge turned down to close the gap is a wall round the valley's mouth.
    */
   inner?: HeightFn,
+  /** The hills' own heights, where the land is not made up here: as for a valley that was found, whose hills are the land it was found in. */
+  heights?: HeightFn,
 ): void {
   const around = 560;
   const radii: number[] = [];
   for (let r = 215; r <= 3050; r += 5.5 + (r - 215) * 0.022) radii.push(r);
   const rings = radii.length;
-  const height = farHeights(cx, cz, base, seed);
+  const height = heights ?? farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
   for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
     const a = (k / around) * Math.PI * 2, o = ri * around + k;

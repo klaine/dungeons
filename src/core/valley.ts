@@ -1,4 +1,5 @@
 import { fbm2, Rng } from './rng';
+import { highlands, uplandHeight, valleyFrame, ValleySpot } from './highlands';
 import { Place, Valley } from './site';
 
 /**
@@ -55,15 +56,57 @@ export function walkable(v: Valley, x: number, z: number, margin: number): boole
  * Shapes a valley below a house whose forecourt is `meadow`. Returns it and the line down its
  * middle, which is where a track would go if nothing turned it aside.
  */
-export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false): { valley: Valley; middle: (z: number) => number } {
+/** How high a found valley's land stands over its floor, as a share of the upland's own height. */
+const RELIEF = 0.3;
+
+/** The height of the land a valley was found in, at a point of the site, relative to the meadow's floor `floor`. */
+export function valleyLand(v: Valley, floor: number, meadow: { x0: number; x1: number; z0: number; z1: number }, x: number, z: number, out = 0): number {
+  const t = v.terrain!, [u, w] = valleyFrame(t, (meadow.x0 + meadow.x1) / 2, (meadow.z0 + meadow.z1) / 2, x, z);
+  // (At under a third of its height over the valley: the upland's shape is the shape of a valley country, but at its own height
+  // the hills stood two hundred metres sheer over the floor, a gorge, where the valley is to be a wooded one under crags.)
+  return (uplandHeight(highlands(t.seed), u, w, out) - t.base) * RELIEF + floor;
+}
+
+export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot }): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
+  // (A valley that was found: the line down its middle is its stream's, turned into the site's frame, and its breadth on either
+  // hand is where the land has risen four metres over the stream. Both read once, at every second metre down its length.)
+  const terrain = found ? { seed: found.seed, u: found.spot.u, v: found.spot.v, turn: found.spot.turn, base: Math.round(found.spot.base * 100) / 100 } : undefined;
+  const mx = (meadow.x0 + meadow.x1) / 2, mz = (meadow.z0 + meadow.z1) / 2;
+  let courseX: number[] = [], courseZ: number[] = [];
+  if (found) {
+    const c = Math.cos(found.spot.turn), sn = Math.sin(found.spot.turn);
+    for (const [u, w] of found.spot.course) { const du = u - found.spot.u, dw = w - found.spot.v; courseX.push(mx + c * du + sn * dw); courseZ.push(mz - sn * du + c * dw); }
+    // (Kept going south: a point that would turn back up the valley is dropped.)
+    const keep = courseZ.map((z, k) => k === 0 || z > Math.max(...courseZ.slice(0, k)));
+    courseX = courseX.filter((_, k) => keep[k]); courseZ = courseZ.filter((_, k) => keep[k]);
+  }
+  const courseAt = (z: number) => {
+    if (z <= courseZ[0]) return courseX[0];
+    for (let k = 1; k < courseZ.length; k++) if (z <= courseZ[k]) return courseX[k - 1] + ((courseX[k] - courseX[k - 1]) * (z - courseZ[k - 1])) / (courseZ[k] - courseZ[k - 1] || 1);
+    return courseX[courseX.length - 1];
+  };
+  const landAtV = (x: number, z: number) => valleyLand({ z0: 0, step: 2, west: [], east: [], mouth: 0, terrain }, meadow.floor, meadow, x, z);
+  const landHalf = (z: number, k: number): number => {
+    const c = courseAt(z), floor = landAtV(c, z), dir = k === 0 ? -1 : 1;
+    for (let r = 4; r <= 70; r += 1) if (landAtV(c + dir * r, z) > floor + 4) return r;
+    return 70;
+  };
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
   const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(95, 150), mouth = Math.round((front + length) / step) * step;
   const mid = (meadow.x0 + meadow.x1) / 2, head = (meadow.x1 - meadow.x0) / 2 + rng.range(5.5, 10);
   const s = rng.range(0, 500), gate = rng.range(7.4, 9.2);
   // It bends: once or twice in its length, and less the nearer the house, which it must stay square to.
   const swing = rng.range(0, 15) * (rng.chance(0.5) ? 1 : -1), wave = rng.range(70, 140), phase = rng.range(0, Math.PI * 2);
-  const middle = (z: number) => mid + (swing * (Math.sin(((z - front) / wave) * Math.PI * 2 + phase) - Math.sin(phase)) + (fbm2(z / 46, s, 2) - 0.5) * 12) * smooth((z - meadow.z1 + 4) / 30);
+  const drawn = (z: number) => mid + (swing * (Math.sin(((z - front) / wave) * Math.PI * 2 + phase) - Math.sin(phase)) + (fbm2(z / 46, s, 2) - 0.5) * 12) * smooth((z - meadow.z1 + 4) / 30);
+  const middle = found ? (z: number) => mid + (courseAt(z) - mid) * smooth((z - meadow.z1 + 4) / 30) : drawn;
+  // (Its breadth on either hand as the land has it, at every second metre, evened over a dozen metres so that it does not jink.)
+  const breadth: number[][] = [[], []];
+  if (found) for (const k of [0, 1]) {
+    const raw: number[] = [];
+    for (let z = front; z <= mouth + 2; z += step) raw.push(landHalf(z, k));
+    for (let i = 0; i < raw.length; i++) { let sum = 0, n = 0; for (let j = i - 3; j <= i + 3; j++) if (j >= 0 && j < raw.length) { sum += raw[j]; n++; } breadth[k].push(sum / n); }
+  }
   // Each side has its own breadth, a bay somewhere (more often than not), and its own unevenness.
   const sides = (['w', 'e'] as const).map((_, k) => ({
     full: rng.range(30, 58), open: rng.range(14, 30), close: rng.range(15, 24),
@@ -101,6 +144,8 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     let w = side.full * (1 + 0.5 * (fbm2(z / 40, side.seed, 2) - 0.5)) + (fbm2(z / 11, side.seed + 7, 2) - 0.5) * 5;
     if (side.bay) w += side.bay.deep * Math.exp(-(((z - side.bay.at) / side.bay.long) ** 2));
     if (narrows) w *= 1 - narrows.by * Math.exp(-(((z - narrows.at) / narrows.long) ** 2));
+    // (A valley that was found is as broad as the land has it, not less than fourteen metres to a side nor more than sixty-five.)
+    if (found) w = Math.min(65, Math.max(14, breadth[k][Math.min(breadth[k].length - 1, Math.max(0, Math.round((z - front) / step)))]));
     // From the corner of the ridge it opens out, or on from the mouth of an arm; to the gap it draws in.
     const start = round_ ? roundAt(k, front - 0.01) : edge[k] + armAt(k, front - 0.01);
     w = Math.max(w, 15, start * 0.9);
@@ -108,7 +153,7 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     w = gate + (w - gate) * smooth((mouth - z) / side.close);
     return z < meadow.z1 + 2 ? Math.max(w, head, start) : w;
   };
-  const valley: Valley = { z0, step, west: [], east: [], mouth, ...(round_ ? {} : { ridge }) };
+  const valley: Valley = { z0, step, west: [], east: [], mouth, ...(round_ ? {} : { ridge }), ...(terrain ? { terrain } : {}) };
   for (let i = 0, n = Math.round((mouth - z0) / step) + 1 + 22; i < n; i++) {
     const z = z0 + i * step, c = z < front ? mid : middle(Math.min(z, mouth + 30));
     valley.west.push(round(c - half(sides[0], z, 0)));

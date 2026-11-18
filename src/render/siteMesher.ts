@@ -17,7 +17,7 @@ import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf } from '../core/building';
-import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt } from '../core/valley';
+import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt, valleyLand } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
@@ -713,6 +713,12 @@ export function meshSite(site: Site): SceneDescription {
       // (Level on the promontory a keep stands on, as a castle's court would be; swelling elsewhere as it always did.)
       // (Fading in over some metres, so that the ledge coming up to it meets it without a step.)
       const level = !keepShelf ? 1 : Math.max(smooth((Math.abs(z - (keepShelf.z0 + keepShelf.z1) / 2) - (keepShelf.z1 - keepShelf.z0) / 2 + 2) / 9), smooth((fromSide(keepShelf.side, x, z) - 4.7 - keepShelf.depth + 1) / 6));
+      // (A valley that was found: its floor is the land, held at the meadow's level about the house and following the land further
+      // down; not tilted across the track, which keeps the level the land has under its middle.)
+      if (vale?.terrain) {
+        const land = valleyLand(vale, p.floor, p, x, z), mid = valleyLand(vale, p.floor, p, pathAt(z), z), floor = land + (mid - land) * (1 - Math.min(1, fromPath / 6));
+        return p.floor - 0.03 + (floor - p.floor) * smooth((z - p.z1 - 2) / 30) * level;
+      }
       return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
     };
     // The ground is levelled where something lies on it: hollowed for a pond, raised a little for the stones.
@@ -1179,7 +1185,9 @@ export function meshSite(site: Site): SceneDescription {
         // than on others. (North of the house front the hills keep the distance they always kept from it.)
         const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : free ? out : north + (out - north) * t;
         const stands = 0.55 + 0.9 * fbm2(x * 0.008 + s2 + 9, z * 0.008 - s1, 2);
-        y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
+        // (A valley that was found has the land it was found in beyond its sides, rising behind the crags: not hills made up.)
+        if (vale.terrain) { if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6)); }
+        else y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
       // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
       for (const nt of notches) {
@@ -1948,7 +1956,9 @@ export function meshSite(site: Site): SceneDescription {
       // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
       // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
       // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)
-      bare: 0.8,
+      // (Where the valley was found its hills are the land's own, with long slopes of forty and fifty degrees that are turf and
+      // trees in such country; at six metres to a cell they came out as grey slabs. There only the steepest is bare.)
+      bare: vale?.terrain ? 0.58 : 0.8,
       skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
     });
     // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
@@ -1958,7 +1968,8 @@ export function meshSite(site: Site): SceneDescription {
     // On the nearer hillsides the woods have trees standing in them: each a single tuft of
     // cards with a whole tree painted on it, in the colours of the season.
     // What stands on the hills: each on the highest ground at its bearing, in its range, on a hilltop levelled for it.
-    const hills = farHeights(cxA, czA, p.floor + 30, s2);
+    // (A valley that was found has for hills the land it was found in, with detail in fewer octaves the further off.)
+    const hills = vale?.terrain ? (x: number, z: number) => valleyLand(vale, p.floor, p, x, z, Math.hypot(x - cxA, z - czA)) : farHeights(cxA, czA, p.floor + 30, s2);
     const landmarks = (site.landmarks ?? []).map((l) => {
       const top = crestAt(hills, cxA, czA, (l.angle * Math.PI) / 180, l.range === 'near' ? 255 : 400, l.range === 'near' ? 330 : 540);
       return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
@@ -1967,7 +1978,7 @@ export function meshSite(site: Site): SceneDescription {
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
-    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground);
+    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
