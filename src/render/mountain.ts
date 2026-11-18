@@ -568,6 +568,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
       c[0] *= dim; c[1] *= dim; c[2] *= dim;
       field[1] = Math.max(field[1], 0.3); field[2] = 1;
     }
+    // (Nor in the hall, nor on its stair where the stair is under the rock: in winter its floor was white with snow.)
+    if (H && (hallAir(q.x, q.y, q.z) > -0.6 || (stairAir(q.x, q.y, q.z) > -0.6 && landAt(m, F, q.x, q.z, true) - q.y > 2))) field[2] = 1;
     return c;
   };
 

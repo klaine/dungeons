@@ -1162,20 +1162,34 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   {
     const q = rng.fork('cave');
     if (q.chance(0.6)) {
-      const a = headAngle + (q.chance(0.5) ? 1 : -1) * (cove.beach + q.range(0.45, 0.9));
-      // Its mouth is at the foot of the cliff, a few strides out from the top of it into the cove, where the strand of shingle ends.
-      const toe = 6.5, cave = { x: round(cove.x + Math.cos(a) * (coveRim(island, a) - toe)), z: round(cove.z + Math.sin(a) * (coveRim(island, a) - toe)), heading: Math.round((a + q.range(-0.3, 0.3)) * 1000) / 1000, length: round(q.range(20, 28)) };
-      // It runs no further than the rock round it is thick: a cave that came out through the far side of a headland would leave the cliff full of holes.
-      // (Whether a point is deep in the rock is judged against the coast and the cove both: the cove is in the island's record by now.)
-      let deep = 0;
-      for (let along = toe + 3; along <= cave.length + 4; along += 1) {
-        const px = cave.x + Math.cos(cave.heading) * along, pz = cave.z + Math.sin(cave.heading) * along;
-        if (inland(island, px, pz) < Math.min((along - toe) * 0.75, 7)) break;
-        // (Nor where the hill over it is too low to hold a roof: there the land comes down to the beach.)
-        if (along > toe + 5 && plain(px, pz) < sea + 10) break;
-        deep = along;
+      const side = q.chance(0.5) ? 1 : -1, spread = cove.beach + q.range(0.45, 0.9), turn = q.range(-0.3, 0.3), length = round(q.range(20, 28));
+      // (Not where the jetty is rooted or the stair comes down: on one island the stair climbed across the cave's mouth. Then at the
+      // beach's other end, if that is clear.)
+      const clear = (x: number, z: number) => {
+        const j = island.jetty;
+        if (j) {
+          const dx = j.to[0] - j.from[0], dz = j.to[1] - j.from[1], l2 = dx * dx + dz * dz || 1, t = Math.max(0, Math.min(1, ((x - j.from[0]) * dx + (z - j.from[1]) * dz) / l2));
+          if (Math.hypot(x - j.from[0] - dx * t, z - j.from[1] - dz * t) < j.width / 2 + 6) return false;
+        }
+        return !(island.stair ?? []).some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 8);
+      };
+      for (const s of [side, -side]) {
+        const a = headAngle + s * spread;
+        // Its mouth is at the foot of the cliff, a few strides out from the top of it into the cove, where the strand of shingle ends.
+        const toe = 6.5, cave = { x: round(cove.x + Math.cos(a) * (coveRim(island, a) - toe)), z: round(cove.z + Math.sin(a) * (coveRim(island, a) - toe)), heading: Math.round((a + turn) * 1000) / 1000, length };
+        if (!clear(cave.x, cave.z) || !clear(cave.x + Math.cos(cave.heading) * 5, cave.z + Math.sin(cave.heading) * 5)) continue;
+        // It runs no further than the rock round it is thick: a cave that came out through the far side of a headland would leave the cliff full of holes.
+        // (Whether a point is deep in the rock is judged against the coast and the cove both: the cove is in the island's record by now.)
+        let deep = 0;
+        for (let along = toe + 3; along <= cave.length + 4; along += 1) {
+          const px = cave.x + Math.cos(cave.heading) * along, pz = cave.z + Math.sin(cave.heading) * along;
+          if (inland(island, px, pz) < Math.min((along - toe) * 0.75, 7)) break;
+          // (Nor where the hill over it is too low to hold a roof: there the land comes down to the beach.)
+          if (along > toe + 5 && plain(px, pz) < sea + 10) break;
+          deep = along;
+        }
+        if (deep - 4 >= toe + 10) { island.seaCave = { ...cave, length: round(Math.min(cave.length, deep - 4)) }; break; }
       }
-      if (deep - 4 >= toe + 10) island.seaCave = { ...cave, length: round(Math.min(cave.length, deep - 4)) };
     }
   }
 

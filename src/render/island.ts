@@ -686,8 +686,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
       torches.push({ position: V(x, h.y + 0.9 * 0.64 + 2.0, z), out: V(dx / l, 0, dz / l) });
     }
     const q = rng.fork('cache'), [kx, kz] = onEdge(q.range(0, Math.PI * 2), 0.62), ky = h.y + 0.9 * 0.62 * 0.62;
-    for (let k = 0; k < 4; k++) box('wood', kx + q.range(-1.4, 1.4), ky - 0.05, kz + q.range(-1.4, 1.4), 0.6, 0.6, q.range(0.55, 0.85), q.range(0, 3), [0.3, 0.2, 0.12]);
-    box('wood', kx + 1.9, ky - 0.05, kz - 0.6, 1.1, 0.7, 0.7, q.range(0, 3), [0.26, 0.18, 0.11]);
+    for (let k = 0; k < 4; k++) box('wood', kx + q.range(-1.4, 1.4), ky - 0.05, kz + q.range(-1.4, 1.4), 0.6, 0.6, q.range(0.55, 0.85), q.range(0, 3), [0.62, 0.45, 0.28]);
+    box('wood', kx + 1.9, ky - 0.05, kz - 0.6, 1.1, 0.7, 0.7, q.range(0, 3), [0.55, 0.4, 0.25]);
     b.finds.push({ at: V(kx, ky + 0.4, kz), what: 'a tarred keg of brandy and a coil of rope, the smugglers\' cache in the cavern under the island' });
     const up = CV.upper, mouth = up.findIndex(([x, z, y]) => plain(x, z) - y < 3.4);
     if (mouth > 0) {
