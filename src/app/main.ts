@@ -1110,7 +1110,12 @@ async function start(): Promise<void> {
     (window as any).__frames = ((window as any).__frames ?? 0) + 1;
   };
   let loopCount = 0;
+  // For making films: the loop held, and a frame drawn at a time given, so that each picture is of an exact moment and the clock,
+  // the clouds, the water and the flames keep the film's time and not the time the drawing took.
+  let held = false;
+  (window as any).__film = { hold: (on: boolean) => { held = on; }, frameAt: (seconds: number) => frame(seconds * 1000) };
   const loop = (now: number) => {
+    if (held) { requestAnimationFrame(loop); return; }
     if (!bakeFirst || (window as any).__bakeDone || loopCount++ % 240 === 0) frame(now);
     else (window as any).__frames = ((window as any).__frames ?? 0) + 1;
     requestAnimationFrame(loop);
