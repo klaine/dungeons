@@ -154,6 +154,8 @@ export interface SceneDescription {
   flockKind?: 'sheep' | 'goat';
   /** Where sheep graze: about a point, within so many metres of it, so many of them. */
   flocks?: { x: number; z: number; r: number; count: number }[];
+  /** Where fireflies are, if any: their homes, three numbers to each (x, y, z), low over the grass by water and along the edges of woods. */
+  fireflies?: number[];
   /** The sea of cloud, if the place is a mountain top: the level of its top, and how high its billows stand above and below that. Drawn with the air. */
   deck?: {
     level: number; billow: number;

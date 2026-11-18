@@ -30,6 +30,7 @@ import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
 import { Rain, Snowfall } from '../render/rain';
+import { Fireflies } from '../render/fireflies';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { inside as onMountain } from '../core/mountain';
@@ -451,6 +452,10 @@ async function start(): Promise<void> {
   // Sheep, where the place has pasture for them: stood on what the body walks on, and kept out of the house, the water and the sea.
   const rainFall = new Rain(seed), snowFall = new Snowfall(seed);
   scene.add(rainFall.mesh, snowFall.mesh);
+  // Fireflies, where the place has a home for them, on a warm evening: after sunset, in spring and summer.
+  const warm = !!site && (site.setting.hour === 'dusk' || site.setting.hour === 'night') && (site.setting.season === 'spring' || site.setting.season === 'summer');
+  const fireflies = warm && desc.fireflies?.length ? new Fireflies(desc.fireflies, seed, site.setting.hour === 'night' ? 1.6 : 2.4) : null;
+  if (fireflies) scene.add(fireflies.mesh);
   const flocks = desc.flocks?.length ? (() => {
     const down = new Vector3(0, -1, 0), from = new Vector3(), ray = new Ray(from, down);
     const groundAtFlock = (x: number, z: number): number => { from.set(x, 400, z); const hit = bvh.raycastFirst(ray, DoubleSide); return hit ? hit.point.y : -1000; };
@@ -1040,6 +1045,8 @@ async function start(): Promise<void> {
       const wet = weatherUniforms.uWet, soak = snowing ? 0 : raining;
       wet.value += (soak - wet.value) * Math.min(1, dt * (soak > wet.value ? 0.12 : 0.02));
       sound.rain = snowing ? 0 : raining;
+      // (Fireflies keep in out of the rain.)
+      fireflies?.update(time, camera, raining < 0.15, dt);
     }
     beacon?.update(time);
 

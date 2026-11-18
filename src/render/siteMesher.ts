@@ -67,6 +67,7 @@ export function meshSite(site: Site): SceneDescription {
   let flockSpots: { x: number; z: number; r: number; count: number }[] | undefined;
   // And rooks over a valley's woods, if it has any.
   let rookSpots: { x: number; y: number; z: number }[] | undefined;
+  let fireflySpots: number[] | undefined;
 
   // ------------------------------------------------------------------ helpers
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
@@ -2692,6 +2693,32 @@ export function meshSite(site: Site): SceneDescription {
       }
       if (out.length) rookSpots = out;
     }
+    // Fireflies: by the water and along the edges of the woods, in swarms of a hundred or two, low over the long grass. Whether
+    // they are out (after sunset, in spring and summer, and not in rain) the program decides; this is only where they would be.
+    {
+      const q = rng.fork('fireflies'), out: number[] = [], swarms: { x: number; z: number }[] = [], banks: [number, number][] = [];
+      for (const c of channels) for (let k = 0; k < c.x.length; k += 3) banks.push([c.x[k], c.z[k]]);
+      for (let tries = 0; tries < 500 && swarms.length < 7; tries++) {
+        let x: number, z: number;
+        if (banks.length && q.chance(0.55)) { const [bx, bz] = q.pick(banks); x = bx + q.range(-8, 8); z = bz + q.range(-8, 8); }
+        else {
+          x = q.range(g.x0, g.x1); z = q.range(g.z0, g.z1);
+          const s = shadeAt(x, z);
+          if (s < 0.12 || s > 0.45) continue;
+        }
+        if (!inGrounds(x, z, 3) || inHouse(x, z, 12) || swarms.some((w) => Math.hypot(w.x - x, w.z - z) < 30)) continue;
+        swarms.push({ x, z });
+        const n = q.int(90, 200), r = q.range(8, 14);
+        for (let k = 0; k < n; k++) {
+          const a = q.range(0, Math.PI * 2), d = r * Math.sqrt(q.next()), fx = x + Math.cos(a) * d, fz = z + Math.sin(a) * d;
+          if (!inGrounds(fx, fz, 1) || inHouse(fx, fz, 2)) continue;
+          // (Over water they keep above it; most fly at the height of the grass heads, a few higher.)
+          const gy = ground(fx, fz), top = gy + Math.max(0, waterOver(fx, fz, gy));
+          out.push(fx, top + 0.25 + 2.2 * q.next() * q.next(), fz);
+        }
+      }
+      if (out.length) fireflySpots = out;
+    }
     // Nettles and docks: rank green growth on the enriched ground about a ruin.
     for (const f of ruins) {
       for (let k = 0; k < 70; k++) {
@@ -4125,6 +4152,7 @@ export function meshSite(site: Site): SceneDescription {
     birds: birdSpots ?? rookSpots,
     birdKind: birdSpots ? (site.mountain ? 'chough' : 'gull') : 'rook',
     flocks: flockSpots,
+    fireflies: fireflySpots,
     beacon,
     finds,
   };
