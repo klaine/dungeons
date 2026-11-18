@@ -1146,7 +1146,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, renderer, pipeline, atmosphere, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

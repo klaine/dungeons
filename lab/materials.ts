@@ -759,6 +759,8 @@ async function start(): Promise<void> {
     state, scene, camera, renderer, controls, atmosphere, sun,
     get stage() { return stage; }, get materials() { return materials; }, get modules() { return { SM, TX, VG }; },
     view, place, keep, letGo, forge, paint, plant,
+    /** Grows again what `state.dabs` says: for planting from a script, as the brush does. */
+    growPlants: () => growPlants(false),
     /** Draws one frame and gives it back as a picture. */
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     ready: true,
