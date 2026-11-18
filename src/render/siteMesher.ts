@@ -1734,7 +1734,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     };
     // The street of a town: the ground before each house of brick, from its front to beyond the middle of the track, and the lanes
     // between; trodden bare, with nothing growing on it. 1 in the street, fading to 0 over a stride or two about it.
-    const lots = houses.filter((b) => b.style === 'brick' && b.brick?.kind !== 'church').map((b) => {
+    const lots = houses.filter((b) => b.style === 'brick' && b.brickwork?.kind !== 'church').map((b) => {
       const turn = b.faces === 'w' ? 1 : -1, fx = b.x - (turn * b.d) / 2;
       return { turn, fx, z0: b.z - b.w / 2 - 0.6, z1: b.z + b.w / 2 + 0.6, reach: Math.abs(fx - pathAt(b.z)) + 2.2 };
     });
@@ -2268,7 +2268,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // The charcoal burners felled their clearing.
       if (site.camp) clear = Math.min(clear, Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 1.08);
       // (More of it about a large building than a cottage: it is meant to be seen.)
-      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' || b.brick?.kind === 'church' ? 4 : 1.8));
+      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' || b.brickwork?.kind === 'church' ? 4 : 1.8));
       // Nothing stands in a town's street.
       if (lots.length && street(x, z) > 0.05) clear = Math.min(clear, -1);
       // Nor before the mouth of the way through the hill.

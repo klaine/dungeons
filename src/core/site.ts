@@ -292,7 +292,12 @@ export interface BrickWork {
   steps: number;
   /** The front is rendered and washed with the building's `colour`, and what is moulded on it is white; otherwise it is bare brick. */
   rendered: boolean;
-  /** The brick's tone: its red is multiplied by this, from dark brown to orange. */
+  /**
+   * The clay the brick was burnt from, dug near the town as brick clay always was: `red` from clays with iron in them, as
+   * along the Baltic, or `buff`, pale yellow to ochre, from clays with lime in them, as in limestone country.
+   */
+  clay: 'red' | 'buff';
+  /** The brick's tone: its colour is multiplied by this, from dark brown to orange. */
   tone: [number, number, number];
   /** Bands of dark glazed brick run across the front, at the floors and under the gable. */
   glazed: boolean;
@@ -376,7 +381,7 @@ export interface Building {
    */
   wings?: { side: -1 | 1; width: number; length: number }[];
   /** Of the style `brick`: which of the family it is, and how it is made. */
-  brick?: BrickWork;
+  brickwork?: BrickWork;
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
 }

@@ -35,7 +35,7 @@ for (let n = 0; n < (only && only !== 'valley' ? 0 : count); n++) {
         if (x > r.x0 - 1.4 && x < r.x1 + 1.4 && z > r.z0 - 1.4 && z < r.z1 + 1.4) throw new Error(`building ${i} stands on the track`);
       }
     }
-    if (site.settlement === 'town') bump(`town houses=${Math.min(14, (site.buildings ?? []).filter((b) => b.brick?.kind !== 'church').length)}${(site.buildings ?? []).some((b) => b.brick?.kind === 'church') ? ' +church' : ''}`);
+    if (site.settlement === 'town') bump(`town houses=${Math.min(14, (site.buildings ?? []).filter((b) => b.brickwork?.kind !== 'church').length)}${(site.buildings ?? []).some((b) => b.brickwork?.kind === 'church') ? ' +church' : ''}`);
     const rooms = site.places.filter((p) => p.roof !== 'sky').length;
     bump(`rooms=${rooms}`);
     bump(`loops=${loopCount(site)}`);

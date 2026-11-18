@@ -5,7 +5,7 @@ import { layOutMountain } from './mountain';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
-import { dealBrickHouse, dealChurch } from './brick';
+import { brickCountry, dealBrickHouse, dealChurch } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
 /**
@@ -941,7 +941,7 @@ function layOutTown(site: Site, meadow: Place, fromTrack: (x: number, z: number)
     if (broad > best) { best = broad; mid = z; }
   }
   const length = rng.range(50, 72), z0 = Math.max(lo, mid - length / 2), z1 = Math.min(hi + 10, z0 + length);
-  const out: Building[] = [];
+  const out: Building[] = [], country = brickCountry(site.setting.stone);
   // The corners and middles of a building's ground, in the world.
   const corners = (b: Building, grow = 0) => footprintOf(b).flatMap((r) => {
     const turn = b.faces === 'w' ? 1 : -1, at = (u: number, w: number): [number, number] => [b.x - (turn * b.d) / 2 + turn * w, b.z + turn * u];
@@ -959,7 +959,7 @@ function layOutTown(site: Site, meadow: Place, fromTrack: (x: number, z: number)
   // The church: beside the street at one end of it, behind a yard, where it closes the view along the street; the largest that fits.
   const chooser = rng.fork('church');
   for (const room of [48, 40, 33]) {
-    const church = dealChurch(chooser.fork(`deal${room}`), room);
+    const church = dealChurch(chooser.fork(`deal${room}`), room, country);
     if (!church) continue;
     let pick: Building | null = null, score = Infinity;
     for (const side of [-1, 1] as const) for (let z = z0 - 14; z <= z1 + 14; z += 2) for (const yard of [7, 10, 13]) {
@@ -975,20 +975,20 @@ function layOutTown(site: Site, meadow: Place, fromTrack: (x: number, z: number)
   let k = 0;
   for (const side of [-1, 1] as const) {
     for (let z = z0 + rng.range(0, 3); z < z1;) {
-      const house = dealBrickHouse(rng.fork(`house${k}`), 13), line = 4.5 + rng.range(0, 0.35);
+      const house = dealBrickHouse(rng.fork(`house${k}`), 13, undefined, country), line = 4.5 + rng.range(0, 0.35);
       let placed = false;
       // (Where the valley's side or something in it comes close, the house is tried shallower, as town lots are cut short.)
       for (let n = 0; n < 9 && !placed; n++) {
         const step = n % 3, d = [house.d, Math.min(house.d, 10.5), Math.min(house.d, 8.6)][Math.floor(n / 3)];
         const b: Building = { ...house, d, x: round(trackX(z + house.w / 2) + side * (line + step * 0.9 + d / 2)), z: round(z + house.w / 2), faces: side > 0 ? 'w' : 'e' };
         if (!corners(b).every(([cx, cz]) => walkable(v, cx, cz, 4) && roomAt(site, cx, cz, 0.6) && fromTrack(cx, cz) > 3.1)) continue;
-        if (!out.every((q) => apart(b, q, q.brick?.kind === 'church' ? 3 : -0.01))) continue;
+        if (!out.every((q) => apart(b, q, q.brickwork?.kind === 'church' ? 3 : -0.01))) continue;
         out.push(b); placed = true; k++;
       }
       z += placed ? house.w + (rng.chance(0.18) ? rng.range(2.6, 4.5) : 0) : 1.5;
     }
   }
-  if (out.filter((b) => b.brick?.kind !== 'church').length < 4) return false;
+  if (out.filter((b) => b.brickwork?.kind !== 'church').length < 4) return false;
   site.buildings = out;
   return true;
 }

@@ -152,6 +152,66 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   };
 }
 
+/**
+ * Brick of the Baltic towns: large bricks of the old monastic size, about 28 centimetres by 9, laid in the Wendish bond (two
+ * stretchers, then a header) in a thick bed of lime mortar. The picture is two metres square, so faces built at the usual scale
+ * have twenty courses to it and fifteen headers' breadth across. Each course is set off from the one below by two or three
+ * headers' breadth, so no joint runs straight up. Every brick is its own shade between the clay's `low` and `high`: some fired
+ * `hard` nearest the kiln's fire, dark and purplish; a few `soft`, pale, fired too little. Their faces are a little uneven, their
+ * arrises worn round, and the mortar stands back from them and is dirtied grey. The colour given to each point tints it all,
+ * so the same picture serves a red town or a brown one; a pale clay needs a picture of its own, since the tint would take the
+ * mortar with it.
+ */
+function brickRecipe(o: { low: number[]; high: number[]; hard: number[]; soft: number[] }): Recipe {
+  const v3 = (v: number[]) => `vec3(${v.map((n) => n.toFixed(3)).join(', ')})`;
+  return {
+    normalStrength: 5.5,
+    height: /* glsl */ `
+vec4 brickCell(vec2 uv) {
+  // (Fifteen units across, where a header is one and a stretcher two; twenty courses up.)
+  // (Rows and periods are counted round, so that the picture meets itself at its edges.)
+  float row = mod(floor(uv.y * 20.), 20.), fy = fract(uv.y * 20.);
+  float x = uv.x * 15. + mod(row * 3., 5.);
+  float period = mod(floor(x / 5.), 3.), p = mod(x, 5.);
+  float start = p < 2. ? 0. : p < 4. ? 2. : 4., len = p < 4. ? 2. : 1.;
+  float fx = (p - start) / len;
+  float id = hash21(vec2(period * 5. + start, row) + 7.);
+  return vec4(fx, fy, id, len);
+}
+float heightFn(vec2 uv) {
+  vec4 c = brickCell(uv);
+  // Joints: the bed joint about a centimetre and a half, the cross joints a little narrower.
+  float jx = .045 / c.w, jy = .075;
+  float ex = min(c.x, 1. - c.x) / jx, ey = min(c.y, 1. - c.y) / jy;
+  float face = smoothstep(.55, 1.35, min(ex, ey * 1.0));
+  float dent = fbm(uv + c.z * 3.1, vec2(60.), 3, .55) * .12 + (c.z - .5) * .06;
+  float pit = smoothstep(.62, .78, fbm(uv + 2.3, vec2(110.), 2, .5)) * .1;
+  float mortar = .22 + fbm(uv + 9.1, vec2(140.), 2, .5) * .08;
+  return clamp(mix(mortar, .74 + dent - pit, face), 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  vec4 c = brickCell(uv);
+  float id = c.z, k = fract(id * 13.7), m = fract(id * 7.31);
+  vec3 clay = mix(${v3(o.low)}, ${v3(o.high)}, k);
+  // Fired hardest nearest the fire, and darkest. A few came out of the kiln pale.
+  clay = mix(clay, ${v3(o.hard)}, step(.86, m) * .85);
+  clay = mix(clay, ${v3(o.soft)}, step(m, .07) * .7);
+  // Within a brick the colour wanders, darker in fire-flashes along one end.
+  clay *= .86 + .22 * fbm(uv + id * 5., vec2(30.), 3, .5) + .14;
+  clay *= mix(1., .78, smoothstep(.55, 1., abs(c.x - .5) * 2.) * step(.5, fract(id * 3.3)) * .6);
+  vec3 lime = vec3(.44, .42, .38) * (.85 + .2 * fbm(uv + 1.7, vec2(70.), 2, .5));
+  float face = smoothstep(.36, .5, h);
+  // Weather has washed some of the lime over the brick, and dirt down it.
+  float bloom = smoothstep(.25, .65, fbm(uv + 6.6, vec2(4., 7.), 4, .55)) * .22;
+  albedo = mix(lime, clay, face);
+  albedo = mix(albedo, lime * .9, bloom * face * .5);
+  albedo *= (1. - cavity * .45) * (.95 + .1 * hash21(floor(uv * 512.)));
+  rough = mix(.94, .82, face);
+}`,
+  };
+}
+
 const RECIPES: Record<string, Recipe> = {
   // Dressed limestone: broad undulation, pitting, fine tooling and grain. Pale, so vertex tint sets the colour.
   stone: {
@@ -546,60 +606,10 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = .82;
 }`,
   },
-  // Brick of the Baltic towns: large bricks of the old monastic size, about 28 centimetres by 9,
-  // laid in the Wendish bond (two stretchers, then a header) in a thick bed of lime mortar. The
-  // picture is two metres square, so faces built at the usual scale have twenty courses to it and
-  // fifteen headers' breadth across. Each course is set off from the one below by two or three
-  // headers' breadth, so no joint runs straight up. Every brick is its own shade of red: some
-  // paler, some fired dark and purplish nearest the kiln's fire; their faces are a little uneven,
-  // their arrises worn round, and the mortar stands back from them and is dirtied grey. The
-  // colour given to each point tints all of it, so the same picture serves a red town or a brown.
-  brick: {
-    normalStrength: 5.5,
-    height: /* glsl */ `
-vec4 brickCell(vec2 uv) {
-  // (Fifteen units across, where a header is one and a stretcher two; twenty courses up.)
-  // (Rows and periods are counted round, so that the picture meets itself at its edges.)
-  float row = mod(floor(uv.y * 20.), 20.), fy = fract(uv.y * 20.);
-  float x = uv.x * 15. + mod(row * 3., 5.);
-  float period = mod(floor(x / 5.), 3.), p = mod(x, 5.);
-  float start = p < 2. ? 0. : p < 4. ? 2. : 4., len = p < 4. ? 2. : 1.;
-  float fx = (p - start) / len;
-  float id = hash21(vec2(period * 5. + start, row) + 7.);
-  return vec4(fx, fy, id, len);
-}
-float heightFn(vec2 uv) {
-  vec4 c = brickCell(uv);
-  // Joints: the bed joint about a centimetre and a half, the cross joints a little narrower.
-  float jx = .045 / c.w, jy = .075;
-  float ex = min(c.x, 1. - c.x) / jx, ey = min(c.y, 1. - c.y) / jy;
-  float face = smoothstep(.55, 1.35, min(ex, ey * 1.0));
-  float dent = fbm(uv + c.z * 3.1, vec2(60.), 3, .55) * .12 + (c.z - .5) * .06;
-  float pit = smoothstep(.62, .78, fbm(uv + 2.3, vec2(110.), 2, .5)) * .1;
-  float mortar = .22 + fbm(uv + 9.1, vec2(140.), 2, .5) * .08;
-  return clamp(mix(mortar, .74 + dent - pit, face), 0., 1.);
-}`,
-    surface: /* glsl */ `
-void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
-  vec4 c = brickCell(uv);
-  float id = c.z, k = fract(id * 13.7), m = fract(id * 7.31);
-  vec3 red = mix(vec3(.27, .075, .045), vec3(.42, .15, .085), k);
-  // Fired hardest nearest the fire: dark, brownish purple. A few came out of the kiln pale and orange.
-  red = mix(red, vec3(.13, .05, .04), step(.86, m) * .85);
-  red = mix(red, vec3(.5, .24, .12), step(m, .07) * .7);
-  // Within a brick the colour wanders, darker in fire-flashes along one end.
-  red *= .86 + .22 * fbm(uv + id * 5., vec2(30.), 3, .5) + .14;
-  red *= mix(1., .78, smoothstep(.55, 1., abs(c.x - .5) * 2.) * step(.5, fract(id * 3.3)) * .6);
-  vec3 lime = vec3(.44, .42, .38) * (.85 + .2 * fbm(uv + 1.7, vec2(70.), 2, .5));
-  float face = smoothstep(.36, .5, h);
-  // Weather has washed some of the lime over the brick, and dirt down it.
-  float bloom = smoothstep(.25, .65, fbm(uv + 6.6, vec2(4., 7.), 4, .55)) * .22;
-  albedo = mix(lime, red, face);
-  albedo = mix(albedo, lime * .9, bloom * face * .5);
-  albedo *= (1. - cavity * .45) * (.95 + .1 * hash21(floor(uv * 512.)));
-  rough = mix(.94, .82, face);
-}`,
-  },
+  // Brick of two clays: red, from clays with iron in them as along the Baltic, and buff, from clays with lime in them (see
+  // `brickRecipe`). Which a town has is the country's: `brickCountry` in `src/core/brick.ts`.
+  redBrick: brickRecipe({ low: [0.27, 0.075, 0.045], high: [0.42, 0.15, 0.085], hard: [0.13, 0.05, 0.04], soft: [0.5, 0.24, 0.12] }),
+  buffBrick: brickRecipe({ low: [0.46, 0.33, 0.17], high: [0.62, 0.48, 0.28], hard: [0.3, 0.2, 0.12], soft: [0.68, 0.6, 0.44] }),
   ground: {
     normalStrength: 3.5,
     height: /* glsl */ `

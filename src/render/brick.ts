@@ -325,7 +325,7 @@ function bandSpans(plan: FrontPlan, s0: number, s1: number, y0: number, y1: numb
  * a point across the front; every point of the outline stands above it.
  */
 function gableOf(k: BrickKit, b: Building, f: Face, W: number, E: number, tan: number, T: number, rng: Rng, o: { material: string; colour: Colour; trim: [string, Colour]; hoist: boolean }) {
-  const bw = b.brick!, n = bw.steps, ridge = E + (W / 2) * tan, roofAt = (s: number) => E + Math.min(s, W - s) * tan;
+  const bw = b.brickwork!, n = bw.steps, ridge = E + (W / 2) * tan, roofAt = (s: number) => E + Math.min(s, W - s) * tan;
   const top: Pt[] = [], niches: FrontPlan['niches'] = [], openings: FrontPlan['openings'] = [], after: (() => void)[] = [];
   const white = bw.niches === 'white', sunk = bw.niches !== 'none';
   const coping: Colour = bw.rendered ? WHITE : shade(o.colour, 0.85), copeMat = bw.rendered ? 'plaster' : o.material;
@@ -488,7 +488,7 @@ function rot(f: Face): number {
  * as walls are that stand against a neighbour's; its back is plainer than its front.
  */
 function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
-  const bw = b.brick!, W = b.w, D = b.d, T = BRICK.front, S = BRICK.wall, PL = BRICK.plinth, N = b.storeys, E = brickEaves(b), store = bw.kind === 'store';
+  const bw = b.brickwork!, W = b.w, D = b.d, T = BRICK.front, S = BRICK.wall, PL = BRICK.plinth, N = b.storeys, E = brickEaves(b), store = bw.kind === 'store';
   const tan = Math.tan((bw.pitch * Math.PI) / 180), brick = bw.tone, rendered = bw.rendered;
   const material = rendered ? 'plaster' : 'brick', colour = rendered ? b.colour : brick;
   const trim: [string, Colour] = rendered ? ['plaster', WHITE] : ['stone', mul(stone, [1.15, 1.05, 0.88])];
@@ -645,7 +645,7 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
  * and a light above the leaves. The ends are gables of plain brick.
  */
 function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
-  const bw = b.brick!, W = b.w, D = b.d, T = BRICK.front, S = BRICK.wall, PL = BRICK.plinth, N = b.storeys, E = brickEaves(b), H0 = b.heights[0];
+  const bw = b.brickwork!, W = b.w, D = b.d, T = BRICK.front, S = BRICK.wall, PL = BRICK.plinth, N = b.storeys, E = brickEaves(b), H0 = b.heights[0];
   const tan = Math.tan((bw.pitch * Math.PI) / 180), brick = bw.tone, rendered = bw.rendered, floor = (s: number) => brickFloor(b, s);
   const material = rendered ? 'plaster' : 'brick', colour = rendered ? b.colour : brick, trim: [string, Colour] = rendered ? ['plaster', WHITE] : ['stone', mul(stone, [1.15, 1.05, 0.88])];
   const paint = rng.pick(DOORS), granite = shade(stone, 0.6);
@@ -771,7 +771,7 @@ function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
  * a flat wall with a gable, and over its roof the nave's own gable, stepped or between piers.
  */
 function church(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
-  const bw = b.brick!, c = bw.church!, W = b.w, D = b.d, Hw = b.heights[0], T = 1.1, PL = BRICK.plinth, bays = b.bays, bay = W / bays;
+  const bw = b.brickwork!, c = bw.church!, W = b.w, D = b.d, Hw = b.heights[0], T = 1.1, PL = BRICK.plinth, bays = b.bays, bay = W / bays;
   const tan = Math.tan((bw.pitch * Math.PI) / 180), brick = bw.tone, glazedTone = mul(brick, GLAZED), granite = shade(stone, 0.6);
   const dress: Colour = [0.82, 0.79, 0.72], paint = rng.pick(DOORS), parts = churchParts(b), away = parts.away, out = c.end;
   const [front, right, back, left] = k.walls(0), ridge = Hw + (D / 2) * tan;
@@ -1004,7 +1004,7 @@ function church(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
       finial(above(centre, 0.25 + h));
     } else {
       // A ridged roof between two stepped gables, to the street and to the back.
-      const tg = Math.tan((58 * Math.PI) / 180), rr = Ht + (L / 2) * tg, steps = { ...b, brick: { ...bw, gable: 'stepped' as const, steps: 3 } };
+      const tg = Math.tan((58 * Math.PI) / 180), rr = Ht + (L / 2) * tg, steps = { ...b, brickwork: { ...bw, gable: 'stepped' as const, steps: 3 } };
       for (const f of [faces[0], faces[2]]) {
         const g = gableOf(k, steps, f, L, Ht, tg, 0.8, rng, { material: 'brick', colour: brick, trim, hoist: false });
         buildFront(k, f, { outline: [[0, Ht], [L, Ht], ...[...g.top].reverse()], openings: g.openings, niches: g.niches }, 0.8, 'brick', brick, { frame: FRAME, paint });
@@ -1028,8 +1028,10 @@ function church(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
 
 /** Builds a building of brick where the site document says it stands, on ground at the height `base`. */
 export function buildBrick(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
-  const k = brickTools(b, base, mesh);
-  const kind = b.brick!.kind;
+  // (What is built of brick is built of the building's own clay.)
+  const clay = b.brickwork!.clay === 'buff' ? 'buffBrick' : 'redBrick';
+  const k = brickTools(b, base, (material) => mesh(material === 'brick' ? clay : material));
+  const kind = b.brickwork!.kind;
   if (kind === 'gabled' || kind === 'store') streetHouse(b, k, rng, stone);
   else if (kind === 'eaves') eavesHouse(b, k, rng, stone);
   else church(b, k, rng, stone);

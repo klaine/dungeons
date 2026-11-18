@@ -452,7 +452,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         ctx.fillStyle = DARK;
         for (const r of footprintOf(b)) { const x = xs(r), z = [b.z + turn * r.u0, b.z + turn * r.u1]; rect(Math.min(...x) + 0.35, Math.min(...z) + 0.35, Math.max(...x) - 0.35, Math.max(...z) - 0.35); }
         ctx.fillStyle = INK;
-        if (b.brick?.kind === 'gabled' || b.brick?.kind === 'store') rect(b.x - b.d / 2, b.z - 0.12, b.x + b.d / 2, b.z + 0.12);
+        if (b.brickwork?.kind === 'gabled' || b.brickwork?.kind === 'store') rect(b.x - b.d / 2, b.z - 0.12, b.x + b.d / 2, b.z + 0.12);
         else rect(b.x - 0.12, b.z - b.w / 2, b.x + 0.12, b.z + b.w / 2);
         continue;
       }
