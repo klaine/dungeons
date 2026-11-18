@@ -271,10 +271,14 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (The field says how far from the track's middle, plus a hundred; or from a footpath's, plus two hundred.)
   const onFoot: N = step(150, f.x), onTrack: N = step(50, f.x).mul(one(onFoot));
   // Paving, in a town: where the field's first number is less than nothing it is how far in from the paving's edge this point is,
-  // plus three hundred for setts (a street) or six hundred for flags (a square, a quay), made negative; drawn here as stones in
-  // courses, each its own tone, with dark joints between, the edges of setts rounded, and the pattern fading into its own average
-  // further off, where it would only shimmer.
-  const flagged: N = step(f.x, -500), paveSd: N = select(f.x.lessThan(-500), f.x.negate().sub(600), f.x.negate().sub(300)).toVar();
+  // plus three hundred, made negative; and what the paving is, the litter channel says, which paving has no other use for: nothing
+  // or more for setts (a street), less than nothing for flags (a square, a quay), less than minus one and a half for gravel (a
+  // garden's walk). It is drawn here as stones in courses, each its own tone, with dark joints between, the edges of setts rounded,
+  // and the pattern fading into its own average further off, where it would only shimmer.
+  // (The kinds were once told apart by bands of the first number, three hundred apart; but where flags meet grass the sheet's
+  // triangles blend their number down towards nothing, and passing through the setts' band it drew setts in the grass a few metres
+  // off every flagged edge, first a strip and, with the band narrowed, a hairline. One band for all crosses nothing on its way.)
+  const flagged: N = step(f.w, -0.5), gravelled: N = step(f.w, -1.5), paveSd: N = f.x.negate().sub(300).toVar();
   const paved: N = smoothstep(-0.04, 0.04, paveSd).mul(step(f.x, -250)).toVar();
   // (Each course of flags is its own length of stone, as flags are laid from what the quarry gave; each stone its own tone and cast.)
   const courseOf = (): N => { const rowH: N = mix(0.14, 0.62, flagged), row0: N = floor(at0.y.div(rowH)), lenX: N = mix(0.23, mix(0.66, 1.3, fract(sin(row0.mul(78.233)).mul(43758.5453))), flagged); return vec2(lenX, rowH); };
@@ -403,7 +407,11 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const trodSnow: N = max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare).toVar();
   // (In summer, what is left of the snow does not lie on a path that is walked every day; in winter it is only thinner there.)
   const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(mix(1, 0.25, smoothstep(0.4, 0.9, snowUniforms.uSnow as N))))).toVar();
-  ground = mix(ground, pave, paved);
+  // A garden's walks are gravel: the shingle read small and pale, darker towards the edges where it is not raked.
+  // (Read at nearly twice the shingle's size it was cobbles; and its dark grit between the stones is lightened, as dust fills a walk.)
+  const gravelAt: N = at0.mul(4.3).add(0.37), gGravel: N = (texture(shingle.map, gravelAt) as N).bias(blur);
+  const gravel: N = mix(gGravel.rgb, vec3(0.5, 0.47, 0.41), 0.35).mul(vec3(1.3, 1.24, 1.1)).mul(mix(0.9, 1.06, macro)).mul(mix(0.82, 1, smoothstep(0, 0.4, paveSd))).toVar();
+  ground = mix(ground, mix(pave, gravel, gravelled), paved);
   ground = mix(ground.mul(mix(1, 0.52, wetV)), mix(vec3(...SNOW).mul(mix(0.94, 1.04, macro)), vec3(0.5, 0.49, 0.47), trodSnow.mul(0.55)), snowy);
   m.colorNode = vec4(ground, 1);
   m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.04, puddle);
@@ -425,14 +433,15 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     // (Three sizes: the long swells of drift; ridges a stride or two apart, sharp on their lee side, as the wind cuts old snow; and
     // ripples a hand apart, near the eye. With the two larger alone, and faint, a snowfield in the sun was flat white paint.)
     const drifted: N = rip(0.9, 0.08).mul(0.16).add(rip(0.16, 0.05).mul(0.35)).add(rip(2.7, 0.03).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))).toVar();
-    const laid: N = mix(vec3(n.xy.mul(steep), n.z), paveNormal, paved);
+    const gG: N = (texture(shingle.normalMap, gravelAt) as N).bias(blur).xyz.mul(2).sub(1).mul(vec3(0.6, 0.6, 1));
+    const laid: N = mix(vec3(n.xy.mul(steep), n.z), mix(paveNormal, gG, gravelled), paved);
     m.normalNode = normalMap(vec3(laid.xy.mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), laid.z).mul(0.5).add(0.5));
   }
   // (And here and there a grain of it catches the sun: a glint, near the eye, from a crystal turned just so.)
   const glint: N = step(0.992, fract(sin(dot(floor(positionWorld.mul(26)), vec3(12.9898, 78.233, 37.719))).mul(43758.5453))).mul(one(smoothstep(4, 14, far))).toVar();
-  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(0.82, 0.5, wetV), paved), mix(0.66, 0.08, glint), snowy);
+  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(mix(0.82, 0.5, wetV), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), wetV.mul(paved).mul(0.65)), 0.55, snowy) });
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
   return m;
 }
 

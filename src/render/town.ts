@@ -106,12 +106,94 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   const fieldAt = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? -1 : fieldOf[j * znx + i]; };
   const wayOff = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? 99 : offWay[j * znx + i]; };
   /** How far in from the paving's edge a point is (less than nothing outside it), read between the lattice's points; and whether it is flags. */
-  const paveAt = (x: number, z: number): { d: number; flags: boolean } => {
+  const paveAt = (x: number, z: number): { d: number; flags: boolean; gravel: boolean } => {
     const fx = (x - zx0) / ZC, fz = (z - zz0) / ZC, i = Math.floor(fx), j = Math.floor(fz);
-    if (i < 0 || j < 0 || i >= znx - 1 || j >= znz - 1) return { d: -9, flags: false };
+    if (i < 0 || j < 0 || i >= znx - 1 || j >= znz - 1) return { d: -9, flags: false, gravel: false };
     const a = fx - i, c = fz - j, k = j * znx + i;
-    return { d: pave[k] * (1 - a) * (1 - c) + pave[k + 1] * a * (1 - c) + pave[k + znx] * (1 - a) * c + pave[k + znx + 1] * a * c, flags: flagsAt[Math.round(fz) * znx + Math.round(fx)] === 1 };
+    return { d: pave[k] * (1 - a) * (1 - c) + pave[k + 1] * a * (1 - c) + pave[k + znx] * (1 - a) * c + pave[k + znx + 1] * a * c, flags: flagsAt[Math.round(fz) * znx + Math.round(fx)] >= 1, gravel: flagsAt[Math.round(fz) * znx + Math.round(fx)] === 2 };
   };
+
+  // ---- the house's garden, behind it, on the open ground between the blocks either side of the square's line, wherever that is
+  // lawn and gentle: walks of gravel on a square grid struck from the house's middle and from a walk along its back; between them
+  // beds bordered by low clipped hedges with a gap in each side, every other bed planted with flowers in rows on bare earth and the
+  // rest lawn with a clipped cone in its middle; cones of yew at the corners of the beds either side of the main walk; and a sundial
+  // where four beds meet nearest the middle. It follows the ground's gentle rise; nothing is levelled for it. (That ground had been
+  // one lawn climbing behind the house, the largest bare thing in the town seen from above.)
+  const garden = { hedges: [] as [number, number, number, number][], cones: [] as [number, number, number][], beds: [] as { x0: number; x1: number; z0: number; z1: number; flowers: boolean; n: number }[], dial: null as [number, number] | null };
+  const bedOf = new Uint8Array(znx * znz);
+  const bedOf_ = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i >= 0 && j >= 0 && i < znx && j < znz ? bedOf[j * znx + i] : 0; };
+  /** Whether a point is in one of the garden's flower beds; and in one of its lawns, which are mown. */
+  const bedAt = (x: number, z: number) => bedOf_(x, z) === 1, mownAt = (x: number, z: number) => bedOf_(x, z) === 2;
+  if (b.outerRects.length) {
+    const lv = t.level, R = { x0: Math.max(L.x0, t.square.x0) + 2, x1: Math.min(L.x1, t.square.x1) - 2, z0: Math.max(L.z0, lv.z0 - 110), z1: lv.z1 - 2 };
+    const hx = (Math.min(...b.outerRects.map((r) => r.x0)) + Math.max(...b.outerRects.map((r) => r.x1))) / 2, zRef = Math.min(...b.outerRects.map((r) => r.z0)) - 4.4;
+    const S = 13, half = 1.2, clearOfHouse = 3;
+    // (Open, and gentle: nowhere steeper than about one in four. The ground there is worn land, not graded, and uneven in small
+    // bumps; held to one in seven, the garden was refused on single points and came out a pair of beds in a great lawn.)
+    const gentle = (x: number, z: number) => Math.hypot(ground(x + 1, z) - ground(x - 1, z), ground(x, z + 1) - ground(x, z - 1)) < 0.5;
+    const plain = (x: number, z: number) => zoneAt(x, z) === Z.wild && gentle(x, z);
+    const houseOff = (x: number, z: number) => Math.min(...b.outerRects.map((r) => outsideRect({ x0: r.x0 - clearOfHouse, x1: r.x1 + clearOfHouse, z0: r.z0 - clearOfHouse, z1: r.z1 + clearOfHouse }, x, z)));
+    const lineOff = (v: number, o: number) => { const m = (((v - o) % S) + S) % S; return Math.min(m, S - m); };
+    // The beds first, so that the walks are laid only where they lead between beds or round them.
+    const ci0 = Math.floor((R.x0 - hx) / S) - 1, ci1 = Math.ceil((R.x1 - hx) / S) + 1, cj0 = Math.floor((R.z0 - zRef) / S) - 1, cj1 = Math.ceil((R.z1 - zRef) / S) + 1;
+    const bedAtCell = new Map<string, number>(), fits = new Map<string, { x0: number; x1: number; z0: number; z1: number }>();
+    for (let cj = cj0; cj <= cj1; cj++) for (let ci = ci0; ci <= ci1; ci++) {
+      const r = { x0: hx + ci * S + half + 0.6, x1: hx + (ci + 1) * S - half - 0.6, z0: zRef + cj * S + half + 0.6, z1: zRef + (cj + 1) * S - half - 0.6 };
+      let ok = r.x0 > R.x0 && r.x1 < R.x1 && r.z0 > R.z0 && r.z1 < R.z1;
+      for (let z = r.z0 - 2; z <= r.z1 + 2.01 && ok; z += 1) for (let x = r.x0 - 2; x <= r.x1 + 2.01 && ok; x += 1) if (!plain(x, z) || houseOff(x, z) < 0) ok = false;
+      if (ok) fits.set(`${ci},${cj}`, r);
+    }
+    // (Only in pairs either side of the house's line, so that the garden is as symmetrical as the house; laid one-sided where the
+    // ground let it, it looked like a garden abandoned half made.)
+    for (const [key, r] of fits) {
+      const [ci, cj] = key.split(',').map(Number);
+      if (!fits.has(`${-1 - ci},${cj}`)) continue;
+      bedAtCell.set(key, garden.beds.length);
+      garden.beds.push({ ...r, flowers: (((ci + cj) % 2) + 2) % 2 === 0, n: garden.beds.length });
+    }
+    if (garden.beds.length >= 2) {
+      // The walks: round every bed, out to the next; gravel, with the band about it that the ground's material needs to draw its edge.
+      for (let j = 0; j < znz; j++) for (let i = 0; i < znx; i++) {
+        const x = zx0 + i * ZC, z = zz0 + j * ZC;
+        if (x < R.x0 - 3 || x > R.x1 + 3 || z < R.z0 - 3 || z > R.z1 + 3) continue;
+        const ci = Math.floor((x - hx) / S), cj = Math.floor((z - zRef) / S);
+        // (A walk runs along a grid line only where a bed lies on one side of it or the other.)
+        const bx = lineOff(x, hx), bz = lineOff(z, zRef);
+        const ciL = Math.round((x - hx) / S), cjL = Math.round((z - zRef) / S);
+        const alongX = garden.beds.length && (bedAtCell.has(`${ci},${cjL}`) || bedAtCell.has(`${ci},${cjL - 1}`));
+        const alongZ = garden.beds.length && (bedAtCell.has(`${ciL},${cj}`) || bedAtCell.has(`${ciL - 1},${cj}`));
+        const d = Math.min(alongX ? bz : 99, alongZ ? bx : 99);
+        if (d > 99) continue;
+        const sd = Math.min(half - d, x - R.x0 + 2, R.x1 + 2 - x, z - R.z0 + 2, R.z1 + 2 - z, houseOff(x, z) + 0.5);
+        if (sd < -2.4) continue;
+        const k = j * znx + i, open = zone[k] === Z.wild && gentle(x, z);
+        if (!open) continue;
+        if (sd > pave[k]) { pave[k] = sd; flagsAt[k] = 2; }
+        if (sd > 0) zone[k] = Z.flags;
+      }
+      for (const bd of garden.beds) {
+        const i0 = Math.ceil((bd.x0 + 0.5 - zx0) / ZC), i1 = Math.floor((bd.x1 - 0.5 - zx0) / ZC), j0 = Math.ceil((bd.z0 + 0.5 - zz0) / ZC), j1 = Math.floor((bd.z1 - 0.5 - zz0) / ZC);
+        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) bedOf[j * znx + i] = bd.flowers ? 1 : 2;
+        // The hedge: round the bed a little in from its edge, with a gap in the middle of each side.
+        const e = 0.35, gap = 0.8, mx = (bd.x0 + bd.x1) / 2, mz = (bd.z0 + bd.z1) / 2, X0 = bd.x0 + e, X1 = bd.x1 - e, Z0 = bd.z0 + e, Z1 = bd.z1 - e;
+        garden.hedges.push([X0, Z0, mx - gap, Z0], [mx + gap, Z0, X1, Z0], [X0, Z1, mx - gap, Z1], [mx + gap, Z1, X1, Z1], [X0, Z0, X0, mz - gap], [X0, mz + gap, X0, Z1], [X1, Z0, X1, mz - gap], [X1, mz + gap, X1, Z1]);
+        if (!bd.flowers) garden.cones.push([mx, mz, 1.6]);
+      }
+      // Yew at the corners of the beds either side of the main walk, and the sundial.
+      for (const [key, n] of bedAtCell) {
+        const [ci] = key.split(',').map(Number), bd = garden.beds[n];
+        if (ci === -1) garden.cones.push([bd.x1 - 0.35, bd.z0 + 0.35, 2.6], [bd.x1 - 0.35, bd.z1 - 0.35, 2.6]);
+        if (ci === 0) garden.cones.push([bd.x0 + 0.35, bd.z0 + 0.35, 2.6], [bd.x0 + 0.35, bd.z1 - 0.35, 2.6]);
+      }
+      let best = Infinity;
+      const mid = { x: (R.x0 + R.x1) / 2, z: (R.z0 + R.z1) / 2 };
+      for (let cj = cj0; cj <= cj1; cj++) for (let ci = ci0; ci <= ci1; ci++) {
+        if (![[ci - 1, cj - 1], [ci, cj - 1], [ci - 1, cj], [ci, cj]].every(([a, c]) => bedAtCell.has(`${a},${c}`))) continue;
+        const x = hx + ci * S, z = zRef + cj * S, d = Math.hypot(x - mid.x, z - mid.z) + Math.abs(ci) * 4;
+        if (d < best) { best = d; garden.dial = [x, z]; }
+      }
+    } else garden.beds.length = 0;
+  }
 
   // ---- the rock: wherever the made land is steep, which is the sea's cliffs and the crags of the headland and the hills,
   // carved as the island's cliffs are, in tiles
@@ -296,12 +378,17 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // draw the edge where it truly is, and the paving's colour, which on the ground beside it is the dust of the street.)
     const pv = paveAt(x, z);
     if (pv.d > -2.4) {
-      lay.code = -((pv.flags ? 600 : 300) + pv.d);
+      // (How far in, in one band for every kind; and the kind in the litter channel, which paving has no other use for. See the
+      // ground's material.)
+      lay.code = -(300 + pv.d);
+      lay.litter = pv.gravel ? -2 : pv.flags ? -1 : 0;
       const tone = 0.85 + 0.3 * fbm2(x * 0.08 + s2, z * 0.08, 2);
       if (pv.d > 0) return shade(paving, tone);
       const c0 = turfColour(x, z, s1);
       return [c0[0] * 0.75 + paving[0] * 0.6, c0[1] * 0.75 + paving[1] * 0.5, c0[2] * 0.75 + paving[2] * 0.5];
     }
+    // (The garden's flower beds are dug earth between the rows.)
+    if (bedAt(x, z)) { lay.bare = 0.95; lay.wet = Math.max(lay.wet, 0.25); return c; }
     if (zn === Z.track || zn === Z.path) {
       const off = wayOff(x, z);
       lay.code = zn === Z.track ? 100 + off * (fbm2(x * 0.3, z * 0.3, 2) > 0.5 ? 1 : -1) : 200 + off;
@@ -777,6 +864,70 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
   }
 
+  // ---- the garden's hedges and cones (a dark core, so that nothing is seen through them, under leaves set close over its faces), its
+  // sundial, and the flowers in its beds
+  if (garden.beds.length) {
+    const h = rng.fork('garden'), pl = b.planting, box0: Colour = [0.11, 0.21, 0.055], core: Colour = [0.06, 0.12, 0.04];
+    const green = (): Colour => shade(box0, h.range(0.75, 1.25));
+    for (const [ax, az, bx, bz] of garden.hedges) {
+      const run = Math.hypot(bx - ax, bz - az);
+      if (run < 0.3) continue;
+      const dx = (bx - ax) / run, dz = (bz - az) / run, nx = -dz, nz = dx, W = 0.22, H = 0.6;
+      // (In pieces of a couple of metres, each standing on the ground at its ends, so that the hedge follows the rise.)
+      const pieces = Math.ceil(run / 2.2);
+      for (let k = 0; k < pieces; k++) {
+        const s0 = (k / pieces) * run - (k === 0 ? W : 0), s1 = ((k + 1) / pieces) * run + (k === pieces - 1 ? W : 0.01);
+        const p0x = ax + dx * s0, p0z = az + dz * s0, p1x = ax + dx * s1, p1z = az + dz * s1, y0 = ground(p0x, p0z), y1 = ground(p1x, p1z);
+        solid('plaster', [[p0x - nx * W, y0 - 0.1, p0z - nz * W], [p1x - nx * W, y1 - 0.1, p1z - nz * W], [p1x + nx * W, y1 - 0.1, p1z + nz * W], [p0x + nx * W, y0 - 0.1, p0z + nz * W], [p0x - nx * W, y0 + H, p0z - nz * W], [p1x - nx * W, y1 + H, p1z - nz * W], [p1x + nx * W, y1 + H, p1z + nz * W], [p0x + nx * W, y0 + H, p0z + nz * W]], core);
+      }
+      // (Leaves close and large enough to hide the core: a box hedge is a surface of leaves, not a dark box with sprigs on it.)
+      for (let s = -W; s < run + W; s += 0.13) {
+        const px = ax + dx * s, pz = az + dz * s, y = ground(px, pz);
+        for (let k = 0; k < 3; k++) { const o = h.range(-W, W); pl.card(pl.leaves, px + nx * o, y + H + h.range(0, 0.05), pz + nz * o, h.range(0.26, 0.4), -Math.PI / 2 + h.range(-0.5, 0.5), h.range(0, 6.28), h.range(-0.5, 0.5), green(), px, y + H * 0.3, pz); }
+        for (const side of [-1, 1]) for (let k = 0; k < 3; k++) {
+          const ox = nx * side, oz = nz * side;
+          pl.card(pl.leaves, px + ox * (W + 0.03), y + h.range(0.06, H), pz + oz * (W + 0.03), h.range(0.26, 0.4), h.range(-0.5, 0.5), Math.atan2(ox, oz) + h.range(-0.5, 0.5), h.range(-0.6, 0.6), green(), px, y + H * 0.3, pz);
+        }
+      }
+    }
+    for (const [cx, cz, tall] of garden.cones) {
+      const y = ground(cx, cz), R = tall * 0.3, n = 8, apex: P3 = [cx, y + tall, cz], inside: P3 = [cx, y + tall * 0.3, cz];
+      for (let k = 0; k < n; k++) {
+        const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2;
+        face('plaster', [[cx + Math.cos(a0) * R * 0.85, y - 0.05, cz + Math.sin(a0) * R * 0.85], [cx + Math.cos(a1) * R * 0.85, y - 0.05, cz + Math.sin(a1) * R * 0.85], [apex[0], apex[1] - 0.1, apex[2]]], core, inside);
+      }
+      // (Close enough that the core does not show between them: with half as many the cone read as a dark spire hung with leaves.)
+      for (let k = Math.round(560 * tall * tall / 6.8); k > 0; k--) {
+        const hh = tall * (1 - Math.sqrt(h.next())) * 0.97, r = R * (1 - hh / tall) + 0.06, a = h.range(0, Math.PI * 2), ox = Math.cos(a), oz = Math.sin(a);
+        pl.card(pl.leaves, cx + ox * r, y + hh, cz + oz * r, h.range(0.26, 0.38), -0.35 + h.range(-0.5, 0.5), Math.atan2(ox, oz) + h.range(-0.5, 0.5), h.range(-0.6, 0.6), shade(green(), 0.8), cx, y + tall * 0.25, cz);
+      }
+    }
+    if (garden.dial) {
+      const [dx, dz] = garden.dial, at = frame(dx, dz, ground(dx, dz), 0), st = shade(stone, 1.08), bronze: Colour = [0.42, 0.3, 0.14];
+      box(at, 'stone', -0.42, 0.42, -0.1, 0.12, -0.42, 0.42, st, 0.4);
+      box(at, 'stone', -0.15, 0.15, 0.12, 0.95, -0.15, 0.15, st, 0.4);
+      box(at, 'stone', -0.27, 0.27, 0.95, 1.03, -0.27, 0.27, st, 0.4);
+      box(at, 'metal', -0.2, 0.2, 1.03, 1.045, -0.2, 0.2, bronze);
+      solid('metal', [at(-0.008, 1.045, -0.15), at(0.008, 1.045, -0.15), at(0.008, 1.045, 0.15), at(-0.008, 1.045, 0.15), at(-0.008, 1.045, -0.15), at(0.008, 1.045, -0.15), at(0.008, 1.2, 0.15), at(-0.008, 1.2, 0.15)], bronze);
+    }
+    // The flowers: in rows, two colours to a bed by turns, as bedding is planted; none in winter, and the autumn's in its own colours.
+    if (season !== 'winter') {
+      const schemes: [Colour, Colour][] = season === 'autumn'
+        ? [[[0.7, 0.32, 0.06], [0.55, 0.12, 0.1]], [[0.78, 0.55, 0.1], [0.45, 0.2, 0.4]]]
+        : [[[0.78, 0.1, 0.08], [0.88, 0.86, 0.78]], [[0.32, 0.26, 0.72], [0.88, 0.72, 0.12]], [[0.82, 0.36, 0.52], [0.88, 0.86, 0.78]], [[0.88, 0.46, 0.08], [0.5, 0.14, 0.44]]];
+      for (const bd of garden.beds) if (bd.flowers) {
+        const [c1, c2] = h.pick(schemes);
+        // (Each plant a clump of leaves with its flowers over it, set close, so that a bed reads as a carpet of colour.)
+        for (let z = bd.z0 + 0.85; z < bd.z1 - 0.75; z += 0.3) for (let x = bd.x0 + 0.85; x < bd.x1 - 0.75; x += 0.26) {
+          const row = Math.round((z - bd.z0) / 0.3), c = row % 4 < 2 ? c1 : c2;
+          const fx = x + h.range(-0.05, 0.05), fz = z + h.range(-0.05, 0.05), fy = ground(fx, fz);
+          pl.tuft(pl.herbs, fx, fy - 0.03, fz, h.range(0.3, 0.4), h.range(0.16, 0.24), h.range(0, 6.28), shade([0.09, 0.17, 0.04], h.range(0.8, 1.2)));
+          pl.tuft(pl.flowers, fx, fy - 0.02, fz, 0.36, h.range(0.26, 0.38), h.range(0, 6.28), shade(c, h.range(0.85, 1.1)));
+        }
+      }
+    }
+  }
+
   // ---- the buildings: each made in its own measures by the valley's builder, then turned to its street and set on its ground;
   // with a footing of stone under it, so that where the street falls away along its front no gap shows under its wall
   const chimneys: { x: number; y: number; z: number }[][] = [];
@@ -1091,6 +1242,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
 
   // ---- what grows: grass where nothing is built or paved, crops in the fields, trees in the woods and the orchards
   const planted = plantTown();
+  if (garden.beds.length) planted['garden beds'] = garden.beds.length;
   function plantTown(): Record<string, number> {
     const counts: Record<string, number> = {}, count = (k: string, n = 1) => { counts[k] = (counts[k] ?? 0) + n; };
     const pl = b.planting, qq = rng.fork('plants'), dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : 0;
@@ -1103,7 +1255,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       if (dist > 380) continue;
       if (dist > 220 && qq.next() > 0.45) continue;
       const px = x + qq.range(-0.4, 0.4), pz = z + qq.range(-0.4, 0.4), zn = zoneAt(px, pz);
-      if (zn === Z.street || zn === Z.flags || zn === Z.built || zn === Z.shack || zn === Z.harbour || zn === Z.quay) continue;
+      if (zn === Z.street || zn === Z.flags || zn === Z.built || zn === Z.shack || zn === Z.harbour || zn === Z.quay || bedAt(px, pz)) continue;
       const y = ground(px, pz), above = y - sea;
       if (above < 1.4 || (rocky.holds(px, pz) && rocky.at(px, pz) > 0.35) || insideOuter(px, pz, 0.5)) continue;
       if ((zn === Z.track && wayOff(px, pz) < 1.5) || (zn === Z.path && wayOff(px, pz) < 0.6)) continue;
@@ -1129,12 +1281,12 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       const wood = woodAt(px, pz);
       if (wood > 0.5) { if (qq.chance(0.5)) { pl.tuft(pl.ferns, px, y - 0.05, pz, qq.range(0.7, 1.2), qq.range(0.6, 1.0), yaw, season === 'autumn' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('ferns'); } continue; }
       if (above < 3 && dist > 60) { if (fine > 0.45) { pl.tuft(cropSet('marram'), px, y - 0.05, pz, qq.range(0.7, 1.1), qq.range(0.5, 0.85), yaw, [0.33, 0.33, 0.2]); count('marram'); } continue; }
-      const town = zn === Z.yard ? 1 : smooth(1 - (Math.min(...[t.square, ...t.blocks].map((r) => outsideRect(r, px, pz))) - 5) / 30);
+      const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(...[t.square, ...t.blocks].map((r) => outsideRect(r, px, pz))) - 5) / 30);
       if (zn === Z.yard && fine < 0.45) continue;
-      const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
+      const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25) * (mown ? 0.45 : 1), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
       pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), tall, yaw, [(0.17 + 0.16 * dried) * c[0] * tone, 0.3 * c[1] * tone, (0.05 + 0.05 * dried) * c[2] * tone]);
       count('grass');
-      if (fine > 0.6 && qq.chance(0.25) && season !== 'autumn') { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.32, qq.range(0.2, 0.34), yaw, qq.pick([[0.62, 0.62, 0.58], [0.55, 0.2, 0.45], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
+      if (fine > 0.6 && qq.chance(0.25) && season !== 'autumn' && !mown) { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.32, qq.range(0.2, 0.34), yaw, qq.pick([[0.62, 0.62, 0.58], [0.55, 0.2, 0.45], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
     }
     // Trees: the woods, from the edge of the fields up into the hills; fruit trees in rows in the orchards; a few in the yards.
     const wood = wild.mesh('bark');
