@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -229,6 +229,11 @@ async function start(): Promise<void> {
     if (params.has('haze')) site.setting.haze = Math.min(1, Math.max(0, Number(params.get('haze'))));
     if (params.has('layered')) site.setting.cloudForm = params.get('layered') === '0' ? 'heaped' : 'layered';
   }
+  // Windows with a lamp or a fire behind them glow once the light is going; by day they are glass like the rest.
+  // (The eyes open wider as the light goes, so the lamps need not be brighter by night than at dusk to tell more.)
+  const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
+  materials.window = lamps ? makeWindowMaterial() : materials.glass;
+  windowUniforms.uLit.value = lamps;
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
@@ -335,7 +340,7 @@ async function start(): Promise<void> {
     mesh.name = `scenery:${material}`;
     mesh.receiveShadow = true;
     // (Glass throws no shadow: the sun comes in at windows.)
-    mesh.castShadow = material !== 'glass';
+    mesh.castShadow = material !== 'glass' && material !== 'window';
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
     scenic.push(mesh);

@@ -25,6 +25,18 @@ interface Gap { s0: number; s1: number; y0: number; y1: number }
 const OAK: Colour = [0.2, 0.13, 0.085], WHITE: Colour = [0.9, 0.89, 0.85], PANE: Colour = [0.04, 0.055, 0.075], LIMEWASH: Colour = [0.86, 0.84, 0.78];
 const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
 
+/**
+ * Whether a room has a lamp or a fire lit in it when it is dark, told from where it is (so no choice is drawn, and nothing else
+ * about a place changes): a share of the rooms, and the colour and strength of the light in each; or nothing if it is dark.
+ * Lamplight is yellow and steady, firelight redder; windows of one room are alike.
+ */
+export function litRoom(x: number, y: number, z: number, share = 0.38): Colour | null {
+  const h = (k: number) => { const v = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719 + k * 19.19) * 43758.5453; return v - Math.floor(v); };
+  if (h(0) > share) return null;
+  const strength = 0.55 + 0.6 * h(1), fire = h(2);
+  return [strength, strength * (0.5 - 0.12 * fire), strength * (0.17 - 0.1 * fire)];
+}
+
 /** The tools: where things are, and solids to build with. */
 function tools(b: Building, base: number, mesh: (material: string) => MeshBuilder) {
   const turn = b.faces === 'w' ? 1 : -1;
@@ -98,7 +110,10 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
   /** What stands in a window opening: the frame, the bars that divide it, and the glass behind them. */
   const glazed = (f: Face, g: Gap, across: number, down: number, frame: Colour, deep = 0.1) => {
     const w = g.s1 - g.s0, h = g.y1 - g.y0;
-    on(f, 'glass', g.s0, g.s1, g.y0, g.y1, deep + 0.05, deep + 0.08, PANE);
+    // (Which room a window belongs to, near enough: a stretch of a wall some three and a half metres long on one storey.)
+    const room = f.P(Math.floor(g.s0 / 3.5) * 3.5, Math.floor(g.y0 / 2.6) * 2.6, 0), light = litRoom(Math.round(room.x), Math.round(room.y), Math.round(room.z));
+    if (light) on(f, 'window', g.s0, g.s1, g.y0, g.y1, deep + 0.05, deep + 0.08, light);
+    else on(f, 'glass', g.s0, g.s1, g.y0, g.y1, deep + 0.05, deep + 0.08, PANE);
     for (const [a, c] of [[g.s0, g.s0 + 0.07], [g.s1 - 0.07, g.s1]]) on(f, 'wood', a, c, g.y0, g.y1, deep, deep + 0.07, frame, true);
     for (const [a, c] of [[g.y0, g.y0 + 0.07], [g.y1 - 0.07, g.y1]]) on(f, 'wood', g.s0, g.s1, a, c, deep, deep + 0.07, frame, true);
     for (let k = 1; k < across; k++) on(f, 'wood', g.s0 + (w * k) / across - 0.022, g.s0 + (w * k) / across + 0.022, g.y0, g.y1, deep + 0.01, deep + 0.06, frame, true);
@@ -147,7 +162,7 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
   // in streaks, stone darkened; and that throws away its glass, its flowers and its tiles, which did not survive.
   const burnt = !!b.burnt, waste = new MeshBuilder(), charred = new Map<string, MeshBuilder>();
   const mesh = !burnt ? given : (material: string): MeshBuilder => {
-    if (material === 'glass' || material === 'leaf' || material === 'tile') return waste;
+    if (material === 'glass' || material === 'window' || material === 'leaf' || material === 'tile') return waste;
     let m = charred.get(material);
     if (!m) {
       const real = given(material), k = material === 'wood' ? 0.28 : material === 'plaster' ? 0.42 : material === 'stone' ? 0.62 : 0.8;

@@ -5,7 +5,7 @@ import { Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
 import { buildLandmark } from './landmarks';
-import { buildBuilding } from './buildings';
+import { buildBuilding, litRoom } from './buildings';
 import { CLASSICAL } from '../core/building';
 import { Colour } from './planting';
 
@@ -70,7 +70,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   const { site, wild, rng } = c, o = site.island!, sea = o.sea;
   const mesh = (m: string) => wild.mesh(m);
   // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
-  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'metal', 'lamp', 'thatch', 'slate'];
+  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'window', 'metal', 'lamp', 'thatch', 'slate'];
   const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
   const indoors: ((x: number, y: number, z: number) => number)[] = [];
   const { face, solid } = anyAngle(mesh);
@@ -327,14 +327,16 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // (It stands proud of the wall on both faces, a few centimetres, so that no face of it lies in the plane of the plaster and flickers.)
     box(at, 'wood', doorAt - 0.62, doorAt + 0.62, doorTop, doorTop + 0.16, -t - 0.04, 0.05, [0.22, 0.17, 0.12], 0.9);
     box(at, 'wood', doorAt - 0.48, doorAt - 0.43, 0.14, doorTop - 0.04, -t - 0.9, -t, doorCol, 0.9);
-    // The windows: dark glass in the middle of the wall's thickness, white frames, and a deep sill inside.
+    // The windows: dark glass in the middle of the wall's thickness, white frames, and a deep sill inside. (After dark most of the
+    // cottages have the fire going or a lamp lit, and their windows glow with it.)
+    const light = litRoom(Math.round(h.x), Math.round(h.y), Math.round(h.z), 0.65), pane = light ? 'window' : 'glass', paned: Colour = light ?? [0.03, 0.04, 0.05];
     for (const wa of windowsAt) {
-      box(at, 'glass', wa - 0.4, wa + 0.4, 0.9, 1.8, -t / 2 - 0.02, -t / 2 + 0.02, [0.03, 0.04, 0.05]);
+      box(at, pane, wa - 0.4, wa + 0.4, 0.9, 1.8, -t / 2 - 0.02, -t / 2 + 0.02, paned);
       box(at, 'wood', wa - 0.03, wa + 0.03, 0.9, 1.8, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
       box(at, 'wood', wa - 0.4, wa + 0.4, 1.33, 1.38, -t / 2 - 0.03, -t / 2 + 0.03, [0.85, 0.85, 0.82]);
       box(at, 'stone', wa - 0.5, wa + 0.5, 0.84, 0.93, -0.02, 0.12, shade(stone, 1.05));
     }
-    box(at, 'glass', backWindow - 0.3, backWindow + 0.3, 1.0, 1.6, -D + t / 2 - 0.02, -D + t / 2 + 0.02, [0.03, 0.04, 0.05]);
+    box(at, pane, backWindow - 0.3, backWindow + 0.3, 1.0, 1.6, -D + t / 2 - 0.02, -D + t / 2 + 0.02, paned);
     // A ceiling of boards on the tie beams, under the roof.
     box(at, 'wood', -W + t, W - t, eaves - 0.12, eaves, -D + t, -t, [0.3, 0.24, 0.17], 0.9);
     for (let a = -W + t + 0.6; a < W - t - 0.3; a += 1.1) box(at, 'wood', a - 0.08, a + 0.08, eaves - 0.3, eaves - 0.12, -D + t, -t, [0.22, 0.17, 0.12], 0.9);

@@ -25,7 +25,7 @@ type N = any;
 const {
   Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
   normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
-  uniform, uv, vec2, vec3, vec4, vertexColor,
+  time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
 
 export interface SiteUniforms {
@@ -415,6 +415,23 @@ export function makeStainedMaterial(): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.25, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
   m.colorNode = vertexColor().mul(0.12);
   m.emissiveNode = vertexColor().mul(glassUniforms.uGlow as N);
+  return m;
+}
+
+/**
+ * A window with a lamp or a fire lit in the room behind it, seen from outside once the light is going: the glass glows with the
+ * room's light, each room its own colour and brightness (given per vertex), and firelight wavers a little. By day the windows
+ * that would be lit are drawn as any other glass, so this is only made for the evening and the night. `uLit` is how much the
+ * lamps tell against the hour.
+ */
+export const windowUniforms: { uLit: { value: number } } = { uLit: uniform(1) as N };
+export function makeWindowMaterial(): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.2, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
+  const c: N = vertexColor();
+  m.colorNode = c.mul(0.05);
+  // (Each room wavers at its own pace, from its own colour: two slow beats, so that it never quite repeats.)
+  const waver: N = sin(time.mul(5.3).add(c.x.mul(91))).mul(sin(time.mul(2.3).add(c.y.mul(57)))).mul(0.07).add(1);
+  m.emissiveNode = c.mul(windowUniforms.uLit as N).mul(waver);
   return m;
 }
 
