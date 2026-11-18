@@ -11,7 +11,9 @@ import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Ro
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
  *
  * The plan is a grid whose columns and rows vary in width, so rooms range from narrow passages to
- * halls while sharing walls exactly. Which cells are rooms, and which are joined, comes from a
+ * halls while sharing walls exactly; now and then two cells side by side are one long hall, and a
+ * room whose wall looks out on nothing may stand in from the grid's line, so that rooms are not
+ * all the size of their cells. Which cells are rooms, and which are joined, comes from a
  * draft: one of several ways of laying out loops. Structure is built from cycles, not from a tree
  * with loops added afterwards, so there is always more than one way round. Side chambers and
  * chains of chambers hang off the loops, a court may open one cell to the sky, and the mission
@@ -1316,6 +1318,16 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     widths[court.i] = rng.range(6.6, 8.2);
     depths[court.j] = rng.range(6.6, 8.6);
   }
+  // Now and then a column or a row broader still, for a hall, or narrower, for a closet of a room; and the court sometimes a broad
+  // garth. (With every room within a metre or two of every other the houses were all much alike.) From a stream of its own, so the
+  // draft and every choice after it are what they were.
+  const proportions = rng.fork('proportions');
+  for (let i = 0; i < NX; i++) if (widths[i] > 5) widths[i] = proportions.chance(0.16) ? proportions.range(8.6, 10.8) : proportions.chance(0.12) ? proportions.range(4.4, 5.2) : widths[i];
+  for (let j = 0; j < NZ; j++) if (depths[j] > 5) depths[j] = proportions.chance(0.16) ? proportions.range(9.4, 11.6) : proportions.chance(0.12) ? proportions.range(4.4, 5.2) : depths[j];
+  if (court && proportions.chance(0.45)) {
+    widths[court.i] = proportions.range(8.6, 11.8);
+    depths[court.j] = proportions.range(8.6, 12.2);
+  }
   const round = (v: number) => Math.round(v * 10) / 10;
   const xs = [0];
   const zs = [0];
@@ -1328,14 +1340,16 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   const inGrid = (c: Cell) => c.i >= 0 && c.i < NX && c.j >= 0 && c.j < NZ;
   const placeOf = (c: Cell) => places[byCell.get(key(c))!];
 
-  const addCell = (c: Cell, role: Role, name: string): Place => {
+  const addCell = (c: Cell, role: Role, name: string, also?: Cell): Place => {
+    const i0 = Math.min(c.i, also?.i ?? c.i), i1 = Math.max(c.i, also?.i ?? c.i), j0 = Math.min(c.j, also?.j ?? c.j), j1 = Math.max(c.j, also?.j ?? c.j);
     const p: Place = {
       id: places.length, role, name, roof: 'barrel', light: 'torch',
-      x0: xs[c.i] + T / 2, x1: xs[c.i + 1] - T / 2, z0: zs[c.j] + T / 2, z1: zs[c.j + 1] - T / 2,
+      x0: xs[i0] + T / 2, x1: xs[i1 + 1] - T / 2, z0: zs[j0] + T / 2, z1: zs[j1 + 1] - T / 2,
       floor: 0, wall: 3.4, axis: 'x', depth: 0,
     };
     places.push(p);
     byCell.set(key(c), p.id);
+    if (also) byCell.set(key(also), p.id);
     return p;
   };
 
@@ -1354,9 +1368,28 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   const DOOR = 0.85;
   const joined = (a: Cell, b: Cell) => ways.some((w) => (w.a === byCell.get(key(a)) && w.b === byCell.get(key(b))) || (w.b === byCell.get(key(a)) && w.a === byCell.get(key(b))));
 
+  // ---- now and then two rooms of the draft side by side are one long hall (or, where they are narrow, one long gallery): the wall
+  // between them is not built, and the way between them is not needed. Never the court or the gatehall. From a stream of its own.
+  const halls = new Map<string, Cell>();
+  {
+    const q = rng.fork('halls'), want = q.chance(0.65) ? (q.chance(0.35) ? 2 : 1) : 0, taken = new Set<string>();
+    for (const [a, b] of shuffle(draft.edges.filter(([a, b]) => !isCourt(a) && !isCourt(b) && !same(a, draft.entrance) && !same(b, draft.entrance)), q)) {
+      if (halls.size >= want) break;
+      if (taken.has(key(a)) || taken.has(key(b))) continue;
+      const sideBySide = a.j === b.j, long = sideBySide ? widths[a.i] + widths[b.i] + T : depths[a.j] + depths[b.j] + T;
+      if (long > 19.5) continue;
+      halls.set(key(b), a);
+      taken.add(key(a));
+      taken.add(key(b));
+    }
+  }
+  const joinedTo = (c: Cell) => [...halls.entries()].find(([, a]) => same(a, c))?.[0];
+
   // ---- the drafted rooms and the ways between them; a court is entered through open arches
   for (const c of draft.cells) {
-    const p = addCell(c, isCourt(c) ? 'court' : 'passage', isCourt(c) ? 'cloister court' : 'gallery');
+    if (halls.has(key(c))) continue;
+    const other = joinedTo(c), also = other ? draft.cells.find((d) => key(d) === other) : undefined;
+    const p = addCell(c, isCourt(c) ? 'court' : 'passage', isCourt(c) ? 'cloister court' : 'gallery', also);
     if (isCourt(c)) p.roof = 'sky';
   }
   const archesFor = (a: Cell, b: Cell): number[] => {
@@ -1366,6 +1399,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     return Array.from({ length: count }, (_, m) => (m - (count - 1) / 2) * 3.1);
   };
   for (const [a, b] of draft.edges) {
+    if (placeOf(a) === placeOf(b)) continue;
     if (isCourt(a) || isCourt(b)) connect(a, b, 'arch', 1.15, archesFor(a, b));
     else connect(a, b, 'door', DOOR);
   }
@@ -1397,12 +1431,14 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   const ranked = draft.cells.filter((c) => !isCourt(c) && !same(c, draft.entrance))
     .map((c) => ({ c, d: fromEntrance.get(placeOf(c).id)!, tie: rng.next() }))
     .sort((a, b) => b.d - a.d || a.tie - b.tie).map((x) => x.c);
-  const farCell = ranked.find((c, k) => k < 3 && around(c).some(free)) ?? ranked[0];
+  // (And among those, one with room beside it at least four and a half metres across: a sanctum a passage's width was a corridor.)
+  const broad = (c: Cell) => (Math.min(widths[c.i], depths[c.j]) >= 4.4 ? 1 : 0);
+  const farCell = ranked.find((c, k) => k < 3 && around(c).some((n) => free(n) && broad(n))) ?? ranked.find((c, k) => k < 3 && around(c).some(free)) ?? ranked[0];
   const far = placeOf(farCell);
 
   let goal = far;
-  // Of the free cells beside it, the sanctum takes the largest.
-  const sanctumCell = around(farCell).filter(free).sort((a, b) => widths[b.i] * depths[b.j] - widths[a.i] * depths[a.j])[0];
+  // Of the free cells beside it, the sanctum takes the largest; and one a passage's width across only if there is no other.
+  const sanctumCell = around(farCell).filter(free).sort((a, b) => broad(b) - broad(a) || widths[b.i] * depths[b.j] - widths[a.i] * depths[a.j])[0];
   if (sanctumCell) {
     goal = addCell(sanctumCell, 'goal', 'sanctum');
     connect(farCell, sanctumCell, 'door', DOOR);
@@ -1537,6 +1573,38 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     });
   }
 
+  // ---- not every room fills its cell of the plan. Where a wall of a room looks out on nothing (no room beyond it, and no door, arch
+  // or window in it), it may stand in from the line of the plan: so rooms are of sizes of their own, and the outline of a house that
+  // stands free steps in and out. Never the front, which stands in a line to the forecourt; never so far that a doorway in a wall
+  // either side of it would no longer fit; and never a room cut down below four metres and a half. From a stream of its own.
+  {
+    const q = rng.fork('insets');
+    const opposite = { n: 's', s: 'n', e: 'w', w: 'e' } as const;
+    for (const p of places) {
+      if (p.roof === 'sky' || p.roof === 'cave' || p.role === 'approach') continue;
+      const cells = [...byCell.entries()].filter(([, id]) => id === p.id).map(([k]) => { const [i, j] = k.split(',').map(Number); return { i, j }; });
+      const mine = ways.filter((w) => w.a === p.id || w.b === p.id).map((w) => ({ side: w.a === p.id ? w.side : opposite[w.side], at: w.at, half: w.halfWidth }));
+      for (const side of shuffle(['n', 'e', 'w'] as Side[], q)) {
+        if (!q.chance(0.45)) continue;
+        const di = side === 'e' ? 1 : side === 'w' ? -1 : 0, dj = side === 'n' ? -1 : 0;
+        if (cells.some((c) => { const n = byCell.get(key({ i: c.i + di, j: c.j + dj })); return n !== undefined && n !== p.id; })) continue;
+        if (mine.some((w) => w.side === side)) continue;
+        const across = side === 'n' ? p.z1 - p.z0 : p.x1 - p.x0;
+        if (across < 5) continue;
+        let d = q.range(0.5, Math.min(2.2, across - 4.5));
+        // (The doorways in the two walls either side keep their jambs and half a metre more.)
+        for (const w of mine) {
+          if (side === 'n' && (w.side === 'e' || w.side === 'w')) d = Math.min(d, w.at - w.half - 0.6 - p.z0);
+          if (side === 'w' && (w.side === 'n' || w.side === 's')) d = Math.min(d, w.at - w.half - 0.6 - p.x0);
+          if (side === 'e' && (w.side === 'n' || w.side === 's')) d = Math.min(d, p.x1 - (w.at + w.half + 0.6));
+        }
+        d = Math.floor(d * 10) / 10;
+        if (d < 0.4) continue;
+        if (side === 'n') p.z0 = round(p.z0 + d); else if (side === 'w') p.x0 = round(p.x0 + d); else p.x1 = round(p.x1 - d);
+      }
+    }
+  }
+
   // ---- roofs
   for (const p of places) {
     if (p.roof === 'sky' || p.roof === 'cave') continue;
@@ -1545,7 +1613,9 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     const roomy = Math.min(dx, dz) >= 5.6;
     const roof: Roof = roomy && p.role !== 'goal' && rng.chance(0.3) ? 'timber' : 'barrel';
     p.roof = roof;
-    p.wall = roof === 'timber' ? 4.2 : 3.4;
+    // (A long hall stands taller than a chamber: its walls rise with its length, up to a metre and more under a timber roof.)
+    const long = Math.max(dx, dz);
+    p.wall = round(roof === 'timber' ? 4.2 + Math.min(1.4, Math.max(0, (long - 8) * 0.15)) : 3.4 + Math.min(0.7, Math.max(0, (long - 9) * 0.09)));
     if (Math.min(dx, dz) < 4 && p.name === 'gallery') p.name = 'passage';
   }
 

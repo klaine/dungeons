@@ -861,6 +861,9 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     };
     const pts = [...first.slice(1), ...down.slice(1)].map(keep);
     for (const p of pts) if (Math.hypot(p[0] - track[track.length - 1][0], p[1] - track[track.length - 1][1]) > 1.2) track.push(p);
+    // (A last step much shorter than the rest is joined to the one before: its heights are rounded to a tenth of a metre like any
+    // other, and over a stride's length that could make a path of one in two climb at nearly six in ten.)
+    if (track.length > 3) { const [a, b] = track.slice(-2); if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1.8) track.splice(track.length - 2, 1); }
     // The way's level line, from the forecourt to the arrival.
     const line: [number, number][] = track.slice(1);
     // (Its level line is taken from the ridge as it would be without the cleft: the way does not go down into that.)

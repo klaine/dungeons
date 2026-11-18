@@ -97,7 +97,7 @@ A place is a rectangle of open floor. Walls lie outside it.
 
 | Field | Meaning |
 | --- | --- |
-| `x0`, `x1`, `z0`, `z1` | The interior, west to east and north to south. |
+| `x0`, `x1`, `z0`, `z1` | The interior, west to east and north to south. Rooms of the house are laid on a plan of columns and rows of differing width, a wall's thickness apart; a room usually fills one cell of it, but may span two (a long hall or gallery), and where a wall of it looks out on nothing it may stand in from the plan's line by up to a couple of metres. |
 | `floor` | Height of the floor. Floors differ from room to room, and steps in the doorways make up the difference. |
 | `wall` | Height of the walls above the floor: to where a vault springs, or to a flat ceiling. |
 | `roof` | `barrel` (a stone vault), `timber` (boards on beams), `sky` (open), or `cave` (not built: natural rock all round, and the open floor is an irregular hollow inside the rectangle). |

@@ -472,8 +472,9 @@ export function meshSite(site: Site): SceneDescription {
     const list: TorchSpec[] = [];
     if (p.roof !== 'sky') {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
-      // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none.
-      const want = p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : 3) : p.light === 'day' && area >= 40 ? 1 : 0;
+      // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none. (A long hall, of two cells
+      // of the plan, has more.)
+      const want = p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : area < 90 ? 3 : 4) : p.light === 'day' ? (area >= 90 ? 2 : area >= 40 ? 1 : 0) : 0;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
       const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
