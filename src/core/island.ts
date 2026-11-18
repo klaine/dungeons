@@ -534,7 +534,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
     // height its cliff is to have there, which differs round the island: a low rocky shore here, a cliff fifteen metres high there.
     // Beyond that the sea has had the land away, and the cliff is cut (`below`).
     const sp = found.spot, c = Math.cos(sp.turn), sn = Math.sin(sp.turn), du = sp.cu - sp.u, dv = sp.cv - sp.v;
-    island.terrain = { seed: found.seed, cell: 1.5, u: sp.u, v: sp.v, turn: sp.turn, base: Math.round(sp.base * 100) / 100, shore: Math.round(sp.sea * 100) / 100 };
+    island.terrain = { seed: found.seed, cell: 1, u: sp.u, v: sp.v, turn: sp.turn, base: Math.round(sp.base * 100) / 100, shore: Math.round(sp.sea * 100) / 100 };
     island.x = round(hx + c * du + sn * dv); island.z = round(hz - sn * du + c * dv);
     island.sea = sea = round(F - (island.terrain.base - island.terrain.shore));
     const q = rng.fork('cliffs'), s0 = q.range(0, 500), sharp = q.range(0.12, 0.2);

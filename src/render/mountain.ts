@@ -167,7 +167,8 @@ export function buildMountain(b: MountainBuild): MountainResult {
   // ---- the band that is carved: round the rim and the ridge's edges, this far in and out; and wherever the ground inland is steep
   // (Carved at half a metre, where a valley's rim and an island's cliffs are carved at four tenths: there is twice as much rock
   // here, most of it seen from further off, and at four tenths it took a minute and a half to build.)
-  const CELL = 0.5, SHEET = 1.25, TILE = 10, IN = 5, OUT = 11;
+  // (Rock carved at four tenths of a metre and the sheet laid at a metre: a notch finer than first made.)
+  const CELL = 0.4, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(g.x0 - 90, false), x1: snap(g.x1 + 90, true), z0: snap(g.z0 - 90, false), z1: snap(g.z1 + 90, true) };
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.05; };
@@ -1382,8 +1383,8 @@ function plantMountain(c: MountainPlanting): Record<string, number> {
 function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean): void {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
   // (A notch finer than first made: half as many points again round each ring, and the rings closer.)
-  const around = 960, radii: number[] = [];
-  for (let r = 60; r <= 6900; r += 2.2 + r * 0.014) radii.push(r);
+  const around = 1280, radii: number[] = [];
+  for (let r = 60; r <= 6900; r += 1.8 + r * 0.011) radii.push(r);
   // (The land is the core's: `countryAt`. Here it is only drawn.)
   const wet = new Uint8Array(radii.length * around);
   const rings = radii.length, H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);

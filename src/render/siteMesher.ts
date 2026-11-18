@@ -1952,7 +1952,7 @@ export function meshSite(site: Site): SceneDescription {
     }
     const reach = 246;
     layTerrain(sceneryMesh('turf'), sceneryMesh('rock'), ground, {
-      ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 6,
+      ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 3,
       // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
       // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
       // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)

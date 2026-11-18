@@ -503,7 +503,7 @@ export const COUNTRY_WEAR = {
 };
 /** The finer lattice about this mountain: made from the coarse one with its detail, and worn again at its own scale. */
 export const NEAR_WEAR = {
-  cell: 9, half: 2600, cut: 45, fill: 20,
+  cell: 7, half: 2600, cut: 45, fill: 20,
   water: { drops: 1.0, life: 70, inertia: 0.1, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.015, gravity: 4, radius: 2, most: 1.6 },
   frost: { passes: 2, repose: 1.9, rate: 0.4 },
 };
@@ -733,7 +733,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     }
   }
   // (If the land is to be worn, it is worn now that its large shape is decided, so that every way and platform after is laid on the worn land.)
-  if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 1.5 };
+  if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 1 };
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.

@@ -79,7 +79,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const insideOuter = (x: number, z: number, m = 0) => b.outerRects.some((r) => x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m);
 
   // ---- the band of coast that is carved: this far in from the cliff top, and this far out over the sea bed
-  const CELL = 0.4, SHEET = 1.2, TILE = 9.6, IN = 8.4, OUT = 11;
+  // (Rock carved at a third of a metre and the sheet laid at a little under a metre: a notch finer than first made.)
+  const CELL = 0.32, SHEET = 0.96, TILE = 9.6, IN = 8.4, OUT = 11;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(g.x0 - 40, false), x1: snap(g.x1 + 40, true), z0: snap(g.z0 - 40, false), z1: snap(g.z1 + 40, true) };
   const nearStack = (x: number, z: number, m: number) => o.stacks.some((s) => Math.hypot(x - s.x, z - s.z) < s.r * 2.2 + m);
@@ -622,8 +623,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
 function layMainland(mesh: MeshBuilder, site: Site, stone: Colour, F: number): void {
   const o = site.island!, m = o.mainland, cx = o.x, cz = o.z, sea = o.sea, seed = (o.x * 7.31 + o.z * 3.17) % 97;
   // (A notch finer than first made: half as many points again round each ring, and the rings closer.)
-  const around = 1080, radii: number[] = [];
-  for (let r = 240; r <= 3400; r += 3 + (r - 240) * 0.011) radii.push(r);
+  const around = 1440, radii: number[] = [];
+  for (let r = 240; r <= 3400; r += 2.4 + (r - 240) * 0.009) radii.push(r);
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(fbm2(x, z, 3, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
     const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);

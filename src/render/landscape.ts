@@ -101,7 +101,7 @@ export function turfColour(x: number, z: number, seed: number): [number, number,
  * before the sheet is laid.
  */
 export function farHeights(cx: number, cz: number, base: number, seed: number): (x: number, z: number) => number {
-  const around = 780;
+  const around = 1040;
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(valueNoise2(x, z, s) * 2 - 1); return v * v; };
   /** Ridges and gullies at a point, between 0 and about 1: `grain` is how many of the broadest to the metre. */
   const relief = (x: number, z: number, grain: number, s: number, spacing: number): number => {
@@ -188,9 +188,9 @@ export function layMountains(
   heights?: HeightFn,
 ): void {
   // (A notch finer than first made: more points round each ring, and the rings closer.)
-  const around = 780;
+  const around = 1040;
   const radii: number[] = [];
-  for (let r = 215; r <= 3050; r += 4.2 + (r - 215) * 0.016) radii.push(r);
+  for (let r = 215; r <= 3050; r += 3.4 + (r - 215) * 0.013) radii.push(r);
   const rings = radii.length;
   const height = heights ?? farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
