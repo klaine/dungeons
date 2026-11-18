@@ -226,6 +226,7 @@ export class Furnisher {
 
     switch (p.name) {
       case 'refectory': {
+        const before = this.tally.placed;
         // Tables end to end down the room, a bench either side of each.
         for (const shift of [0, 1.3, -1.3]) {
           const tables: Rect[] = [];
@@ -237,6 +238,19 @@ export class Furnisher {
             this.bench(rectAlong(a0 + 0.15, a1 - 0.15, b - 0.97, b - 0.65));
           }
           if (tables.length) break;
+        }
+        // (Where the middle of the room must be kept clear, its doors facing one another across it, the tables stand along the long
+        // walls instead, a bench on the inner side of each. Without them a refectory with doors on every side was an empty hall.)
+        if (this.tally.placed === before) {
+          for (const side of longWalls) wallRow(side, Math.min(2.4, long * 0.35), 0.78, 0.5, (r) => {
+            const inner: Rect = side === 'n' ? { ...r, z0: r.z1 + 0.18, z1: r.z1 + 0.5 } : side === 's' ? { ...r, z0: r.z0 - 0.5, z1: r.z0 - 0.18 }
+              : side === 'w' ? { ...r, x0: r.x1 + 0.18, x1: r.x1 + 0.5 } : { ...r, x0: r.x0 - 0.5, x1: r.x0 - 0.18 };
+            // (Shortened a little at each end, as a bench is.)
+            const trim = (q: Rect): Rect => (side === 'n' || side === 's' ? { ...q, x0: q.x0 + 0.15, x1: q.x1 - 0.15 } : { ...q, z0: q.z0 + 0.15, z1: q.z1 - 0.15 });
+            if (!this.table(r)) return false;
+            this.bench(trim(inner));
+            return true;
+          }, 0.3);
         }
         break;
       }
@@ -296,6 +310,24 @@ export class Furnisher {
       case 'reliquary':
       case 'antechamber': {
         shelves(2);
+        break;
+      }
+      // An undercroft is where a house keeps what it lays by: barrels and crates gathered in its corners, shelves along a wall.
+      // (It was left bare, a vault of nothing.)
+      case 'undercroft': {
+        const order = [0, 1, 2, 3].sort(() => rng.next() - 0.5);
+        cluster(order[0]);
+        cluster(order[1]);
+        cluster(order[2]);
+        shelves(2);
+        break;
+      }
+      // What someone hid away: a chest or two and a shelf of things, left in the dust.
+      case 'hidden chamber': {
+        const [x, z] = corners[rng.int(0, 3)];
+        this.crate(x + (x < cx ? 0.25 : -0.25), z + (z < cz ? 0.25 : -0.25), 0.7, rng.chance(0.4));
+        this.crate(cx + rng.range(-0.6, 0.6), cz + rng.range(-0.6, 0.6), 0.55);
+        shelves(1);
         break;
       }
       default:
