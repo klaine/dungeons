@@ -283,6 +283,8 @@ export class Atmosphere {
       uShadeFoot: uniform(0),
       uShadePeak: uniform(new Vector4(0, 0, 0, 0)),
       uDeckSun: uniform(new Vector3(2, 2, 2)),
+      // The ridge the way comes up out of the cloud by (x, z of one end and of the other), over which no heaps of cloud stand.
+      uDeckSpur: uniform(new Vector4(0, 0, 0, 0)),
       uDeckAir: uniform(new Vector3(0.6, 0.7, 0.8)),
     });
     const sky = (this.sky = skyParts(u, cloudSteps));
@@ -333,7 +335,22 @@ export class Atmosphere {
       const small = u.tCloud.sample(vec3(xz.x.div(210), 0.67, xz.y.div(210)).add(u.uCloudDrift.mul(vec3(1.7, 0, 1.7)))).level(0).r;
       // And here and there, where a great swell and a heap coincide, the cloud towers up: heads standing well over the rest.
       const tower = pow(smoothstep(0.5, 0.78, big), 2).mul(smoothstep(0.38, 0.7, vast)).mul(u.uDeck.y.mul(2.6));
-      return u.uDeck.x.add(smoothstep(0.3, 0.72, vast).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, big).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, small).mul(2).sub(1).mul(u.uDeck.y.mul(0.62))).add(tower);
+      // And on all that, heaps: domes some hundreds of metres across standing tens of metres over the sea, rounded over the top and
+      // falling steeply between, with smaller heads on them, as the tops of a sea of cloud are; banked up against the mountain as
+      // well. Not over the ridge the way comes up out of the cloud by, where the player would be kept in the fog a long while.
+      // (Without them its top was a sheet with swells in it a few metres high: from above, a flat white disc with the mountain in it.)
+      const sa: N = u.uDeckSpur.xy, sb: N = u.uDeckSpur.zw, along: N = sb.sub(sa), l2: N = max(dot(along, along), 1);
+      const onSpur: N = length(xz.sub(sa.add(along.mul(clamp(dot(xz.sub(sa), along).div(l2), 0, 1)))));
+      const room: N = select(l2.greaterThan(2), smoothstep(45, 170, onSpur), float(1));
+      // (Read from the same noise as the swells and billows, which costs nothing more: a line of sight reads this some fifty times.)
+      const heapN: N = big;
+      const heap: N = sqrt(smoothstep(0.46, 0.84, big.add(vast.sub(0.5).mul(0.3)))).toVar();
+      const heads: N = sqrt(smoothstep(0.5, 0.86, small)).mul(smoothstep(0.15, 0.6, heap));
+      // (Against the mountain it banks up, as cloud driven against a cliff does, in heaps of its own.)
+      const toBody: N = select(u.uShadeBody.z.greaterThan(0.5), length(xz.sub(u.uShadeBody.xy)).sub(u.uShadeFoot), float(1e4));
+      const bank: N = smoothstep(260, 15, toBody).mul(heapN.mul(0.7).add(0.3)).mul(3.2);
+      const heaped: N = heap.mul(5.5).add(heads.mul(2.2)).add(bank).mul(u.uDeck.y).mul(room);
+      return u.uDeck.x.add(smoothstep(0.3, 0.72, vast).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, big).mul(2).sub(1).mul(u.uDeck.y)).add(smoothstep(0.3, 0.72, small).mul(2).sub(1).mul(u.uDeck.y.mul(0.62))).add(tower).add(heaped);
     };
     // (The same with its smallest knobs on, for how it is lit where it is looked at: too fine to matter to where a line of sight meets it.)
     const deckFine = (xz: N): N => deckHeight(xz).add(u.tCloud.sample(vec3(xz.x.div(64), 0.87, xz.y.div(64)).add(u.uCloudDrift.mul(vec3(3.1, 0, 3.1)))).level(0).g.sub(0.5).mul(u.uDeck.y.mul(0.5)));
@@ -353,23 +370,31 @@ export class Atmosphere {
         out.assign(vec4(u.uDeckAir.mul(1.1).add(u.uDeckSun.mul(0.35)).mul(lightness), one(exp(through.mul(thick).negate()))));
         far.assign(0);
       }).ElseIf(rd.y.lessThan(-0.0004), () => {
-        const top: N = u.uDeck.x.add(amp.mul(2.05)), bottom: N = u.uDeck.x.sub(amp).sub(u.uDeck.y.mul(u.uDeckGap.y).mul(step(0.01, u.uDeck.w)));
+        const top: N = u.uDeck.x.add(amp.mul(2.05)).add(u.uDeck.y.mul(7.7)), bottom: N = u.uDeck.x.sub(amp).sub(u.uDeck.y.mul(u.uDeckGap.y).mul(step(0.01, u.uDeck.w)));
         const t0: N = max(top.sub(ro.y).div(rd.y), 0).toVar();
         const tBottom: N = bottom.sub(ro.y).div(rd.y).toVar();
         const t1: N = min(min(tBottom, reach), 40000).toVar();
         If(t1.greaterThan(t0), () => {
           // Walked from where the line of sight comes down past the highest billows to where it passes the lowest, or meets the land.
-          const dt: N = t1.sub(t0).div(30).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
+          const dt: N = t1.sub(t0).div(38).toVar(), t: N = t0.add(dt.mul(jitter.mul(0.5))).toVar();
           const prev: N = ro.y.add(rd.y.mul(t)).sub(deckHeight(ro.xz.add(rd.xz.mul(t)))).toVar();
           const hit: N = float(-1).toVar();
-          Loop(30, () => {
+          // (And the cloud's top is not a hard skin: over it lies a fringe a few metres deep, thinning upward, which the line of sight
+          // gathers on its way down, so the heaps' edges against what is behind them are soft.)
+          // (The fringe is taken as deep as one step of the walk falls, if that is more than its few metres, and as thin in proportion,
+          // or the steps, tens of metres long for a line of sight that grazes the cloud, catch it or miss it in bands. And none over a
+          // break, where there is no cloud.)
+          const fringe: N = float(0).toVar(), fall: N = max(dt.mul(rd.y.negate()).mul(1.2), 6).toVar();
+          Loop(38, () => {
             t.addAssign(dt);
             const p: N = ro.add(rd.mul(t)).toVar();
-            const d: N = p.y.sub(deckHeight(p.xz)).toVar();
+            const gap: N = deckOpen(p.xz).toVar();
+            const d: N = p.y.sub(deckWhole(p.xz).sub(gap.mul(u.uDeck.y).mul(u.uDeckGap.y))).toVar();
             If(d.lessThan(0), () => {
               hit.assign(t.sub(dt.mul(d.div(d.sub(prev)))));
               Break();
             });
+            fringe.addAssign(exp(d.div(fall).negate()).mul(dt).mul(float(6).div(fall)).mul(one(smoothstep(0.3, 0.8, gap))));
             prev.assign(d);
           });
           // (A line of sight that reaches the lowest billows without meeting the land is in the cloud there, whatever the walk found.)
@@ -408,6 +433,12 @@ export class Atmosphere {
             // (In a break there is no cloud: thinning to nothing towards its middle, with the cloud's walls standing round it.)
             out.assign(vec4(colour, one(exp(reach.sub(hit).div(-16))).mul(one(smoothstep(0.5, 0.95, deckOpen(p.xz))))));
             far.assign(hit);
+          });
+          // The fringe: lit as the cloud's tops are, a little paler, laid over whatever the line of sight met or went on to.
+          const veil: N = one(exp(fringe.mul(-0.012))).mul(0.6).toVar();
+          If(veil.greaterThan(0.002), () => {
+            const tint: N = u.uDeckSun.mul(0.62).add(u.uDeckAir.mul(0.55));
+            out.assign(vec4(mix(select(out.w.greaterThan(0), out.xyz, tint), tint, veil), max(out.w, veil)));
           });
         });
       });

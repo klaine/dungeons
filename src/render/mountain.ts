@@ -1302,7 +1302,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       // (And bare ground is scree: stones of the mountain's own rock, its colour and as pale.)
       bare: [0.42 * (rockKind.dark[0] + rockKind.pale[0]) * outcrop[0], 0.42 * (rockKind.dark[1] + rockKind.pale[1]) * outcrop[1], 0.43 * (rockKind.dark[2] + rockKind.pale[2]) * outcrop[2], 1] },
     deck: {
-      level: deck, billow: m.billow, breaks: m.breaks ?? 0,
+      level: deck, billow: m.billow, breaks: m.breaks ?? 0, spur: [m.spur.from[0], m.spur.from[1], m.spur.to[0], m.spur.to[1]],
       shade: (() => {
         const mean = m.rim.reduce((sum, r) => sum + r, 0) / m.rim.length, pk = m.peaks[0];
         return { x: m.x, z: m.z, top: F, rTop: mean * 0.92, rFoot: mean + (F - deck) * 0.75, px: m.cairn?.x ?? pk.x, pz: m.cairn?.z ?? pk.z, pr: pk.r * 0.9, py: m.cairn?.y ?? F + pk.height };
@@ -1395,8 +1395,8 @@ function plantMountain(c: MountainPlanting): Record<string, number> {
  * is white but the steep faces; in summer only the high peaks keep their snow.
  */
 /** The range's sheet: points round each ring, and how far out from one ring the next lies. */
-const RANGE_AROUND = 1280;
-const rangeStep = (r: number) => 1 + r * 0.006;
+const RANGE_AROUND = 1792;
+const rangeStep = (r: number) => 0.8 + r * 0.0043;
 
 /**
  * How far each point of the range lies in the shadow of the land between it and the sun, from 0 (in the sun) to 1. The sun's

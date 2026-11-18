@@ -642,6 +642,7 @@ async function start(): Promise<void> {
     u.uDeckGap.value.set(0.5 - 0.22 * u.uDeck.value.w, 7, 0.08 * u.uDeck.value.w, 0);
     const sh = desc.deck.shade;
     if (sh) { u.uShadeBody.value.set(sh.x, sh.z, sh.rTop, sh.top); u.uShadeFoot.value = sh.rFoot; u.uShadePeak.value.set(sh.px, sh.pz, sh.pr, sh.py); }
+    if (desc.deck.spur) u.uDeckSpur.value.set(...desc.deck.spur);
     u.uDeckSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.27);
     u.uDeckAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.0);
   }

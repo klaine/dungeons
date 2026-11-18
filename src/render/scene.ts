@@ -155,6 +155,8 @@ export interface SceneDescription {
     breaks?: number;
     /** The mountain, for the shadow it throws on the cloud: its body's middle, how broad at its top and at the cloud, and its top's level; its summit's place, breadth at the foot, and height. */
     shade?: { x: number; z: number; top: number; rTop: number; rFoot: number; px: number; pz: number; pr: number; py: number };
+    /** The ridge the way comes up out of the cloud by, from one end to the other (x, z, x, z): no heaps of cloud stand over it. */
+    spur?: [number, number, number, number];
   };
   /** How sharply the place's rock breaks, 0 to 1, if not as its stone does elsewhere: a mountain's is frost-shattered. */
   rockSharp?: number;

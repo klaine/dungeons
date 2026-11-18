@@ -666,20 +666,57 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   const tone = crown.x.mul(0.36).add(0.74).mul(crown.w.mul(0.4).add(0.8));
   land = mix(land, green.mul(mix(0.84, tone, seen)).mul(mix(0.6, 1, smoothstep(0.3, 0.7, n0.y))), mix(max(wood, one(smoothstep(0.3, 0.6, n0.y)).mul(step(high, 0.5)).mul(0.9)), standing, seen).mul(step(0.0001, wood)));
   const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(step(0.0001, wood)))).toVar();
+  // The rock of a steep face, finer than the sheet can hold: gullies some twenty metres apart and ribs some seven, running down the
+  // face and wandering; the ledges where its beds come out across it, every ten metres or so; and the chips and edges of the rock.
+  // As light and shade, and as where snow can lie. Each size is let go only when it is smaller than a point of the picture, so a
+  // face a mile off still has its rock. (Without it a face far off was smooth between the sheet's points, ten or twenty metres
+  // apart: a cast, not a mountain.)
+  // (Only on the heights: the low country seen far below through a break in the cloud is wood and pasture, and the rock drawn on it
+  // there came out as ripples.)
+  const rocky: N = sstep(0.86, 0.6, n0.y).mul(one(wood)).mul(smoothstep(0.3, 0.55, high)).toVar();
+  const flatOut: N = vec2(n0.x, n0.z).toVar();
+  const outward: N = flatOut.div(max(length(flatOut), 0.001)).toVar();
+  const alongDir: N = vec2(outward.y.negate(), outward.x).toVar();
+  const sAt: N = dot(fp, alongDir).toVar();
+  // (Each size kept while it is at least four or five points of the picture across.)
+  const o1: N = one(smoothstep(2.2, 4.5, grain)).toVar(), o2: N = one(smoothstep(0.9, 1.8, grain)).toVar(), o3: N = one(smoothstep(0.35, 0.7, grain)).toVar();
+  const ridgeOf = (q: N): N => { const v = one(abs(farNoise(q).mul(2).sub(1))); return v.mul(v); };
+  const reliefAt = (sx: N, y: N): N => {
+    const w = farNoise(vec2(sx.div(37), y.div(61)).add(5.3));
+    const gully = ridgeOf(vec2(sx.div(19).add(w.mul(1.6)), y.div(48)).add(1.7)).mul(o1);
+    const rib = ridgeOf(vec2(sx.div(7.3).add(w.mul(2.4)), y.div(17)).add(8.2)).mul(0.5).mul(o2);
+    // (The beds dip, and fold a little, and are of all thicknesses; and a ledge comes and goes along each, as the rock breaks. Even
+    // and unbroken, they drew a face as a model drawn in contours.)
+    const bedY = y.add(sx.mul(0.09)).add(farNoise(vec2(sx.div(70), y.div(90)).add(2.1)).mul(16)).toVar();
+    const bedK = floor(bedY.div(11)), beds = fract(bedY.div(11)).toVar();
+    const thick = farNoise(vec2(bedK.mul(0.73), 7.7));
+    const ledge = smoothstep(0.55 + 0.0, 0.9, beds).mul(one(smoothstep(0.9, 1, beds))).mul(0.45).mul(o2)
+      .mul(smoothstep(0.42, 0.72, farNoise(vec2(sx.div(17), bedK.mul(1.31)).add(4.4)))).mul(step(0.35, thick));
+    const chip = farNoise(vec2(sx.div(2.6), y.div(3.1)).add(3.3)).mul(0.25).mul(o3);
+    return gully.add(rib).add(ledge).add(chip);
+  };
+  const r0: N = reliefAt(sAt, P.y).toVar();
+  const rs: N = reliefAt(sAt.add(1.2), P.y).sub(r0).div(1.2), ry: N = reliefAt(sAt, P.y.add(1.2)).sub(r0).div(1.2);
+  const upFace: N = normalize(vec3(0, 1, 0).sub(n0.mul(n0.y)).add(vec3(0, 0.0001, 0))).toVar();
+  const faceN: N = normalize(farN.sub(vec3(alongDir.x, 0, alongDir.y).mul(rs).add(upFace.mul(ry.mul(upFace.y))).mul(3.4).mul(rocky))).toVar();
+  // (And darker down in the gullies and cracks, paler on the ribs; and the sky's light reaches less far into them, so a face in the
+  // shade, which has no sun to model it, still shows its rock. In the shade it had looked as smooth as ever.)
+  const cavity: N = mix(1, mix(0.55, 1.18, smoothstep(0.05, 1.1, r0)), rocky.mul(0.9)).toVar();
+  land = land.mul(cavity);
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
   // (On a face too steep to hold it, snow still lodges in the gullies and on the ledges of the beds, and lies down the face in
   // streaks and bands; without them a steep face high up was all one dark grey.)
   const lodged: N = max(hollow, 0).mul(0.5).add(max(run.negate(), 0).mul(3).mul(sloping).mul(smoothstep(0.32, 0.62, broad.add(fine.sub(0.5).mul(0.3))))).add(step(0.7, bed).mul(smoothstep(0.42, 0.56, fine.add(broad.sub(0.5).mul(0.8)))).mul(0.42).mul(steep)).toVar();
-  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(lodged.mul(-0.4).add(0.5), lodged.mul(-0.4).add(0.72), farN.y)).toVar();
+  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(lodged.mul(-0.4).add(0.5), lodged.mul(-0.4).add(0.72), faceN.y)).toVar();
   land = mix(land, vec3(1.3, 1.34, 1.42), snow);
   // Water, where the sheet says there is some (in the field other materials use for moss): a lake in a valley floor far below, dark,
   // taking the sky's colour, and bright where the sun is on it.
   const water: N = smoothstep(0.5, 0.9, f.x).toVar();
   m.colorNode = vec4(mix(land.mul(mix(gullied, 1, snow.mul(0.7))), uFallback.mul(vec3(0.16, 0.24, 0.3)).add(vec3(0.012, 0.02, 0.028)), water), 1);
   m.roughnessNode = mix(float(1), 0.16, water);
-  m.normalNode = transformNormalToView(normalize(mix(farN, vec3(0, 1, 0), water)));
+  m.normalNode = transformNormalToView(normalize(mix(faceN, vec3(0, 1, 0), water)));
   // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
   // field other materials use for damp. Sheets that do not reckon it say none.)
-  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(farN.y.mul(0.45))), bakedAt(farN), uBake), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
+  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
   return m;
 }

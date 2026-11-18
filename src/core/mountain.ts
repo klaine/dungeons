@@ -456,6 +456,19 @@ function countryDetailed(m: Mountain, floor: number, x: number, z: number): numb
 /** Where a point lies on the faces of the horn of the range's mountain `k`, as `hornFace` gives it. Reused, not made anew. */
 const FACE = { th: 0, th2: 0, ax: 1, az: 0 };
 /**
+ * How far out from its summit a horn's faces are cut back: no further than the mountain's own breadth, and far enough that a face,
+ * from the summit down to the valley floors under the cloud that it stands up from, is no steeper than about forty-five degrees on
+ * the whole. (The whole height is some three quarters of the summit's over the floors. At fifty-five, what stood over the cloud,
+ * the top third of it, still stood as a spire.)
+ */
+function hornBase(m: Mountain, k: number): number {
+  const q = m.range[k], faces = 4 + (k % 2);
+  return Math.max(q.r * 1.15 * 1.05 * Math.cos(Math.PI / faces), (0.75 * (q.height + 690)) / 1.12);
+}
+/** How far from its summit a horn's faces reach at most, along an arête: beyond that it has none. */
+const hornExtent = (m: Mountain, k: number) => hornBase(m, k) * 1.12 * 2.15;
+
+/**
  * Where a point lies on the faces of the horn of the range's mountain `k`: `th`, how far out on the face it is furthest out on
  * (0 at the summit, 1 at the foot), and `th2` the same for the next face, so that where the two are nearly equal is an arête; and
  * which way that face looks (`ax`, `az`). Its faces are planes, each cut back by the ice a distance of its own and turned a little
@@ -463,15 +476,17 @@ const FACE = { th: 0, th2: 0, ax: 1, az: 0 };
  * angles; a point belongs to whichever face it is furthest out on, as on a solid cut by planes.
  */
 function hornFace(m: Mountain, k: number, x: number, z: number, seed: number): typeof FACE {
-  const q = m.range[k], reach = q.r * 1.15, faces = 3 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
-  const px = x - q.x, pz = z - q.z, base = reach * 0.95 * Math.cos(sector / 2);
+  // (Four or five faces, and cut back no further than the mountain's own breadth: with three, and steep, they stood as spires.)
+  const q = m.range[k], reach = q.r * 1.15, faces = 4 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
+  const px = x - q.x, pz = z - q.z, base = hornBase(m, k);
   let th = -Infinity, th2 = -Infinity, ax = 1, az = 0;
   for (let f = 0; f < faces; f++) {
     const a = turn + f * sector + 0.3 * Math.sin(k * 4.1 + f * 2.3), cut = base * (0.84 + 0.28 * (0.5 + 0.5 * Math.sin(k * 7.3 + f * 3.7)));
     const t = (px * Math.cos(a) + pz * Math.sin(a)) / cut;
     if (t > th) { th2 = th; th = t; ax = Math.cos(a); az = Math.sin(a); } else if (t > th2) th2 = t;
   }
-  FACE.th = th; FACE.th2 = th2; FACE.ax = ax; FACE.az = az;
+  // (Its summit is not a point: the faces are eased together over the top, into a short crest.)
+  FACE.th = Math.sqrt(th * th + 0.004) - 0.063; FACE.th2 = Math.sqrt(th2 * th2 + 0.004) - 0.063; FACE.ax = ax; FACE.az = az;
   return FACE;
 }
 
@@ -487,9 +502,10 @@ function hornRelief(m: Mountain, x: number, z: number, octaves: number, seed: nu
   let best = 0, out = 0;
   for (let k = 0; k < m.range.length; k++) {
     const q = m.range[k];
-    if (q.height < 180) continue;
+    if (q.height < 150) continue;
     const reach = q.r * 1.15, dx = x - q.x, dz = z - q.z;
-    if (dx * dx + dz * dz > reach * reach * 1.7) continue;
+    const ext = hornExtent(m, k);
+    if (dx * dx + dz * dz > ext * ext) continue;
     const { th, th2, ax, az } = hornFace(m, k, x, z, seed);
     if (th >= 1) continue;
     // (The horn that stands highest over this point has it.)
@@ -500,7 +516,7 @@ function hornRelief(m: Mountain, x: number, z: number, octaves: number, seed: nu
     const w = Math.min(150, Math.max(50, reach * 0.085)), face = smooth(th / 0.05) * smooth((1 - th) / 0.35);
     // Ribs and gullies: ridged noise drawn out down the fall line, its lines warped so that they wander, join and part.
     const u = across / w + 0.9 * fbmd(across / (w * 4) + k, fall / (w * 4), 2, seed + 61), v = fall / (w * 2.6);
-    const oct = Math.max(1, Math.min(4, Math.ceil(octaves - 2.5)));
+    const oct = Math.max(1, Math.min(5, Math.ceil(octaves - 2)));
     const rib = ridgedFbm(u, v, oct, seed + 63);
     // The arêtes: towers and gaps along them, as high as the ribs are deep.
     const tower = ridgedFbm(fall / (w * 0.7) + k * 3.3, th2 * 3 + k, Math.min(3, oct), seed + 65);
@@ -538,7 +554,7 @@ function countryShape(m: Mountain, floor: number, x: number, z: number): number 
     // (A horn is a pyramid of three or four faces, a little hollowed by the ice that cut them, with arêtes on its edges: not a cone,
     // and not a needle either, its faces at forty-five degrees and more but not much more. Only the
     // mountains that stand well over the cloud have one; the rest are what the noise makes of them.)
-    if (q.height < 180 || d > reach * 1.6) continue;
+    if (q.height < 150 || d > Math.max(reach * 1.6, hornExtent(m, k))) continue;
     // Its faces are planes of their own depth and turn (`hornFace`), each hollowed, steeper towards the summit.
     const { th, th2, ax, az } = hornFace(m, k, x, z, seed), px = x - q.x, pz = z - q.z;
     if (th >= 1) continue;
@@ -550,7 +566,8 @@ function countryShape(m: Mountain, floor: number, x: number, z: number): number 
     const across = -px * az + pz * ax, fall = px * ax + pz * az, w = Math.min(230, Math.max(80, reach * 0.13)), arete = 1 - smooth((th - th2) / 0.07);
     const n = fbmd(across / w + k * 3.1 + 0.25 * fbmd(fall / (w * 2.5), k, 1, seed + 49), fall / (w * 5), 2, seed + 47);
     const couloir = Math.pow(Math.max(0, 1 - Math.abs(n) / 0.2), 1.5) * smooth(th / 0.12) * smooth((0.97 - th) / 0.3) * (1 - arete);
-    const shape = 0.97 * Math.pow(1 - th, 1.4);
+    // (Its faces nearly straight from the summit down: hollowed, they steepened towards the top, which is all that shows over the cloud.)
+    const shape = 0.97 * Math.pow(Math.max(0, 1 - th), 1.05);
     const band = 0.014 * smooth((Math.sin(shape * 38 + 3 * fbmd(across / (w * 3), fall / (w * 3), 1, seed + 51)) - 0.55) / 0.3);
     const notch = 0.08 * arete * smooth((ridgedFbm(fall / (w * 0.8) + k * 5.3, k * 2.9, 2, seed + 53) - 0.35) / 0.4) * smooth(th / 0.08);
     horn = Math.max(horn, shape * (0.85 + 0.15 * ridgedFbm(x / 380 + k, z / 380, 3, seed + 43)) * (1 - 0.16 * couloir - notch) - band * (1 - th));
@@ -1087,12 +1104,15 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // (Far off, beyond them all, a few giants: the great range this mountain is an outlier of.)
     for (let k = 0, n = q.int(5, 8), a0 = q.range(0, TAU); k < n; k++) {
       const a = a0 + q.range(-0.5, 0.5) + (k / n) * q.range(2.2, 3.6), d = q.range(3700, 6200);
-      m.range.push({ x: round(m.x + Math.cos(a) * d), z: round(m.z + Math.sin(a) * d), r: round(q.range(1000, 1700)), height: round(q.range(480, 1050)) });
+      // (Their heights over the cloud: some hundreds of metres, not a thousand. Higher, standing as near as they do, they towered
+      // over the top like spires in a drawing.)
+      m.range.push({ x: round(m.x + Math.cos(a) * d), z: round(m.z + Math.sin(a) * d), r: round(q.range(1000, 1700)), height: round(q.range(340, 700)) });
     }
     for (let tries = 0; tries < 900 && m.range.length < want; tries++) {
       const a = q.range(0, TAU), d = q.range(520, 3300);
-      const big = q.chance(0.2 + 0.25 * smooth((d - 1400) / 1500));
-      const height = round(big ? q.range(260, 650) : q.range(25, 230) * (0.55 + 0.45 * smooth((d - 520) / 1500)));
+      // (The great ones not within a kilometre or so: broad as they are, their faces would reach the top's own ground.)
+      const big = q.chance(0.2 + 0.25 * smooth((d - 1400) / 1500)) && d > 1100;
+      const height = round(big ? q.range(180, 420) : q.range(25, 200) * (0.55 + 0.45 * smooth((d - 520) / 1500)));
       const r = round(q.range(300, 700) * (big ? 1.6 : 1) * (0.7 + 0.3 * smooth((d - 520) / 900)));
       const x = round(m.x + Math.cos(a) * d), z = round(m.z + Math.sin(a) * d);
       if (m.range.some((p) => Math.hypot(p.x - x, p.z - z) < (p.r + r) * 0.45)) continue;
@@ -1102,9 +1122,10 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // what is seen is a massif with a skyline, not a cone.
     for (const p of [...m.range]) {
       if (p.height < 120) continue;
-      for (let k = 0, n = q.int(2, 4); k < n; k++) {
-        const a = q.range(0, TAU), d = p.r * q.range(0.28, 0.6);
-        m.range.push({ x: round(p.x + Math.cos(a) * d), z: round(p.z + Math.sin(a) * d), r: round(p.r * q.range(0.45, 0.7)), height: round(p.height * q.range(0.5, 0.86)) });
+      // (One to three, well below it: four, nearly as high, made a cluster of spires.)
+      for (let k = 0, n = q.int(1, 3); k < n; k++) {
+        const a = q.range(0, TAU), d = p.r * q.range(0.32, 0.65);
+        m.range.push({ x: round(p.x + Math.cos(a) * d), z: round(p.z + Math.sin(a) * d), r: round(p.r * q.range(0.5, 0.75)), height: round(p.height * q.range(0.42, 0.72)) });
       }
     }
   }
