@@ -978,6 +978,160 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   }
 }
 
+/**
+ * A classical house of wood, as the small towns of the north built them in the early nineteenth century: one storey, sometimes two,
+ * on a basement of rough granite with low windows in it, its floor a metre or more over the street; walls of weatherboards painted
+ * ochre, red, yellow, green or grey, with broad white boards at the corners carrying a little cap, a white band at each floor and a
+ * frieze under the eaves; tall windows of six panes in white surrounds, each with a cornice over it and on the front a panel under
+ * it; the door in an end wall near the front, up stone steps under a little roof on brackets; and a low hipped roof of dark sheet
+ * metal laid in seams, with plastered chimneys and half-round dormers lighting the attic. With a wing it is an L, as at a street
+ * corner, the wing finished as the main block is. Its door is shut: it is seen, and not gone into.
+ */
+function woodenHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
+  const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, poly, wedge } = k;
+  const W = b.w, D = b.d, Bm = b.basement ?? 1.1, N = b.storeys, paint = b.colour, T = 0.22;
+  const floorY = (s: number) => Bm + b.heights.slice(0, s).reduce((sum, h) => sum + h, 0), top = floorY(N);
+  const white: Colour = [0.9, 0.89, 0.85], backing = shade(paint, 0.35), roofTone: Colour = rng.pick([[0.11, 0.11, 0.12], [0.19, 0.2, 0.21], [0.27, 0.29, 0.3], [0.3, 0.19, 0.15]] as Colour[]);
+  const leaf: Colour = rng.pick([[0.42, 0.1, 0.08], [0.12, 0.2, 0.15], [0.35, 0.25, 0.15], [0.86, 0.85, 0.8]] as Colour[]);
+  const granite = (q: number): Colour => { const g = 0.52 + 0.22 * q; return [g * (0.9 + 0.25 * stone[0]) * 0.92, g * (0.86 + 0.2 * stone[1]) * 0.9, g * (0.86 + 0.2 * stone[2]) * 0.88]; };
+  // The faces: the main block's four, and each wing's three (its outer side, its inner side and its far end).
+  const [front, right, back, left] = k.walls(0);
+  const wings = (b.wings ?? []).map((g) => {
+    const s = g.side, L = g.length;
+    return { g, faces: [
+      { f: { L, P: (a: number, y: number, t: number) => at(s * (W / 2 - t), y, s > 0 ? D + a : D + L - a) } as Face, kind: 'side' },
+      { f: { L, P: (a: number, y: number, t: number) => at(s * (W / 2 - g.width + t), y, s > 0 ? D + L - a : D + a) } as Face, kind: 'yard' },
+      { f: { L: g.width, P: (a: number, y: number, t: number) => at(s * (W / 2 - a), y, D + L - t) } as Face, kind: 'yard' },
+    ] };
+  });
+  // (The end wall a wing stands against is hidden where the wing is: no windows in it there.)
+  const winged = (side: number) => (b.wings ?? []).find((g) => g.side === side);
+  const faces: { f: Face; kind: 'front' | 'side' | 'yard'; door?: number; skip?: [number, number] }[] = [
+    { f: front, kind: 'front' },
+    { f: right, kind: 'side', door: b.endDoor === 1 ? 1.5 : undefined },
+    { f: back, kind: 'yard', skip: winged(1) || winged(-1) ? [winged(1) ? 0 : W - (winged(-1)!.width), winged(1) ? winged(1)!.width : W] : undefined },
+    { f: left, kind: 'side', door: b.endDoor === -1 ? D - 1.5 : undefined },
+    ...wings.flatMap((w) => w.faces.map((q) => ({ f: q.f, kind: q.kind as 'side' | 'yard' }))),
+  ];
+  for (const { f, kind, door, skip } of faces) {
+    const n = kind === 'front' ? b.bays : Math.max(1, Math.round((f.L - 1.4) / 2.3)), margin = kind === 'front' ? 1.0 : 0.9, pitch = (f.L - 2 * margin) / n;
+    const centres = Array.from({ length: n }, (_, i) => margin + (i + 0.5) * pitch).filter((c) => !skip || c < skip[0] - 0.8 || c > skip[1] + 0.8);
+    const openings: Gap[][] = Array.from({ length: N }, () => []), cellar: Gap[] = [];
+    let doorGap: Gap | null = null;
+    if (door !== undefined) doorGap = { s0: door - 0.62, s1: door + 0.62, y0: Bm - 0.01, y1: Bm + 2.35 };
+    for (const c of centres) {
+      if (doorGap && Math.abs(c - door!) < 1.5) continue;
+      for (let st = 0; st < N; st++) { const fy = floorY(st), h = b.heights[st]; openings[st].push({ s0: c - 0.55, s1: c + 0.55, y0: fy + (st ? 0.62 : 0.72), y1: fy + h - (st ? 0.62 : 0.55) }); }
+      cellar.push({ s0: c - 0.36, s1: c + 0.36, y0: Bm - 0.62, y1: Bm - 0.18 });
+    }
+    if (doorGap) openings[0].push(doorGap);
+    const all = openings.flat();
+    // The basement: rough granite in courses, each stone its own size and tone and standing a little proud or sunk; the joints dark behind.
+    pierced(f, 'stone', 0, f.L, -0.45, Bm, 0.03, T + 0.06, shade(granite(0.3), 0.4), cellar);
+    for (let y = -0.45, row = 0; y < Bm - 0.01; row++) {
+      const hgt = Math.min(Bm - y, rng.range(0.26, 0.42));
+      for (let a = -0.08 - (row % 2) * rng.range(0.1, 0.4); a < f.L + 0.08;) {
+        const len = rng.range(0.35, 0.95), s0 = Math.max(-0.08, a), s1 = Math.min(f.L + 0.08, a + len);
+        if (s1 - s0 > 0.04) pierced(f, 'stone', s0 + 0.012, s1 - 0.012, y + 0.012, y + hgt - 0.012, -0.08 + rng.range(-0.025, 0.02), 0.06, granite(rng.next()), cellar);
+        a += len;
+      }
+      y += hgt;
+    }
+    for (const g of cellar) { glazed(f, g, 2, 1, [0.25, 0.22, 0.2], 0.1); on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.08, g.y0, -0.12, 0.1, granite(0.6)); }
+    // The water table over it, then the wall: a dark backing, and over it the weatherboards, each laid a little proud of the joint over it.
+    on(f, 'wood', -0.1, f.L + 0.1, Bm - 0.06, Bm + 0.12, -0.11, 0.04, white, true);
+    pierced(f, 'wood', 0, f.L, Bm + 0.12, top, 0, T, backing, all);
+    for (let y = Bm + 0.12; y < top - 0.42; y += 0.155) pierced(f, 'wood', 0.2, f.L - 0.2, y, Math.min(top - 0.42, y + 0.142), -0.03, 0, shade(paint, 0.93 + 0.12 * Math.sin(y * 37.7 + f.L)), all);
+    // Corner boards with their caps; a band at each floor; the frieze under the eaves.
+    for (const [a, e] of [[-0.06, 0.32], [f.L - 0.32, f.L + 0.06]]) { on(f, 'wood', a, e, Bm + 0.1, top - 0.4, -0.07, 0.02, white, true); on(f, 'wood', a - 0.04, e + 0.04, top - 0.55, top - 0.4, -0.1, 0.02, white); }
+    for (let st = 1; st < N; st++) on(f, 'wood', 0.3, f.L - 0.3, floorY(st) - 0.1, floorY(st) + 0.12, -0.065, 0.02, white, true);
+    on(f, 'wood', -0.04, f.L + 0.04, top - 0.42, top, -0.05, 0.02, white, true);
+    // The windows: sashes of six panes, a white surround, a sill, a cornice over each; and on the front a panel under those of the ground floor.
+    openings.forEach((row, st) => row.forEach((g) => {
+      if (g === doorGap) return;
+      glazed(f, g, 2, 3, white, 0.08);
+      for (const [a, e] of [[g.s0 - 0.13, g.s0], [g.s1, g.s1 + 0.13]]) on(f, 'wood', a, e, g.y0 - 0.05, g.y1 + 0.05, -0.06, 0.02, white, true);
+      on(f, 'wood', g.s0 - 0.2, g.s1 + 0.2, g.y0 - 0.1, g.y0, -0.12, 0.04, white, true);
+      on(f, 'wood', g.s0 - 0.17, g.s1 + 0.17, g.y1 + 0.05, g.y1 + 0.22, -0.07, 0.02, white, true);
+      on(f, 'wood', g.s0 - 0.24, g.s1 + 0.24, g.y1 + 0.22, g.y1 + 0.3, -0.15, 0.02, white, true);
+      if (kind === 'front' && st === 0 && g.y0 - 0.85 > Bm + 0.2) {
+        const p0 = g.y0 - 0.72, p1 = g.y0 - 0.2;
+        for (const [a, e, y0, y1] of [[g.s0 - 0.05, g.s1 + 0.05, p0, p0 + 0.06], [g.s0 - 0.05, g.s1 + 0.05, p1 - 0.06, p1], [g.s0 - 0.05, g.s0 + 0.01, p0, p1], [g.s1 - 0.01, g.s1 + 0.05, p0, p1]]) on(f, 'wood', a, e, y0, y1, -0.06, 0.01, white);
+      }
+    }));
+    if (doorGap) {
+      const g = doorGap, mid = (g.s0 + g.s1) / 2;
+      // Two leaves, shut, panelled; a light over them; the surround; a little roof on two brackets; and steps of stone up from the street.
+      for (const [a, e] of [[g.s0 + 0.02, mid - 0.01], [mid + 0.01, g.s1 - 0.02]]) {
+        on(f, 'wood', a, e, g.y0 + 0.02, g.y1 - 0.42, 0.04, 0.09, leaf, true);
+        for (const [y0, y1] of [[g.y0 + 0.2, g.y0 + 0.85], [g.y0 + 1.05, g.y1 - 0.62]]) on(f, 'wood', a + 0.08, e - 0.08, y0, y1, 0.0, 0.04, shade(leaf, 1.15), true);
+      }
+      glazed(f, { s0: g.s0 + 0.04, s1: g.s1 - 0.04, y0: g.y1 - 0.38, y1: g.y1 - 0.04 }, 3, 1, white, 0.06);
+      on(f, 'wood', g.s0, g.s1, g.y1 - 0.44, g.y1 - 0.38, 0.0, 0.1, white);
+      for (const [a, e] of [[g.s0 - 0.16, g.s0], [g.s1, g.s1 + 0.16]]) on(f, 'wood', a, e, g.y0, g.y1 + 0.08, -0.07, 0.02, white, true);
+      const r0 = g.y1 + 0.35, out = 1.1;
+      wedge(f.P(g.s0 - 0.45, r0, -out), f.P(g.s1 + 0.45, r0, -out), f.P(mid, r0 + 0.45, -out), f.P(0, 0, 0.02).sub(f.P(0, 0, -out)), ['metal', roofTone], ['wood', white], ['wood', white]);
+      for (const a of [g.s0 - 0.3, g.s1 + 0.3]) stick(f.P(a, g.y1 - 0.2, 0), f.P(a, r0, -out + 0.15), 0.08, 0.08, white);
+      const steps = Math.max(2, Math.ceil(Bm / 0.18)), rise = Bm / steps;
+      for (let i = 0; i < steps; i++) on(f, 'stone', g.s0 - 0.35, g.s1 + 0.35, -0.3, Bm - i * rise, -0.35 - i * 0.32, 0.02, granite(0.55 + 0.1 * (i % 2)));
+    }
+  }
+  // The eaves: a soffit standing out all round, and its fascia.
+  const y = top, e = 0.48;
+  box('wood', -W / 2 - e, W / 2 + e, y, y + 0.06, -e, D + e, white);
+  box('wood', -W / 2 - e, W / 2 + e, y + 0.06, y + 0.2, -e, -e + 0.04, white);
+  box('wood', -W / 2 - e, W / 2 + e, y + 0.06, y + 0.2, D + e - 0.04, D + e, white);
+  for (const g of b.wings ?? []) { const ua = g.side > 0 ? W / 2 - g.width : -W / 2, ub = g.side > 0 ? W / 2 : -W / 2 + g.width; box('wood', ua - e, ub + e, y, y + 0.06, D, D + g.length + e, white); }
+  // The roof: low and hipped, of seamed sheet metal; a wing's runs in under the main block's.
+  const slope = Math.tan((24 * Math.PI) / 180), ry = y + 0.2, up = new Vector3(0, 1, 0);
+  const outward = (du: number, dv: number) => at(du, 0, dv).sub(at(0, 0, 0)).add(up);
+  const hip = (u0: number, u1: number, v0: number, v1: number, nearOpen: boolean) => {
+    const half = Math.min(u1 - u0, v1 - v0) / 2, rise = half * slope, alongU = u1 - u0 >= v1 - v0, mu = (u0 + u1) / 2, mv = (v0 + v1) / 2;
+    const r0 = alongU ? at(u0 + half, ry + rise, mv) : at(mu, ry + rise, nearOpen ? v0 : v0 + half), r1 = alongU ? at(u1 - half, ry + rise, mv) : at(mu, ry + rise, v1 - half);
+    const a = at(u0, ry, v0), c = at(u1, ry, v0), g = at(u1, ry, v1), h = at(u0, ry, v1);
+    if (alongU) {
+      poly('metal', [a, c, r1, r0], roofTone, outward(0, -1)); poly('metal', [g, h, r0, r1], roofTone, outward(0, 1));
+      poly('metal', [c, g, r1], roofTone, outward(1, 0)); poly('metal', [h, a, r0], roofTone, outward(-1, 0));
+    } else {
+      poly('metal', [h, a, r0, r1], roofTone, outward(-1, 0)); poly('metal', [c, g, r1, r0], roofTone, outward(1, 0));
+      poly('metal', [g, h, r1], roofTone, outward(0, 1)); if (!nearOpen) poly('metal', [a, c, r0], roofTone, outward(0, -1));
+    }
+    poly('metal', [a, c, g, h], shade(roofTone, 0.6), new Vector3(0, -1, 0));
+    // (Seams up the slopes, a hand proud.)
+    if (alongU) for (let u = u0 + 0.35; u < u1 - 0.2; u += 0.6) {
+      const reach = Math.min(half, u - u0, u1 - u);
+      for (const side of [-1, 1]) stick(at(u, ry + 0.02, side < 0 ? v0 : v1), at(u, ry + reach * slope + 0.02, side < 0 ? v0 + reach : v1 - reach), 0.03, 0.045, shade(roofTone, 0.8), 'metal');
+    }
+    return rise;
+  };
+  const mainRise = hip(-W / 2 - e, W / 2 + e, -e, D + e, false);
+  for (const g of b.wings ?? []) { const ua = g.side > 0 ? W / 2 - g.width : -W / 2, ub = g.side > 0 ? W / 2 : -W / 2 + g.width; hip(ua - e, ub + e, D / 2, D + g.length + e, true); }
+  // Chimneys along the ridge, plastered and dark, each with a cap.
+  const stacks = W > 14 ? 3 : 2, cTone: Colour = rng.pick([[0.16, 0.16, 0.17], [0.55, 0.52, 0.48], [0.4, 0.2, 0.15]] as Colour[]);
+  for (let n = 0; n < stacks; n++) {
+    const u = (-0.5 + (n + 0.5) / stacks) * Math.max(1.5, W - D), v = D / 2 + (n % 2 ? 0.8 : -0.8);
+    box('plaster', u - 0.36, u + 0.36, ry + mainRise * 0.5, ry + mainRise + 1.0, v - 0.3, v + 0.3, cTone);
+    box('plaster', u - 0.44, u + 0.44, ry + mainRise + 1.0, ry + mainRise + 1.12, v - 0.38, v + 0.38, shade(cTone, 0.8));
+  }
+  // Half-round dormers in the front slope, lighting the attic: a fan of glass in a white frame, under a little vault of the roof's metal.
+  for (let n = 0; n < (b.dormers ?? 0); n++) {
+    const u = (-0.5 + (n + 0.5) / (b.dormers ?? 1)) * (W * 0.6), v = 0.35, R = 0.62, sill = ry + (v + e) * slope + 0.05, seg = 9;
+    const arc = (i: number, r: number, dv = 0) => { const a = (i / seg) * Math.PI; return at(u + Math.cos(a) * r, sill + Math.sin(a) * r, v + dv); };
+    const depth = (R + 0.1) / slope + 0.3;
+    for (let i = 0; i < seg; i++) {
+      poly('glass', [at(u, sill, v + 0.06), arc(i, R - 0.08, 0.06), arc(i + 1, R - 0.08, 0.06)], [0.04, 0.05, 0.07], outward(0, -1));
+      stick(arc(i, R - 0.04), arc(i + 1, R - 0.04), 0.08, 0.1, white);
+      k.slope([arc(i + 1, R + 0.05, -0.05), arc(i, R + 0.05, -0.05), arc(i, R + 0.05, depth), arc(i + 1, R + 0.05, depth)], ['metal', roofTone], shade(roofTone, 0.6), 0.05);
+    }
+    stick(at(u - R, sill, v), at(u + R, sill, v), 0.08, 0.1, white);
+    for (const a of [Math.PI / 3, (2 * Math.PI) / 3]) stick(at(u, sill, v + 0.04), at(u + Math.cos(a) * (R - 0.08), sill + Math.sin(a) * (R - 0.08), v + 0.04), 0.03, 0.03, white);
+    // (Its cheeks below the vault, down to the roof.)
+    for (const side of [-1, 1]) poly('metal', [at(u + side * (R + 0.05), sill - 0.05, v - 0.05), at(u + side * (R + 0.05), sill, v + depth), at(u + side * (R + 0.05), sill - 0.3, v + depth)], roofTone, outward(side, 0));
+  }
+  // Downpipes at the front corners.
+  for (const side of [-1, 1]) stick(at(side * (W / 2 + 0.12), 0.25, -0.12), at(side * (W / 2 + 0.12), y + 0.1, -0.12), 0.09, 0.09, shade(roofTone, 1.2), 'metal');
+}
+
 /** Plain solids for other builders to use: a block between two corners, a squared length between two points, a sheet of roof. */
 export function solids(mesh: (material: string) => MeshBuilder) {
   const t = tools({ x: 0, z: 0, w: 0, d: 0, faces: 'w' } as Building, 0, mesh);
@@ -998,6 +1152,16 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
       let storey = 0;
       while (storey < b.storeys - 1 && h > timberFloor(b, storey + 1) - 0.14) storey++;
       return Math.abs(u) < b.w / 2 - 0.24 && v > timberFront(b, storey) + 0.24 && v < b.d - 0.24 && h > 0.4 && h < top + 0.05 ? 0.32 : 1;
+    }, from);
+    return;
+  }
+  if (b.style === 'wooden') {
+    woodenHouse(b, base, noting, rng, stone);
+    // (Shut: what is within its walls is indoors, and nobody sees it.)
+    const turn = b.faces === 'w' ? 1 : -1, rects = footprintOf(b);
+    for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
+      const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+      return rects.some((r) => u > r.u0 + 0.24 && u < r.u1 - 0.24 && v > r.v0 + 0.24 && v < r.v1 - 0.24) && y > base + (b.basement ?? 1) && y < base + floorOf(b, b.storeys) + (b.basement ?? 1) ? 0.32 : 1;
     }, from);
     return;
   }

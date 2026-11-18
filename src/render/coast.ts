@@ -409,44 +409,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   }
 
   // ---- boats, drawn up on the beach or riding in the cove
-  o.boats.forEach((bt, n) => {
-    // (A boat riding in the cove is a mesh of its own, `boat` and its number, so that it can rise and fall with the swell.)
-    const was = wild.group;
-    if (bt.afloat) wild.group = `boat${n}`;
-    const q = rng.fork(`boat${n}`), L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
-    const y = bt.afloat ? sea - depth * 0.45 : c.ground(bt.x, bt.z) + 0.08;
-    const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
-    const at = frame(bt.x, bt.z, y, bt.heading);
-    const tilt = (a: number, h: number, f: number): P3 => at(a * Math.cos(roll) - h * Math.sin(roll), h * Math.cos(roll) + a * Math.sin(roll), f);
-    const paint: Colour = q.pick([[0.12, 0.27, 0.4], [0.5, 0.12, 0.08], [0.18, 0.35, 0.2], [0.75, 0.74, 0.7], [0.55, 0.42, 0.12]] as Colour[]);
-    // The hull: stations from stern to bow, each a rounded bottom and flaring sides; the outside painted, tarred below, the inside bare wood.
-    const S = 9, R = 5, sec: P3[][] = [], inner: P3[][] = [];
-    for (let i = 0; i <= S; i++) {
-      const f = -L + (2 * L * i) / S, t = i / S, w = B * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * t)), 0.6) * (t > 0.6 ? 1 - (t - 0.6) * 0.9 : 1), sheer = depth * (1 + 0.5 * (t > 0.5 ? (t - 0.5) * 2 : (0.5 - t) * 0.6));
-      const ring: P3[] = [], ringIn: P3[] = [];
-      for (let k = 0; k <= R; k++) {
-        const u = -1 + (2 * k) / R, a = u * w, h = sheer - depth * (1 - u * u) * 1.1 * (t > 0.92 ? 0.3 : 1) - (Math.abs(u) < 1 ? 0 : 0);
-        ring.push(tilt(a, h - sheer * 0.4 + depth * 0.6, f));
-        ringIn.push(tilt(a * 0.88, h - sheer * 0.4 + depth * 0.6 + 0.05, f));
-      }
-      sec.push(ring); inner.push(ringIn);
-    }
-    const mid = at(0, depth * 2, 0);
-    for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
-      const low = Math.abs(-1 + (2 * (k + 0.5)) / R) < 0.6;
-      face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], low ? [0.05, 0.045, 0.04] : paint, mid, 0.9);
-      face('wood', [inner[i][k], inner[i][k + 1], inner[i + 1][k + 1], inner[i + 1][k]], [0.42, 0.33, 0.22], at(0, -depth * 3, 0), 0.9);
-    }
-    // The gunwale joins inside to out along both sides, and the stern and bow are closed.
-    for (let i = 0; i < S; i++) for (const k of [0, R]) face('wood', [sec[i][k], sec[i + 1][k], inner[i + 1][k], inner[i][k]], [0.85, 0.83, 0.78], at(0, -depth * 5, 0), 0.9);
-    for (const i of [0, S]) for (let k = 0; k < R; k++) face('wood', [sec[i][k], sec[i][k + 1], inner[i][k + 1], inner[i][k]], paint, at(0, depth, i ? -L * 3 : L * 3), 0.9);
-    // Thwarts across, and a pair of oars laid in her.
-    for (const f of [-L * 0.45, 0.1, L * 0.4]) {
-      const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
-      solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
-    }
-    wild.group = was;
-  });
+  o.boats.forEach((bt, n) => layBoat(wild, mesh, bt, n, sea, c.ground, rng.fork(`boat${n}`)));
 
   // ---- the lighthouse
   const lh = o.lighthouse;
@@ -652,4 +615,47 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
 function at2(at: ReturnType<typeof frame>, a: number, f: number): [number, number] {
   const p = at(a, 0, f);
   return [p[0], p[2]];
+}
+
+/**
+ * A boat: clinker-built and open, drawn up on a beach or riding at her mooring (`afloat`); a boat afloat is a mesh of its own, `boat`
+ * and its number, so that she can rise and fall with the swell. For the island's cove and the town's harbour alike.
+ */
+export function layBoat(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; afloat: boolean }, n: number, sea: number, ground: (x: number, z: number) => number, rng: Rng): void {
+  const { face, solid } = anyAngle(mesh);
+  const was = wild.group;
+  if (bt.afloat) wild.group = `boat${n}`;
+  const q = rng, L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
+  const y = bt.afloat ? sea - depth * 0.45 : ground(bt.x, bt.z) + 0.08;
+  const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
+  const at = frame(bt.x, bt.z, y, bt.heading);
+  const tilt = (a: number, h: number, f: number): P3 => at(a * Math.cos(roll) - h * Math.sin(roll), h * Math.cos(roll) + a * Math.sin(roll), f);
+  const paint: Colour = q.pick([[0.12, 0.27, 0.4], [0.5, 0.12, 0.08], [0.18, 0.35, 0.2], [0.75, 0.74, 0.7], [0.55, 0.42, 0.12]] as Colour[]);
+  // The hull: stations from stern to bow, each a rounded bottom and flaring sides; the outside painted, tarred below, the inside bare wood.
+  const S = 9, R = 5, sec: P3[][] = [], inner: P3[][] = [];
+  for (let i = 0; i <= S; i++) {
+    const f = -L + (2 * L * i) / S, t = i / S, w = B * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * t)), 0.6) * (t > 0.6 ? 1 - (t - 0.6) * 0.9 : 1), sheer = depth * (1 + 0.5 * (t > 0.5 ? (t - 0.5) * 2 : (0.5 - t) * 0.6));
+    const ring: P3[] = [], ringIn: P3[] = [];
+    for (let k = 0; k <= R; k++) {
+      const u = -1 + (2 * k) / R, a = u * w, h = sheer - depth * (1 - u * u) * 1.1 * (t > 0.92 ? 0.3 : 1) - (Math.abs(u) < 1 ? 0 : 0);
+      ring.push(tilt(a, h - sheer * 0.4 + depth * 0.6, f));
+      ringIn.push(tilt(a * 0.88, h - sheer * 0.4 + depth * 0.6 + 0.05, f));
+    }
+    sec.push(ring); inner.push(ringIn);
+  }
+  const mid = at(0, depth * 2, 0);
+  for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
+    const low = Math.abs(-1 + (2 * (k + 0.5)) / R) < 0.6;
+    face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], low ? [0.05, 0.045, 0.04] : paint, mid, 0.9);
+    face('wood', [inner[i][k], inner[i][k + 1], inner[i + 1][k + 1], inner[i + 1][k]], [0.42, 0.33, 0.22], at(0, -depth * 3, 0), 0.9);
+  }
+  // The gunwale joins inside to out along both sides, and the stern and bow are closed.
+  for (let i = 0; i < S; i++) for (const k of [0, R]) face('wood', [sec[i][k], sec[i + 1][k], inner[i + 1][k], inner[i][k]], [0.85, 0.83, 0.78], at(0, -depth * 5, 0), 0.9);
+  for (const i of [0, S]) for (let k = 0; k < R; k++) face('wood', [sec[i][k], sec[i][k + 1], inner[i][k + 1], inner[i][k]], paint, at(0, depth, i ? -L * 3 : L * 3), 0.9);
+  // Thwarts across, and a pair of oars laid in her.
+  for (const f of [-L * 0.45, 0.1, L * 0.4]) {
+    const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
+    solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
+  }
+  wild.group = was;
 }

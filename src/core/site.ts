@@ -281,7 +281,8 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  style: 'timber' | 'imperial';
+  /** Timber-framed (`timber`), stuccoed classical (`imperial`), or a classical house of weatherboards on a stone basement (`wooden`). */
+  style: 'timber' | 'imperial' | 'wooden';
   x: number;
   z: number;
   w: number;
@@ -320,6 +321,14 @@ export interface Building {
    * than the one in its middle bay. Each is an entrance with a stair of its own.
    */
   entrances?: number[];
+  /**
+   * Of a wooden house: how high its basement of rough granite stands over the ground before its front (its floor is that high), the end
+   * its door is in (-1 the left as one stands before the front, 1 the right), up steps under a little roof, near the front; and how
+   * many half-round dormers light its attic from the front's slope of the roof.
+   */
+  basement?: number;
+  endDoor?: -1 | 1;
+  dormers?: number;
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
   /**
@@ -390,6 +399,14 @@ export interface Town {
    * low ground or the water's edge, `lean` if its roof is one slope.
    */
   shacks: { x: number; z: number; y: number; w: number; d: number; turn: number; roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number; colour: [number, number, number] }[];
+  /**
+   * Storehouses along the shore beyond the harbour, in a row, their gable ends to the water: each `w` across its gable by `d` deep,
+   * its gable facing the bearing `turn`, its floor at `y`, its walls `height` high to the eaves, of upright boards with battens over
+   * the joints painted the red of iron ochre (or another `colour`), or of logs; a door and a hatch for loading in its gable.
+   */
+  storehouses: { x: number; z: number; y: number; w: number; d: number; turn: number; height: number; colour: [number, number, number]; logs: boolean }[];
+  /** The stone quays the storehouses stand on: each a line of points along the water's edge, the sea on its right hand going along it, its top at `y`. */
+  wharves: { line: [number, number][]; y: number }[];
   /** Stalls on the market square, each `w` by `d`, its counter facing `turn`, its awning's colours. */
   stalls: { x: number; z: number; w: number; d: number; turn: number; awning: [number, number, number]; goods: 'fish' | 'fruit' | 'cloth' | 'pots' | 'bread' }[];
   /** The fountain in the square. */

@@ -201,6 +201,8 @@ A tower is square, centred on `x`, `z`, and `half` is half its breadth inside; i
 
 A building stands with the middle of its ground at `x`, `z`. `w` is its breadth along its front and `d` its depth from front to back, both outside its walls at the ground; `faces` is the way its front looks, `e` towards greater x or `w` towards lesser, so its breadth lies along z. `storeys` counts the ground storey, and the roof is above the last. `heights` gives the height of each storey from its floor to the floor above, the ground storey first. `bays` is the number of windows in a row across the front. `colour` is the wash on its walls, in linear red, green and blue. Its doors are shut: it is not one of the `places`.
 
+Of the style `wooden` (a classical house of weatherboards, as the small towns of the north built them): one storey of 3.1 to 3.6 metres, or now and then two of about 3, on a `basement` of rough granite 0.8 to 1.5 metres high, whose top is its floor; its door in the end wall named by `endDoor` (-1 the left, 1 the right as one stands before the front), near the front, up steps under a little roof; a low hipped roof at 24 degrees with `dormers` half-round in its front slope. With one wing in `wings` it is an L, as on a street corner. It has no `plan`: its door is shut.
+
 Of the style `timber` (a timber-framed house): it stands on a plinth of 0.3 metres, and its storeys are 2.3 to 3.3 metres high; each upper storey stands `jetty` metres further out over the street than the one below, on the front only; the roof rises at 56 degrees with a gable to the street if `gable` is true, and at 52 degrees with its eaves to the street and dormers in it if not.
 
 Of the style `imperial` (a stuccoed classical building): one to five storeys and three to thirteen bays, always an odd number. A plinth of 0.5 metres, a ground storey of 3.4 to 4.2, a principal storey of 3.8 to 4.8, and further storeys of about 3 each (or a ground storey of 4.4 to 5.2 with storeys of 3.1 to 3.5 over it, or all storeys of 3.3 to 3.9: `heights` says); a cornice and a low wall above it, and a hipped roof at 21 degrees. If `portico` is true the three middle bays stand 0.4 metres forward under pilasters and a pediment; with `pediment` false they stand forward without it, and the cornice runs straight across them. The door is in the middle bay.
@@ -279,6 +281,37 @@ A site may instead be a mountain top. Then it has `mountain` and neither `valley
 `hall`, on three mountains in five or so, is a great hall hewn in the rock under the top. `out` is the middle of its far end, a few metres in from the rim, where three tall windows (`windows`, each as how far across the hall from its middle line it stands) are cut out through the precipice's face; it runs `long` metres in from there to `in`, `wide` across, its floor at `floor` and its vault's crown `high` over that, with two rows of great pillars of the rock left standing. `chasm` is a cleft across it, `at` metres in from the windows, `width` across and `depth` deep, crossed by a bridge of the rock, arched beneath and with a parapet each side, a lip of rock along both its edges. `sides` are halls opening off it through arches, each `at` metres in on one `side`, `long` deep and `wide` across, one perhaps with a shaft of daylight (`shaft`, its radius) from the top. `gallery` is a gallery cut into one long wall eleven metres up, opening on the hall through an arcade, reached by a stair climbing inside that wall from a doorway at the hall's near end. `stair` is the stair down to the hall from the top, as points `[x, z, y]` a couple of metres apart: a cutting in open ground that deepens into a tunnel, with one turn, ending at `in` at the hall's floor.
 
 The plain shape of the land follows from these by rule (`landAt` in `src/core/island.ts`), and what stands on it is placed on that shape; the builder then wears and carves the cliffs, which moves their edge by a stride or two. Cottages, the lighthouse and the castle stand on ground levelled at their own `y`. The lighthouse can be gone into and climbed; the cottages can be gone into, one room each; the castle is walked round and into its court. Things left to find are at the top of the lighthouse, in the castle's court and at the far end of the sea cave.
+
+### Towns
+
+A site may be a harbour town on a coast instead of a valley. Then it has `town` and no `valley`; `stands` is always `free` (the house stands on a terrace at the head of the town's square), `grounds` is the box that can be walked (the town's own land, less a margin), and the track runs from the door down the stair, across the square and along the waterfront to the head of the mole, where the player arrives.
+
+```json
+"town": {
+  "terrain": { "seed": 9132, "u": 170, "v": -20, "turn": 3.1, "base": 4.58, "cell": 1.5 },
+  "sea": -4.6, "land": { "x0": -440, "x1": 500, "z0": -253, "z1": 297 }, "level": { "x0": -3.6, "x1": 46.2, "z0": 5.4, "z1": 57.4 },
+  "quay": { "x0": -72.9, "x1": 152.4, "z": 108.8, "y": -2.7, "apron": 11.5 },
+  "square": { "x0": -9.7, "x1": 54.3, "z0": 57.4, "z1": 97.3, "yN": -1.1, "yS": -2.4 }, "stair": { "x0": 4, "x1": 18.8, "z0": 57.4, "z1": 65.2 },
+  "moles": [{ "line": [[-72.9, 107.8], [-74, 116], "…"], "width": 7.4, "y": -2.2 }], "light": { "x": 37.2, "z": 189.6, "y": -2.2, "r": 2.5, "height": 11.2, "door": 3.4 },
+  "streets": [{ "line": [[-70.9, 103, -2.3], "…"], "width": 11.5, "kind": "street" }],
+  "blocks": [{ "x0": 54.3, "x1": 88.1, "z0": 63.9, "z1": 97.3, "kind": "classical" }],
+  "buildings": [{ "style": "imperial", "x": 71.2, "z": 92, "w": 33.2, "d": 10.6, "faces": "w", "turn": 1.571, "y": -2.3, "…": "…" }],
+  "shacks": [{ "x": 160.4, "z": 120.2, "y": -3.2, "w": 4.1, "d": 4.8, "turn": 1.71, "roof": "tin", "lean": true, "stilts": 0, "colour": [0.42, 0.33, 0.24] }],
+  "storehouses": [{ "x": 192.6, "z": 128, "y": -2.8, "w": 5.8, "d": 9.1, "turn": 1.52, "height": 5.4, "colour": [0.46, 0.13, 0.08], "logs": false }],
+  "wharves": [{ "line": [[170.3, 133.4], "…"], "y": -2.8 }],
+  "stalls": [{ "x": 12, "z": 75, "w": 2.9, "d": 1.8, "turn": 0, "awning": [0.62, 0.12, 0.08], "goods": "fish" }], "fountain": { "x": 11.4, "z": 80.2, "r": 3.4 },
+  "boats": [{ "x": -40.1, "z": 111.8, "heading": 0, "length": 6.2, "afloat": true }],
+  "fields": [{ "corners": [[-380, -200], [-327, -201], [-326, -158], [-381, -159]], "crop": "wheat" }],
+  "walls": [{ "line": [[-380, -200], [-327, -201]], "gaps": [[22, 26]], "fallen": [], "height": 1.1 }],
+  "outlook": { "x": 372.2, "z": 98.8, "y": 15.3, "facing": 1.96 }
+}
+```
+
+The land was found (`coastland.ts`): `terrain` names the stretch of coast country it was found in (its seed), the point of that country's frame under the middle of the quay's edge (`u`, `v`), how far the frame is turned to the site's (so that the sea lies south), the height in the frame of the house's ground (`base`, which is the forecourt's floor in the site), and the lattice in metres the town's own land is made fine on, over `land`. The sea stands at `sea`. Where the land was steep at the water the sea has cut it back to cliffs; along the harbour it has not. What the town made of the land (its grading, the square, the waterfront, the level ground under every building, the dug harbour, the storehouses' quays) is not written down as heights: it follows from the rest by rule (`townLand` in `core/town.ts`), so that the document stays small and whatever reads it can make the same land.
+
+`level` is the house's level ground, at the forecourt's floor, a terrace over the square; `stair` is the flight from the forecourt's south edge down into the square. The `square` falls from `yN` at its north side to `yS` at its south, where it opens onto the waterfront: `apron` metres deep behind the `quay`'s edge, which runs along x at `z` from `x0` to `x1`, its top at `y`. South of the quay is the harbour, dug out and closed by two `moles`, each a line of points from the quay's end, sweeping round towards the other, `width` broad, its top at `y`; the `light` stands at the head of the longer.
+
+`streets` are lines of points `[x, z, y]` with their breadth: a `street` or a `lane` is paved in setts and stands at its own levels, a `track` or a `path` is earth, cut and made up to its line. `blocks` are the rectangles between the streets that are built up, and with what: `classical` nearest the square and the harbour, `timber` beyond. Every building of the blocks is in `buildings`, as a `Building` with its `turn` (the bearing its front faces) and its `y` (the ground it stands on); see *Buildings by the track* above for what a building is, and `wooden` there for the classical houses of wood. `shacks` stand on the fringes of the town, on gentle ground among its edges and along the shore where no storehouses stand; one with `stilts` stands on posts that many metres high. `storehouses` stand in a row along the shore beyond the harbour, each on the stone quay its `wharves` entry describes. The square has `stalls` and a `fountain`. `fields` are four-cornered parcels outside the town, with what is grown in each, and `walls` of dry stone along some of their sides, as an island's. `outlook` is a level place on the headland beside the town, at the cliff's edge, facing the sea, with a parapet and a belvedere; a `path` leads up to it.
 
 ### The solution
 

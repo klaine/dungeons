@@ -90,10 +90,10 @@ if (!params.has('seed')) {
   keep(params);
 }
 const seed = params.get('seed')!;
-// What kind of place: a valley, unless an island or a mountain top is asked for.
+// What kind of place: a valley, unless an island, a mountain top or a harbour town is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
-const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : 'valley';
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' ? 'town' : 'valley';
 
 const hud = {
   status: document.getElementById('status')!,
@@ -109,10 +109,10 @@ const newPlace = () => {
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
-// Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.
+// Another kind of place: from a valley an island, from an island a mountain top, from a mountain a town, from a town a valley; a new one, since the same seed is the same house.
 {
-  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'valley' } as const)[place];
-  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain' }[then];
+  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'town', town: 'valley' } as const)[place];
+  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[then];
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
     next.set('seed', randomSeed());
@@ -404,11 +404,11 @@ async function start(): Promise<void> {
   // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
   // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
   const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
-  if (sea && site?.island) {
-    const isle = site.island;
+  if (sea && (site?.island || site?.town)) {
+    const boats = site.island?.boats ?? site.town!.boats, level = site.island?.sea ?? site.town!.sea;
     scene.traverse((m) => {
-      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? isle.boats[Number(n[1])] : undefined;
-      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: isle.sea });
+      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? boats[Number(n[1])] : undefined;
+      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: level });
     });
   }
   const floatTilt = new Quaternion(), floatUp = new Vector3(0, 1, 0), floatN = new Vector3(), floatTurn = new Matrix4(), floatBack = new Matrix4();
@@ -1029,6 +1029,8 @@ async function start(): Promise<void> {
           fall = Math.max(fall, 0.5 / (1 + (edge / 14) ** 2));
           if (py < site.island.sea + 1.9) hearing.wading = true;
         }
+        // In a town, the sea is heard along the shore and the moles.
+        if (site?.town) { const tw = site.town, off = Math.max(0, tw.quay.z - pz) * (px > tw.quay.x0 - 40 && px < tw.quay.x1 + 40 ? 1 : 0.4); fall = Math.max(fall, 0.3 / (1 + (off / 30) ** 2)); if (py < tw.sea + 1.9) hearing.wading = true; }
         hearing.fall = fall < 0.02 ? 0 : fall;
       }
       let surface: Surface = 'stone';
@@ -1116,7 +1118,7 @@ async function start(): Promise<void> {
       } else if (!here && lastPlace !== -2) {
         lastPlace = -2;
         // (Out of doors: the valley, or the island.)
-        hud.seed.textContent = `${seed} · ${site.island ? 'island' : site.mountain ? 'mountain' : 'valley'}`;
+        hud.seed.textContent = `${seed} · ${site.island ? 'island' : site.mountain ? 'mountain' : site.town ? 'town' : 'valley'}`;
       }
     }
 
@@ -1302,6 +1304,8 @@ async function start(): Promise<void> {
   (window as any).__dbg.beyond = (x: number, z: number) => {
     if (site?.island) return -inland(site.island, x, z);
     if (site?.mountain) return -onMountain(site.mountain, x, z);
+    // (A town's country is the box its land was made over, less the strip at its edges that is fenced.)
+    if (site?.town) { const g = site.grounds!; return Math.max(g.x0 - x, x - g.x1, g.z0 - z, z - g.z1); }
     const v = site?.valley;
     if (!v) return -1;
     // (Nor whoever is down a mine.)

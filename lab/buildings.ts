@@ -48,7 +48,17 @@ const classical = (r: Rng, bays: number, storeys: number): Building => {
   const heights = [3.8, 4.4, ...Array.from({ length: storeys - 2 }, () => 3.2)].slice(0, storeys);
   return { style: 'imperial', x: 0, z: 0, w: bays * 2.55 + 1.6, d: 10.6, faces: 'w', storeys, heights, bays, colour: r.pick([[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78]] as [number, number, number][]), portico: bays >= 7 || bays === 5 };
 };
-if (style === 'timber') {
+if (style === 'wooden') {
+  // Classical houses of wood: long and low on their basements, one storey or two; and an L, as at a street corner.
+  const tints: [number, number, number][] = [[0.8, 0.55, 0.18], [0.55, 0.2, 0.12], [0.86, 0.72, 0.36], [0.62, 0.68, 0.58], [0.72, 0.74, 0.72], [0.85, 0.6, 0.52]];
+  for (let k = 0; k < 4; k++) {
+    const r = new Rng(`${seed}/${k}`), storeys = k === 1 ? 2 : 1, w = [18, 14, 13, 20][k], bays = Math.round((w - 2) / 2.2);
+    const b: Building = { style: 'wooden', x: 0, z: 0, w, d: r.range(8, 10), faces: 'w', storeys, heights: storeys === 1 ? [3.3] : [3.2, 3.0], bays, colour: tints[(k + (seed.length % 3)) % tints.length], basement: r.range(0.9, 1.5), endDoor: r.chance(0.5) ? -1 : 1, dormers: k === 3 ? 0 : r.int(1, 3) };
+    if (k === 2) { b.wings = [{ side: 1, width: 8, length: 10 }]; b.endDoor = -1; }
+    show(b, ((k % 2) - 0.5) * 34, Math.floor(k / 2) * 34 - 17, turn, r);
+    made.push(`${k}: ${w} m, ${storeys} storey${storeys > 1 ? 's' : ''}${b.wings ? ', an L' : ''}, ${b.dormers} dormers`);
+  }
+} else if (style === 'timber') {
   for (let k = 0; k < 5; k++) {
     const r = new Rng(`${seed}/${k}`), storeys = r.pick([2, 3, 3, 4]);
     const b: Building = { style: 'timber', x: 0, z: 0, w: r.range(6, 8.6), d: r.range(6.5, 8.5), faces: 'w', storeys, heights: [3, ...Array.from({ length: storeys - 1 }, () => 2.6)], bays: 3, colour: [0.82, 0.62, 0.3], jetty: 0.4, gable: r.chance(0.6), door: 0.24 };

@@ -2,6 +2,7 @@ import { planMission, solve } from './mission';
 import { Rng } from './rng';
 import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
+import { layOutTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, classicalVariations, floorOf, footprintOf, planClassical, planTimber } from './building';
@@ -162,8 +163,8 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
  * Generates the site for a seed. Several are drafted and the one with the richest structure is
  * kept: early layers are cheap, so it pays to make many and choose.
  */
-/** What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, or a hospice on a mountain top above the cloud. */
-export type PlaceKind = 'valley' | 'island' | 'mountain';
+/** What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, a hospice on a mountain top above the cloud, or a house at the head of a harbour town's square. */
+export type PlaceKind = 'valley' | 'island' | 'mountain' | 'town';
 
 /** Choices that are not part of the seed: trials of other ways of making a place, to be compared with the usual way. */
 export interface MakeOptions {
@@ -233,7 +234,9 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
   // (Every kind of place unless asked otherwise, `plain`: valleys too, now that a found one walks and looks as a drawn one does.)
-  if (opts.terrain !== 'plain') {
+  // (A town is always laid on land that was found: its drafts lay nothing out but the box it would have.)
+  if (opts.terrain !== 'plain' || kind === 'town') {
+    if (kind === 'town') return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' });
     try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
       // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
       if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
@@ -1772,6 +1775,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
   if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'), opts.terrain === 'eroded');
   else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded');
+  else if (kind === 'town') layOutTown(site, forecourt, ecx, rng.fork('town'), opts.terrain === 'eroded');
   else layOutValley(site, forecourt, ecx, rng.fork('valley'), opts.terrain === 'eroded');
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
@@ -1815,7 +1819,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   if (below.length) parts.push(below.length === 1 ? `${a(below[0].name)} below` : `${count(below.length)} cellars below`);
   if (above.length) parts.push(above.length === 1 ? `${a(above[0].name)} above` : `${count(above.length)} rooms above`);
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
-  site.title = `${kind === 'island' ? 'On an island in the sea, a' : kind === 'mountain' ? `On a mountain top above the cloud${setting.season === 'winter' ? ', in snow' : ''}, a` : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  site.title = `${kind === 'island' ? 'On an island in the sea, a' : kind === 'town' ? 'At the head of a harbour town\'s square, a' : kind === 'mountain' ? `On a mountain top above the cloud${setting.season === 'winter' ? ', in snow' : ''}, a` : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

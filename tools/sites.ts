@@ -1,5 +1,5 @@
 /**
- * Generates many sites and reports on them. Usage: npx tsx tools/sites.ts [count] [valley|island|mountain]
+ * Generates many sites and reports on them. Usage: npx tsx tools/sites.ts [count] [valley|island|mountain|town]
  * (With a kind of place named, only that kind: the whole takes some twenty minutes, now that land is made before it is laid out.)
  */
 import { generateSite } from '../src/core/generate';
@@ -7,6 +7,7 @@ import { solve } from '../src/core/mission';
 import { loopCount } from '../src/core/site';
 import { inland, landAt } from '../src/core/island';
 import { inside } from '../src/core/mountain';
+import { nearLine, outlineOf, outsideBuilt, townGround } from '../src/core/town';
 
 const count = Number(process.argv[2] ?? 200), only = process.argv[3];
 const tally = new Map<string, number>();
@@ -209,4 +210,49 @@ for (let n = 0; n < (only && only !== 'mountain' ? 0 : plainPeaks + wornPeaks); 
 }
 if (!only || only === 'mountain') console.log(`${wornPeaks} mountain tops and ${plainPeaks} plain, ${peakFailures} failures`);
 for (const k of [...peaks.keys()].sort()) console.log(' ', k.padEnd(14), peaks.get(k));
-if (failures || isleFailures || peakFailures) process.exitCode = 1;
+// Towns: the same houses at the head of a harbour town's square. Each must be completable; every building stands on dry ground,
+// clear of every other and of the streets; the streets climb gently, the tracks and paths no more steeply than a path can; the way
+// from the door to the mole's head is on dry ground or the mole.
+const towns = new Map<string, number>();
+let townFailures = 0;
+const townCount = only && only !== 'town' ? 0 : Math.ceil(count / 8);
+for (let n = 0; n < townCount; n++) {
+  const seed = `town-check-${n}`;
+  try {
+    const site = generateSite(seed, 'town'), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
+    if (!solve(site).ok) throw new Error('cannot be completed');
+    const tally3 = (k: string) => towns.set(k, (towns.get(k) ?? 0) + 1);
+    const ground = (x: number, z: number) => townGround(t, F, x, z);
+    // (Outlines as boxes: the town's buildings stand square to its streets.)
+    const boxes = t.buildings.map((b) => { const pts = outlineOf(b).flat(); return { b, x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), z0: Math.min(...pts.map((p) => p[1])), z1: Math.max(...pts.map((p) => p[1])) }; });
+    for (const q of boxes) {
+      if (ground(q.b.x, q.b.z) < t.sea + 0.5) throw new Error(`a building in the water at ${q.b.x}, ${q.b.z}`);
+      for (const o of boxes) if (o !== q && Math.min(q.x1, o.x1) - Math.max(q.x0, o.x0) > 0.35 && Math.min(q.z1, o.z1) - Math.max(q.z0, o.z0) > 0.35 && outlineOf(q.b).some((r) => outlineOf(o.b).some((r2) => { const a = { x0: Math.min(...r.map((p) => p[0])), x1: Math.max(...r.map((p) => p[0])), z0: Math.min(...r.map((p) => p[1])), z1: Math.max(...r.map((p) => p[1])) }, c = { x0: Math.min(...r2.map((p) => p[0])), x1: Math.max(...r2.map((p) => p[0])), z0: Math.min(...r2.map((p) => p[1])), z1: Math.max(...r2.map((p) => p[1])) }; return Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0) > 0.35 && Math.min(a.z1, c.z1) - Math.max(a.z0, c.z0) > 0.35; }))) throw new Error(`two buildings overlap at ${q.b.x}, ${q.b.z} and ${o.b.x}, ${o.b.z}`);
+    }
+    for (const s of t.streets) {
+      for (let k = 1; k < s.line.length; k++) {
+        const run = Math.hypot(s.line[k][0] - s.line[k - 1][0], s.line[k][1] - s.line[k - 1][1]), rise = Math.abs(s.line[k][2] - s.line[k - 1][2]);
+        if (run > 0.5 && rise / run > (s.kind === 'street' || s.kind === 'lane' ? 0.2 : 0.5)) throw new Error(`a ${s.kind} climbs at ${(rise / run).toFixed(2)} at ${s.line[k][0]}, ${s.line[k][1]}`);
+      }
+      if (s.kind !== 'street' && s.kind !== 'lane') continue;
+      for (const [x, z] of s.line) for (const q of boxes) if (outsideBuilt(q.b, x, z) < Math.min(1.2, s.width / 2 - 1.5)) throw new Error(`a building in the street at ${x}, ${z}`);
+    }
+    const onMole = (x: number, z: number) => t.moles.some((m) => nearLine(m.line.map(([a, c]) => [a, c, 0] as [number, number, number]), x, z).off < m.width / 2 + 0.5);
+    for (const [x, z] of site.track ?? []) if (ground(x, z) < t.sea + 0.3 && !onMole(x, z)) throw new Error(`the way to the door in the water at ${x}, ${z}`);
+    for (const s of t.storehouses) if (ground(s.x, s.z) < t.sea + 0.5) throw new Error(`a storehouse in the water at ${s.x}, ${s.z}`);
+    const kinds = (k: string) => t.buildings.filter((b) => b.style === k).length;
+    tally3(`coast=${t.terrain.seed}`);
+    tally3(`classical=${Math.round(kinds('imperial') / 5) * 5}`);
+    tally3(`timber=${Math.round(kinds('timber') / 20) * 20}`);
+    tally3(`wooden=${Math.round(kinds('wooden') / 5) * 5}`);
+    tally3(`storehouses=${t.storehouses.length ? 'yes' : 'no'}`);
+    tally3(`outlook=${!!t.outlook}`);
+    tally3(`light=${!!t.light}`);
+  } catch (e) {
+    townFailures++;
+    console.log(seed, 'FAILED', (e as Error).message);
+  }
+}
+if (townCount) console.log(`${townCount} towns, ${townFailures} failures`);
+for (const k of [...towns.keys()].sort()) console.log(' ', k.padEnd(16), towns.get(k));
+if (failures || isleFailures || peakFailures || townFailures) process.exitCode = 1;
