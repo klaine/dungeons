@@ -315,6 +315,11 @@ export interface Building {
    * round arch in the front and the back, through the two bays at its left end (-1) or its right (1) as one stands before it.
    */
   arch?: { side: -1 | 1 };
+  /**
+   * Of a broad classical building: the bays its front doors are in, counted from 0 at the left as one stands before it, if it has more
+   * than the one in its middle bay. Each is an entrance with a stair of its own.
+   */
+  entrances?: number[];
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
   /**

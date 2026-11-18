@@ -1,4 +1,4 @@
-import { buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, entranceBays, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building } from '../core/site';
 
 /**
@@ -57,7 +57,7 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
   if (arch) for (const [v0, v1] of [[-0.01, T + 0.01], [D - T - 0.01, D + 0.01]]) rect(arch.u - arch.w / 2, arch.u + arch.w / 2, v0, v1, HALL);
   windows.forEach((u, n) => {
     if (arch && Math.abs(u - arch.u) < arch.w / 2 + 0.7) return;
-    const v0 = frontV(u), door = storey === 0 && n === middle;
+    const v0 = frontV(u), door = storey === 0 && entranceBays(b).includes(n);
     if (door) rect(u - 0.85, u + 0.85, v0 - 0.01, v0 + T + 0.01, FLOOR);
     else pane(u - 0.6, u + 0.6, v0, v0 + T, 'v');
     if (b.backDoor !== undefined && storey === 1 && Math.abs(u - b.backDoor) < 0.05) rect(u - 0.62, u + 0.62, D - T - 0.01, D + 0.01, FLOOR);
@@ -74,7 +74,9 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
     for (const u of across) if (!buried(b, D + g.length, sill)) pane(u - 0.6, u + 0.6, D + g.length - T, D + g.length, 'v');
   }
   // The stair: the flight that goes up from this storey, with its treads and an arrow; the landing; and, on the storey above, the well it comes up through.
-  const stair = classicalStair(b), { START, TREAD, LANDING, across, strip } = stair;
+  // (One behind each entrance.)
+  for (const stair of classicalStairs(b)) {
+  const { START, TREAD, LANDING, across, strip } = stair;
   const at = (a: number, e: number) => stair.place(a, e);
   const box = (a0: number, a1: number, e0: number, e1: number, fill: string) => {
     const p = at(a0, e0), q = at(a1, e1);
@@ -110,6 +112,7 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
     ctx.closePath();
     ctx.fillStyle = INK;
     ctx.fill();
+  }
   }
   if (!o.labels) return;
   ctx.fillStyle = LINE;
