@@ -11,7 +11,7 @@ import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/roc
 import { layTerrain, turfColour } from './landscape';
 import { Colour, Planting } from './planting';
 import { CardSet, SeaDesc } from './scene';
-import { buildCoast } from './coast';
+import { anyAngle, buildCoast } from './coast';
 import { plantIsland } from './islandPlanting';
 
 /**
@@ -62,6 +62,8 @@ export interface IslandResult {
   /** Running water, and where it falls, for the water's drawing: as `SceneDescription.streams` and `falls`. */
   streams: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
   falls: { x: number; y: number; z: number; height: number; width: number }[];
+  /** Torches in the caverns under the island and their passages, if it has them. */
+  torches: { position: Vector3; out: Vector3; fire?: number }[];
 }
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
@@ -91,7 +93,24 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.1; };
   const ar = o.arch;
   const nearArch = (x: number, z: number, m: number) => { if (!ar) return false; const [ax, az] = ar.from, [bx, bz] = ar.to, dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)); return Math.hypot(x - ax - dx * t, z - az - dz * t) < ar.width + 4 + m; };
-  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || nearArch(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)); };
+  // The caverns under the island, if it has them, and their passages: how far a point lies outside them, across the ground.
+  const CV = o.caverns;
+  const nearLine = (line: [number, number, number][], x: number, z: number): { off: number; y: number } => {
+    let off = Infinity, y = 0;
+    for (let k = 0; k + 1 < line.length; k++) {
+      const [ax, az, ay] = line[k], [bx, bz, by] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
+      const d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+      if (d < off) { off = d; y = ay + (by - ay) * t; }
+    }
+    return { off, y };
+  };
+  /** Where a point is in the cavern's own measures: 0 at its middle, 1 at its edge. */
+  const inHall = (x: number, z: number) => {
+    const h = CV!.hall, dx = x - h.x, dz = z - h.z, c = Math.cos(h.turn), sn = Math.sin(h.turn);
+    return Math.hypot((dx * c + dz * sn) / h.rx, (-dx * sn + dz * c) / h.rz);
+  };
+  const nearCaverns = (x: number, z: number) => !CV || x < CV.hall.x - 200 || x > CV.hall.x + 200 || z < CV.hall.z - 200 || z > CV.hall.z + 200 ? Infinity : Math.min(nearLine(CV.lower, x, z).off - 1.6, nearLine(CV.upper, x, z).off - 1.6, (inHall(x, z) - 1) * Math.min(CV.hall.rx, CV.hall.rz));
+  const inBand = (x: number, z: number) => { const d = inland(o, x, z); return (d > -OUT && d < IN) || nearStack(x, z, 0) || nearCave(x, z, 0) || nearArch(x, z, 0) || onStair(o, x, z).off < 6 || (d >= IN && steepAt(x, z)) || nearCaverns(x, z) < 4; };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
@@ -278,7 +297,58 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const sx = x + out * spot.ux, sz = z + out * spot.uz;
     return (y - land.at(sx, sz)) / steepness.at(sx, sz);
   };
-  const density = caveAir || archAir ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), caveAir ? caveAir(x, y, z) : -9, archAir ? archAir(x, y, z) : -9) : landAir;
+  // ---- the caverns: the passages, natural and uneven, a little broader where the rock gave; the cavern, a low dome over a floor that
+  // rises a little to its edges, with dripstone in it, columns from floor to roof and spears up from the floor and down from the roof,
+  // kept off the way across it from one passage to the other.
+  const drip: { x: number; z: number; r: number; kind: 'up' | 'down' | 'column'; reach: number }[] = [];
+  if (CV) {
+    const q = rng.fork('dripstone'), h = CV.hall, a = CV.lower[CV.lower.length - 1], bq = CV.upper[0];
+    for (let tries = 0; tries < 200 && drip.length < 16; tries++) {
+      const t = q.range(0, Math.PI * 2), r = Math.sqrt(q.range(0.05, 0.75)), c = Math.cos(h.turn), sn = Math.sin(h.turn);
+      const lx = Math.cos(t) * r * h.rx, lz = Math.sin(t) * r * h.rz, x = h.x + lx * c - lz * sn, z = h.z + lx * sn + lz * c;
+      // (Off the way across: the line from where the passage in comes to where the passage out leaves.)
+      const dx = bq[0] - a[0], dz = bq[1] - a[1], l2 = dx * dx + dz * dz || 1, tt = Math.min(1, Math.max(0, ((x - a[0]) * dx + (z - a[1]) * dz) / l2));
+      if (Math.hypot(x - a[0] - dx * tt, z - a[1] - dz * tt) < 2.8 || drip.some((d) => Math.hypot(d.x - x, d.z - z) < d.r + 1.2)) continue;
+      const kind = q.chance(0.3) ? 'column' : q.chance(0.5) ? 'up' : 'down';
+      drip.push({ x, z, r: kind === 'column' ? q.range(0.6, 1.3) : q.range(0.35, 0.8), kind, reach: q.range(1.5, 4.5) });
+    }
+  }
+  // (A box round all of it, outside which nothing need be reckoned: the land is carved a great deal more than the caverns are.)
+  const sysBox = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity, y0: Infinity, y1: -Infinity };
+  if (CV) {
+    const R = Math.max(CV.hall.rx, CV.hall.rz) * 1.3;
+    for (const [x, z, y] of [...CV.lower, ...CV.upper, [CV.hall.x - R, CV.hall.z - R, CV.hall.y], [CV.hall.x + R, CV.hall.z + R, CV.hall.y + CV.hall.high]] as [number, number, number][]) {
+      sysBox.x0 = Math.min(sysBox.x0, x - 4); sysBox.x1 = Math.max(sysBox.x1, x + 4); sysBox.z0 = Math.min(sysBox.z0, z - 4); sysBox.z1 = Math.max(sysBox.z1, z + 4);
+      sysBox.y0 = Math.min(sysBox.y0, y - 2); sysBox.y1 = Math.max(sysBox.y1, y + 4);
+    }
+    sysBox.y1 = Math.max(sysBox.y1, CV.hall.y + CV.hall.high + 2);
+  }
+  const systemAir = CV ? (x: number, y: number, z: number): number => {
+    if (x < sysBox.x0 || x > sysBox.x1 || z < sysBox.z0 || z > sysBox.z1 || y < sysBox.y0 || y > sysBox.y1) return -9;
+    const rough = (fbm3(x * 0.35 + s1, y * 0.35, z * 0.35, 2) - 0.5) * 0.9;
+    let air = -9;
+    for (const line of [CV.lower, CV.upper]) {
+      const n = nearLine(line, x, z);
+      if (n.off > 3.5) continue;
+      const half = 1.55 + (fbm2(x * 0.15 + s2, z * 0.15, 2) - 0.5) * 0.8;
+      air = Math.max(air, Math.min(half - n.off + rough, y - n.y, n.y + 3.1 - (n.off / half) ** 2 * 0.9 - y + rough));
+    }
+    const h = CV.hall, r = inHall(x, z);
+    if (r < 1.25) {
+      const floor = h.y + 0.9 * r * r, roof = h.y + 1.6 + (h.high - 1.6) * Math.sqrt(Math.max(0, 1 - r * r)) * (0.8 + 0.4 * fbm2(x * 0.08 + s1, z * 0.08, 2));
+      let cav = Math.min((1 - r) * Math.min(h.rx, h.rz) + rough, y - floor, roof - y + rough);
+      for (const d of drip) {
+        const off = Math.hypot(x - d.x, z - d.z);
+        if (off > d.r * (d.kind === 'column' ? 1.7 : 1) + 0.6) continue;
+        if (d.kind === 'column') cav = Math.min(cav, off - d.r * (1 + 0.16 * Math.sin((y - floor) * 0.7 + d.reach) + 0.5 * Math.max(0, 1 - (y - floor) / 1.5) + 0.5 * Math.max(0, 1 - (roof - y) / 1.5)));
+        else if (d.kind === 'up') { const u = (y - floor) / d.reach; if (u < 1) cav = Math.min(cav, off - d.r * Math.pow(1 - Math.max(0, u), 1.3)); }
+        else { const u = (roof - y) / d.reach; if (u < 1) cav = Math.min(cav, off - d.r * Math.pow(1 - Math.max(0, u), 1.3)); }
+      }
+      air = Math.max(air, cav);
+    }
+    return air;
+  } : null;
+  const density = caveAir || archAir || systemAir ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), caveAir ? caveAir(x, y, z) : -9, archAir ? archAir(x, y, z) : -9, systemAir ? systemAir(x, y, z) : -9) : landAir;
 
   // ---- colours: of rock by the sea, and of the turf on the land above it
   const tint = b.stoneTint;
@@ -421,12 +491,15 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const REACH = 4.5;
     for (let z = c.z0 - REACH; z < c.z1 + REACH + CELL / 2; z += CELL) for (let x = c.x0 - REACH; x < c.x1 + REACH + CELL / 2; x += CELL) { const h = land.at(x, z); lo = Math.min(lo, h); hi = Math.max(hi, h); }
     if (cave && nearCave((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2, TILE)) lo = Math.min(lo, caveFloor - 1);
+    if (CV && nearCaverns((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2) < TILE) lo = Math.min(lo, Math.min(CV.lower[0][2], CV.hall.y) - 1.6);
     carveRock(rockMesh, density, {
       // (Not below a few metres under the sea, where the water is too deep to see through: there the rock is closed off flat.)
       min: V(c.x0, Math.floor((Math.max(lo - 2, sea - 4.8)) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((Math.max(hi, sea - 3) + 2.8) / CELL) * CELL, c.z1),
       cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
       meshFor: (n, at) => {
         if (!(n.y > 0.74 && rocky.at(at.x, at.z) < 0.5)) return null;
+        // (Under the island, the caverns' floors are the rock.)
+        if (systemAir && systemAir(at.x, at.y + 0.6, at.z) > 0 && plain(at.x, at.z) - at.y > 1.5) return null;
         // (Not in the stair's cut: the ledge either side of the steps, and the floor they stand on, are the rock they are cut in. As
         // ground they were turf, and so close to the sea it was drawn as sand: a band of yellow up the cliff beside the steps.)
         if (stairBox && at.x > stairBox[0] && at.x < stairBox[1] && at.z > stairBox[2] && at.z < stairBox[3]) { const st = onStair(o, at.x, at.z); if (st.off < 2.6 && at.y < st.y + 1.6) return null; }
@@ -541,7 +614,14 @@ export function buildIsland(b: IslandBuild): IslandResult {
       if (!touches) continue;
       const x = gx0 + i * C, z = gz0 + j * C;
       // (Over the cave, where the rock stands above its roof, the fence begins above the roof; anywhere else, out over the water included, it goes down below the sea bed.)
-      const floor = caveAir && caveAir(x, caveFloor + 1, z) > -1.5 && ground(x, z) > caveFloor + 7 ? caveFloor + 8 : Math.min(sea - 8, ground(x, z) - 4);
+      let floor = caveAir && caveAir(x, caveFloor + 1, z) > -1.5 && ground(x, z) > caveFloor + 7 ? caveFloor + 8 : Math.min(sea - 8, ground(x, z) - 4);
+      // (And over the caverns and their passages, above their roofs: whoever is in them walks under it.)
+      if (CV) {
+        const lo2 = nearLine(CV.lower, x, z), up2 = nearLine(CV.upper, x, z);
+        if (lo2.off < 3) floor = Math.max(floor, lo2.y + 4);
+        if (up2.off < 3) floor = Math.max(floor, up2.y + 4);
+        if (inHall(x, z) < 1.3) floor = Math.max(floor, CV.hall.y + CV.hall.high + 2);
+      }
       b.fences.push({ min: V(x - C / 2, floor, z - C / 2), max: V(x + C / 2, F + 90, z + C / 2) });
     }
   }
@@ -585,8 +665,42 @@ export function buildIsland(b: IslandBuild): IslandResult {
   // Where the player comes in: at the end of the jetty, facing the land.
   const [jx, jz] = o.jetty.to, [rx, rz] = o.jetty.from, jl = Math.hypot(jx - rx, jz - rz);
   const ex = jx + ((rx - jx) / jl) * 1.6, ez = jz + ((rz - jz) / jl) * 1.6;
+  // The caverns: torches down the passages and round the cavern; the smugglers' barrels and crates against its wall, and what they
+  // left; and two jambs and a lintel of stone where the passage out comes up into its cutting.
+  const torches: IslandResult['torches'] = [];
+  if (CV) {
+    const { solid } = anyAngle((mm) => wild.mesh(mm));
+    const begun = new Map(['stone', 'wood', 'metal'].map((mm) => [mm, wild.mesh(mm).vertexCount]));
+    const box = (mm: string, x: number, y: number, z: number, w: number, d: number, hgt: number, yaw: number, colour: Colour) => {
+      const c = Math.cos(yaw), sn = Math.sin(yaw), at = (a: number, f: number, up: number): [number, number, number] => [x + c * a - sn * f, y + up, z + sn * a + c * f];
+      solid(mm, [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), at(-w / 2, -d / 2, hgt), at(w / 2, -d / 2, hgt), at(w / 2, d / 2, hgt), at(-w / 2, d / 2, hgt)], colour);
+    };
+    for (const line of [CV.lower, CV.upper]) for (let k = 3, side = 1; k < line.length - 2; k += 5, side = -side) {
+      const [x, z, y] = line[k], [nx2, nz2] = line[k + 1], dx = nx2 - x, dz = nz2 - z, l = Math.hypot(dx, dz) || 1, px = (-dz / l) * side, pz = (dx / l) * side;
+      if (plain(x, z) - y < 3.5) continue;
+      torches.push({ position: V(x + px * 1.15, y + 1.9, z + pz * 1.15), out: V(-px, 0, -pz) });
+    }
+    const h = CV.hall, c = Math.cos(h.turn), sn = Math.sin(h.turn), onEdge = (t: number, r: number) => { const lx = Math.cos(t) * r * h.rx, lz = Math.sin(t) * r * h.rz; return [h.x + lx * c - lz * sn, h.z + lx * sn + lz * c]; };
+    for (let k = 0; k < 5; k++) {
+      const [x, z] = onEdge((k / 5) * Math.PI * 2 + 0.4, 0.8), dx = h.x - x, dz = h.z - z, l = Math.hypot(dx, dz) || 1;
+      torches.push({ position: V(x, h.y + 0.9 * 0.64 + 2.0, z), out: V(dx / l, 0, dz / l) });
+    }
+    const q = rng.fork('cache'), [kx, kz] = onEdge(q.range(0, Math.PI * 2), 0.62), ky = h.y + 0.9 * 0.62 * 0.62;
+    for (let k = 0; k < 4; k++) box('wood', kx + q.range(-1.4, 1.4), ky - 0.05, kz + q.range(-1.4, 1.4), 0.6, 0.6, q.range(0.55, 0.85), q.range(0, 3), [0.3, 0.2, 0.12]);
+    box('wood', kx + 1.9, ky - 0.05, kz - 0.6, 1.1, 0.7, 0.7, q.range(0, 3), [0.26, 0.18, 0.11]);
+    b.finds.push({ at: V(kx, ky + 0.4, kz), what: 'a tarred keg of brandy and a coil of rope, the smugglers\' cache in the cavern under the island' });
+    const up = CV.upper, mouth = up.findIndex(([x, z, y]) => plain(x, z) - y < 3.4);
+    if (mouth > 0) {
+      const [x, z, y] = up[mouth], [x0, z0] = up[mouth - 1], yaw = Math.atan2(z - z0, x - x0) + Math.PI / 2, cc = Math.cos(yaw), ss = Math.sin(yaw);
+      for (const side of [-1, 1]) box('stone', x + cc * side * 1.8, y - 0.3, z + ss * side * 1.8, 0.6, 0.8, 3.3, yaw, [0.6 * tint[0], 0.58 * tint[1], 0.55 * tint[2]]);
+      box('stone', x, y + 3.0, z, 4.3, 0.9, 0.6, yaw, [0.6 * tint[0], 0.58 * tint[1], 0.55 * tint[2]]);
+    }
+    // (What is set up down there sees little of the sky, and is lit so.)
+    for (const [mm, from] of begun) wild.mesh(mm).setOpenBy((x, y, z) => (plain(x, z) - y > 2.5 ? 0.12 : 1), from);
+  }
   const season = site.setting.season ?? 'spring';
   return {
+    torches,
     spawn: V(ex, coast.deck + 1.75, ez),
     // (Yaw is measured so that 0 looks towards lesser z.)
     yaw: Math.atan2(-(rx - jx), -(rz - jz)),
@@ -636,11 +750,14 @@ export function buildIsland(b: IslandBuild): IslandResult {
       ...o.stacks.slice(0, 2).map((q) => ({ x: q.x, y: sea + q.height + 6, z: q.z })),
       { x: o.cove.x, y: sea + 14, z: o.cove.z },
     ],
-    unders: cave ? [(() => {
+    unders: [...(CV ? [
+      { min: V(CV.hall.x - Math.max(CV.hall.rx, CV.hall.rz) - 2, CV.hall.y - 1, CV.hall.z - Math.max(CV.hall.rx, CV.hall.rz) - 2), max: V(CV.hall.x + Math.max(CV.hall.rx, CV.hall.rz) + 2, CV.hall.y + CV.hall.high + 2, CV.hall.z + Math.max(CV.hall.rx, CV.hall.rz) + 2) },
+      ...[CV.lower, CV.upper].map((line) => ({ min: V(Math.min(...line.map((p0) => p0[0])) - 2, Math.min(...line.map((p0) => p0[2])) - 1, Math.min(...line.map((p0) => p0[1])) - 2), max: V(Math.max(...line.map((p0) => p0[0])) + 2, Math.max(...line.map((p0) => p0[2])) + 1.5, Math.max(...line.map((p0) => p0[1])) + 2) })),
+    ] : []), ...(cave ? [(() => {
       const ux = Math.cos(cave.heading), uz = Math.sin(cave.heading), a0 = 3, a1 = cave.length + 2, w = 6;
       const xs = [cave.x + ux * a0 - uz * w, cave.x + ux * a0 + uz * w, cave.x + ux * a1 - uz * w, cave.x + ux * a1 + uz * w], zs = [cave.z + uz * a0 + ux * w, cave.z + uz * a0 - ux * w, cave.z + uz * a1 + ux * w, cave.z + uz * a1 - ux * w];
       return { min: V(Math.min(...xs), caveFloor - 1, Math.min(...zs)), max: V(Math.max(...xs), caveFloor + 8, Math.max(...zs)) };
-    })()] : [],
+    })()] : [])],
   };
 }
 

@@ -1292,6 +1292,59 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
     if (walls.length) island.walls = walls;
   }
 
+  // Caverns under the island, where its sea cave leads on into the rock: a passage climbing gently to a cavern under the hill, and
+  // from it another climbing to come out in the open ground near something built. A smugglers' way, from the sea to the land.
+  if (island.seaCave) {
+    const q = rng.fork('caverns'), sc = island.seaCave, ways = [track, ...(site.paths ?? []).map((p0) => p0.points)];
+    const nearWay = (x: number, z: number, r: number) => ways.some((l) => l.some(([px, pz]) => Math.hypot(px - x, pz - z) < r)) || (!!island.way && island.way.some(([px, pz]) => Math.hypot(px - x, pz - z) < r));
+    const built: [number, number][] = [
+      ...island.cottages.map((c): [number, number] => [c.x, c.z]),
+      ...(island.lighthouse ? [[island.lighthouse.x, island.lighthouse.z] as [number, number]] : []),
+      ...(island.castle ? [[island.castle.x, island.castle.z] as [number, number]] : []),
+      ...(island.chapel ? [[island.chapel.x, island.chapel.z] as [number, number]] : []),
+    ];
+    // (Its floor where the passage leaves it: the cave's floor is cut three tenths below its level, and its end opens out a few metres
+    // beyond its length; the passage keeps that floor, level, until it is past the end, or there is a step at the end.)
+    const ex = sc.x + Math.cos(sc.heading) * sc.length, ez = sc.z + Math.sin(sc.heading) * sc.length, ey = round(island.sea + 0.75 + sc.length * 0.02 - 0.3);
+    const line = (ax: number, az: number, ay: number, bx: number, bz: number, by: number): [number, number, number][] => {
+      const l = Math.hypot(bx - ax, bz - az), n = Math.max(2, Math.round(l / 2)), out: [number, number, number][] = [];
+      for (let i = 0; i <= n; i++) { const t = i / n; out.push([round(ax + (bx - ax) * t), round(az + (bz - az) * t), round(ay + (by - ay) * t)]); }
+      return out;
+    };
+    // (Rock enough over a passage all along it: four and a half metres, and more under the house, where the cellars are.)
+    const roofed = (pts: [number, number, number][], skipLast = 0) => pts.slice(0, pts.length - skipLast).every(([x, z, y]) => plain(x, z) - y > (outside(level, x, z) < 4 ? 10 : 4.5));
+    for (let tries = 0; tries < 200 && !island.caverns; tries++) {
+      const dist = q.range(22, tries < 40 ? 50 : 72), a = sc.heading + q.range(-1, 1) * (tries < 100 ? 1.3 : 1.7), cx = ex + Math.cos(a) * dist, cz = ez + Math.sin(a) * dist, cy = round(ey + dist * 0.16);
+      const rx = round(q.range(9, 13)), rz = round(q.range(6.5, 9)), turn = round(q.range(0, Math.PI)), high = round(q.range(7, 9.5));
+      if (inland(island, cx, cz) < rx + 6 || outside(level, cx, cz) < rx + 8 || built.some(([bx, bz]) => Math.hypot(bx - cx, bz - cz) < rx + 8)) continue;
+      // (Rock over the whole of its roof.)
+      let ok = true;
+      for (let k = 0; k < 12 && ok; k++) { const t = (k / 12) * TAU, x = cx + Math.cos(t) * rx * Math.cos(turn) - Math.sin(t) * rz * Math.sin(turn), z = cz + Math.cos(t) * rx * Math.sin(turn) + Math.sin(t) * rz * Math.cos(turn); if (plain(x, z) < cy + high * 0.6 + 4 || plain(cx, cz) < cy + high + 4) ok = false; }
+      if (!ok) continue;
+      // The passage in: from the sea cave's end to the cavern's edge on that side.
+      const ia = Math.atan2(ez - cz, ex - cx), inX = cx + Math.cos(ia) * Math.min(rx, rz) * 0.8, inZ = cz + Math.sin(ia) * Math.min(rx, rz) * 0.8;
+      const ld = Math.hypot(inX - ex, inZ - ez), fx = ex + ((inX - ex) / ld) * 5, fz = ez + ((inZ - ez) / ld) * 5;
+      const lower = [...line(ex, ez, ey, fx, fz, ey).slice(0, -1), ...line(fx, fz, ey, inX, inZ, cy)];
+      if (!roofed(lower.slice(3))) continue;
+      // The way out: to a spot in open, level ground, clear of the ways and of what is built but near it, climbing no more steeply than one in two and a half.
+      let best: { x: number; z: number; y: number; score: number } | null = null;
+      for (let k = 0; k < 48; k++) {
+        const b = (k / 48) * TAU, run = q.range(42, 72), xx = cx + Math.cos(b) * run, zz = cz + Math.sin(b) * run, yy = plain(xx, zz);
+        if (inland(island, xx, zz) < 14 || outside(level, xx, zz) < 9 || nearWay(xx, zz, 6) || built.some(([bx, bz]) => Math.hypot(bx - xx, bz - zz) < 11)) continue;
+        if ((yy - cy) / run > 0.42 || yy - cy < 5 || Math.abs(plain(xx + Math.cos(b) * 4, zz + Math.sin(b) * 4) - yy) > 1.4) continue;
+        const near = Math.min(60, ...built.map(([bx, bz]) => Math.hypot(bx - xx, bz - zz)));
+        const score = -near + q.next() * 6;
+        if (!best || score > best.score) best = { x: xx, z: zz, y: yy, score };
+      }
+      if (!best) continue;
+      const ob = Math.atan2(best.z - cz, best.x - cx), outX = cx + Math.cos(ob) * Math.min(rx, rz) * 0.8, outZ = cz + Math.sin(ob) * Math.min(rx, rz) * 0.8;
+      const upper = line(outX, outZ, cy, best.x, best.z, best.y);
+      // (Under rock all the way but for its cutting at the top, sixteen metres at most; and its cutting, while it is open or shallow, crosses no way.)
+      if (!roofed(upper.slice(1), 8) || upper.some(([x, z, y]) => plain(x, z) - y < 4.5 && nearWay(x, z, 4))) continue;
+      island.caverns = { lower, hall: { x: round(cx), z: round(cz), y: cy, rx, rz, turn, high }, upper };
+    }
+  }
+
   // The box that holds the island.
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   island.coast.forEach((r, k) => {

@@ -105,6 +105,13 @@ export function meshSite(site: Site): SceneDescription {
   // through it too. Without them they were walled up from outside, and open from inside, where the wall's face cannot be seen.)
   const frontWindows = (p: Place, side: Side): Way[] => p.role !== 'approach' || side !== 'n' ? []
     : [...outerWindows.values()].flat().filter((w) => w.side === 's' && Math.abs(places[w.a].z1 + T - p.z0) < 0.05);
+  // (The stretches of a free house's front that stand on the forecourt's line, where its front is the forecourt's wall. A room set back
+  // from that line has an outer wall of its own, with its windows; a front drawn across from end to end stood before it as a blank screen.)
+  const frontPieces = (p: Place, fx0: number, fx1: number): [number, number][] => !free ? [[fx0, fx1]]
+    : runs.filter((r) => r.side === 's' && Math.abs(r.at - p.z0) < 0.05).map((r): [number, number] => [Math.max(fx0, r.from), Math.min(fx1, r.to)]).filter(([a, b]) => b - a > 0.05);
+  const buildFront = (p: Place, fx0: number, fx1: number) => {
+    for (const [a, b] of frontPieces(p, fx0, fx1)) kit.wallFace('stone', kit.frame(a, p.z0, b, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).filter((h) => h.at > a && h.at < b).map((h) => ({ ...h, c: h.at - a })) });
+  };
   const holesOn = (p: Place, side: Side, e: number): Hole[] =>
     [...[...site.ways, ...(outerWindows.get(p.id) ?? [])].filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side), ...frontWindows(p, side)]
       .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w), ...(hiddenFrom(w, p) ? { band: 0.03 } : {}) }));
@@ -778,8 +785,7 @@ export function meshSite(site: Site): SceneDescription {
       kit.box('stone', V(px0 - 0.12, top - 0.05, p.z0 - 0.3), V(px1 + 0.12, top + 0.3, p.z0 + 0.22), coping, coping, 'portalhead');
       for (const x of [px0, px1 - 0.42]) kit.box('stone', V(x, p.floor - 0.2, p.z0 - 0.1), V(x + 0.42, top - 0.05, p.z0 + 0.14), dressed, dressed, 'portaljamb');
     } else {
-      const front = kit.frame(fx0, p.z0, fx1, p.z0);
-      kit.wallFace('stone', front, p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+      buildFront(p, fx0, fx1);
     }
 
     const r = rng.fork('approach');
@@ -3538,7 +3544,7 @@ export function meshSite(site: Site): SceneDescription {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
     const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
-    kit.wallFace('stone', kit.frame(fx0, p.z0, fx1, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildIsland({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
     arrival.spawn = made.spawn;
@@ -3553,6 +3559,7 @@ export function meshSite(site: Site): SceneDescription {
     beacon = made.lamp;
     flows.push(...made.streams);
     falls.push(...made.falls);
+    hallTorches.push(...made.torches);
     scenery.cards.push(...planting.sets);
   };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
@@ -3561,7 +3568,7 @@ export function meshSite(site: Site): SceneDescription {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
     const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
-    kit.wallFace('stone', kit.frame(fx0, p.z0, fx1, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).map((h) => ({ ...h, c: h.at - fx0 })) });
+    buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildMountain({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
     arrival.spawn = made.spawn;
@@ -4329,6 +4336,15 @@ export function meshSite(site: Site): SceneDescription {
   if (site.grounds) {
     min.x = Math.min(min.x, site.grounds.x0 - 2); max.x = Math.max(max.x, site.grounds.x1 + 2); max.z = Math.max(max.z, site.grounds.z1 + 2);
   }
+  // (And, across the ground, the spaces under the land: the sun's shadow and the two maps of what lies under the sky are drawn over
+  // this box, and whatever lay outside it was taken to be in the open. A great hall under a mountain top reaches out to its windows
+  // in the precipice, beyond the top; it had the sun on its walls and cloud shadows going over its floor.)
+  const hall = site.mountain?.hall;
+  const under: [number, number, number][] = [
+    ...unders.flatMap((u): [number, number, number][] => [[u.min.x, u.min.z, 0], [u.max.x, u.max.z, 0]]),
+    ...(hall ? [hall.out, hall.in, ...hall.stair].map(([x, z]): [number, number, number] => [x, z, hall.wide / 2 + Math.max(0, ...hall.sides.map((q) => q.long + 2)) + 6]) : []),
+  ];
+  for (const [x, z, r] of under) { min.x = Math.min(min.x, x - r); max.x = Math.max(max.x, x + r); min.z = Math.min(min.z, z - r); max.z = Math.max(max.z, z + r); }
   const approach = places.find((p) => p.role === 'approach') ?? places[site.entrance];
   return {
     meshes: kit.meshes,

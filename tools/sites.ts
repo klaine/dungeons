@@ -90,6 +90,19 @@ for (let n = 0; n < (only && only !== 'island' ? 0 : Math.ceil(count / 4)); n++)
     tally2(`mansion=${o.mansion ? `${o.mansion.building.bays} bays x${o.mansion.building.storeys}` : 'none'}`);
     tally2(`cave=${!!o.seaCave}`);
     tally2(`stacks=${o.stacks.length}`);
+    // The caverns, if there are any: their passages climb no more steeply than the way does, without a break, from the sea cave to
+    // the cavern and from it to the open ground, which they come out on.
+    if (o.caverns) {
+      const cv = o.caverns;
+      for (const [name, l] of [['passage in', cv.lower], ['passage out', cv.upper]] as const) {
+        for (let k = 1; k < l.length; k++) {
+          const run = Math.hypot(l[k][0] - l[k - 1][0], l[k][1] - l[k - 1][1]), rise = Math.abs(l[k][2] - l[k - 1][2]);
+          if (run > 3 || rise > run * 0.45 + 0.05) throw new Error(`the caverns' ${name} breaks at its point ${k}: ${run.toFixed(1)} along, ${rise.toFixed(1)} up`);
+        }
+      }
+      if (Math.abs(cv.lower[cv.lower.length - 1][2] - cv.hall.y) > 0.2 || Math.abs(cv.upper[0][2] - cv.hall.y) > 0.2) throw new Error("the caverns' passages do not meet the cavern's floor");
+      tally2('caverns=true');
+    } else tally2('caverns=false');
   } catch (e) {
     isleFailures++;
     console.log(seed, 'FAILED', (e as Error).message);

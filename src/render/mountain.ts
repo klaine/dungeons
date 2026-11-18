@@ -208,9 +208,23 @@ export function buildMountain(b: MountainBuild): MountainResult {
     let any = false;
     // (A tile wholly far below the top or far out from it has nothing to carve, and is passed over quickly.)
     const cx = area.x0 + (i + 0.5) * TILE, cz = area.z0 + (j + 0.5) * TILE;
-    if (inside(m, cx, cz) < -OUT - TILE) continue;
+    // (But not one by the great hall, whose windows are in the precipice: the face under them was passed over, and holes showed in it.)
+    if (inside(m, cx, cz) < -OUT - TILE && nearHall(cx, cz) > TILE) continue;
     for (let z = area.z0 + j * TILE + 0.6; z < area.z0 + (j + 1) * TILE && !any; z += SHEET) for (let x = area.x0 + i * TILE + 0.6; x < area.x0 + (i + 1) * TILE && !any; x += SHEET) any = inBand(x, z);
     tiles[j * tilesX + i] = any ? 1 : 0;
+  }
+  // (A tile left out between two that are carved, on either hand or before and behind, is carved too: the sheet laid over it and the
+  // rock carved round it are not the same shape on a steep face, and between them there were holes to see the sky through.)
+  // (And about the hall a ring wider than it needs, down its face to the cloud, so that the seam lies further off and lower.)
+  {
+    const was = tiles.slice(), at = (i: number, j: number) => i >= 0 && j >= 0 && i < tilesX && j < tilesZ && was[j * tilesX + i] === 1;
+    const centre = (i: number, j: number): [number, number] => [area.x0 + (i + 0.5) * TILE, area.z0 + (j + 0.5) * TILE];
+    for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
+      if (was[j * tilesX + i]) continue;
+      const [x, z] = centre(i, j);
+      if (plain(x, z) <= HIDDEN) continue;
+      if ((at(i - 1, j) && at(i + 1, j)) || (at(i, j - 1) && at(i, j + 1)) || nearHall(x, z) < 4 + TILE * 1.5) tiles[j * tilesX + i] = 1;
+    }
   }
   const carvedTile = (i: number, j: number) => i >= 0 && j >= 0 && i < tilesX && j < tilesZ && tiles[j * tilesX + i] === 1;
   const carved = (x: number, z: number) => {
