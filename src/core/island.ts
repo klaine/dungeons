@@ -188,7 +188,8 @@ function topAt(o: Island, floor: number, x: number, z: number): number {
   if (o.terrain) {
     // The land as it was found, made fine and worn again (`islandLand`); inside the coast never lower than a little over the sea.
     const f = islandLand(o, floor);
-    top = f.holds(x, z) ? f.at(x, z) : frameY(o, floor, x, z);
+    // (Read on a smooth curve through the lattice, not straight between its points, which left creases a lattice apart.)
+    top = f.holds(x, z) ? f.smoothAt(x, z) : frameY(o, floor, x, z);
     if (d > 0) top = Math.max(top, o.sea + 1.5);
     // A stream has cut its bed: flat across the water, with banks that lie back from it. (Only ever taken away.)
     for (const st of o.streams ?? []) {
@@ -329,7 +330,15 @@ export function acrossWater(o: Island, floor: number, x: number, z: number, out:
  * what stands over the height its cliff is to have there (`edge`), on the island the house is on: other land in the lattice is sea.
  */
 const COASTS = new WeakMap<Island, { sig: number[]; field: HeightField }>();
+let lastCoast: { o: Island; t: object; coast: number[]; edge?: number[]; field: HeightField } | null = null;
 function coastField(o: Island): HeightField {
+  // (Asked for at nearly every point the builder makes: the last answer is kept, and given again while what it was made from is the same.)
+  if (lastCoast && lastCoast.o === o && lastCoast.t === o.terrain && lastCoast.coast === o.coast && lastCoast.edge === o.edge) return lastCoast.field;
+  const field = coastFieldOf(o);
+  lastCoast = { o, t: o.terrain!, coast: o.coast, edge: o.edge, field };
+  return field;
+}
+function coastFieldOf(o: Island): HeightField {
   const t = o.terrain!, had = COASTS.get(o), sig = [t.seed, t.u, t.v, t.turn, t.shore, o.coast.length, o.coast[0], o.edge?.[0] ?? 0];
   if (had && had.sig.every((v, k) => v === sig[k])) return had.field;
   const cell = 2, hx = (o.level.x0 + o.level.x1) / 2, hz = (o.level.z0 + o.level.z1) / 2, a = archipelago(t.seed);
@@ -393,7 +402,14 @@ const FIELDS = new WeakMap<Island, { sig: number[]; field: HeightField }>();
  * The island's own land, on a two-metre lattice: the land it was found in, with fine detail laid on and worn again by water and frost
  * at that scale. The house's ground is spared, and the sea bed; the rest of the land in part.
  */
+let lastLand: { o: Island; t: object; coast: number[]; floor: number; field: HeightField } | null = null;
 function islandLand(o: Island, floor: number): HeightField {
+  if (lastLand && lastLand.o === o && lastLand.t === o.terrain && lastLand.coast === o.coast && lastLand.floor === floor) return lastLand.field;
+  const field = islandLandOf(o, floor);
+  lastLand = { o, t: o.terrain!, coast: o.coast, floor, field };
+  return field;
+}
+function islandLandOf(o: Island, floor: number): HeightField {
   const t = o.terrain!, had = FIELDS.get(o), sig = [floor, t.seed, t.u, t.v, t.turn, t.base, o.coast.length];
   if (had && had.sig.every((v, k) => v === sig[k])) return had.field;
   const cell = t.cell, W = ISLAND_WEAR;
@@ -518,7 +534,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
     // height its cliff is to have there, which differs round the island: a low rocky shore here, a cliff fifteen metres high there.
     // Beyond that the sea has had the land away, and the cliff is cut (`below`).
     const sp = found.spot, c = Math.cos(sp.turn), sn = Math.sin(sp.turn), du = sp.cu - sp.u, dv = sp.cv - sp.v;
-    island.terrain = { seed: found.seed, cell: 2, u: sp.u, v: sp.v, turn: sp.turn, base: Math.round(sp.base * 100) / 100, shore: Math.round(sp.sea * 100) / 100 };
+    island.terrain = { seed: found.seed, cell: 1.5, u: sp.u, v: sp.v, turn: sp.turn, base: Math.round(sp.base * 100) / 100, shore: Math.round(sp.sea * 100) / 100 };
     island.x = round(hx + c * du + sn * dv); island.z = round(hz - sn * du + c * dv);
     island.sea = sea = round(F - (island.terrain.base - island.terrain.shore));
     const q = rng.fork('cliffs'), s0 = q.range(0, 500), sharp = q.range(0.12, 0.2);

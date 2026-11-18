@@ -19,6 +19,11 @@ import { Rng } from './rng';
  * point stands over its neighbour more steeply than broken rock can lie, some of it comes down.
  */
 
+/** A point on Catmull and Rom's curve through four values a step apart, `t` of the way from the second to the third. */
+function catmull(a: number, b: number, c: number, e: number, t: number): number {
+  return b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - e + t * (3 * (b - c) + e - a)));
+}
+
 /** Heights on a square lattice, `cell` metres apart, from (`x0`, `z0`). */
 export class HeightField {
   readonly data: Float32Array;
@@ -34,9 +39,13 @@ export class HeightField {
   smoothAt(x: number, z: number): number {
     const fx = Math.min(this.nx - 2.0001, Math.max(1, (x - this.x0) / this.cell)), fz = Math.min(this.nz - 2.0001, Math.max(1, (z - this.z0) / this.cell));
     const i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, d = this.data, nx = this.nx;
-    const cr = (a: number, b: number, c: number, e: number, t: number) => b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - e + t * (3 * (b - c) + e - a)));
-    const row = (jj: number) => { const k = jj * nx + i; return cr(d[k - 1], d[k], d[k + 1], d[k + 2], tx); };
-    return cr(row(j - 1), row(j), row(j + 1), row(j + 2), tz);
+    // (Written out, with nothing made on each call: this is asked for millions of times while rock is carved.)
+    let k = (j - 1) * nx + i;
+    const r0 = catmull(d[k - 1], d[k], d[k + 1], d[k + 2], tx); k += nx;
+    const r1 = catmull(d[k - 1], d[k], d[k + 1], d[k + 2], tx); k += nx;
+    const r2 = catmull(d[k - 1], d[k], d[k + 1], d[k + 2], tx); k += nx;
+    const r3 = catmull(d[k - 1], d[k], d[k + 1], d[k + 2], tx);
+    return catmull(r0, r1, r2, r3, tz);
   }
   /** The height at a point, blended between the four lattice points about it. */
   at(x: number, z: number): number {

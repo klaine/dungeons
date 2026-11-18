@@ -49,7 +49,8 @@ export function archipelago(seed: number): Archipelago {
   let a = SHAPES.get(seed);
   if (a) return a;
   const rng = new Rng(`archipelago/${seed}`);
-  const oc = 24, on = 301, ic = 6, inn = 401;
+  // (Five metres to a point within 1.2 kilometres, twenty beyond: a notch finer than first made, for the land across the water.)
+  const oc = 20, on = 361, ic = 5, inn = 481;
   const outer = wornLattice(-(on - 1) * oc / 2, -(on - 1) * oc / 2, oc, on, on, (u, v) => shapeAt(seed, u, v, false), rng.fork('outer'), OUTER_WEAR, undefined, 8);
   const inner = wornLattice(-(inn - 1) * ic / 2, -(inn - 1) * ic / 2, ic, inn, inn, (u, v) => shapeAt(seed, u, v, true), rng.fork('inner'), INNER_WEAR, undefined, 20);
   a = { seed, inner, outer };

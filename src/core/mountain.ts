@@ -268,7 +268,9 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   let y: number;
   if (field && field.holds(x, z)) {
     const edge = Math.min(x - field.x0, z - field.z0, field.x0 + (field.nx - 1) * field.cell - x, field.z0 + (field.nz - 1) * field.cell - z);
-    y = edge > 60 ? field.at(x, z) : below(x, z) + (field.at(x, z) - below(x, z)) * smooth(edge / 60);
+    // (Read on a smooth curve through the lattice, not straight between its points, which left creases a lattice apart.)
+    const fy = field.smoothAt(x, z);
+    y = edge > 60 ? fy : below(x, z) + (fy - below(x, z)) * smooth(edge / 60);
     // (Deep under the cloud, where nothing has been laid out, the mountain's lattice is joined to the country it stands in: else, in
     // the corners of that lattice, it would go down below the valley floors about it.)
     if (m.range.length && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
@@ -495,13 +497,13 @@ function countryShape(m: Mountain, floor: number, x: number, z: number): number 
 
 /** How the country round about is worn: tried and tuned with the relief tool, as `WEAR` is. */
 export const COUNTRY_WEAR = {
-  cell: 32, half: 7200, cut: 110, fill: 45,
+  cell: 24, half: 7200, cut: 110, fill: 45,
   water: { drops: 1.0, life: 90, inertia: 0.15, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.012, gravity: 4, radius: 2, most: 4 },
   frost: { passes: 2, repose: 1.9, rate: 0.4 },
 };
 /** The finer lattice about this mountain: made from the coarse one with its detail, and worn again at its own scale. */
 export const NEAR_WEAR = {
-  cell: 12, half: 2600, cut: 45, fill: 20,
+  cell: 9, half: 2600, cut: 45, fill: 20,
   water: { drops: 1.0, life: 70, inertia: 0.1, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.015, gravity: 4, radius: 2, most: 1.6 },
   frost: { passes: 2, repose: 1.9, rate: 0.4 },
 };
@@ -731,7 +733,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     }
   }
   // (If the land is to be worn, it is worn now that its large shape is decided, so that every way and platform after is laid on the worn land.)
-  if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 2 };
+  if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 1.5 };
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.

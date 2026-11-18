@@ -621,8 +621,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
  */
 function layMainland(mesh: MeshBuilder, site: Site, stone: Colour, F: number): void {
   const o = site.island!, m = o.mainland, cx = o.x, cz = o.z, sea = o.sea, seed = (o.x * 7.31 + o.z * 3.17) % 97;
-  const around = 720, radii: number[] = [];
-  for (let r = 240; r <= 3400; r += 4 + (r - 240) * 0.016) radii.push(r);
+  // (A notch finer than first made: half as many points again round each ring, and the rings closer.)
+  const around = 1080, radii: number[] = [];
+  for (let r = 240; r <= 3400; r += 3 + (r - 240) * 0.011) radii.push(r);
   const ridge = (x: number, z: number, s: number) => { const v = 1 - Math.abs(fbm2(x, z, 3, s) * 2 - 1); return v * v; };
   const height = (x: number, z: number): number => {
     const r = Math.hypot(x - cx, z - cz), a = Math.atan2(z - cz, x - cx);

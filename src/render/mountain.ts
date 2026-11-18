@@ -1381,8 +1381,9 @@ function plantMountain(c: MountainPlanting): Record<string, number> {
  */
 function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean): void {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
-  const around = 640, radii: number[] = [];
-  for (let r = 60; r <= 6900; r += 3 + r * 0.02) radii.push(r);
+  // (A notch finer than first made: half as many points again round each ring, and the rings closer.)
+  const around = 960, radii: number[] = [];
+  for (let r = 60; r <= 6900; r += 2.2 + r * 0.014) radii.push(r);
   // (The land is the core's: `countryAt`. Here it is only drawn.)
   const wet = new Uint8Array(radii.length * around);
   const rings = radii.length, H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);

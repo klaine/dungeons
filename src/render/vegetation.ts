@@ -646,7 +646,10 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   // Whole trees stand far off, are never dropped for distance, and are drawn in large lots.
   const whole = set.kind === 'fir' || set.kind === 'tree';
   const ground = set.kind !== 'leaf' && set.kind !== 'needle' && set.kind !== 'pine' && !whole;
-  const block = whole ? 220 : ground ? (set.kind === 'grass' ? 12 : 24) : 48;
+  // (Each block is a draw call: at twelve metres to a block of grass an island had two and a half thousand of them, and the frame
+  // was spent issuing them. Blocks four times the area cost a little more drawing at the edge of the range, where the cards shrink
+  // away by themselves, and far fewer calls.)
+  const block = whole ? 220 : ground ? (set.kind === 'grass' ? 24 : 40) : 48;
   // Grass is drawn two ways: near the eye as real blades, farther off as painted tufts. Each block
   // gets both, and which is drawn, and where one gives way to the other, is settled in `cullCards`
   // and by the cards themselves shrinking away over the hand-over. (`?blades=0` keeps the painted tufts alone.)

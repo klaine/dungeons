@@ -45,7 +45,7 @@ export function highlands(seed: number): Highlands {
   let h = LANDS.get(seed);
   if (h) return h;
   const rng = new Rng(`highlands/${seed}`);
-  const oc = 24, on = 301, ic = 6, inn = 401;
+  const oc = 20, on = 361, ic = 5, inn = 481;
   const outer = wornLattice(-(on - 1) * oc / 2, -(on - 1) * oc / 2, oc, on, on, (u, v) => shapeAt(seed, u, v, false), rng.fork('outer'), OUTER_WEAR, undefined, 8);
   const inner = wornLattice(-(inn - 1) * ic / 2, -(inn - 1) * ic / 2, ic, inn, inn, (u, v) => shapeAt(seed, u, v, true), rng.fork('inner'), INNER_WEAR, undefined, 20);
   // How it drains. First its hollows are filled to where they would spill (water does not stop in a dip where the wear left
