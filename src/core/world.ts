@@ -106,7 +106,7 @@ export function planWorld(seed: string, size: { x: number; z: number } = WORLD_S
   const il = rng.fork('islands'), wantIsles = il.int(7, 9);
   for (let tries = 0; tries < 900 && p.islands.length < wantIsles; tries++) {
     const x = il.range(-hx + 500, hx - 500), z = il.range(-hz + 500, hz - 500), zn = zonesAt(p, x, z);
-    if (zn.d > -0.12 * p.shelf || zn.d < -0.75 * p.shelf) continue;
+    if (zn.d0 > -0.12 * p.shelf || zn.d0 < -0.75 * p.shelf) continue;
     const r = il.range(150, 210);
     if (p.islands.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.6 + 250)) continue;
     p.islands.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), top: Math.round(il.range(34, 52)), squash: Math.round(il.range(0.6, 0.95) * 100) / 100, turn: Math.round(il.range(0, Math.PI) * 100) / 100, lobe: Math.round(il.range(0, Math.PI * 2) * 100) / 100, hill: Math.round(il.range(0, Math.PI * 2) * 100) / 100 });
@@ -134,30 +134,39 @@ export function planWorld(seed: string, size: { x: number; z: number } = WORLD_S
 }
 
 /**
- * Where a point lies among the zones: how far inland of the coast (`d`, the bay's shore included) and
- * of the coast as it would run without the bay (`d0`); where the upland and the range begin there,
- * measured as `d0` is; how far it is upland or range rather than low country (`up`), and range
- * rather than upland (`high`); and how much it belongs to each zone (the four add to one).
+ * Where a point lies among the zones: how far inland of the coast (`d0`), and of the bay's shore as
+ * the fjords reckon it (`d`); how far the land has sunk there for the bay (`bay`, 0 to 1); where the
+ * upland and the range begin there; how far it is upland or range rather than low country (`up`), and
+ * range rather than upland (`high`); and how much it belongs to each zone (the four add to one).
  */
-export interface Zones { d: number; d0: number; P: number; U: number; up: number; high: number; wI: number; wP: number; wU: number; wR: number }
-const ZN: Zones = { d: 0, d0: 0, P: 0, U: 0, up: 0, high: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
+export interface Zones { d: number; d0: number; bay: number; P: number; U: number; up: number; high: number; wI: number; wP: number; wU: number; wR: number }
+const ZN: Zones = { d: 0, d0: 0, bay: 0, P: 0, U: 0, up: 0, high: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
 
 /** The zones at a point. (Written into one object, reused: read what is wanted before asking again.) */
 export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
   const n = p.n, s = x * Math.cos(p.inland) + z * Math.sin(p.inland);
   // (The coast wanders in bays and headlands a kilometre or two across, and in smaller ones on them.)
   const d0 = s - p.coast + 800 * fbmd(x / 2500 + 1.7, z / 2500 - 0.3, 3, n + 1) + 200 * fbmd(x / 700, z / 700 + 2.2, 3, n + 2);
-  // The great bay: the coast pushed back inland, furthest along its middle, which wanders; rounded at its head. Only the coast is
-  // moved: the upland and the range stand where they would without it, so where it reaches them its shores are high ground.
+  // The great bay: the land sunk in a broad hollow, deepest along its middle, which wanders, and dying away at its sides and at its
+  // head; the sea comes in as far as the land lies under it. So its shore is where the land's own shape meets the sea: the valleys
+  // drowned into inlets, the spurs between them left as headlands, the hills in it as islands, as a firth or a sea loch is.
+  // (Drawn first as an outline cut out of the land, the bay's shore was one smooth sweep, cutting through hill and valley alike.)
   const B = p.bay, lat = -x * Math.sin(p.inland) + z * Math.cos(p.inland);
-  // (Its sides wander too, in and out, as its middle does.)
   const across = (lat - B.at + 300 * fbmd(d0 / 1400 + 2.7, 0.4, 2, n + 6)) / (B.width / 2) + 0.18 * fbmd(x / 700 - 1.9, z / 700 + 0.6, 3, n + 7);
-  // (Its sides slope: drawn first with a profile that rose nearly upright at its edge, its sides were long straight walls.)
+  // (Sunk evenly over most of its breadth, and dying away slowly at its sides and head, so that there the land's own relief, not the
+  // hollow's, says where the water stops.)
+  // (Its edge worn into coves and points at two sizes, and its depth uneven: where the land is flat, as low country by the sea is,
+  // nothing else breaks the line where the water stops, and without them it was a smooth sweep there.)
+  const rag = 0.3 * fbmd(x / 550 + 4.2, z / 550 - 1.3, 3, n + 8) + 0.13 * fbmd(x / 160 - 2.6, z / 160 + 3.4, 2, n + 9);
+  // (Its fall at the sides gentle, over most of the bay's half-breadth again: steep, it said where the shore went wherever the land
+  // was gentle, and the bay came out a smooth lobe in low country.)
+  const sunk = smooth((1.75 - Math.abs(across) + rag) / 1.5) * smooth((B.depth + 400 - d0 + 500 * rag) / 1300) * smooth((d0 + 500) / 500) * (0.85 + 0.3 * (0.5 + fbmd(x / 900, z / 900 + 7.7, 2, n + 10)));
+  // (Where the fjords reckon the shore to be: the bay's outline, as it was first drawn.)
   const d = d0 - B.depth * Math.pow(Math.max(0, 1 - across * across), 1.1);
   const P = p.plains + 900 * fbmd(x / 2500 + 3.3, z / 2500 - 1.2, 2, n + 3);
   const U = Math.max(P, -100) + p.upland + 600 * fbmd(x / 2500 - 4.1, z / 2500 + 2.2, 2, n + 4);
-  const a = smooth((d + 250) / 650), b = smooth((d0 - P + 300) / 600), c = smooth((d0 - U + 500) / 1000);
-  ZN.d = d; ZN.d0 = d0; ZN.P = P; ZN.U = U; ZN.up = b; ZN.high = c;
+  const a = smooth((d0 + 250) / 650), b = smooth((d0 - P + 300) / 600), c = smooth((d0 - U + 500) / 1000);
+  ZN.d = d; ZN.d0 = d0; ZN.bay = sunk; ZN.P = P; ZN.U = U; ZN.up = b; ZN.high = c;
   ZN.wI = 1 - a; ZN.wP = a * (1 - b); ZN.wU = a * b * (1 - c); ZN.wR = a * b * c;
   return ZN;
 }
@@ -289,12 +298,10 @@ const STRATHS = 1100;
 
 /** The plain shape of the world's land at a point: each zone's land, in the share the point belongs to it. `fine` for the tiles' lattice, with more octaves. */
 export function worldShape(p: WorldPlan, x: number, z: number, fine = false): number {
-  const { d, d0, P, U, up, high, wI, wP, wU, wR } = zonesAt(p, x, z);
+  const { d, d0, bay, P, U, up, high, wI, wP, wU, wR } = zonesAt(p, x, z);
   let h = 0;
-  // (The bay's floor is reckoned as the shelf's near the coast, so that it is shallow and has its islands, and is not open sea;
-  // in front of its mouth a channel a little deeper than the shelf around leads in.)
-  if (wI > 1e-4) h += wI * islesAt(p, x, z, Math.max(d, Math.min(d0, 0) - 500), fine);
-  if (wP > 1e-4) h += wP * plainsAt(p, x, z, d, P, fine);
+  if (wI > 1e-4) h += wI * islesAt(p, x, z, d0, fine);
+  if (wP > 1e-4) h += wP * plainsAt(p, x, z, d0, P, fine);
   if (wU > 1e-4) h += wU * uplandAt(p, x, z, d0, P, U, fine);
   if (wR > 1e-4) h += wR * rangeAt(p, x, z, d0, U, fine);
   // Fjords: where the coast is high ground (the upland come down to the sea, or the bay's shores cut into it), the straths, deep
@@ -306,6 +313,9 @@ export function worldShape(p: WorldPlan, x: number, z: number, fine = false): nu
     const v = valleyLines(p, x, z, STRATHS, 1, p.n + 36, true), w = smooth(1 - v / 0.45) * up * (1 - high) * F.strength * reach;
     if (w > 0) h -= w * (70 + 0.75 * Math.max(0, h));
   }
+  // The bay: the land sunk, less at its mouth, where the low country need go down only a little to be under the sea, and more
+  // towards its head, where the upland's floors must go under; but not so far that its hills do, which stand as headlands and islands.
+  if (bay > 0) h -= bay * (70 + 110 * smooth(d0 / p.bay.depth));
   return h;
 }
 
@@ -611,7 +621,7 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
     for (let z = cz - TILE.stride / 2; z < cz + TILE.stride / 2; z += 80) for (let x = cx - TILE.stride / 2; x < cx + TILE.stride / 2; x += 80) {
       const zn = zonesAt(p, x, z), y = f.at(x, z);
       all++;
-      if (zn.wI > 0.5 && y > -12) isle++;
+      if ((zn.wI > 0.5 || zn.bay > 0.3) && y > -12) isle++;
       if (zn.wU > 0.6 && y > 20) up++;
     }
     if (isle / all > 0.04) isleTiles.push({ i, j, score: isle / all });

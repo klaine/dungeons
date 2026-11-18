@@ -54,12 +54,18 @@ place asks for it.
   to one and blending over a few hundred metres where zones meet. The boundaries wander: the coast in
   bays and headlands a kilometre or two across, the foot of the upland so far that in places it comes
   down to the sea and the low country is gone.
-- **The great bay and the fjords.** The bay is the coast pushed back inland over a stretch 1.5 to
-  2.5 kilometres broad at its mouth and 1.8 to 3 deep, furthest along its middle, its middle and its
-  sides wandering, its sides sloping (drawn first nearly upright at the edge, they were long straight
-  walls). Only the coast is moved: the upland and the range stand where they would without it, so
-  the bay cuts past the low country into high ground, and its sides and head are steep. Its floor is
-  reckoned as the shelf's near the coast, so it is shallow and has islands in it. Fjords are cut
+- **The great bay and the fjords.** The bay is drowned land, as a firth or a sea loch is: the land
+  sunk in a broad hollow some 1.5 to 2.5 kilometres across and reaching 1.8 to 3 inland, its middle
+  wandering, sunk evenly over most of its breadth (seventy metres at its mouth, where the low country
+  need go down only a little to be under the sea, and 180 towards its head, where the upland's floors
+  go under but not its hills), and dying away slowly at its sides and head, its edge worn into coves and
+  points at two sizes and its depth uneven. The sea comes in as far as the land lies under it, so the
+  bay's shore is where the land's own shape meets the sea: valleys drowned into inlets, the spurs
+  between them left as headlands, hills standing in it as peninsulas and islands. (It was first an
+  outline cut out of the land, with the shelf's islands in it: its shore was one smooth sweep that cut
+  through hill and valley alike, sides like walls, "very unnatural", as was said. Then a hollow too deep
+  and too steep at its edge still drew its own outline as the shore wherever the land was gentle.) Only
+  the land is sunk; the upland and the range stand where they would without it. Fjords are cut
   wherever the coast is high ground: the upland's straths, which run inland, are carried on under the
   sea between their walls for 0.9 to 1.8 kilometres, deepest at their mouths, their floors rounded;
   where low country lies in front of one, its carved floor is cut off from the sea and holds a long loch
