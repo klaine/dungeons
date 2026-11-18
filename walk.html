@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dungeons: walk the world</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #9ab6cf; font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+    #hud { position: fixed; left: 12px; top: 10px; padding: 8px 12px; background: rgba(12, 11, 10, .62); color: #e8e2d6; border-radius: 6px; white-space: pre; font-variant-numeric: tabular-nums; pointer-events: none; }
+    #hint { position: fixed; right: 12px; bottom: 10px; padding: 6px 10px; background: rgba(12, 11, 10, .55); color: #e8e2d6; border-radius: 6px; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="hud">Starting…</div>
+  <div id="hint">Click to look about · W A S D to move · Shift to run · V to fly (Space up, C down) · 1 to 4 a valley head, Shift+1 to 4 an island, Ctrl+1 to 4 a mountain top · M wireframe</div>
+  <script type="module" src="/src/worldwalk/main.ts"></script>
+</body>
+</html>

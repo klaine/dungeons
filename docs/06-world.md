@@ -196,7 +196,8 @@ Each step is a slice that can be judged on its own. Nothing a site already makes
 world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already seen.
 
 1. **The world, and its map.** *Done*: everything above. Nothing in the game reads a world yet.
-2. **Land streamed in at a metre, meshed by its detail.** The world's land to a metre, made where it
+2. **Land streamed in at a metre, meshed by its detail.** *Done as a test, on a page of its own*
+   (below, *The land at a metre*); the game does not use it yet. As planned: the world's land to a metre, made where it
    is wanted and not before: squares of 256 or 512 metres on a fixed grid (so a square is the same
    whoever asks), each made from the 5-metre tile under it as that is made from the world (its fine
    shape, with what the coarser wear did laid on it, worn again at its own scale), drained, and kept
@@ -219,6 +220,57 @@ world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already
    (the shape continued, unworn), in place of the three kinds of far sheet each place has now.
 6. **The map leads to the places**, and **more kinds of place** where the world has room (the low
    country, the coast).
+
+## The land at a metre
+
+`src/core/stream.ts` makes the land a square at a time: 256 metres on a side, 257 points a side at a
+metre, on a fixed grid from the world's north-west corner. A square is the world's tiles of 5 metres
+under it, each weighed by how far inside its own lattice the point lies, so that across the strip
+where two tiles overlap (each worn alone, and differing there) the land passes from one to the other;
+then detail finer than the tiles hold (`detailAt`: knolls and hollows tens of metres across, a metre
+or two high where the ground is rough, less where it is gentle, and small unevenness on that); then a
+light wear by water and frost at a metre, made over the square and a strip of 24 metres about it, and
+faded out over the last 20 metres towards the square's edge. So along its edge a square is the plain
+function of the tiles and the detail, which its neighbour shares, and the two meet exactly. Then how
+far each point may be left out of a mesh (`errorsOf`: the square cut into right triangles, each split
+at the middle of its long side, down to a metre, as Mapbox's Martini makes them).
+
+`src/render/streamMesh.ts` meshes a square true to within a given distance (`meshTriangles`), with
+normals from the ground at a metre whatever the mesh keeps, and a skirt six metres deep hanging from
+its edge, which fills the slit where a neighbour meshed to another distance keeps other points along
+the same edge.
+
+`walk.html` (`src/worldwalk/`) is the page to try it on, not the game: the world made in a worker,
+which then makes its tiles as they are asked for; squares made in a few more workers, a core each,
+nearest first, within 700 metres of where one stands (`?radius=`); each meshed to a distance chosen
+by how far off it lies (2 centimetres within a dozen metres, 5 within thirty, 10, 20, 40, 80 and 160
+centimetres at 60, 125, 250, 500 and a thousand), and meshed again, a few a frame, as one moves;
+squares let go of beyond a kilometre; beyond them the world's lattice of 8 metres, read every 32, in
+blocks of a kilometre with holes where squares are, a metre low. One walks on the squares' heights
+(or flies, `V`); `1` to `4` go to the valley heads, with Shift the islands, with Ctrl the mountain tops;
+`M` shows the triangles. Its ground is coloured by what the world's lattice says lies there, rock where
+it is steep and sand by the water, and lit plainly: the game's ground material, grass and trees are not
+on it. `tools/stream.ts` makes squares about each place without a browser and checks that neighbours
+meet; `tools/browser/walk.cjs` walks the page to places and keeps pictures.
+
+*Measured*, November 2026, in the cloud container of four cores, on `w2`:
+
+- A square takes 0.32 to 0.41 seconds to make (without a browser; 0.37 to 0.40 in a worker of the
+  page). 147 edges shared between neighbouring squares about the twelve places differed by nothing.
+- Of the 131,072 triangles of a square's full lattice, a mesh true to 2 centimetres keeps 84%; to 5,
+  68%; 10, 53%; 20, 36%; 40, 19%; 80, 6%; 160, 1%. (More than measured before the detail was laid on:
+  the ground at a metre now has a metre's worth of detail in it.)
+- In the page (Chromium, headless, drawing in software), the world ready in 22 seconds; then about a
+  valley head 33 squares made and meshed in 7 seconds, holding 495,000 triangles, of which 297,000
+  were drawn in the view; about an island 33 squares in 8 seconds, 444,000 (360,000 drawn); about a
+  mountain top 38 in 13 seconds, 658,000 (441,000 drawn). (A valley's walked ground in the game is
+  some 500,000 triangles of turf and scree at 1.2 metres, over a smaller area.) No frame has been timed
+  on a graphics card: software drawing says nothing of it. `REAL_GPU=1 node tools/browser/walk.cjs
+  <folder> w2 valley1` does it on a machine with one.
+
+Not done: keeping squares once made (the browser's storage); the land beyond the squares is the world's
+lattice of 8 metres, which can lie some metres off the tiles' land where they meet, a step the skirts
+may not hide far off; and the game's ground, grass and trees on the squares, which is step 3.
 
 ## Open questions
 

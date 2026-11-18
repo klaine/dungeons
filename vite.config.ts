@@ -40,7 +40,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
-    // Four pages: the tool itself, the gallery of candidates, the map of a world, and the small example that reads what it exports.
-    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', viewer: 'examples/viewer/index.html' } },
+    // Five pages: the tool itself, the gallery of candidates, the map of a world, a walk over a world's land streamed in at a metre, and
+    // the small example that reads what it exports.
+    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', walk: 'walk.html', viewer: 'examples/viewer/index.html' } },
   },
 });
