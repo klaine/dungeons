@@ -18,7 +18,7 @@ import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makeP
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
-import { generateSite } from '../core/generate';
+import { generateSite, MakeOptions } from '../core/generate';
 import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
 import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
@@ -44,7 +44,7 @@ import { breathe, fail, finish as finishLoading, share, stage } from './loader';
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
-  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', sand: 'sand',
+  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', brick: 'brick', sand: 'sand',
 };
 import { Torch, TorchLights } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
@@ -139,7 +139,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, brick: 0.3 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -168,7 +168,7 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
   // Each surface is painted in turn, with the page given a chance to draw between them.
-  const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile'];
+  const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'brick'];
   const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0);
   let textureDone = 0;
   const paint = async (name: string, size: number, tseed: number) => {
@@ -188,6 +188,7 @@ async function start(): Promise<void> {
   const plaster = await paint('plaster', texSize, 41);
   const thatch = await paint('thatch', texSize, 47);
   const tile = await paint('tile', texSize, 43);
+  const brick = await paint('brick', texSize, 73);
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -216,7 +217,11 @@ async function start(): Promise<void> {
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
     plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8 }),
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
+    // Brick, for the towns of the northern coasts: red, and tinted per building from brown to orange.
+    brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 2.2 }),
     metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
+    // Copper gone green, on the roofs and spires of the brick towns: the patina is matt, and does not mirror the sky as sheet metal does.
+    copper: makeSiteMaterial(plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
     // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
     thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
@@ -230,7 +235,8 @@ async function start(): Promise<void> {
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
+  const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
+  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement: settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined });
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;
@@ -249,7 +255,8 @@ async function start(): Promise<void> {
   // Windows with a lamp or a fire behind them glow once the light is going; by day they are glass like the rest.
   // (The eyes open wider as the light goes, so the lamps need not be brighter by night than at dusk to tell more.)
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
-  materials.window = lamps ? makeWindowMaterial() : materials.glass;
+  // (By day a window that would be lit is glass like any other: its points carry the lamp's colour, which the glass must not take.)
+  materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
   windowUniforms.uLit.value = lamps;
   let desc: SceneDescription;
   if (site) {
@@ -796,7 +803,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, metal: plaster, glass: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, brick, metal: plaster, copper: plaster, glass: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));

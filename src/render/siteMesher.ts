@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { anyAngle } from './coast';
-import { Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
+import { Building, Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
 import { Frame, Kit, Opening } from './geom/kit';
@@ -880,7 +880,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (The keep's tower stands on its promontory: built at the shelf's height, though the ground under it is levelled before the shelf is raised.)
     const towers = (site.grounds ? site.towers ?? [] : []).map((t, i) => { const lift = keepShelf && i === 0 && site.keep ? keepShelf.height : 0; return { ...t, base: swells(t.x, t.z) + lift, lift }; });
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
+    // (A building of brick stands in a street, deep from its front: it is set at the height of the ground before its door, so that the
+    // street runs level to its step; any other at the height of the ground under its middle.)
+    const frontOf = (b: Building) => { const turn = b.faces === 'w' ? 1 : -1; return swells(b.x - (turn * b.d) / 2 - turn * 1.2, b.z); };
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: b.style === 'brick' ? frontOf(b) : swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
     // Whether a point is under a building, within its outer walls.
     // Whether a point is under a building, within its outer walls (wings and all).
     const footprint = (b: (typeof houses)[number], x: number, z: number) => {
@@ -1729,6 +1732,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // Where the track comes up to the flags before the door, the ruts die away.
       return off + (off < 0 ? -1 : 1) * 4 * (1 - smooth((z - p.z1 + 6) / 3));
     };
+    // The street of a town: the ground before each house of brick, from its front to beyond the middle of the track, and the lanes
+    // between; trodden bare, with nothing growing on it. 1 in the street, fading to 0 over a stride or two about it.
+    const lots = houses.filter((b) => b.style === 'brick' && b.brick?.kind !== 'church').map((b) => {
+      const turn = b.faces === 'w' ? 1 : -1, fx = b.x - (turn * b.d) / 2;
+      return { turn, fx, z0: b.z - b.w / 2 - 0.6, z1: b.z + b.w / 2 + 0.6, reach: Math.abs(fx - pathAt(b.z)) + 2.2 };
+    });
+    const street = (x: number, z: number): number => {
+      let s = 0;
+      for (const q of lots) {
+        const before = (q.fx - x) * q.turn;
+        if (before < -0.5 || before > q.reach + 2 || z < q.z0 - 2 || z > q.z1 + 2) continue;
+        s = Math.max(s, 1 - smooth(Math.max(q.z0 - z, z - q.z1, before - q.reach, 0) / 1.6));
+      }
+      return s;
+    };
     const clumpAt = (z: number) => Math.sin(z * 0.9 + 2.2 * Math.sin(z * 0.31));
     const rutted = (x: number, z: number): number => {
       const d = Math.abs(trackOff(x, z));
@@ -1758,6 +1776,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       // on the spoil of a mine, which is broken stone;
       bare = Math.max(bare, Math.min(0.95, heapAt(x, z) * 3));
+      // in the street of a town, trodden earth and stones, greener at its edges and here and there;
+      if (lots.length) bare = Math.max(bare, street(x, z) * (0.72 + 0.22 * fbm2(x * 0.4 + s1, z * 0.4 - s2, 2)));
       lay.bare = bare;
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
@@ -2248,7 +2268,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // The charcoal burners felled their clearing.
       if (site.camp) clear = Math.min(clear, Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 1.08);
       // (More of it about a large building than a cottage: it is meant to be seen.)
-      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' ? 4 : 1.8));
+      for (const b of houses) clear = Math.min(clear, outside(b, x, z) - (b.style === 'imperial' || b.brick?.kind === 'church' ? 4 : 1.8));
+      // Nothing stands in a town's street.
+      if (lots.length && street(x, z) > 0.05) clear = Math.min(clear, -1);
       // Nor before the mouth of the way through the hill.
       if (backWay && backWay.along(x) > -9 && backWay.along(x) < -1.5 && Math.abs(z - backWay.z) < 2.4) clear = Math.min(clear, -1);
       // Nor before the mouth of a grotto.
@@ -2522,6 +2544,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         if (f.kind === 'stones') w = Math.max(w, 0.6 * (1 - smooth((d - f.r * 0.9) / 2.5)));
         if (f.kind === 'ruin') w = Math.max(w, 0.45 * (1 - smooth((d - f.r * 0.5) / 2)));
       }
+      // The street of a town is walked all over.
+      if (lots.length) w = Math.max(w, street(x, z));
       // The floor of the burners' camp is trodden and scorched bare, nearly to its edge.
       if (site.camp) w = Math.max(w, 0.95 * (1 - smooth((Math.hypot(x - site.camp.x, z - site.camp.z) - site.camp.r * 0.78) / 2.4)));
       return w;
@@ -2553,7 +2577,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       for (let gz = z0; gz < z1; gz += step) for (let gx = x0; gx < x1; gx += step) {
         const x = gx + plant.range(0, step), z = gz + plant.range(0, step);
         // (Nothing grows in the ruts of the track; what would have is drawn all the same and thrown away.)
-        planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
+        planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7) || (lots.length > 0 && street(x, z) > 0.55);
         if (!keep(x, z)) continue;
         // (Nor in front of the mouth of a grotto, where the ground is cut away to the door: a tuft there stood in the air.)
         if (grottoes.some((q) => { const inside = (x - q.edge) * q.inw; return inside > -7 && inside < 3 && Math.abs(z - q.z) < 4; })) continue;
@@ -2592,7 +2616,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // covered, not dotted.
     for (let gz = g.z0 + 0.5; gz < g.z1; gz += 0.5) for (let gx = g.x0 + 1; gx < g.x1 - 1; gx += 0.5) {
       const x = gx + lush.range(0, 0.5), z = gz + lush.range(0, 0.5), t = lush.next(), turn = lush.range(0, Math.PI), tone = lush.range(0.75, 1.2);
-      planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7);
+      planting.muted = rutted(x, z) > 0.5 || towers.some((t) => Math.max(Math.abs(x - t.x), Math.abs(z - t.z)) < t.half + 1.4) || houses.some((b) => outside(b, x, z) < 0.7) || (lots.length > 0 && street(x, z) > 0.55);
       // The cheap questions first: most places are settled by them.
       if (!inGrounds(x, z, 0) || inHouse(x, z, 0.4)) continue;
       const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z, true);
