@@ -38,7 +38,14 @@ import { inside as onMountain } from '../core/mountain';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
-import { meshSite } from '../render/siteMesher';
+import { meshSiteSteps } from '../render/siteMesher';
+import { breathe, fail, finish as finishLoading, share, stage } from './loader';
+
+/** What each texture recipe is called on the loading screen. */
+const TEXTURE_NAMES: Record<string, string> = {
+  stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
+  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', sand: 'sand',
+};
 import { Torch, TorchLights } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Game } from './game';
@@ -144,6 +151,7 @@ async function start(): Promise<void> {
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
+  await stage('Starting the renderer', 0.01, params.has('webgl') ? 'WebGL 2' : 'WebGPU, or WebGL 2 where there is none');
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -158,25 +166,32 @@ async function start(): Promise<void> {
   camera.layers.enable(1);
 
   // ------------------------------------------------------------------ materials
-  hud.status.textContent = 'Generating materials';
   const texSize = num('tex', quality.tex);
-  const stone = generateTextureSet('stone', texSize, 3);
-  const wood = generateTextureSet('wood', texSize, 5);
-  const moss = generateTextureSet('moss', texSize / 2, 9);
-  const rock = generateTextureSet('rock', texSize, 13);
-  const ground = generateTextureSet('ground', texSize, 17);
-  const scree = generateTextureSet('scree', texSize, 23);
-  const bark = generateTextureSet('bark', texSize, 29);
-  const barkAsh = generateTextureSet('barkAsh', texSize, 59), barkPine = generateTextureSet('barkPine', texSize, 61), barkFir = generateTextureSet('barkFir', texSize, 67);
-  const soil = generateTextureSet('soil', texSize, 31);
-  const litter = generateTextureSet('litter', texSize, 37);
-  const plaster = generateTextureSet('plaster', texSize, 41);
-  const thatch = generateTextureSet('thatch', texSize, 47);
-  const tile = generateTextureSet('tile', texSize, 43);
+  // Each surface is painted in turn, with the page given a chance to draw between them.
+  const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile'];
+  const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0);
+  let textureDone = 0;
+  const paint = async (name: string, size: number, tseed: number) => {
+    await stage(`Painting surfaces: ${TEXTURE_NAMES[name] ?? name}`, 0.04 + 0.2 * (textureDone++ / textureCount), `${textureDone} of ${textureCount} textures, ${size} pixels square`);
+    return generateTextureSet(name, size, tseed);
+  };
+  const stone = await paint('stone', texSize, 3);
+  const wood = await paint('wood', texSize, 5);
+  const moss = await paint('moss', texSize / 2, 9);
+  const rock = await paint('rock', texSize, 13);
+  const ground = await paint('ground', texSize, 17);
+  const scree = await paint('scree', texSize, 23);
+  const bark = await paint('bark', texSize, 29);
+  const barkAsh = await paint('barkAsh', texSize, 59), barkPine = await paint('barkPine', texSize, 61), barkFir = await paint('barkFir', texSize, 67);
+  const soil = await paint('soil', texSize, 31);
+  const litter = await paint('litter', texSize, 37);
+  const plaster = await paint('plaster', texSize, 41);
+  const thatch = await paint('thatch', texSize, 47);
+  const tile = await paint('tile', texSize, 43);
   // On an island the bare ground is sand, where in a valley it is beaten earth.
-  const sand = place === 'island' ? generateTextureSet('sand', texSize, 53) : null;
+  const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
-  const talus = place === 'mountain' ? generateTextureSet('talus', texSize, 71) : null;
+  const talus = place === 'mountain' ? await paint('talus', texSize, 71) : null;
   doneGenerating();
   const materials: Record<string, Material> = {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
@@ -211,8 +226,8 @@ async function start(): Promise<void> {
   };
 
   // ------------------------------------------------------------------ geometry
-  hud.status.textContent = 'Laying stone';
-  await nextFrame();
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, `Seed “${seed}”: rooms, doors, locks and keys`);
+  await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
   const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
@@ -236,7 +251,18 @@ async function start(): Promise<void> {
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
   materials.window = lamps ? makeWindowMaterial() : materials.glass;
   windowUniforms.uLit.value = lamps;
-  const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
+  let desc: SceneDescription;
+  if (site) {
+    // The long step: the building of every room, the rock and the planting. It speaks between its parts, and the page breathes.
+    const steps = meshSiteSteps(site);
+    const build = share(0.28, 0.7);
+    for (;;) {
+      const next = steps.next();
+      if (next.done) { desc = next.value; break; }
+      await stage(next.value.label, build(next.value.at), `${site.places.length} places · ${((performance.now() - t0) / 1000).toFixed(0)} s building`);
+    }
+  } else desc = buildCourtyardHall(seed);
+  await stage('Gathering the geometry', 0.7);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
   if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
@@ -299,7 +325,10 @@ async function start(): Promise<void> {
   const statics: Mesh[] = [];
   const parts: { mesh: Mesh; offset: number; count: number; albedo: number; plan: { source: Int32Array; scale: Float32Array } }[] = [];
   let vertexTotal = 0, triTotal = 0;
+  let builtMeshes = 0;
+  const meshTotal = desc.meshes.size + (desc.scenery?.meshes.size ?? 0);
   for (const [name, builder] of desc.meshes) {
+    await stage('Shaping the stone into meshes', 0.72 + 0.1 * (builtMeshes++ / Math.max(1, meshTotal)), `${triTotal.toLocaleString('en')} triangles so far`);
     const geometry = builder.build();
     const material = name.split('|')[1];
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
@@ -320,6 +349,7 @@ async function start(): Promise<void> {
   for (const [key, builder] of desc.scenery?.meshes ?? []) {
     // Keyed as the site's own meshes are, by group and material.
     const material = key.split('|').pop()!;
+    await stage('Shaping the land and its rock', 0.72 + 0.1 * (builtMeshes++ / Math.max(1, meshTotal)), `${triTotal.toLocaleString('en')} triangles in the building`);
     const geometry = builder.build();
     const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
     const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];
@@ -360,6 +390,7 @@ async function start(): Promise<void> {
   // Trees carry more leaves than a modest machine wants to draw; at the lower levels of detail
   // a share of them is left off, evenly, so every crown thins and none goes bare.
   const leafShare = num('leaves', quality.leaves);
+  const cardAll = (desc.scenery?.cards ?? []).reduce((n, c) => n + c.matrices.length / 16, 0);
   for (const whole of desc.scenery?.cards ?? []) {
     let set = whole;
     if (leafShare < 1 && whole.kind === 'leaf') {
@@ -370,6 +401,7 @@ async function start(): Promise<void> {
         for (let c = 0; c < 3; c++) { set.colours.push(whole.colours[i * 3 + c]); set.centres.push(whole.centres[i * 3 + c]); }
       }
     }
+    await stage('Planting grass, leaves and flowers', 0.82 + 0.05 * (cardTotal / Math.max(1, cardAll)), `${Math.round(cardTotal).toLocaleString('en')} cards of ${Math.round(cardAll).toLocaleString('en')}`);
     for (const cards of makeCards(set, paintCards(set.kind))) {
       // What grows low on the ground is left out of the picture still water mirrors: there it is
       // a fringe a few pixels high, and drawing it twice cost a tenth of the frame. The eye sees
@@ -382,8 +414,9 @@ async function start(): Promise<void> {
     }
     cardTotal += set.matrices.length / 16;
   }
+  await stage('Filling the water', 0.88);
   // Deep water takes its colour from the sky over it: a dark green by day, nearly black by night.
-  const water = new Water(desc.water ?? [], desc.streams ?? [], {
+  const water =new Water(desc.water ?? [], desc.streams ?? [], {
     mirror: Math.round(num('mirror', quality.mirror)),
     zenith: SKY.zenith, horizon: SKY.horizon,
     falls: desc.falls,
@@ -423,6 +456,7 @@ async function start(): Promise<void> {
   if (site && (site.setting.hour === 'night' || site.setting.hour === 'dusk')) (materials.lamp as MeshStandardMaterial).emissiveIntensity = site.setting.hour === 'night' ? 60 : 25;
   const buildMs = performance.now() - t0;
 
+  await stage('Preparing collision', 0.9, 'Merging the site into one solid');
   // One merged copy of everything, for collision and for the bake.
   const positions = new Float32Array(vertexTotal * 3);
   const normals = new Float32Array(vertexTotal * 3);
@@ -461,6 +495,7 @@ async function start(): Promise<void> {
   const merged = new BufferGeometry();
   merged.setAttribute('position', new BufferAttribute(solidPositions, 3));
   merged.setIndex(new BufferAttribute(solidIndex, 1));
+  await stage('Preparing collision', 0.93, 'Building the index that keeps you out of the walls');
   const bvh = new MeshBVH(merged);
   // Sheep, where the place has pasture for them: stood on what the body walks on, and kept out of the house, the water and the sea.
   const rainFall = new Rain(seed), snowFall = new Snowfall(seed);
@@ -584,6 +619,7 @@ async function start(): Promise<void> {
   };
   const sky = makeSky(true);
   scene.add(sky);
+  await stage('Painting the sky', 0.95);
   const pmrem = new PMREMGenerator(renderer);
   const envScene = new Scene();
   envScene.add(makeSky(false));
@@ -1128,6 +1164,9 @@ async function start(): Promise<void> {
     }
     (window as any).__frames = ((window as any).__frames ?? 0) + 1;
   };
+  // The first frame compiles every shader; done here, behind the loading screen, it does not stall the picture.
+  await stage('Compiling shaders', 0.97, 'The first picture takes a moment');
+  try { await renderer.compileAsync(scene, camera); } catch (err) { console.warn('Shader warm-up skipped:', err); }
   let loopCount = 0;
   // For making films: the loop held, and a frame drawn at a time given, so that each picture is of an exact moment and the clock,
   // the clouds, the water and the flames keep the film's time and not the time the drawing took.
@@ -1140,6 +1179,9 @@ async function start(): Promise<void> {
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
+  // One frame is drawn under the screen before it lifts, so that the place is there when it does.
+  await stage('Ready', 1);
+  finishLoading();
 
   // The height of whatever is underfoot at a point, for placing a camera or a test.
   const groundAt = (x: number, z: number): number => {
@@ -1385,4 +1427,5 @@ function nextFrame(): Promise<void> {
 start().catch((err) => {
   console.error(err);
   hud.status.textContent = `Failed to start: ${err.message}`;
+  fail(`Failed to start: ${err.message}`);
 });

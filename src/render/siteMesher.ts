@@ -56,7 +56,21 @@ function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, nu
   for (let k = 1; k < ids.length - 1; k++) mesh.addTriangle(ids[0], ids[k], ids[k + 1]);
 }
 
+/** Where the building has got to: said between its long steps, so that a page can show it and breathe while it waits. */
+export interface MeshStage { label: string; at: number }
+
+/** Builds the whole scene at once, for tools that wait for it. */
 export function meshSite(site: Site): SceneDescription {
+  const steps = meshSiteSteps(site);
+  for (;;) { const next = steps.next(); if (next.done) return next.value; }
+}
+
+/**
+ * The same, as a sequence of steps. It gives up control between rooms and caves; the caller may let the browser draw and answer the
+ * person before asking for the next. (Built in one run it holds a page still for ten seconds or more, and browsers offer to kill such pages.)
+ */
+export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescription, void> {
+  yield { label: 'Surveying the ground', at: 0 };
   const kit = new Kit(site.seed);
   const rng = new Rng(site.seed).fork('mesh');
   const T = site.wallThickness;
@@ -3433,6 +3447,7 @@ export function meshSite(site: Site): SceneDescription {
   const trees: [number, number][] = [];
 
   // ------------------------------------------------------------------ caves
+  yield { label: 'Tracing the caves', at: 0.05 };
   // Chambers joined by clefts make one cave. Each is listed under every chamber it holds, first chamber first.
   const cavesOf = new Map<number, number[]>();
   for (const p of places) {
@@ -3594,6 +3609,11 @@ export function meshSite(site: Site): SceneDescription {
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
+    yield {
+      label: p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
+        : p.roof === 'cave' ? `Carving cave chamber ${p.id + 1} of ${places.length}` : `Laying stone: place ${p.id + 1} of ${places.length}`,
+      at: 0.1 + 0.8 * (places.indexOf(p) / places.length),
+    };
     if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
@@ -4149,6 +4169,7 @@ export function meshSite(site: Site): SceneDescription {
   }
 
   // ------------------------------------------------------------------ the outside of a house that stands free
+  yield { label: 'Walling and roofing the house', at: 0.92 };
   if (free) {
     const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;
     const ox0 = Math.min(...outerRects.map((r) => r.x0)), ox1 = Math.max(...outerRects.map((r) => r.x1));
