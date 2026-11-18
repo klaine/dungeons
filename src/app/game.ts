@@ -1,3 +1,4 @@
+import { mergeParts } from '../render/geom/mergeParts';
 import {
   BoxGeometry, BufferAttribute, Color, CylinderGeometry, Group, Material, Mesh, OctahedronGeometry, Scene, TorusGeometry, Vector3,
 } from 'three';
@@ -137,6 +138,8 @@ export class Game {
         }
       }
 
+      // (Its fixed parts drawn as one for each material; the leaf, the bar and the gate are kept apart, being what the game moves.)
+      mergeParts(group, [leaf, bar, ...(gate ? [gate] : [])].filter((m): m is Mesh => m instanceof Mesh));
       const open = spec.leaf === 'open';
       const angle = open ? 1 : 0;
       group.rotation.y = d.yaw + d.swing * angle;

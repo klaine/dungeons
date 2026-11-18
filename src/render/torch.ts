@@ -1,3 +1,4 @@
+import { mergeParts } from './geom/mergeParts';
 import {
   AdditiveBlending, Color, CylinderGeometry, DoubleSide, Group, Mesh, PlaneGeometry, PointLight,
   TorusGeometry, Vector3,
@@ -27,6 +28,8 @@ const flameNoise: N = Fn(([p]: [N]) => {
  * own; `TorchLights` lends real lights to whichever torches are nearest the player.
  */
 
+let TORCH_IRON: ReturnType<typeof makePropMaterial> | null = null, TORCH_WOOD: ReturnType<typeof makePropMaterial> | null = null;
+
 export class Torch {
   readonly group = new Group();
   readonly flamePosition = new Vector3();
@@ -41,8 +44,9 @@ export class Torch {
   constructor(position: Vector3, out: Vector3, phase: number, fire = 0) {
     this.phase = phase;
 
-    const iron = makePropMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9 });
-    const wood = makePropMaterial({ color: new Color(0.12, 0.07, 0.04), roughness: 0.9, metalness: 0 });
+    // (One iron and one wood for every torch: a material of its own for each was a set of uniforms and a pipeline for each.)
+    const iron = (TORCH_IRON ??= makePropMaterial({ color: new Color(0.05, 0.045, 0.04), roughness: 0.55, metalness: 0.9 }));
+    const wood = (TORCH_WOOD ??= makePropMaterial({ color: new Color(0.12, 0.07, 0.04), roughness: 0.9, metalness: 0 }));
 
     // The brand leans out from the wall; its head is at `position`.
     const lean = 0.42;
@@ -60,9 +64,10 @@ export class Torch {
     arm.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), out);
     arm.position.copy(ring.position).addScaledVector(out, -0.13);
     // (An open fire has none of that: only the flame, standing on whatever was built for it to burn on.)
-    if (!fire) for (const m of [brand, head, ring, arm]) {
-      m.castShadow = false;
-      this.group.add(m);
+    if (!fire) {
+      for (const m of [brand, head, ring, arm]) { m.castShadow = false; this.group.add(m); }
+      // (The iron parts drawn as one.)
+      mergeParts(this.group);
     }
 
     if (fire) this.flamePosition.copy(position).add(new Vector3(0, 0.3 * fire, 0));
