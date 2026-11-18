@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { solve } from '../core/mission';
 import { Place, Site } from '../core/site';
 import { drawInk, wrap } from '../maps/ink';
+import { drawInkCountry } from '../maps/inkCountry';
 import { drawPlan } from '../maps/plan';
 import { TextureSet } from '../render/textures';
 
@@ -125,7 +126,16 @@ export function inkCanvas(site: Site, size = 2000): HTMLCanvasElement {
   });
   ctx.font = `italic ${24 * u}px Georgia, 'Times New Roman', serif`;
   signLines.forEach((text, k) => ctx.fillText(text, edge, top + line * (perColumn + 0.6) + k * 32 * u));
-  return out;
+  // A second sheet below: the whole place, the valley, the island or the mountain top, in the same hand.
+  const country = document.createElement('canvas');
+  if (!drawInkCountry(country, site, { pixels: size })) return out;
+  const both = document.createElement('canvas');
+  both.width = size;
+  both.height = out.height + country.height;
+  const b = both.getContext('2d')!;
+  b.drawImage(out, 0, 0);
+  b.drawImage(country, 0, out.height);
+  return both;
 }
 
 export function exportInk(site: Site): void {

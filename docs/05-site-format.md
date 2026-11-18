@@ -9,7 +9,7 @@ A generated place leaves the tool as up to four files, all named for the seed:
 | `<seed>.json` | The site document: every place, every way between places, what is locked and what opens it, and a route through. |
 | `<seed>.glb` | The built world as a glTF 2.0 model: every stone, with materials. |
 | `<seed>-plan.png` | The plan, with a key to the rooms. |
-| `<seed>-map.png` | The same plan drawn in ink, as a referee's map. |
+| `<seed>-map.png` | The same plan drawn in ink, as a referee's map; and below it the whole place, valley, island or mountain top, in the same hand. |
 | `<seed>-battlemap.jpg` | The built world seen from straight above with the roofs cut away, ruled with a grid. |
 
 The document is the source. The model and the maps are made from it, so they always agree with it and with each other. A game that wants its own look can ignore the model entirely and build from the document; a game that wants the tool's stonework can load the model and use the document to know what it is looking at.
@@ -307,7 +307,7 @@ Models are large: around 50 MB and 700,000 to 900,000 triangles for a house of t
 
 ## The maps
 
-All have north up. `<seed>-plan.png` is a clean plan with numbered rooms and a key. `<seed>-map.png` is the same site drawn in ink with hatching, and shows everything a referee would want: keys, the lever, the secret door and the hidden chamber. Both have a scale; neither is georeferenced, so to lay one over the model use the document.
+All have north up. `<seed>-plan.png` is a clean plan with numbered rooms and a key. `<seed>-map.png` is the same site drawn in ink with hatching, and shows everything a referee would want: keys, the lever, the secret door and the hidden chamber. Below its key, a second sheet draws the whole place in the same hand (`inkCountry.ts`): the valley shut in by its rock, hatched, with hachures down its crags; the island ringed by cliffs in hachures, the sea in lines following the coast, the cove and its jetty, the stacks; or the mountain top above its precipices, in two rows of hachures the longer the higher the fall, its ridge, its summits, and banks of cloud below; and on it the house (its walls solid, its doors gaps, its courts hatched), the track as a pair of lines, paths dotted, streams and ponds, the buildings solid. The woods are not drawn: they are decided where the place is built, not in the document. Both have a scale; neither is georeferenced, so to lay one over the model use the document.
 
 `<seed>-battlemap.jpg` is a picture of the 3D world, not a drawing. Everything above head height is cut away indoors; courts and open ground are shown whole, in daylight. It has no labels, and the hidden chamber is blacked out as solid wall, so it can be put in front of players. The grid is 1.5 metres (five feet) to a square at 72 pixels a square, fewer if the site is too large for a 4,096-pixel image, and the image's edges fall on grid lines, so it can be dropped into a virtual tabletop and its grid matched by setting the square size alone.
 

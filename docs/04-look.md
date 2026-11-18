@@ -395,7 +395,7 @@ Maps are assets in their own right, for use in games, on virtual tabletops and i
 | Style | Description | Use |
 |---|---|---|
 | **Plan** | Clean technical drawing with optional overlays for zones, critical path, locks, fields and metrics | The workbench; debugging |
-| **Ink** | Hand-drawn look: wobbly line, hatching around walls, simple symbols | Printable adventure maps |
+| **Ink** | Hand-drawn look: wobbly line, hatching around walls, simple symbols; and a second sheet of the whole place, valley, island or mountain top, with hachures down its falls, the sea in lines, cloud in banks | Printable adventure maps |
 | **Illustrated** | Parchment, shaded relief, drawn trees and roofs, labels | Handouts, site overviews |
 | **Rendered** | Top-down orthographic render of the 3D scene with its lighting, roofs and ceilings removed | Battle maps for tabletop play |
 | **Automap** | Minimal, revealed as explored | In the explorer |
