@@ -1161,7 +1161,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   // A cave in the cliff of the cove, at one end of the beach: it can be walked into along a strip of shingle.
   {
     const q = rng.fork('cave');
-    if (q.chance(0.6)) {
+    if (q.chance(0.85)) {
       const side = q.chance(0.5) ? 1 : -1, spread = cove.beach + q.range(0.45, 0.9), turn = q.range(-0.3, 0.3), length = round(q.range(20, 28));
       // (Not where the jetty is rooted or the stair comes down: on one island the stair climbed across the cave's mouth. Then at the
       // beach's other end, if that is clear.)
