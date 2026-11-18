@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { acrossWater, beachness, coastAt, inland, landAt, onStair } from '../core/island';
+import { layWall } from './walls';
 import { Place, Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
@@ -487,6 +488,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
   // ---- what stands on the island, and what grows on it
   wild.group = 'wild';
   const coast = buildCoast({ site, wild, rng: rng.fork('coast'), ground, stoneTint: tint, finds: b.finds, fences: b.fences, caveFloor });
+  // The dry-stone walls, of the island's own stone.
+  (o.walls ?? []).forEach((w, k) => layWall((m) => wild.mesh(m), w, ground, [0.62 * (0.6 + 0.4 * tint[0]), 0.6 * (0.6 + 0.4 * tint[1]), 0.56 * (0.6 + 0.4 * tint[2])], rng.fork(`wall${k}`)));
   const planted = plantIsland({ site, wild, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, heathAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), trackOff, offFoot, looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0) });
 
   // ---- the edge of the world: nobody walks off a cliff or swims away

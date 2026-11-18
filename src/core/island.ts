@@ -221,18 +221,21 @@ function topAt(o: Island, floor: number, x: number, z: number): number {
 /** The top with what has been made on it: the way cut and made up to its level, and level ground for whatever stands on the land. */
 function levelTop(o: Island, floor: number, x: number, z: number, top: number): number {
   // The way is cut and made up to its own level, across a cart's breadth and a little more, and eased into the land beside it.
-  if (o.way) {
-    const w = nearestOn(o.way, x, z, 9);
-    if (w.off < 9) top += (w.y - top) * (1 - smooth((w.off - 2.6) / 6));
-  }
+  const wayAt = o.way ? nearestOn(o.way, x, z, 9) : null;
+  if (wayAt && wayAt.off < 9) top += (wayAt.y - top) * (1 - smooth((wayAt.off - 2.6) / 6));
   // What stands on the land has level ground made for it.
-  const flat = (x0: number, z0: number, y: number, r: number) => { const w = 1 - smooth((Math.hypot(x - x0, z - z0) - r) / 4); top += (y - top) * w; };
+  // (Eased into the land over a breadth that grows with the height it has to make up, so that on a knoll or a slope the bank about
+  // it is one that can be walked up, not a step.)
+  const flat = (x0: number, z0: number, y: number, r: number) => { const w = 1 - smooth((Math.hypot(x - x0, z - z0) - r) / (4 + Math.abs(y - top) * 1.3)); top += (y - top) * w; };
   for (const q of o.cottages) flat(q.x, q.z, q.y, Math.max(q.w, q.d) * 0.62 + 1.2);
   if (o.lighthouse) flat(o.lighthouse.x, o.lighthouse.z, o.lighthouse.y, o.lighthouse.r + 10);
   if (o.castle) flat(o.castle.x, o.castle.z, o.castle.y, 19);
   if (o.chapel) flat(o.chapel.x, o.chapel.z, o.chapel.y, 15);
   if (o.mansion) { const w = 1 - smooth((outsideBuilding(o.mansion.building, x, z) - 3) / 5); top += (o.mansion.y - top) * w; }
   if (o.graveyard) { const q = o.graveyard, w = 1 - smooth((Math.hypot(Math.max(Math.abs(x - q.x) - q.d / 2, 0), Math.max(Math.abs(z - q.z) - q.w / 2, 0)) - 1) / 5); top += (floor - top) * w; }
+  // (And on its own breadth the way's level holds over all of that: where the ground levelled for a cottage reaches it on a slope,
+  // it would otherwise leave a step in the way. Only its breadth: the cottage keeps its own ground.)
+  if (wayAt && wayAt.off < 3.6) top += (wayAt.y - top) * (1 - smooth((wayAt.off - 2.4) / 1.2));
   return top;
 }
 
@@ -671,22 +674,28 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   // hill and not over it, along a slope and not up it, clear of the cliffs and round the cove, wandering a little where nothing
   // decides it.
   let routed = false;
-  if (island.terrain) {
-    const C = 3, [sx, sz] = track[1];
-    let bx0 = Math.min(sx, root[0]), bx1 = Math.max(sx, root[0]), bz0 = Math.min(sz, root[1]), bz1 = Math.max(sz, root[1]);
+  /**
+   * A way of least effort over the land, from (`sx`, `sz`) to (`ex`, `ez`): round hills rather than over them, along slopes rather
+   * than up them, clear of the cliff edge but for its last strides into `ex`, `ez`, off the house's ground but for its first strides,
+   * and round whatever `blocked` says stands in the way; wandering a little where nothing decides it; smoothed, a point every three
+   * metres or so. Null if there is no way.
+   */
+  const routeOver = (sx: number, sz: number, ex: number, ez: number, label: string, blocked: (x: number, z: number) => boolean = () => false): [number, number][] | null => {
+    const C = 3;
+    let bx0 = Math.min(sx, ex), bx1 = Math.max(sx, ex), bz0 = Math.min(sz, ez), bz1 = Math.max(sz, ez);
     for (let k = 0; k < N; k++) { const a = (k / N) * TAU, r = island.coast[k]; bx0 = Math.min(bx0, island.x + Math.cos(a) * r); bx1 = Math.max(bx1, island.x + Math.cos(a) * r); bz0 = Math.min(bz0, island.z + Math.sin(a) * r); bz1 = Math.max(bz1, island.z + Math.sin(a) * r); }
     const gx0 = Math.floor(bx0 / C) * C, gz0 = Math.floor(bz0 / C) * C, gnx = Math.ceil((bx1 - gx0) / C) + 1, gnz = Math.ceil((bz1 - gz0) / C) + 1;
-    const hs = new Float32Array(gnx * gnz), inl = new Float32Array(gnx * gnz), wander = new Float32Array(gnx * gnz), s0 = rng.fork('wander').range(0, 300);
+    const hs = new Float32Array(gnx * gnz), inl = new Float32Array(gnx * gnz), wander = new Float32Array(gnx * gnz), stop = new Uint8Array(gnx * gnz), s0 = rng.fork(`wander ${label}`).range(0, 300);
     for (let j = 0; j < gnz; j++) for (let i = 0; i < gnx; i++) {
       const x = gx0 + i * C, z = gz0 + j * C, k = j * gnx + i;
-      hs[k] = plain(x, z); inl[k] = inland(island, x, z); wander[k] = fbm2(x / 40 + s0, z / 40, 2, 23);
+      hs[k] = plain(x, z); inl[k] = inland(island, x, z); wander[k] = fbm2(x / 40 + s0, z / 40, 2, 23); stop[k] = blocked(x, z) ? 1 : 0;
     }
-    const ex = root[0], ez = root[1];
     const cost = (a: number, b: number) => {
       const ax = a % gnx, az = (a - ax) / gnx, bxx = b % gnx, bzz = (b - bxx) / gnx, len = Math.hypot(bxx - ax, bzz - az) * C;
       const x = gx0 + bxx * C, z = gz0 + bzz * C, grade = Math.abs(hs[b] - hs[a]) / len;
-      // (Near the landing it must come to the edge: the cliffs and the cove are kept clear of only away from it.)
+      // (Near where it ends it must come to the edge: the cliffs and the cove are kept clear of only away from it.)
       const away = smooth((Math.hypot(x - ex, z - ez) - 5) / 9);
+      if (stop[b] && away > 0.5) return Infinity;
       let c = len * (1 + 10 * grade * grade + 0.5 * wander[b]);
       // (Steeper than a cart can go, it goes the long way round, along the slope.)
       if (grade > 0.22) c += len * 400 * (grade - 0.22);
@@ -698,44 +707,48 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
       return c;
     };
     const line = leastPath(gx0, gz0, C, gnx, gnz, [sx, sz], [ex, ez], cost);
-    if (line) {
-      // (Smoothed, and a point every three metres or so; leaving the forecourt it goes straight on south a little way first.)
-      const smoothed = smoothLine([[sx, sz], [sx, sz + 6], ...line.slice(2)], 3);
-      // (And never ruled straight, even where the land would let it be: a worn path wanders a stride or two from side to side, in
-      // long bends and short, as feet have gone round a stone or a wet place. Not at its ends.)
-      {
-        const wq = rng.fork('track wander'), p1 = wq.range(0, TAU), p2 = wq.range(0, TAU), along = [0];
-        for (let k = 1; k < smoothed.length; k++) along.push(along[k - 1] + Math.hypot(smoothed[k][0] - smoothed[k - 1][0], smoothed[k][1] - smoothed[k - 1][1]));
-        const total = along[along.length - 1], base = smoothed.map((p0) => [p0[0], p0[1]] as [number, number]);
-        const offs = base.map((_, k) => (k === 0 || k === base.length - 1 ? 0 : (3.4 * Math.sin(along[k] / 24 + p1) + 1.1 * Math.sin(along[k] / 8.5 + p2)) * smooth(along[k] / 14) * smooth((total - along[k]) / 16)));
-        const lay = () => { for (let k = 1; k < base.length - 1; k++) { const [ax, az] = base[k - 1], [bx, bz] = base[k + 1], l = Math.hypot(bx - ax, bz - az) || 1; smoothed[k] = [base[k][0] - ((bz - az) / l) * offs[k], base[k][1] + ((bx - ax) / l) * offs[k]]; } };
+    if (!line) return null;
+    // (Smoothed, and a point every three metres or so; leaving the forecourt it goes straight on south a little way first.)
+    const smoothed = smoothLine(label === 'track' ? [[sx, sz], [sx, sz + 6], ...line.slice(2)] : line, 3);
+    // (And never ruled straight, even where the land would let it be: a worn path wanders a stride or two from side to side, in
+    // long bends and short, as feet have gone round a stone or a wet place. Not at its ends.)
+    {
+      const wq = rng.fork(label === 'track' ? 'track wander' : `wander/${label}`), p1 = wq.range(0, TAU), p2 = wq.range(0, TAU), along = [0];
+      for (let k = 1; k < smoothed.length; k++) along.push(along[k - 1] + Math.hypot(smoothed[k][0] - smoothed[k - 1][0], smoothed[k][1] - smoothed[k - 1][1]));
+      const total = along[along.length - 1], base = smoothed.map((p0) => [p0[0], p0[1]] as [number, number]), amp = label === 'track' ? 1 : 0.6;
+      const offs = base.map((_, k) => (k === 0 || k === base.length - 1 ? 0 : amp * (3.4 * Math.sin(along[k] / 24 + p1) + 1.1 * Math.sin(along[k] / 8.5 + p2)) * smooth(along[k] / 14) * smooth((total - along[k]) / 16)));
+      const lay = () => { for (let k = 1; k < base.length - 1; k++) { const [ax, az] = base[k - 1], [bx, bz] = base[k + 1], l = Math.hypot(bx - ax, bz - az) || 1; smoothed[k] = [base[k][0] - ((bz - az) / l) * offs[k], base[k][1] + ((bx - ax) / l) * offs[k]]; } };
+      lay();
+      // (Where the way bends sharply, a wander wider than the bend would fold it back on itself: there it is cut back until it does not.)
+      for (let pass = 0; pass < 8; pass++) {
+        let folded = false;
+        for (let k = 1; k < smoothed.length - 1; k++) {
+          const ux = smoothed[k][0] - smoothed[k - 1][0], uz = smoothed[k][1] - smoothed[k - 1][1], vx = smoothed[k + 1][0] - smoothed[k][0], vz = smoothed[k + 1][1] - smoothed[k][1], l = Math.hypot(ux, uz) * Math.hypot(vx, vz);
+          if (l > 0 && (ux * vx + uz * vz) / l < 0.5) { folded = true; for (let j = Math.max(1, k - 4); j <= Math.min(offs.length - 2, k + 4); j++) offs[j] *= 0.5; }
+        }
+        if (!folded) break;
         lay();
-        // (Where the way bends sharply, a wander wider than the bend would fold it back on itself: there it is cut back until it does not.)
-        for (let pass = 0; pass < 8; pass++) {
-          let folded = false;
-          for (let k = 1; k < smoothed.length - 1; k++) {
-            const ux = smoothed[k][0] - smoothed[k - 1][0], uz = smoothed[k][1] - smoothed[k - 1][1], vx = smoothed[k + 1][0] - smoothed[k][0], vz = smoothed[k + 1][1] - smoothed[k][1], l = Math.hypot(ux, uz) * Math.hypot(vx, vz);
-            if (l > 0 && (ux * vx + uz * vz) / l < 0.5) { folded = true; for (let j = Math.max(1, k - 4); j <= Math.min(offs.length - 2, k + 4); j++) offs[j] *= 0.5; }
-          }
-          if (!folded) break;
-          lay();
-        }
       }
-      let last: [number, number] = [sx, sz];
-      for (const p0 of smoothed.slice(1, -1)) {
-        // (Smoothing cuts corners, round an inlet too: a point it brings near the edge is moved back inland, away from the nearest water.)
-        let [x, z] = p0;
-        for (let i = 0; i < 24 && inland(island, x, z) < 7 && Math.hypot(x - ex, z - ez) > 12; i++) {
-          const gx = inland(island, x + 1, z) - inland(island, x - 1, z), gz = inland(island, x, z + 1) - inland(island, x, z - 1), gl = Math.hypot(gx, gz) || 1;
-          x += (gx / gl) * 0.8; z += (gz / gl) * 0.8;
-        }
-        if (Math.hypot(x - last[0], z - last[1]) > 3) { track.push([round(x), round(z)]); last = [x, z]; }
-      }
-      // (The landing exactly, and no point just short of it: a step a hand long reads as a wall in the level line.)
-      if (Math.hypot(root[0] - last[0], root[1] - last[1]) < 2 && track.length > 2) track.pop();
-      track.push([round(root[0]), round(root[1])]);
-      routed = true;
     }
+    const out: [number, number][] = [];
+    let last: [number, number] = [sx, sz];
+    for (const p0 of smoothed.slice(1, -1)) {
+      // (Smoothing cuts corners, round an inlet too: a point it brings near the edge is moved back inland, away from the nearest water.)
+      let [x, z] = p0;
+      for (let i = 0; i < 24 && inland(island, x, z) < 7 && Math.hypot(x - ex, z - ez) > 12; i++) {
+        const gx = inland(island, x + 1, z) - inland(island, x - 1, z), gz = inland(island, x, z + 1) - inland(island, x, z - 1), gl = Math.hypot(gx, gz) || 1;
+        x += (gx / gl) * 0.8; z += (gz / gl) * 0.8;
+      }
+      if (Math.hypot(x - last[0], z - last[1]) > 3) { out.push([round(x), round(z)]); last = [x, z]; }
+    }
+    // (Its end exactly, and no point just short of it: a step a hand long reads as a wall in a level line.)
+    if (out.length && Math.hypot(ex - last[0], ez - last[1]) < 2) out.pop();
+    out.push([round(ex), round(ez)]);
+    return out;
+  };
+  if (island.terrain) {
+    const routedLine = routeOver(track[1][0], track[1][1], root[0], root[1], 'track');
+    if (routedLine) { track.push(...routedLine); routed = true; }
   }
   if (!routed) {
     const q = rng.fork('track');
@@ -1177,6 +1190,14 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   };
   const footpath = (x: number, z: number, to: 'lighthouse' | 'castle' | 'chapel' | 'mansion') => {
     const [sx, sz] = nearestOnTrack(x, z), points: [number, number][] = [];
+    // (On land that was found, it goes as the way does: by least effort over the land, and round what is built.)
+    if (island.terrain) {
+      const built = (bx: number, bz: number) => island.cottages.some((c) => Math.hypot(bx - c.x, bz - c.z) < Math.max(c.w, c.d) * 0.6 + 1.5)
+        || (!!island.lighthouse && Math.hypot(bx - island.lighthouse.x, bz - island.lighthouse.z) < island.lighthouse.r + 1.5)
+        || (!!island.castle && to !== 'castle' && Math.hypot(bx - island.castle.x, bz - island.castle.z) < 20) || (!!island.mansion && outsideBuilding(island.mansion.building, bx, bz) < 1.5);
+      const line = routeOver(sx, sz, x, z, `path/${to}`, built);
+      if (line) { (site.paths ??= []).push({ points: [[round(sx), round(sz)], ...line], to }); return; }
+    }
     const n = Math.max(2, Math.round(Math.hypot(x - sx, z - sz) / 7)), q = rng.fork(`path/${to}`), sway = q.range(-6, 6);
     for (let k = 0; k <= n; k++) {
       const t = k / n, l = Math.hypot(x - sx, z - sz) || 1;
@@ -1191,6 +1212,69 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   if (island.castle) { const c = island.castle; footpath(c.x - Math.cos(c.facing) * 13, c.z - Math.sin(c.facing) * 13, 'castle'); }
   if (island.mansion) { const b = island.mansion.building, turn = b.faces === 'w' ? 1 : -1; footpath(b.x - turn * (b.d / 2 + 2.5), b.z, 'mansion'); }
   if (island.chapel) { const c = island.chapel; footpath(c.x - Math.cos(c.facing) * 12, c.z - Math.sin(c.facing) * 12, 'chapel'); }
+
+  // Walls. On an island that was found, the head dyke: a dry-stone wall from coast to coast, beyond the house, between the ground
+  // about the houses, once tilled, and the open hill; and a field wall or two off it on the house's side, down to the coast. They
+  // follow the land as a wall is built, not ruled straight; a gateway wherever the way or a footpath goes through; and here and
+  // there a stretch has tumbled. Not near what is built, the cove, the stair or the streams.
+  if (island.terrain) {
+    const q = rng.fork('walls'), ways = [track, ...(site.paths ?? []).map((p0) => p0.points)];
+    const offWays = (x: number, z: number) => { let best = Infinity; for (const l of ways) for (let k = 0; k + 1 < l.length; k++) { const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)); best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t)); } return best; };
+    const blocked = (x: number, z: number) => outside(level, x, z) < 4 || island.cottages.some((c) => Math.hypot(x - c.x, z - c.z) < Math.max(c.w, c.d) * 0.7 + 3)
+      || (!!island.lighthouse && Math.hypot(x - island.lighthouse.x, z - island.lighthouse.z) < 16) || (!!island.castle && Math.hypot(x - island.castle.x, z - island.castle.z) < 26)
+      || (!!island.chapel && Math.hypot(x - island.chapel.x, z - island.chapel.z) < 14) || (!!island.mansion && outsideBuilding(island.mansion.building, x, z) < 6)
+      || (!!island.graveyard && Math.hypot(x - island.graveyard.x, z - island.graveyard.z) < Math.max(island.graveyard.w, island.graveyard.d))
+      || Math.hypot(x - cove.x, z - cove.z) < coveRim(island, Math.atan2(z - cove.z, x - cove.x)) + 6
+      || (!!island.stair && nearestOn(island.stair, x, z, 6).off < 5) || (island.streams ?? []).some((st) => nearestOn(st.course, x, z, 5).off < 3);
+    /** A wall from `from` along `heading`, bending as the land and the builder's eye took it, until it meets the coast or something built. */
+    const run = (fx: number, fz: number, heading: number, most: number): [number, number][] => {
+      const line: [number, number][] = [];
+      let x = fx, z = fz, h = heading;
+      for (let k = 0; k < most; k++) {
+        if (inland(island, x, z) < 3 || blocked(x, z)) break;
+        line.push([round(x), round(z)]);
+        h += (fbm2(x / 40 + 3, z / 40, 2, 91) - 0.5) * 0.12;
+        x += Math.cos(h) * 2; z += Math.sin(h) * 2;
+      }
+      return line;
+    };
+    const walls: NonNullable<Island['walls']> = [];
+    const toMiddle = Math.atan2(island.z - hz, island.x - hx);
+    for (let tries = 0; tries < 12 && !walls.length; tries++) {
+      const d = q.range(55, 110), cx = hx + Math.cos(toMiddle) * d, cz = hz + Math.sin(toMiddle) * d;
+      if (inland(island, cx, cz) < 15 || blocked(cx, cz)) continue;
+      const across = toMiddle + Math.PI / 2 + q.range(-0.35, 0.35);
+      const a = run(cx, cz, across, 200), b = run(cx, cz, across + Math.PI, 200);
+      const line = [...b.reverse(), ...a.slice(1)];
+      if (line.length < 30) continue;
+      walls.push({ line, gaps: [], fallen: [], height: round(q.range(1.1, 1.45)) });
+    }
+    // Field walls off the dyke, on the house's side, down to the coast.
+    if (walls.length) {
+      const dyke = walls[0].line;
+      for (let k = 0, want = q.int(1, 2); k < 30 && walls.length < 1 + want; k++) {
+        const i = q.int(Math.round(dyke.length * 0.15), Math.round(dyke.length * 0.85)), [px, pz] = dyke[i];
+        const [ax, az] = dyke[Math.max(0, i - 2)], [bx, bz] = dyke[Math.min(dyke.length - 1, i + 2)];
+        let h = Math.atan2(bz - az, bx - ax) + Math.PI / 2;
+        if (Math.cos(h - toMiddle) > 0) h += Math.PI;
+        const line = run(px + Math.cos(h) * 2, pz + Math.sin(h) * 2, h + q.range(-0.4, 0.4), 120);
+        if (line.length < 12 || walls.slice(1).some((w) => w.line.some(([x, z]) => Math.hypot(x - line[0][0], z - line[0][1]) < 30))) continue;
+        walls.push({ line, gaps: [], fallen: [], height: round(walls[0].height * q.range(0.85, 1)) });
+      }
+    }
+    for (const w of walls) {
+      // Gateways: wherever a way comes within a stride and a half of it, three metres clear.
+      for (let k = 0; k < w.line.length; k++) {
+        if (offWays(w.line[k][0], w.line[k][1]) > 1.6) continue;
+        const a = Math.max(0, k - 1), b = Math.min(w.line.length - 1, k + 1);
+        const last = w.gaps[w.gaps.length - 1];
+        if (last && a <= last[1] + 1) last[1] = b; else w.gaps.push([a, b]);
+      }
+      // Stretches tumbled: two or three, of a few metres to twenty.
+      for (let k = 0, n = q.int(1, 3); k < n; k++) { const a = q.int(0, Math.max(0, w.line.length - 4)); w.fallen.push([a, Math.min(w.line.length - 1, a + q.int(2, 10))]); }
+    }
+    if (walls.length) island.walls = walls;
+  }
 
   // The box that holds the island.
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;

@@ -478,6 +478,13 @@ export interface Island {
    * the cliff top to the sea where it goes over.
    */
   streams?: { course: [number, number, number][]; width: number; fall?: number }[];
+  /**
+   * Dry-stone walls, on an island that was found: the head dyke, from coast to coast between the ground about the houses and the
+   * open hill, and field walls off it. `line` is the wall's foot as points `[x, z]` about two metres apart; `gaps` are stretches of
+   * it, from one point's number to another's, where there is no wall (a gateway, where a way goes through); `fallen` those where it
+   * has tumbled to half its height and lies about its foot; `height` how high it stands.
+   */
+  walls?: { line: [number, number][]; gaps: [number, number][]; fallen: [number, number][]; height: number }[];
   /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
   seaCave?: { x: number; z: number; heading: number; length: number };
   /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. `height` scales its hills and mountains: low green country at 0.3, a snowy range at 1. */
