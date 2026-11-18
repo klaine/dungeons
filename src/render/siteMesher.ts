@@ -59,6 +59,13 @@ function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, nu
 /** Where the building has got to: said between its long steps, so that a page can show it and breathe while it waits. */
 export interface MeshStage { label: string; at: number }
 
+/**
+ * How finely a valley's ground is laid where it is walked: the sheet's cell, in metres (1.2 by default; `?sheet=` in the browser,
+ * `SHEET=` before a tool). The rock carved along the valley's sides is carved on a lattice that divides it exactly, as near 0.3
+ * metres as that allows (0.3 for 1.2, 0.267 for 0.8), since every carved piece ends on the sheet's own lines.
+ */
+export const VALLEY_GROUND = { sheet: 1.2 };
+
 /** Builds the whole scene at once, for tools that wait for it. */
 export function meshSite(site: Site): SceneDescription {
   const steps = meshSiteSteps(site);
@@ -1433,7 +1440,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const rockKind = ROCK[site.setting.stone];
     const strata = new Strata(rockKind, rng.fork('strata'), p.floor);
     const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
-    const CELL = 0.3, SHEET = 1.2;
+    // (The sheet's cell, and the carving's, which divides it; the lattice the band is worn on stays at 0.3 whatever they are.)
+    const SHEET = VALLEY_GROUND.sheet, CELL = SHEET / Math.max(1, Math.round(SHEET / 0.3)), WORN = 0.3;
     const snapTo = (v: number, up: boolean) => (up ? Math.ceil(v / SHEET - 1e-6) : Math.floor(v / SHEET + 1e-6)) * SHEET;
     // The band of ground carved as cliff: this far into the valley from its edge, and this far out.
     const IN = 9.6, OUT = 6;
@@ -1453,7 +1461,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
      */
     const headPatches: Patch[] = [], rimPatches: Patch[] = [], rows: { z0: number; z1: number; of: Patch[] }[] = [];
     if (vale) {
-      const zEnd = snapTo(vale.mouth + 19, true), ROW = 9.6, COL = 2.4;
+      // (Rows and columns of the band as near 9.6 and 2.4 metres as whole cells of the sheet allow.)
+      const zEnd = snapTo(vale.mouth + 19, true), ROW = SHEET * Math.round(9.6 / SHEET), COL = SHEET * Math.round(2.4 / SHEET);
       let bx0 = Infinity, bx1 = -Infinity;
       const zStart = Math.min(ZNo, snapTo(vale.z0 - 9.6, false));
       for (let z = zStart; z <= zEnd; z += 2) { bx0 = Math.min(bx0, sideAt('w', z)); bx1 = Math.max(bx1, sideAt('e', z)); }
@@ -1499,12 +1508,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     let depthInBand = (_x: number, _z: number): number => 0;
     const MARGIN = 3.2;
     const lx0 = Math.min(...patches.map((c) => c.x0)) - MARGIN, lz0 = Math.min(...patches.map((c) => c.z0)) - MARGIN, lx1 = Math.max(...patches.map((c) => c.x1)) + MARGIN, lz1 = Math.max(...patches.map((c) => c.z1)) + MARGIN;
-    const land = new Grid2(lx0, lz0, CELL, Math.round((lx1 - lx0) / CELL) + 1, Math.round((lz1 - lz0) / CELL) + 1);
+    const land = new Grid2(lx0, lz0, WORN, Math.round((lx1 - lx0) / WORN) + 1, Math.round((lz1 - lz0) / WORN) + 1);
     const known = new Uint8Array(land.data.length);
     // In front of the house the meadow runs level up to the wall; the scarp behind the wall is not this piece's business.
     const wallEnds = (x: number) => smooth((Math.min(x - (p.x0 - 0.2), p.x1 + 0.2 - x) + 0.7) / 0.7);
     for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
-      const x = land.x0 + i * CELL, z = land.z0 + j * CELL;
+      const x = land.x0 + i * WORN, z = land.z0 + j * WORN;
       // A little beyond what is carved is wanted too, because the face is looked up a few paces to one side of where it stands.
       if (!inPatch(meadowPatch, x, z, MARGIN) && !inBandPatch(x, z, MARGIN)) continue;
       known[j * land.nx + i] = 1;
@@ -1516,16 +1525,16 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const wornBy = land.like();
     if (walled) {
       // How far each point of the band is from the nearest ground that is not band, counted in steps of the lattice, there and back.
-      const far = new Float32Array(land.data.length), nxL = land.nx, nzL = land.nz, D1 = CELL, D2 = CELL * Math.SQRT2;
-      for (let j = 0; j < nzL; j++) for (let i = 0; i < nxL; i++) far[j * nxL + i] = i > 0 && j > 0 && i < nxL - 1 && j < nzL - 1 && inBandPatch(land.x0 + i * CELL, land.z0 + j * CELL, 1e-6) ? 1e6 : 0;
+      const far = new Float32Array(land.data.length), nxL = land.nx, nzL = land.nz, D1 = WORN, D2 = WORN * Math.SQRT2;
+      for (let j = 0; j < nzL; j++) for (let i = 0; i < nxL; i++) far[j * nxL + i] = i > 0 && j > 0 && i < nxL - 1 && j < nzL - 1 && inBandPatch(land.x0 + i * WORN, land.z0 + j * WORN, 1e-6) ? 1e6 : 0;
       for (let j = 1; j < nzL - 1; j++) for (let i = 1; i < nxL - 1; i++) { const o = j * nxL + i; if (far[o]) far[o] = Math.min(far[o], far[o - 1] + D1, far[o - nxL] + D1, far[o - nxL - 1] + D2, far[o - nxL + 1] + D2); }
       for (let j = nzL - 2; j > 0; j--) for (let i = nxL - 2; i > 0; i--) { const o = j * nxL + i; if (far[o]) far[o] = Math.min(far[o], far[o + 1] + D1, far[o + nxL] + D1, far[o + nxL + 1] + D2, far[o + nxL - 1] + D2); }
-      depthInBand = (x, z) => far[Math.min(nzL - 1, Math.max(0, Math.round((z - land.z0) / CELL))) * nxL + Math.min(nxL - 1, Math.max(0, Math.round((x - land.x0) / CELL)))];
+      depthInBand = (x, z) => far[Math.min(nzL - 1, Math.max(0, Math.round((z - land.z0) / WORN))) * nxL + Math.min(nxL - 1, Math.max(0, Math.round((x - land.x0) / WORN)))];
       const before = land.data.slice();
       const active = new Uint8Array(land.data.length);
       const foot = land.like();
       for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
-        const x = land.x0 + i * CELL, z = land.z0 + j * CELL, o = j * land.nx + i;
+        const x = land.x0 + i * WORN, z = land.z0 + j * WORN, o = j * land.nx + i;
         // Nothing moves at the edge of the band, where it must still meet the ground beside it;
         // nor above the house, whose rooms lie close behind the scarp.
         const overHouse = z < ZNi + 2 && x > houseX0 - 4 && x < houseX1 + 4;
@@ -1536,7 +1545,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       erode({
         rock: land, loose, active, repose: 0.67, kept: 0.16, passes: 46,
         holds: (o, y) => {
-          const x = land.x0 + (o % land.nx) * CELL, z = land.z0 + Math.floor(o / land.nx) * CELL;
+          const x = land.x0 + (o % land.nx) * WORN, z = land.z0 + Math.floor(o / land.nx) * WORN;
           // The lowest beds are taken to be sound, so that the wall always starts with a face
           // too high to scramble up, whatever lies above it.
           const hard = y < foot.data[o] + 4.5 ? 0.92 : strata.hardness(Math.floor(strata.at(x, y, z)));
@@ -1549,7 +1558,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         land.data[o] += loose.data[o];
         // (The way up to a terrace and its shelf are left as they were made: no scree lies on them and nothing wore them down.)
         if (terraces.length) {
-          const x = land.x0 + (o % land.nx) * CELL, z = land.z0 + Math.floor(o / land.nx) * CELL;
+          const x = land.x0 + (o % land.nx) * WORN, z = land.z0 + Math.floor(o / land.nx) * WORN;
           if (terraces.some((t) => shelfAt(t, x, z) && (shelf.way > 0.3 || shelf.top))) { land.data[o] = before[o]; loose.data[o] = 0; }
         }
         wornBy.data[o] = land.data[o] - before[o];
@@ -1609,7 +1618,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         if (!known[o]) continue;
         const w = i > 0 && known[o - 1] ? o - 1 : o, e = i < nxL - 1 && known[o + 1] ? o + 1 : o;
         const n = j > 0 && known[o - nxL] ? o - nxL : o, s = j < land.nz - 1 && known[o + nxL] ? o + nxL : o;
-        const gx = e > w ? (H[e] - H[w]) / ((e - w) * CELL) : 0, gz = s > n ? (H[s] - H[n]) / (((s - n) / nxL) * CELL) : 0;
+        const gx = e > w ? (H[e] - H[w]) / ((e - w) * WORN) : 0, gz = s > n ? (H[s] - H[n]) / (((s - n) / nxL) * WORN) : 0;
         const slope = Math.hypot(gx, gz);
         steepness.data[o] = Math.sqrt(1 + slope * slope);
         upX.data[o] = gx; upZ.data[o] = gz;
@@ -1803,8 +1812,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // The way the face slopes is felt for half a sample to either side, not a finger's breadth: the roughness of the rock is finer than
         // the carving, and slopes read from it point every way, which puts the carving's points anywhere in their cells and makes splinters.
         normalReach: CELL * 0.5,
-        // (Where a rim patch meets the sheet of ground, it is closed on the sheet's own edge, which runs on lines 1.2 metres apart.)
-        edge: onSheet ? alongSheet(ground, 0, 0, 1.2) : undefined,
+        // (Where a rim patch meets the sheet of ground, it is closed on the sheet's own edge, which runs on lines a cell apart.)
+        edge: onSheet ? alongSheet(ground, 0, 0, SHEET) : undefined,
         // A ledge on a rock face is still rock, with moss on it; turf is for ground that is ground.
         // (Nor is the floor of a grotto turf, though the hill over it may be.)
         meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(grottoes.length && grottoAir(at.x, at.y, at.z) > -0.6) && !(backWay && backWay.along(at.x) > -4.6 && backWay.air(at.x, at.y, at.z) > -0.6) && !(join && join.air(at.x, at.y, at.z) > -0.6) ? (loose.at(at.x, at.z) > 0.3 ? scree : turf) : null),
@@ -2028,8 +2037,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
     // ---- the ground beyond the meadow: a fine sheet over the valley and its rim, a coarse one
     // out to the hills, and mountains behind them
+    // (The fine sheet's edges lie on six-metre lines, where it is eased onto the coarse one, and on its own cells' lines, where what is
+    // carved ends: on the first lines that are both. For a cell of 1.2, every six metres; for 0.8, every twenty-four.)
+    let every = 6;
+    while (Math.abs(every / SHEET - Math.round(every / SHEET)) > 1e-6 && every < 600) every += 6;
     const snap = (v: number, up: boolean) => (up ? Math.ceil(v / 6) : Math.floor(v / 6)) * 6;
-    const fine = { x0: snap(g.x0 - 34, false), x1: snap(g.x1 + 34, true), z0: snap(Math.min(houseZ0 - 40, g.z0 - 34), false), z1: snap(g.z1 + 34, true) };
+    const snapFine = (v: number, up: boolean) => (up ? Math.ceil(v / every) : Math.floor(v / every)) * every;
+    const fine = { x0: snapFine(g.x0 - 34, false), x1: snapFine(g.x1 + 34, true), z0: snapFine(Math.min(houseZ0 - 40, g.z0 - 34), false), z1: snapFine(g.z1 + 34, true) };
     // Near its edge the fine sheet is eased onto the coarse one's corners, so the two meet exactly.
     const eased = (x: number, z: number): number => {
       const inside = Math.min(x - fine.x0, fine.x1 - x, z - fine.z0, fine.z1 - z);
@@ -2042,7 +2056,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
     const terrain = { seed: s1, stone: stoneTint, turfScale: 2.3, rockScale: 0.4, colour: (x: number, z: number) => { const c = turfAt(x, z); return [c[0], c[1], c[2], lay.track, lay.wet, lay.bare, 0]; }, rock: (tone: number) => rockColour(tone * 0.8), bare: 0.62 };
     layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), eased, {
-      ...terrain, area: fine, cell: 1.2,
+      ...terrain, area: fine, cell: SHEET,
       // Not where the land is carved, and not over the house: there it is the turf of the hill
       // above the vaults, left open over every court. Carved patches end on this sheet's own
       // lines, so a cell is either wholly carved or not at all.

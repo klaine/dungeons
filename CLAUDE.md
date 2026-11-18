@@ -26,7 +26,7 @@ Keep these up to date in the same commit as the change they describe.
 - `npm run typecheck` and `npm run build` must pass before a commit.
 - `npm run check` (`tools/sites.ts`): generates sites and confirms each is connected and completable. Run it after any change to `src/core`. It takes some twenty minutes now that land is made before it is laid out; `npx tsx tools/sites.ts 200 island` (or `valley`, `mountain`) checks one kind alone.
 - `npm run range`: regenerates `public/range.html`, the report of what the generator makes.
-- `npx tsx tools/land.ts 12`: builds the valley, its cliffs and boulders for twelve seeds without a browser, and reports rock standing in the doorway, numbers that are not numbers, and build time. Run it after any change to the rock or the ground.
+- `npx tsx tools/land.ts 12`: builds the valley, its cliffs and boulders for twelve seeds without a browser, and reports rock standing in the doorway, numbers that are not numbers, build time and triangles. Run it after any change to the rock or the ground. `SHEET=0.8` before it (or `?sheet=0.8` in the browser) lays the valley's walked ground in cells of 0.8 metres instead of 1.2 (`VALLEY_GROUND` in `siteMesher.ts`).
 - `npx tsx tools/island.ts 4`: the same for islands (`?place=island`). Run it after any change to `src/core/island.ts`, `src/render/island.ts`, `coast.ts` or `islandPlanting.ts`.
 - `npx tsx tools/mountain.ts 4`: the same for mountain tops (`?place=mountain`). Run it after any change to `src/core/mountain.ts` or `src/render/mountain.ts`; add `peak plain` for mountains with the plain shape alone (`?terrain=plain`).
 - `npx tsx tools/islandRelief.ts <folder> 1 isle0 isle1`: islands as shaded relief, drawn beside found, with the way.

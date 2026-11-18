@@ -38,7 +38,7 @@ import { inside as onMountain } from '../core/mountain';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
-import { meshSiteSteps } from '../render/siteMesher';
+import { meshSiteSteps, VALLEY_GROUND } from '../render/siteMesher';
 import { breathe, fail, finish as finishLoading, share, stage } from './loader';
 
 /** What each texture recipe is called on the loading screen. */
@@ -230,6 +230,9 @@ async function start(): Promise<void> {
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
+  // (How finely a valley's ground is laid where it is walked: `?sheet=0.8` for a sheet of 80-centimetre cells instead of 1.2.)
+  const sheet = Number(params.get('sheet'));
+  if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
   const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {

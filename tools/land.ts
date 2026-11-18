@@ -6,9 +6,11 @@
  *   npx tsx tools/land.ts [count] [prefix]
  */
 import { generateSite } from '../src/core/generate';
-import { meshSite } from '../src/render/siteMesher';
+import { meshSite, VALLEY_GROUND } from '../src/render/siteMesher';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'land';
+// (`SHEET=0.8` before the command lays the valley's walked ground in cells of that size instead of 1.2 metres, as `?sheet=` does.)
+if (process.env.SHEET) VALLEY_GROUND.sheet = Number(process.env.SHEET);
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
@@ -21,7 +23,7 @@ for (let k = 0; k < count; k++) {
   const approach = site.places.find((p) => p.role === 'approach')!;
   const door = site.ways.find((w) => w.a === approach.id || w.b === approach.id);
   const problems: string[] = [];
-  let rockTriangles = 0;
+  let rockTriangles = 0, groundTriangles = 0;
   for (const [set, where] of [[scene.meshes, 'site'], [scene.scenery?.meshes ?? new Map(), 'scenery']] as const) {
     for (const [key, mesh] of set) {
       if (!/\|(rock|turf|scree)$/.test(key)) continue;
@@ -44,12 +46,13 @@ for (let k = 0; k < count; k++) {
         }
       }
       if (key.endsWith('rock') || key.endsWith('rockSheet')) rockTriangles += mesh.triangleCount;
+      else groundTriangles += mesh.triangleCount;
       if (bad) problems.push(`${where} ${key}: ${bad} vertices that are not numbers`);
       if (blocking) problems.push(`${where} ${key}: ${blocking} triangles across the doorway`);
     }
   }
   if (problems.length) failed++;
-  console.log(`${seed}: ${site.setting.stone}, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock${problems.length ? ' | ' + problems.join('; ') : ''}`);
+  console.log(`${seed}: ${site.setting.stone}, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock, ${groundTriangles.toLocaleString()} of turf and scree${problems.length ? ' | ' + problems.join('; ') : ''}`);
 }
 console.log(failed ? `${failed} of ${count} FAILED` : `all ${count} sound; slowest ${slowest.toFixed(0)} ms`);
 process.exit(failed ? 1 : 0);
