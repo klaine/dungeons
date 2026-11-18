@@ -24,7 +24,7 @@ for (const q of w.places) {
   const ci = Math.floor((q.x + p.hx) / SQUARE.size), cj = Math.floor((q.z + p.hz) / SQUARE.size);
   for (let j = cj - reach; j <= cj + reach; j++) for (let i = ci - reach; i <= ci + reach; i++) {
     if (i < 0 || j < 0 || i >= cx || j >= cz || made.has(`${i},${j}`)) continue;
-    const s = makeSquare(grid, tilesFor(grid, i, j).map(([a, b]) => tile(a, b)), i, j, p.n);
+    const s = makeSquare(grid, tilesFor(grid, i, j).map(([a, b]) => tile(a, b)), i, j, p.n, w.places.flatMap((q) => (q.ground ? [q.ground] : [])));
     made.set(`${i},${j}`, s); times.push(s.ms);
     levels.forEach((e, k) => { tris[k] += meshTriangles(s.errors, e).count; });
   }

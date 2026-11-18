@@ -297,6 +297,24 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
     else if (q.kind === 'valley') { ctx.rect(x - r, y - r, 2 * r, 2 * r); ctx.moveTo(x, y - r * 0.6); ctx.lineTo(x, y + r * 0.6); ctx.moveTo(x - r * 0.6, y); ctx.lineTo(x + r * 0.6, y); ctx.stroke(); }
     else { ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r, y + r * 0.7); ctx.lineTo(x - r, y + r * 0.7); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y + r * 0.1, r * 0.25, 0, Math.PI * 2); ctx.fill(); }
   };
+  // Each place's ground, as it is fitted to the land: its outline, a line at each step between terraces; and for an island, its
+  // landing and the way up to the house from it, dotted. (Drawn to scale: the house's ground is some fifty metres by sixty.)
+  for (const q of w.places) {
+    const g = q.ground;
+    if (!g) continue;
+    const c = Math.cos(g.turn), sn = Math.sin(g.turn), pt = (a: number, b: number): [number, number] => [X(g.x + a * c - b * sn), Z(g.z + a * sn + b * c)];
+    ctx.strokeStyle = RED; ctx.lineWidth = 1.6 * u;
+    ctx.beginPath();
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([sa, sb], k) => { const [x, y] = pt((sa * g.w) / 2, (sb * g.d) / 2); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+    ctx.closePath(); ctx.stroke();
+    for (let t = 0; t < g.terraces.length - 1; t++) { const b = g.terraces[t].to, [x0, y0] = pt(-g.w / 2, b), [x1, y1] = pt(g.w / 2, b); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+    if (q.landing) {
+      ctx.setLineDash([1.2 * u, 3.6 * u]); ctx.lineWidth = 1.4 * u;
+      const [fx, fy] = pt(0, g.d / 2);
+      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(X(q.landing.x), Z(q.landing.z)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(X(q.landing.x), Z(q.landing.z), 2.6 * u, 0, Math.PI * 2); ctx.fill();
+    }
+  }
   for (const q of w.places) { const x = X(q.x), y = Z(q.z); placeMark(q, x, y, 7 * u); mark(x, y, 8 * u); }
   // Their names, most important first, so they get the clearest places.
   for (const q of w.places) label(q.name, X(q.x), Z(q.z), 8 * u, `italic 600 ${17 * u}px ${SERIF}`, RED);
@@ -419,10 +437,12 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       ctx.fillText(text, x + 46 * u, y);
     });
     // The places of adventure: by kind, each with its height.
+    // (With how its ground is fitted: on one level, or on two or three terraces.)
+    const fitted = (q: WorldPlace) => (q.ground && q.ground.terraces.length > 1 ? `, on ${q.ground.terraces.length === 2 ? 'two' : 'three'} terraces` : '');
     const kinds: [WorldPlace['kind'], string, (q: WorldPlace) => string][] = [
-      ['island', 'Houses on islands', (q) => `${q.name}, ${Math.round(q.y)} m over the sea`],
-      ['valley', 'Houses at the heads of glens', (q) => `${q.name}, ${Math.round(q.y)} m`],
-      ['mountain', 'Hospices on mountain tops', (q) => `${q.name}, ${Math.round(q.y)} m`],
+      ['island', 'Houses on islands', (q) => `${q.name}, ${Math.round(q.y)} m over the sea${fitted(q)}`],
+      ['valley', 'Houses at the heads of glens', (q) => `${q.name}, ${Math.round(q.y)} m${fitted(q)}`],
+      ['mountain', 'Hospices on mountain tops', (q) => `${q.name}, ${Math.round(q.y)} m${q.ground ? `, the hospice at ${Math.round(q.ground.terraces[q.ground.terraces.length - 1].y)} m` : ''}${fitted(q)}`],
     ];
     kinds.forEach(([kind, title, text], c) => {
       const x = edge + 700 * u + c * 560 * u;

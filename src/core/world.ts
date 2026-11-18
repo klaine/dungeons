@@ -1,8 +1,9 @@
 import { Rng, valueNoise2 } from './rng';
 import { fbmd, HeightField, landDetail, leastPath, liftAndErode, ridgedFbm, smoothLine, wearByFrost, wearByWater, Wear } from './terrain';
-import { findIslands, IslandSpot } from './archipelago';
+import { IslandSpot } from './archipelago';
 import { findValleys, ValleySpot } from './highlands';
 import { Namer } from './names';
+import { fitGround, Ground } from './fit';
 
 /**
  * A world: one stretch of country, six kilometres by ten unless asked otherwise (`WORLD_SIZE`), in
@@ -93,8 +94,8 @@ export function planWorld(seed: string, size: { x: number; z: number } = WORLD_S
  * (the four add to one). The zones say how fast the ground rises (`upliftAt`) and how far the sea has
  * come up over it (`drownAt`); the land's shape is the rivers' making.
  */
-export interface Zones { d0: number; bay: number; P: number; U: number; up: number; high: number; wI: number; wP: number; wU: number; wR: number }
-const ZN: Zones = { d0: 0, bay: 0, P: 0, U: 0, up: 0, high: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
+export interface Zones { d0: number; bay: number; mouth: number; P: number; U: number; up: number; high: number; wI: number; wP: number; wU: number; wR: number }
+const ZN: Zones = { d0: 0, bay: 0, mouth: 0, P: 0, U: 0, up: 0, high: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
 
 /** The zones at a point. (Written into one object, reused: read what is wanted before asking again.) */
 export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
@@ -118,7 +119,9 @@ export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
   const P = p.plains + 900 * fbmd(x / 2500 + 3.3, z / 2500 - 1.2, 2, n + 3);
   const U = Math.max(P, -100) + p.upland + 600 * fbmd(x / 2500 - 4.1, z / 2500 + 2.2, 2, n + 4);
   const a = smooth((d0 + 250) / 650), b = smooth((d0 - P + 300) / 600), c = smooth((d0 - U + 500) / 1000);
-  ZN.d0 = d0; ZN.bay = sunk; ZN.P = P; ZN.U = U; ZN.up = b; ZN.high = c;
+  // (The way in to the bay: out over the shelf in front of its mouth, where nothing rises, so the bay stays open to the sea.)
+  const mouth = smooth((1.25 - Math.abs(across)) / 0.5) * smooth((d0 + 1400) / 700) * (1 - smooth(d0 / 400));
+  ZN.d0 = d0; ZN.bay = sunk; ZN.mouth = mouth; ZN.P = P; ZN.U = U; ZN.up = b; ZN.high = c;
   ZN.wI = 1 - a; ZN.wP = a * (1 - b); ZN.wU = a * b * (1 - c); ZN.wR = a * b * c;
   return ZN;
 }
@@ -132,9 +135,10 @@ export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
  * shape and nothing else: where the mountains, valleys, coasts and islands come out is the rivers' doing.
  */
 function upliftAt(p: WorldPlan, x: number, z: number): number {
-  const n = p.n, zn = zonesAt(p, x, z), { wI, wP, wU, wR, bay } = zn;
-  const patches = Math.max(0, fbmd(x / 650 + 3.1, z / 650 - 1.4, 3, n + 81) * 2.4);
-  const shelf = 0.03 + 0.5 * patches * patches;
+  const n = p.n, zn = zonesAt(p, x, z), { wI, wP, wU, wR, bay, mouth } = zn;
+  // (In patches at two sizes, so that the sea leaves an archipelago: some islands a kilometre across, more of a few hundred metres.)
+  const patches = Math.max(0, fbmd(x / 700 + 3.1, z / 700 - 1.4, 3, n + 81) * 1.6 + fbmd(x / 260 - 0.7, z / 260 + 2.6, 2, n + 87) * 1.9 - 0.12);
+  const shelf = 0.03 + 0.55 * patches * patches * (1 - 0.95 * mouth);
   const plains = 0.07 + 0.04 * fbmd(x / 1500, z / 1500 + 2.2, 2, n + 82);
   const upland = 0.32 + 0.14 * fbmd(x / 1800 - 2.7, z / 1800, 3, n + 83);
   const range = 0.85 + 0.35 * fbmd(x / 2400 + 6.1, z / 2400, 3, n + 84) + 0.4 * ridgedFbm(x / 1700 + 0.3, z / 1700 - 0.8, 3, n + 85);
@@ -196,6 +200,10 @@ export interface WorldPlace {
   valley?: ValleySpot;
   /** For a mountain top: which way its ridge runs down (an angle from east towards south), and where its foot is. */
   ridge?: { angle: number; foot: [number, number]; footY: number };
+  /** The house's ground, fitted to the land found: levelled, or terraced (`fit.ts`). */
+  ground?: Ground;
+  /** For an island: where one lands, on the gentlest shore near the house, and how steep the shore is there. */
+  landing?: { x: number; z: number; slope: number };
 }
 
 export interface Town { kind: 'harbour' | 'town' | 'village'; name: string; x: number; z: number; y: number }
@@ -380,7 +388,7 @@ export function worldTile(w: World, i: number, j: number): Tile {
 }
 
 /** The ground a house's spot is looked for with: about the size of an island's or a valley's level ground. */
-const HOUSE = { w: 46, d: 62 }, ISLE_RADIUS = 135, VALLEY_LENGTH = 260;
+const HOUSE = { w: 46, d: 62 }, VALLEY_LENGTH = 260;
 /** How many places of each kind are kept; and how many tiles of each kind are searched at most for them (the richest first, stopping when there are enough). */
 const SEARCH = { isleTiles: 8, uplandTiles: 8, keep: 4 };
 
@@ -448,11 +456,13 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
       }
     }
   }
-  // (Hollows deeper than four metres keep their water as lochs; the rest have an outlet cut, as a river cuts through a low sill.)
+  // (Hollows deeper than four metres have an outlet cut down to four metres over their floor, as a river cuts through a sill; what
+  // water stands in them then, and in the shallower ones, are lochs.)
   breach(f, sea, 4);
   const { filled, acc, down } = drain(f, sea);
   const lake = new Float32Array(n);
-  for (let k = 0; k < n; k++) if (!sea[k] && filled[k] - h[k] > 0.8) lake[k] = Math.max(0.01, filled[k]);
+  // (No lake below the sea's level: a hollow there, shut off from the sea, is land, wet.)
+  for (let k = 0; k < n; k++) if (!sea[k] && filled[k] - h[k] > 0.8 && filled[k] > 0.3) lake[k] = filled[k];
   // (A lake of a few points is a hollow the wear left, not a lake: let it go.)
   {
     const seen = new Uint8Array(n);
@@ -479,7 +489,7 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   const w: World = { plan: p, name: '', regions: { sea: '', bay: '', upland: '', range: '' }, peakNames: [], peaks: [], field: f, shaped, sea, lake, cover, acc, down, rivers, places: [], towns: [], ways: [], timing, why };
 
   // ---- the places
-  // Islands and valley heads, in the tiles where the shelf has land and where the upland is.
+  // Valley heads, in the tiles where the upland is; islands on the world's own lattice, where none crosses a tile's edge.
   const tilesX = Math.round((2 * p.hx) / TILE.stride), tilesZ = Math.round((2 * p.hz) / TILE.stride);
   const isleTiles: { i: number; j: number; score: number }[] = [], uplandTiles: { i: number; j: number; score: number }[] = [];
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
@@ -495,24 +505,13 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
     if (up / all > 0.3) uplandTiles.push({ i, j, score: up / all });
   }
   isleTiles.sort((a, b) => b.score - a.score); uplandTiles.sort((a, b) => b.score - a.score);
-  const isles: WorldPlace[] = [], valleys: WorldPlace[] = [];
+  const valleys: WorldPlace[] = [];
   // (Only in the tile's own two kilometres, what lies in its overlap being the neighbour's; and four hundred metres in from the world's
   // edge at least, so that what is seen from a place is the world's own.)
   const core = (t: Tile, x: number, z: number) => Math.abs(x - t.ox) <= TILE.stride / 2 && Math.abs(z - t.oz) <= TILE.stride / 2 && Math.abs(x) < p.hx - 400 && Math.abs(z) < p.hz - 400;
-  /** The islands found so far, one to an island. */
-  const islands = () => isles.filter((q, k) => !isles.slice(0, k).some((o) => Math.hypot(o.island!.cu - q.island!.cu, o.island!.cv - q.island!.cv) < 400));
-  for (const { i, j } of isleTiles.slice(0, SEARCH.isleTiles)) {
-    if (islands().length >= SEARCH.keep) break;
-    yield `Looking for islands (${islands().length} so far)`;
-    const t = worldTile(w, i, j);
-    const spots = findIslands({ seed: 0, inner: t.field, outer: t.field }, HOUSE.w, HOUSE.d, ISLE_RADIUS, rng.fork(`isles ${i},${j}`), why.island, [0]);
-    for (const s of spots) {
-      const spot: IslandSpot = { ...s, u: s.u + t.ox, v: s.v + t.oz, cu: s.cu + t.ox, cv: s.cv + t.oz };
-      if (!core(t, spot.cu, spot.cv)) continue;
-      isles.push({ kind: 'island', n: 0, name: '', x: spot.u, z: spot.v, y: spot.base, score: 0, island: spot });
-    }
-    lap(`isles ${i},${j}`);
-  }
+  yield 'Looking for islands';
+  const isles = findIslandGrounds(w, why.island);
+  lap('isles');
   for (const { i, j } of uplandTiles.slice(0, SEARCH.uplandTiles)) {
     if (valleys.length >= SEARCH.keep) break;
     yield `Looking for valleys (${valleys.length} so far)`;
@@ -525,13 +524,16 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
       if (!core(t, x, z) || zonesAt(p, x, z).wU < 0.5) continue;
       if (valleys.some((o) => Math.hypot(o.x - x, o.z - z) < 700)) continue;
       const spot: ValleySpot = { ...s, u: x, v: z, course: s.course.map(([a, b]) => [a + t.ox, b + t.oz]) };
-      valleys.push({ kind: 'valley', n: 0, name: '', x, z, y: s.base, score: 10 - rank++, valley: spot });
+      // (Its ground fitted where the search put it, turned down the valley, levelled or terraced.)
+      const g = fitGround((gx, gz) => t.field.at(gx - t.ox, gz - t.oz), x, z, s.turn, HOUSE.w, HOUSE.d);
+      if (g.work > 3) { why.valley['too rough to build on'] = (why.valley['too rough to build on'] ?? 0) + 1; continue; }
+      valleys.push({ kind: 'valley', n: 0, name: '', x, z, y: g.terraces[g.terraces.length - 1].y, score: 10 - rank++ - g.work, valley: spot, ground: g });
       if (rank >= 4) break;
     }
     lap(`glens ${i},${j}`);
   }
-  // Islands: the best place on each island found, and no two on one island.
-  const keptIsles = islands();
+  // Islands: the best place on each island found; the best islands first.
+  const keptIsles = isles.sort((a, b) => b.score - a.score);
   yield 'Looking for mountain tops';
   const summits = findSummits(w, why.mountain);
   lap('summits');
@@ -631,6 +633,93 @@ function highestSummits(w: World, count: number): { x: number; z: number; y: num
 }
 
 /**
+ * Islands a house can stand on, as the land made them: every island of the world (land standing out
+ * of the sea, apart from the mainland and from the world's edge) of three hectares or more, whatever its shape and size;
+ * on each, the ground the house fits best (`fitGround`: levelled or terraced), well in from the cliffs,
+ * near its landing and facing it; and the landing, the gentlest shore near the house. One to an island.
+ * (Before, an island had to be of a size, round, with a shoulder at a set height, level within twelve
+ * metres; few were.)
+ */
+function findIslandGrounds(w: World, why: Record<string, number>): WorldPlace[] {
+  const no = (k: string) => { why[k] = (why[k] ?? 0) + 1; };
+  const f = w.field, nx = f.nx, nz = f.nz, cell = f.cell, h = f.data, n = nx * nz, out: WorldPlace[] = [], p = w.plan;
+  const t = { ox: 0, oz: 0 };
+  const label = new Int32Array(n), far = new Float32Array(n);
+  // How far each point of land lies from the sea.
+  for (let k = 0; k < n; k++) far[k] = h[k] > 0.5 ? 1e6 : 0;
+  for (let pass = 0; pass < 2; pass++) for (let o = 0; o < n; o++) {
+    const k = pass ? n - 1 - o : o, i = k % nx, j = (k - i) / nx;
+    if (!far[k]) continue;
+    let m = far[k];
+    for (const [di, dj, dd] of [[-1, 0, 1], [1, 0, 1], [0, -1, 1], [0, 1, 1], [-1, -1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [1, 1, 1.414]] as const) {
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+      m = Math.min(m, far[jj * nx + ii] + dd * cell);
+    }
+    far[k] = m;
+  }
+  let next = 0;
+  for (let s = 0; s < n; s++) {
+    if (label[s] || h[s] <= 0.5) continue;
+    const cells = [s];
+    label[s] = ++next;
+    let touches = false;
+    for (let c = 0; c < cells.length; c++) {
+      const k = cells[c], i = k % nx, j = (k - i) / nx;
+      if (i === 0 || j === 0 || i === nx - 1 || j === nz - 1) touches = true;
+      for (const m of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, k - nx, k + nx]) {
+        if (m < 0 || m >= n || label[m] || h[m] <= 0.5) continue;
+        label[m] = next; cells.push(m);
+      }
+    }
+    if (touches) { no('mainland, or at the world\'s edge'); continue; }
+    if (cells.length * cell * cell < 3e4) { no('small'); continue; }
+    let cu = 0, cv = 0, reach = 0;
+    for (const k of cells) { cu += f.x0 + (k % nx) * cell; cv += f.z0 + Math.floor(k / nx) * cell; }
+    cu /= cells.length; cv /= cells.length;
+    for (const k of cells) reach = Math.max(reach, Math.hypot(f.x0 + (k % nx) * cell - cu, f.z0 + Math.floor(k / nx) * cell - cv));
+    // The shore: where it is gentle enough to land and walk up (rising no more than six metres in the first fifteen), the landings.
+    const shore: { x: number; z: number; slope: number }[] = [];
+    for (const k of cells) {
+      if (far[k] > cell * 1.5) continue;
+      const i = k % nx, j = (k - i) / nx;
+      let high = 0;
+      for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && label[jj * nx + ii] === next) high = Math.max(high, h[jj * nx + ii]); }
+      shore.push({ x: f.x0 + i * cell, z: f.z0 + j * cell, slope: high / (2 * cell) });
+    }
+    // The house: wherever on the island its ground fits best, well in from the cliffs, a little up from the sea.
+    const half = Math.hypot(HOUSE.w, HOUSE.d) / 2;
+    let best: WorldPlace | null = null;
+    for (let c = 0; c < cells.length; c += 3) {
+      const k = cells[c];
+      if (far[k] < half + 12 || h[k] < 5 || h[k] > 90) continue;
+      const gx = f.x0 + (k % nx) * cell, gz = f.z0 + Math.floor(k / nx) * cell;
+      // (Its landing: the nearest gentle shore, or the gentlest of all if none is gentle.)
+      let land = shore[0], ld = Infinity;
+      for (const q of shore) { const d = Math.hypot(q.x - gx, q.z - gz) * (q.slope < 0.4 ? 1 : 3 + q.slope); if (d < ld) { ld = d; land = q; } }
+      if (!land) continue;
+      const toLand = Math.atan2(land.z - gz, land.x - gx);
+      for (let r = 0; r < 8; r++) {
+        const turn = (r / 8) * TAU, g = fitGround((px, pz) => f.at(px, pz), gx, gz, turn, HOUSE.w, HOUSE.d);
+        if (g.work > 2.5) continue;
+        // (Facing its landing, as a house on an island faces the way people come: its front is the side at b = d/2.)
+        const facing = Math.cos(toLand - (turn + Math.PI / 2));
+        const score = -g.work * 2 - 0.4 * (g.terraces.length - 1) - Math.hypot(land.x - gx, land.z - gz) / 250 - (land.slope < 0.4 ? 0 : 1.5) + 0.4 * facing - Math.abs(g.terraces[g.terraces.length - 1].y - 25) / 40;
+        if (best && score <= best.score) continue;
+        const wx = gx + t.ox, wz = gz + t.oz;
+        const spot: IslandSpot = { u: wx, v: wz, turn, base: g.terraces[g.terraces.length - 1].y, sea: 0, cu: cu + t.ox, cv: cv + t.oz, reach };
+        best = { kind: 'island', n: 0, name: '', x: wx, z: wz, y: spot.base, score, island: spot, ground: { ...g, x: wx, z: wz }, landing: { x: land.x + t.ox, z: land.z + t.oz, slope: land.slope } };
+      }
+    }
+    if (!best) { no('no ground a house fits'); continue; }
+    // (Four hundred metres in from the world's edge, as every place is.)
+    if (Math.abs(best.x) > p.hx - 400 || Math.abs(best.z) > p.hz - 400) { no('near the world\'s edge'); continue; }
+    out.push(best);
+  }
+  return out;
+}
+
+/**
  * Summits for mountain tops: in the range, a summit with nothing as high within three hundred
  * metres, standing a hundred and eighty metres or more over the valleys a kilometre about it,
  * not on the flanks of a great peak, and with a ridge running down from it that a way could come
@@ -695,8 +784,17 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
       if (!best || score > best.score) best = { angle: a, score };
     }
     if (!best) { no('no ridge'); continue; }
+    // The hospice's ground: on a shoulder of the ridge below the summit, its front turned down the ridge, fitted where it fits best.
+    let ground: Ground | null = null, groundCost = Infinity;
+    for (let t = 40; t <= 240; t += 20) for (let off = -30; off <= 30; off += 15) {
+      const gx = x + Math.cos(best.angle) * t - Math.sin(best.angle) * off, gz = z + Math.sin(best.angle) * t + Math.cos(best.angle) * off;
+      const g = fitGround((px, pz) => f.smoothAt(px, pz), gx, gz, best.angle - Math.PI / 2, HOUSE.w, HOUSE.d);
+      const cost = g.work + 0.4 * (g.terraces.length - 1) + Math.abs(t - 100) / 300;
+      if (cost < groundCost) { groundCost = cost; ground = g; }
+    }
+    if (!ground || ground.work > 4) { no('no ground for the hospice'); continue; }
     const fx = x + Math.cos(best.angle) * 450, fz = z + Math.sin(best.angle) * 450;
-    out.push({ kind: 'mountain', n: 0, name: '', x, z, y, score: best.score + Math.min(350, y - low) / 110, ridge: { angle: best.angle, foot: [fx, fz], footY: f.smoothAt(fx, fz) } });
+    out.push({ kind: 'mountain', n: 0, name: '', ground, x, z, y, score: best.score + Math.min(350, y - low) / 110, ridge: { angle: best.angle, foot: [fx, fz], footY: f.smoothAt(fx, fz) } });
   }
   out.sort((a, b) => b.score - a.score);
   const kept: WorldPlace[] = [];

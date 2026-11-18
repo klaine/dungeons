@@ -71,8 +71,8 @@ place asks for it.
   | Range | 0.6 to 1.6 millimetres a year, more in some stretches, so its mountains stand in massifs | branching valleys and sharp ridges; summits 550 to 730 m, the floors of its valleys 100 to 250 |
   | Upland | about 0.3, uneven | fells cut by the range's rivers and their own; tops 250 to 400 |
   | Low country | about 0.07 | gentle ground the rivers cross, 0 to 80 m |
-  | Shelf | 0.03, and up to 0.5 in patches | the patches rise into hills, which the sea leaves as islands of every size |
-  | The bay | an eighth as fast as about it | low ground running far inland for the sea to come into |
+  | Shelf | 0.03, and more in patches at two sizes, some 700 and 260 metres across | the patches rise into hills, which the sea leaves as an archipelago, islands of every size |
+  | The bay | an eighth as fast as about it, and the shelf in front of its mouth not at all | low ground running far inland for the sea to come into, open to the sea |
 
   Then the sea comes up over it (`drownAt`): nothing inland of the coast, 35 metres over the shelf, more
   beyond it, 30 more over the bay; so the shore is where the land's own shape meets the sea: valleys
@@ -106,18 +106,35 @@ place asks for it.
   than 8 metres holds (more on the steep); worn again at its own scale; and drained. Because the grid is the world's, a tile's land is the same whichever place asks.
 - **Places**, looked for where their kind of land is, four hundred metres in from the world's edge at
   least; each list best first, up to four of each kept, the search stopping when it has them, and
-  however few it has when the land is searched through:
-  - *Islands*: in the tiles where the shelf has land, by the islands' own search (`findIslands`),
-    told that the sea stands at the world's level instead of trying twenty levels of its own. One
-    house to an island.
+  however few it has when the land is searched through. A place asks the land for ground a house can
+  stand on and a way to it, not for a shape; and its house's ground is fitted to the land found
+  (`fit.ts`, below):
+  - *Islands*: every island the land made (land standing out of the sea, apart from the mainland and
+    the world's edge, on the world's own lattice, so none is lost where it crosses a tile's edge) of
+    three hectares or more, whatever its shape and size; on each, the house where its ground fits best,
+    well in from the cliffs, a little up from the sea, facing its landing; the landing the nearest shore
+    gentle enough to come ashore and walk up (rising no more than four in ten), or the gentlest if none
+    is. One house to an island. (Before, an island had to be of a size, near round, with a shoulder at a
+    set height, level within twelve metres; few were.)
   - *Valley heads*: in the tiles of the upland, by the valleys' own search (`findValleys`) on the
-    tile's drainage. No two within seven hundred metres.
+    tile's drainage, their ground fitted there; turned down if more than three metres of earth would
+    have to move on average. No two within seven hundred metres.
   - *Mountain tops*: on the world's lattice, in the range: a summit with nothing higher within 300
     metres, standing alone over the cloud (nothing higher joined to it above a level forty metres under
-    its top, within 1.2 kilometres), 180 metres or more over the valleys a kilometre off, not on a great
-    peak, with a ridge down from it that a way could come up (falling steadily for 450 metres along a
-    crest, the ground lower on both hands). The mountain top as a site was made for a country three
-    times as high; when one is fitted to these, its cloud and the valleys under it come down to suit.
+    its top, within 1.2 kilometres), 180 metres or more over the valleys a kilometre off, with a ridge
+    down from it that a way could come up (falling steadily for 450 metres along a crest, the ground
+    lower on both hands); and the hospice's ground on a shoulder of that ridge, 40 to 240 metres below
+    the summit, its front turned down the ridge, where it fits best.
+- **Grounds fitted to the land** (`fit.ts`; asked: "locations need to be adaptable, best found location
+  can be then slightly flattened or smoothed in places for a town or other needs if must, but terraced
+  adaptations are good also"). A house's ground, 46 metres across by 62 deep, is made level where the
+  land is near level, and terraced where it slopes: one, two or three level steps down its depth, each at
+  the middle height of the land under it (which moves the least earth), no step higher than three metres,
+  a terrace more counted as worth half a metre of earth moved. Round it the land is eased back into its
+  own shape over a bank half again as broad as it is high (six metres at least), so nothing stands as a
+  cliff. Each ground is made on the land in the squares at a metre (after their wear; each point's height
+  a function of where it lies alone, so neighbouring squares still meet), and drawn on the ink map to
+  scale, with its terraces and, on an island, the dotted way up from the landing.
 - **Towns**, as placeholders for what the low country will one day hold: a harbour at a river's
   mouth, the nearer the islands the better; up to two market towns on rivers in the low country; up to
   eight villages by water on fields and pasture.
@@ -156,6 +173,14 @@ islands 0, 0, 0, 1 and 0: the sea now leaves hills as islands of every size, but
 and more across, larger than the island's search will take (it wants 200 to 400 metres across and a
 shoulder at a set height), which is the next thing (*Where next*). The squares at a metre made from this
 land still meet their neighbours exactly (96 shared edges about `w0`'s places).
+
+Then with places that fit the land (islands looked for on the world's own lattice, any shape and size;
+grounds fitted): a world in 23 to 32 seconds (fewer tiles are made now); six worlds gave islands 0, 2, 3,
+2, 1 and 1, valley heads four each, mountain tops 2, 4, 2, 4, 4 and 3. Of the places of three worlds
+(`w1`, `w2`, `w3`), most valley heads stand on one level, moving 0.2 to 1 metre of earth on average; the
+hospices on one to three terraces, moving 1 to 2.4; islands on one level, or three terraces down a slope,
+moving 0.2 to 0.8, their landings 40 to 190 metres off. The squares at a metre with the grounds made on
+them still meet their neighbours exactly (108 shared edges about `w2`'s places).
 
 Before, with the land drawn (zones of noise, drawn valley lines): 20 to 28 seconds; with only found
 places, valley heads four each, islands 0 to 2 and mountain tops 0 to 3.
@@ -302,7 +327,10 @@ tens of milliseconds, and a hundred or two steps are needed: seconds, as the wea
 things: gradient noise in place of value noise where the lattice shows; at a metre, detail laid along
 the way water runs rather than the same every way.
 
-**Places that fit the land.** Each kind of place still wants a shape: an island of so many hundred
+**Places that fit the land.** *Begun: the searches ask for ground a house can stand on, and its ground
+is fitted (levelled, terraced) to the land found, as above. The places' own layouts (where the sites put
+their cottages, ways, landings and the rest) are still each site's own, and are fitted when the sites are
+built from the world (step 3).* As it was: each kind of place still wants a shape: an island of so many hundred
 metres with a shoulder at a set height, level within twelve metres over the house's ground; a valley head
 with walls and a fall; a mountain top drawn whole, its rim and ridge and summits. The land is searched for
 that shape, and seldom has it. The other way round: find ground a house can stand on and a way to come to

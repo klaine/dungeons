@@ -65,6 +65,8 @@ async function start(): Promise<void> {
     worldWorker.postMessage({ type: 'world', seed, size });
   });
   const worldMs = performance.now() - t0, { field, grid } = W, [SX, SZ] = squareCount(grid);
+  // (The houses' grounds, fitted to the land: made on it in every square they reach.)
+  const grounds = W.places.flatMap((q) => (q.ground ? [q.ground] : []));
   const coverAt = (x: number, z: number) => W.cover[Math.min(field.nz - 1, Math.max(0, Math.round((z - field.z0) / field.cell))) * field.nx + Math.min(field.nx - 1, Math.max(0, Math.round((x - field.x0) / field.cell)))];
   /** The ground's colour: what lies there, by the world's lattice; rock where it is steep; sand at the water's edge; and a little unevenness. */
   const colourAt = (x: number, z: number, y: number, slope: number): [number, number, number] => {
@@ -104,7 +106,7 @@ async function start(): Promise<void> {
     const need = tilesFor(grid, i, j), data = await Promise.all(need.map(([a, b]) => tile(a, b)));
     const send = data.filter((t) => !worker.has.has(`${t.i},${t.j}`));
     for (const t of send) worker.has.add(`${t.i},${t.j}`);
-    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send });
+    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds });
   };
 
   // ---- the far land: the world's own lattice, in blocks of four squares by four, read every 32 metres, with holes where squares lie

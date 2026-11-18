@@ -1,5 +1,6 @@
 import { Rng } from './rng';
 import { fbmd, HeightField, landDetail, wearByFrost, wearByWater } from './terrain';
+import { Ground, withGrounds } from './fit';
 
 /**
  * The world's land at a metre, made a square at a time where it is wanted (`docs/06-world.md`,
@@ -83,8 +84,12 @@ const CUT = 1.5, FILL = 0.6;
 /** A made square: its heights at a metre (257 by 257, from its north-west corner), and how far each point may be left out. */
 export interface Square { i: number; j: number; x0: number; z0: number; heights: Float32Array; errors: Float32Array; ms: number }
 
-/** Makes a square's land from the tiles under it. `seed` is the world's number for its noise. */
-export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number): Square {
+/**
+ * Makes a square's land from the tiles under it. `seed` is the world's number for its noise. `grounds`
+ * are the houses' grounds fitted to the land (`fit.ts`): made on it, levelled or terraced, with their
+ * banks, after the wear; each a function of where a point lies alone, so two squares still meet.
+ */
+export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number, grounds: Ground[] = []): Square {
   const t0 = performance.now();
   const [x0, z0] = squareOrigin(g, i, j), n = SQUARE.n + 2 * APRON;
   const read = tiles.map((t) => { const f = new HeightField(t.x0, t.z0, t.cell, t.nx, t.nz); f.data.set(t.data); return { t, f }; });
@@ -106,6 +111,10 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
   for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
     const k = (jj + APRON) * n + ii + APRON, edge = Math.min(ii, jj, SQUARE.n - 1 - ii, SQUARE.n - 1 - jj);
     out[jj * SQUARE.n + ii] = shaped[k] + (f.data[k] - shaped[k]) * smooth(edge / FADE);
+  }
+  if (grounds.length) for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
+    const k = jj * SQUARE.n + ii;
+    out[k] = withGrounds(grounds, x0 + ii, z0 + jj, out[k]);
   }
   return { i, j, x0, z0, heights: out, errors: errorsOf(out), ms: performance.now() - t0 };
 }
