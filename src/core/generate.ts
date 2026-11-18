@@ -230,8 +230,8 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   }
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
-  // (Valleys only when asked for, as yet: a found valley is not yet sound to walk. Islands and mountain tops unless asked otherwise.)
-  if (kind === 'valley' ? opts.terrain === 'eroded' : opts.terrain !== 'plain') {
+  // (Every kind of place unless asked otherwise, `plain`: valleys too, now that a found one walks and looks as a drawn one does.)
+  if (opts.terrain !== 'plain') {
     try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
       // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
       if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
@@ -1203,7 +1203,9 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
    * stones if it is a brook, by a bridge if it is a river. All of this is drawn from a stream
    * of its own, so that a valley whose water does not cross is laid out as it always was.
    */
-  const crossing = rng.fork('crossing'), crosses = crossing.chance(0.4);
+  // (Not in a valley found in worn land, whose water and track both follow the line it drains by: crossing there, a stream ran a long
+  // way down the track itself, the bridge found no bank to land on, and whoever walked the track went under its deck along the bed.)
+  const crossing = rng.fork('crossing'), crosses = crossing.chance(0.4) && !v.terrain;
   const over = (start: (towards: [number, number]) => [number, number], wide: number, but?: Feature): Stream | null => {
     for (let tries = 0; tries < 6; tries++) {
       const zc = crossing.range(meadow.z1 + 12, v.mouth - 26), xc = trackX(zc);

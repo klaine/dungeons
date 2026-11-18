@@ -490,6 +490,9 @@ async function start(): Promise<void> {
   under.rotation.x = -Math.PI / 2;
   // (Below the lowest floor there is, which in a cave may be some way down.)
   under.position.y = Math.min(-2.6, ...(site?.places ?? []).map((q) => q.floor - 2.6), ...(desc.unders ?? []).map((u) => u.min.y - 1.5), ...(desc.lowest !== undefined ? [desc.lowest - 1.5] : []));
+  // (And below the lowest ground of the place: a valley found in worn land falls towards its mouth, and its floor there may lie well
+  // below the house's. With the plane above it, the ground there was under a black sheet.)
+  if (desc.groundLow !== undefined) under.position.y = Math.min(under.position.y, desc.groundLow - 3);
   // (Round an island it is below the sea bed, out of sight under deep water.)
   if (desc.sea) under.position.y = Math.min(under.position.y, desc.sea.level - 60);
   // (On a mountain, deep under the cloud.)
@@ -675,7 +678,9 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ player
   const player = new Player(camera, canvas, bvh);
-  player.fallTo = Math.min(-8, under.position.y - 1);
+  // (Whoever falls below this is put back where they came in. It was -8 at the highest: on a found valley whose mouth lies lower than
+  // that, the player was put back there at every step and could not walk at all.)
+  player.fallTo = Math.min(-8, under.position.y - 1, desc.spawn.position.y - 12);
   for (const f of desc.fences ?? []) player.blockers.push({ min: f.min, max: f.max, active: true });
   new TouchControls(canvas, player, toggleLantern);
 
