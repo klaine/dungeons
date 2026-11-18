@@ -621,7 +621,8 @@ function at2(at: ReturnType<typeof frame>, a: number, f: number): [number, numbe
  * A boat: clinker-built and open, drawn up on a beach or riding at her mooring (`afloat`); a boat afloat is a mesh of its own, `boat`
  * and its number, so that she can rise and fall with the swell. For the island's cove and the town's harbour alike.
  */
-export function layBoat(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; afloat: boolean }, n: number, sea: number, ground: (x: number, z: number) => number, rng: Rng): void {
+export function layBoat(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }, n: number, sea: number, ground: (x: number, z: number) => number, rng: Rng): void {
+  if (bt.masts) { layVessel(wild, mesh, bt, n, sea, rng); return; }
   const { face, solid } = anyAngle(mesh);
   const was = wild.group;
   if (bt.afloat) wild.group = `boat${n}`;
@@ -656,6 +657,90 @@ export function layBoat(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: nu
   for (const f of [-L * 0.45, 0.1, L * 0.4]) {
     const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
     solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
+  }
+  wild.group = was;
+}
+
+/**
+ * A decked vessel lying at her moorings: a smack of one mast, or a schooner of two. Her hull is stations from stern to bow, full
+ * amidships and fine at the bow, painted above a band at the waterline and tarred below; a deck of planks within low bulwarks with
+ * a rail, a hatch and a deckhouse; and her masts, raked a little aft, each with a boom low over the deck and a gaff above it, and
+ * the sail furled along the boom; a bowsprit; and the stays from the mastheads to the bow and the sides. A mesh of her own, `boat`
+ * and her number, so that she rides the swell.
+ */
+function layVessel(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; masts?: number }, n: number, sea: number, rng: Rng): void {
+  const { face, solid } = anyAngle(mesh);
+  const was = wild.group;
+  wild.group = `boat${n}`;
+  const q = rng, L = bt.length / 2, B = bt.length * 0.13, depth = Math.max(1.3, bt.length * 0.11), draft = depth * 0.62;
+  const at = frame(bt.x, bt.z, sea - draft, bt.heading);
+  const paint: Colour = q.pick([[0.05, 0.05, 0.055], [0.08, 0.16, 0.12], [0.1, 0.13, 0.22], [0.42, 0.1, 0.07], [0.78, 0.76, 0.7]] as Colour[]);
+  const band: Colour = q.pick([[0.8, 0.78, 0.72], [0.62, 0.1, 0.06], [0.75, 0.6, 0.15]] as Colour[]), tar: Colour = [0.06, 0.055, 0.05], deckC: Colour = [0.5, 0.42, 0.3];
+  // The hull: stations along her length, each a section full at the turn of the bilge and narrowing to the keel.
+  const S = 16, R = 6, sec: P3[][] = [];
+  const halfAt = (t: number) => B * Math.pow(Math.sin(Math.PI * (0.06 + 0.94 * t)), 0.55) * (t > 0.55 ? 1 - Math.pow((t - 0.55) / 0.45, 1.6) * 0.92 : 1 - Math.pow((0.55 - t) / 0.55, 2) * 0.35);
+  const sheerAt = (t: number) => depth * (1 + 0.28 * Math.pow(Math.abs(t - 0.45) / 0.55, 2));
+  for (let i = 0; i <= S; i++) {
+    const t = i / S, f = -L + 2 * L * t, w = Math.max(0.05, halfAt(t)), top = sheerAt(t), ring: P3[] = [];
+    for (let k = 0; k <= R; k++) {
+      const u = -1 + (2 * k) / R, a = u * w * (1 - 0.15 * (1 - u * u));
+      ring.push(at(a, top - depth * Math.pow(1 - u * u, 0.8) * (t > 0.92 ? 0.4 : 1), f));
+    }
+    sec.push(ring);
+  }
+  const mid = at(0, depth * 0.5, 0), wl = draft + 0.1;
+  for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
+    const yAvg = (sec[i][k][1] + sec[i][k + 1][1] + sec[i + 1][k][1] + sec[i + 1][k + 1][1]) / 4 - (sea - draft);
+    face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], yAvg < wl ? tar : yAvg < wl + 0.22 ? band : paint, mid, 0.9);
+  }
+  // The transom across her stern, and the deck at the sheer; bulwarks and a rail along both sides.
+  face('wood', sec[0], paint, at(0, depth, L * 3), 0.9);
+  const deckL: P3[] = sec.map((r) => r[0]), deckR: P3[] = sec.map((r) => r[R]);
+  for (let i = 0; i < S; i++) face('wood', [deckL[i], deckR[i], deckR[i + 1], deckL[i + 1]], deckC, at(0, -depth * 4, 0), 0.9);
+  for (let i = 0; i < S; i++) for (const side of [-1, 1]) {
+    // (Each length of bulwark a board standing on the sheer, a hand thick, and a rail capping it.)
+    const t0 = i / S, t1 = (i + 1) / S, f0 = -L + 2 * L * t0, f1 = -L + 2 * L * t1, w0 = Math.max(0.05, halfAt(t0)), w1 = Math.max(0.05, halfAt(t1)), y0 = sheerAt(t0), y1 = sheerAt(t1);
+    solid('wood', [at(side * w0, y0, f0), at(side * w1, y1, f1), at(side * (w1 - 0.06), y1, f1), at(side * (w0 - 0.06), y0, f0), at(side * w0, y0 + 0.55, f0), at(side * w1, y1 + 0.55, f1), at(side * (w1 - 0.06), y1 + 0.55, f1), at(side * (w0 - 0.06), y0 + 0.55, f0)], paint);
+    solid('wood', [at(side * (w0 + 0.03), y0 + 0.55, f0), at(side * (w1 + 0.03), y1 + 0.55, f1), at(side * (w1 - 0.12), y1 + 0.55, f1), at(side * (w0 - 0.12), y0 + 0.55, f0), at(side * (w0 + 0.03), y0 + 0.63, f0), at(side * (w1 + 0.03), y1 + 0.63, f1), at(side * (w1 - 0.12), y1 + 0.63, f1), at(side * (w0 - 0.12), y0 + 0.63, f0)], [0.55, 0.45, 0.3]);
+  }
+  const deckY = (f: number) => sheerAt((f + L) / (2 * L));
+  const box = (a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, material = 'wood') =>
+    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, 0.9);
+  // A hatch amidships and a deckhouse aft.
+  box(-B * 0.32, B * 0.32, deckY(0) - 0.05, deckY(0) + 0.45, -L * 0.12, L * 0.12, [0.42, 0.33, 0.22]);
+  box(-B * 0.4, B * 0.4, deckY(-L * 0.6) - 0.05, deckY(-L * 0.6) + 1.5, -L * 0.78, -L * 0.48, q.pick([[0.7, 0.66, 0.58], [0.45, 0.32, 0.2]] as Colour[]));
+  box(-B * 0.46, B * 0.46, deckY(-L * 0.6) + 1.5, deckY(-L * 0.6) + 1.6, -L * 0.8, -L * 0.46, [0.3, 0.25, 0.2]);
+  // The masts, raked a little aft; boom, gaff and the furled sail; the bowsprit; the stays.
+  const masts = bt.masts ?? 1, spars: Colour = [0.55, 0.42, 0.26], sail: Colour = q.pick([[0.82, 0.76, 0.62], [0.62, 0.38, 0.22], [0.86, 0.84, 0.78]] as Colour[]);
+  const tops: P3[] = [];
+  for (let m = 0; m < masts; m++) {
+    const f0 = masts === 1 ? L * 0.25 : m === 0 ? L * 0.35 : -L * 0.2, h0 = deckY(f0), tall = bt.length * (masts === 1 ? 0.95 : m === 0 ? 0.62 : 0.68), rake = 0.05;
+    const rad = 0.09 + bt.length * 0.004;
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2;
+      solid('wood', [at(Math.cos(a0) * rad, h0 - 0.4, f0 + Math.sin(a0) * rad), at(Math.cos(a1) * rad, h0 - 0.4, f0 + Math.sin(a1) * rad), at(0, h0 - 0.4, f0), at(0, h0 - 0.4, f0),
+        at(Math.cos(a0) * rad * 0.6, h0 + tall, f0 - tall * rake + Math.sin(a0) * rad * 0.6), at(Math.cos(a1) * rad * 0.6, h0 + tall, f0 - tall * rake + Math.sin(a1) * rad * 0.6), at(0, h0 + tall, f0 - tall * rake), at(0, h0 + tall, f0 - tall * rake)], spars);
+    }
+    tops.push(at(0, h0 + tall, f0 - tall * rake));
+    // The boom along the deck aft of the mast, the sail furled on it, and the gaff over it.
+    const bl = masts === 1 ? L * 1.15 : L * 0.55, hb = h0 + 1.2, beam = (a0: number, a1: number, y0: number, y1: number, fa: number, fb: number, colour: Colour, r: number) =>
+      solid('wood', [at(a0 - r, y0 - r, fa), at(a0 + r, y0 - r, fa), at(a0 + r, y0 + r, fa), at(a0 - r, y0 + r, fa), at(a1 - r, y1 - r, fb), at(a1 + r, y1 - r, fb), at(a1 + r, y1 + r, fb), at(a1 - r, y1 + r, fb)], colour);
+    beam(0, 0, hb, hb + 0.15, f0 - 0.2, f0 - bl, spars, 0.08);
+    beam(0, 0, hb + 0.18, hb + 0.3, f0 - 0.4, f0 - bl * 0.92, sail, 0.2);
+    beam(0, 0, h0 + tall * 0.62, h0 + tall * 0.62 + bl * 0.35, f0 - tall * 0.62 * rake - 0.2, f0 - bl * 0.75, spars, 0.065);
+  }
+  // The bowsprit, and the stays: forestays from the foremost masthead to the bowsprit's end, shrouds to either side.
+  const bowF = L * 0.98, sprit = at(0, deckY(L) + 0.4, bowF + bt.length * 0.18);
+  {
+    const p0 = at(0, deckY(L) + 0.2, bowF - 0.5);
+    solid('wood', [[p0[0], p0[1] - 0.09, p0[2]], [p0[0] + 0.09, p0[1], p0[2]], [p0[0], p0[1] + 0.09, p0[2]], [p0[0] - 0.09, p0[1], p0[2]], [sprit[0], sprit[1] - 0.06, sprit[2]], [sprit[0] + 0.06, sprit[1], sprit[2]], [sprit[0], sprit[1] + 0.06, sprit[2]], [sprit[0] - 0.06, sprit[1], sprit[2]]], spars);
+  }
+  const line = (a: P3, c: P3) => solid('metal', [[a[0] - 0.015, a[1], a[2]], [a[0] + 0.015, a[1], a[2]], [a[0], a[1], a[2] + 0.015], [a[0], a[1], a[2] - 0.015], [c[0] - 0.015, c[1], c[2]], [c[0] + 0.015, c[1], c[2]], [c[0], c[1], c[2] + 0.015], [c[0], c[1], c[2] - 0.015]], [0.12, 0.1, 0.08]);
+  line(tops[0], sprit);
+  if (tops[1]) line(tops[1], tops[0]);
+  for (const top of tops) for (const side of [-1, 1]) for (const df of [-0.6, 0.3]) {
+    const f = masts === 1 ? L * 0.25 + df : df + (top === tops[0] ? L * 0.35 : -L * 0.2), t2 = (f + L) / (2 * L);
+    line(top, at(side * halfAt(t2), deckY(f) + 0.6, f));
   }
   wild.group = was;
 }

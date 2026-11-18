@@ -234,7 +234,8 @@ async function start(): Promise<void> {
   // Windows with a lamp or a fire behind them glow once the light is going; by day they are glass like the rest.
   // (The eyes open wider as the light goes, so the lamps need not be brighter by night than at dusk to tell more.)
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
-  materials.window = lamps ? makeWindowMaterial() : materials.glass;
+  // (By day a window that is lit after dark is glass like any other: its points carry its lamp's colour, which the glass would show.)
+  materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, tint: [0.04, 0.055, 0.075] });
   windowUniforms.uLit.value = lamps;
   const desc: SceneDescription = site ? meshSite(site) : buildCourtyardHall(seed);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }

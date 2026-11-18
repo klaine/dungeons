@@ -157,7 +157,7 @@ function tools(b: Building, base: number, mesh: (material: string) => MeshBuilde
  * with either a framed gable to the street or its eaves, and then dormers; a chimney of stone
  * comes through it. Windows have shutters, and on the street side boxes of flowers.
  */
-function timberHouse(b: Building, base: number, given: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
+function timberHouse(b: Building, base: number, given: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean, tops?: Vector3[]): void {
   // A house that was burnt is built as any other, through a mesh that chars what it is given: timber nearly black, plaster sooted
   // in streaks, stone darkened; and that throws away its glass, its flowers and its tiles, which did not survive.
   const burnt = !!b.burnt, waste = new MeshBuilder(), charred = new Map<string, MeshBuilder>();
@@ -340,6 +340,7 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     box('stone', u - 0.34, u + 0.34, top + 0.4, ridge + 0.75, v - 0.3, v + 0.3, shade(stone, 0.72));
     box('stone', u - 0.42, u + 0.42, ridge + 0.75, ridge + 0.85, v - 0.38, v + 0.38, shade(stone, 0.6));
     for (const side of [-1, 1]) box('tile', u + side * 0.17 - 0.09, u + side * 0.17 + 0.09, ridge + 0.85, ridge + 1.12, v - 0.09, v + 0.09, [0.9, 0.8, 0.75]);
+    tops?.push(at(u, ridge + 1.12, v));
   }
   // ------------------------------------------------------------------ inside
   // The rooms are as the site document plans them. A hall along one side with the stair in it,
@@ -526,7 +527,7 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
  * rail at the height of a chair's back and a cornice; the front rooms have a stove of glazed
  * tiles in the corner.
  */
-function imperialHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
+function imperialHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, tops?: Vector3[]): void {
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
   // (`T` is the rendered skin of an outer wall, which carries its windows; the rest of its thickness is the linings of the rooms inside.)
   const W = b.w, D = b.d, T = CLASSICAL.skin, FULL = CLASSICAL.outer, PLINTH = CLASSICAL.plinth, N = b.storeys, H0 = b.heights[0], wash = b.colour, granite = shade(stone, 0.62);
@@ -773,6 +774,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       const u = (-0.5 + (n + 0.5) / stacks) * Math.max(1.5, W - D * 0.9), v = D / 2 + (n % 2 ? 1.5 : -1.5);
       box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, shade(wash, 0.92));
       box('plaster', u - 0.52, u + 0.52, y + rise + 0.95, y + rise + 1.07, v - 0.37, v + 0.37, WHITE);
+      tops?.push(at(u, y + rise + 1.07, v));
     }
   }
   // Towers at the corners, rising storeys of their own over the cornice: walls standing a hand proud of the front below so that the
@@ -987,7 +989,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
  * metal laid in seams, with plastered chimneys and half-round dormers lighting the attic. With a wing it is an L, as at a street
  * corner, the wing finished as the main block is. Its door is shut: it is seen, and not gone into.
  */
-function woodenHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
+function woodenHouse(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, tops?: Vector3[]): void {
   const k = tools(b, base, mesh), { at, box, on, stick, pierced, glazed, poly, wedge } = k;
   const W = b.w, D = b.d, Bm = b.basement ?? 1.1, N = b.storeys, paint = b.colour, T = 0.22;
   const floorY = (s: number) => Bm + b.heights.slice(0, s).reduce((sum, h) => sum + h, 0), top = floorY(N);
@@ -1112,6 +1114,7 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
     const u = (-0.5 + (n + 0.5) / stacks) * Math.max(1.5, W - D), v = D / 2 + (n % 2 ? 0.8 : -0.8);
     box('plaster', u - 0.36, u + 0.36, ry + mainRise * 0.5, ry + mainRise + 1.0, v - 0.3, v + 0.3, cTone);
     box('plaster', u - 0.44, u + 0.44, ry + mainRise + 1.0, ry + mainRise + 1.12, v - 0.38, v + 0.38, shade(cTone, 0.8));
+    tops?.push(at(u, ry + mainRise + 1.12, v));
   }
   // Half-round dormers in the front slope, lighting the attic: a fan of glass in a white frame, under a little vault of the roof's metal.
   for (let n = 0; n < (b.dormers ?? 0); n++) {
@@ -1139,12 +1142,13 @@ export function solids(mesh: (material: string) => MeshBuilder) {
 }
 
 /** Builds one building where the site document says it stands, on ground at the height `base`. `stone` is the tint of the country's stone. */
-export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean): void {
+/** Builds a building; `tops`, if given, is told where the top of each of its chimneys is, for smoke to rise from. */
+export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean, tops?: Vector3[]): void {
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
   const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
   if (b.style === 'timber') {
-    timberHouse(b, base, noting, rng, stone, first);
+    timberHouse(b, base, noting, rng, stone, first, tops);
     // Indoors is whatever is within the walls of the storey it is on: each storey stands further out over the street than the one below.
     const turn = b.faces === 'w' ? 1 : -1, top = timberFloor(b, b.storeys);
     for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
@@ -1156,7 +1160,7 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
     return;
   }
   if (b.style === 'wooden') {
-    woodenHouse(b, base, noting, rng, stone);
+    woodenHouse(b, base, noting, rng, stone, tops);
     // (Shut: what is within its walls is indoors, and nobody sees it.)
     const turn = b.faces === 'w' ? 1 : -1, rects = footprintOf(b);
     for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
@@ -1165,7 +1169,7 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
     }, from);
     return;
   }
-  imperialHouse(b, base, noting, rng, stone);
+  imperialHouse(b, base, noting, rng, stone, tops);
   // Indoors, only a share of the sky is seen, through the windows: so a room is dimmer than the street, and the sun lies on its floor where it comes in.
   const turn = b.faces === 'w' ? 1 : -1, height = 0.5 + b.heights.reduce((sum, h) => sum + h, 0), rects = footprintOf(b).map((r, i) => (i ? { ...r, v0: r.v0 - 0.5 } : r));
   for (const [m, from] of begun) m.setOpenBy((x, y, z) => {

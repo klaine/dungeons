@@ -38,7 +38,7 @@ type P3 = [number, number, number];
 /** What the ground is at each point of the town, on a lattice: so that the sheet, the planting and the walls ask once. */
 const Z = { wild: 0, street: 1, flags: 2, built: 3, yard: 4, track: 5, path: 6, shack: 7, field: 8, quay: 9, harbour: 10 } as const;
 
-export function buildTown(b: IslandBuild): IslandResult {
+export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[] } {
   const { site, p, kit, wild } = b;
   const t = site.town!, F = p.floor, sea = t.sea, g = site.grounds!, L = t.land;
   const rng = b.rng.fork('town');
@@ -525,6 +525,100 @@ export function buildTown(b: IslandBuild): IslandResult {
   // Boats: drawn up on the shore, and moored in the harbour; each moored one a mesh of its own, so that it can ride the swell.
   t.boats.forEach((bt, n) => layBoat(wild, mesh, bt, n, sea, ground, rng.fork(`boat${n}`)));
 
+  // ---- what lies about on the quay: crates, barrels, sacks and nets in heaps along it, landed and waiting; and a crane of timber
+  // beside the ship, to swing what she carries ashore, with a barrel on its hook
+  {
+    const h = rng.fork('cargo');
+    /** A barrel standing or lying on its side: staves bellied out to the middle, two hoops of iron, and its ends. */
+    const barrel = (x: number, z: number, y: number, r: number, tall: number, upright: boolean, turn: number) => {
+      const at = frame(x, z, y, turn), n = 10, oak: Colour = shade([0.56, 0.41, 0.26], h.range(0.8, 1.12)), hoop: Colour = [0.1, 0.09, 0.08];
+      // (A point at angle `a` round the axis, `s` along it, `rr` out from it; lying, the axis runs forward at the height of the belly.)
+      const P = (a: number, s: number, rr: number): P3 => (upright ? at(Math.cos(a) * rr, s, Math.sin(a) * rr) : at(Math.cos(a) * rr, r + Math.sin(a) * rr, s - tall / 2));
+      const centre = P(0, tall / 2, 0), belly = (s: number) => r * (0.86 + 0.14 * Math.sin((s / tall) * Math.PI));
+      const ring = (s: number, out = 0) => Array.from({ length: n }, (_, k) => P((k / n) * Math.PI * 2, s, belly(s) + out));
+      const steps = [0, 0.25, 0.5, 0.75, 1].map((f) => f * tall);
+      for (let j = 0; j + 1 < steps.length; j++) {
+        const lo = ring(steps[j]), hi = ring(steps[j + 1]);
+        for (let k = 0; k < n; k++) face('wood', [lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k]], k % 2 ? oak : shade(oak, 0.9), centre, 0.9);
+      }
+      for (const s of [0, tall]) face('wood', ring(s), shade(oak, 0.8), centre, 0.9);
+      for (const s of [tall * 0.14, tall * 0.86]) {
+        const lo = ring(s - 0.025, 0.012), hi = ring(s + 0.025, 0.012);
+        for (let k = 0; k < n; k++) face('metal', [lo[k], lo[(k + 1) % n], hi[(k + 1) % n], hi[k]], hoop, centre);
+      }
+    };
+    /** A crate of boards, with battens round it top and bottom. */
+    const crate = (at: ReturnType<typeof frame>, a: number, f: number, y: number, w: number, d: number, tall: number) => {
+      const c: Colour = shade([0.55, 0.43, 0.28], h.range(0.75, 1.1));
+      box(at, 'wood', a - w / 2, a + w / 2, y, y + tall, f - d / 2, f + d / 2, c, 0.9);
+      for (const yy of [y + 0.04, y + tall - 0.11]) box(at, 'wood', a - w / 2 - 0.015, a + w / 2 + 0.015, yy, yy + 0.07, f - d / 2 - 0.015, f + d / 2 + 0.015, shade(c, 0.82), 0.9);
+    };
+    /** A heap of what has been landed: crates (some stacked), barrels, sacks and heaped nets, set in a few places side by side along the quay. */
+    const heap = (x: number, z: number) => {
+      const y = ground(x, z), at = frame(x, z, y, -Math.PI / 2);
+      for (const a of [-1.25, 0, 1.25]) for (const f of [-0.5, 0.5]) {
+        if (!h.chance(0.65)) continue;
+        const kind = h.next(), da = a + h.range(-0.1, 0.1), df = f + h.range(-0.06, 0.06);
+        if (kind < 0.4) {
+          const tall = h.range(0.45, 0.7);
+          crate(at, da, df, 0, h.range(0.75, 1.05), h.range(0.7, 0.9), tall);
+          if (h.chance(0.35)) crate(at, da + h.range(-0.08, 0.08), df, tall, h.range(0.55, 0.75), h.range(0.5, 0.7), h.range(0.35, 0.55));
+        } else if (kind < 0.75) {
+          const [px, , pz] = at(da, 0, df);
+          if (h.chance(0.7)) barrel(px, pz, y, h.range(0.3, 0.37), h.range(0.82, 0.95), true, h.range(0, 3));
+          else barrel(px, pz, y, 0.32, 0.9, false, -Math.PI / 2 + h.range(-0.15, 0.15));
+        } else if (kind < 0.88) {
+          for (const [sa, sf, sh] of [[-0.3, 0, 0], [0.3, 0.05, 0], [0, 0, 0.32]] as P3[]) solid('plaster', [at(da + sa - 0.32, sh, df + sf - 0.22), at(da + sa + 0.32, sh, df + sf - 0.22), at(da + sa + 0.32, sh, df + sf + 0.22), at(da + sa - 0.32, sh, df + sf + 0.22), at(da + sa - 0.26, sh + 0.34, df + sf - 0.15), at(da + sa + 0.26, sh + 0.34, df + sf - 0.15), at(da + sa + 0.26, sh + 0.34, df + sf + 0.15), at(da + sa - 0.26, sh + 0.34, df + sf + 0.15)], [0.62, 0.54, 0.4]);
+        } else {
+          const net: Colour = h.pick([[0.25, 0.22, 0.14], [0.2, 0.24, 0.18], [0.38, 0.26, 0.16]] as Colour[]);
+          solid('plaster', [at(da - 0.6, 0, df - 0.45), at(da + 0.6, 0, df - 0.45), at(da + 0.6, 0, df + 0.45), at(da - 0.6, 0, df + 0.45), at(da - 0.35, 0.32, df - 0.22), at(da + 0.35, 0.32, df - 0.22), at(da + 0.35, 0.32, df + 0.22), at(da - 0.35, 0.32, df + 0.22)], net);
+        }
+      }
+    };
+    for (let x = q.x0 + 9; x < q.x1 - 9; x += h.range(16, 26)) {
+      if (x > t.square.x0 + 6 && x < t.square.x1 - 6 && h.chance(0.6)) continue;
+      heap(x, q.z - h.range(3.4, 4.6));
+    }
+    // The crane: on a block of stone at the quay's edge beside the ship, a mast with a jib raked up from low on it and out over the
+    // water, held up by a rope from the mast's head; a winch at its foot, and a crate in a sling hanging from the jib's end.
+    // (It was first a post with a level arm and a barrel hanging from it, and it looked like a gallows.)
+    const ship = t.boats.find((bt) => bt.masts === 2) ?? t.boats.find((bt) => bt.masts);
+    if (ship) {
+      const cx = ship.x + (h.chance(0.5) ? -1 : 1) * Math.min(ship.length * 0.3, 6), cz = q.z - 1.6, y = deck, at = frame(cx, cz, y, Math.PI / 2);
+      const oak: Colour = [0.3, 0.22, 0.15], rope: Colour = [0.36, 0.3, 0.2], iron: Colour = [0.1, 0.09, 0.085];
+      /** A spar, or a rope, of square section between two points, whichever way it runs. */
+      const spar = (a: P3, c: P3, r: number, material = 'wood', colour = oak) => {
+        const d: P3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], l = Math.hypot(d[0], d[1], d[2]), u: P3 = [d[0] / l, d[1] / l, d[2] / l];
+        const cross = (p: P3, q: P3): P3 => [p[1] * q[2] - p[2] * q[1], p[2] * q[0] - p[0] * q[2], p[0] * q[1] - p[1] * q[0]];
+        const s0 = cross(u, Math.abs(u[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]), sl = Math.hypot(s0[0], s0[1], s0[2]), sv: P3 = [s0[0] / sl, s0[1] / sl, s0[2] / sl], w = cross(u, sv);
+        const ring = (p: P3) => ([[-1, -1], [1, -1], [1, 1], [-1, 1]] as const).map(([i, j]): P3 => [p[0] + (sv[0] * i + w[0] * j) * r, p[1] + (sv[1] * i + w[1] * j) * r, p[2] + (sv[2] * i + w[2] * j) * r]);
+        solid(material, [...ring(a), ...ring(c)], colour, 0.9);
+      };
+      box(at, 'stone', -0.9, 0.9, -0.3, 0.55, -0.9, 0.9, shade(stone, 0.95), 0.4);
+      box(at, 'wood', -0.17, 0.17, 0.55, 7.0, -0.17, 0.17, oak);
+      box(at, 'metal', -0.2, 0.2, 6.8, 6.9, -0.2, 0.2, iron);
+      // (Two shores raking down from the mast to the block's back corners, to stand it against the pull of the load.)
+      for (const side of [-1, 1]) spar(at(0, 3.2, -0.1), at(side * 0.75, 0.55, -0.8), 0.08);
+      const pivot = at(0, 1.4, 0.2), tip = at(0, 6.3, 4.9), head = at(0, 6.85, 0.18);
+      spar(pivot, tip, 0.13);
+      spar(head, tip, 0.025, 'wood', rope);
+      // The winch on the landward side: two cheeks, a drum between them with rope wound on it, and a crank.
+      for (const side of [-0.4, 0.4]) box(at, 'wood', side - 0.05, side + 0.05, 0.55, 1.45, -0.95, -0.35, oak);
+      for (let k = 0; k < 8; k++) {
+        const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2, r = 0.17, ax = -0.65, ay = 1.15;
+        solid('wood', [at(-0.35, ay + Math.sin(a0) * r, ax + Math.cos(a0) * r), at(0.35, ay + Math.sin(a0) * r, ax + Math.cos(a0) * r), at(0.35, ay + Math.sin(a1) * r, ax + Math.cos(a1) * r), at(-0.35, ay + Math.sin(a1) * r, ax + Math.cos(a1) * r), at(-0.35, ay, ax), at(0.35, ay, ax), at(0.35, ay, ax), at(-0.35, ay, ax)], k % 2 ? rope : shade(rope, 0.8), 0.9);
+      }
+      box(at, 'metal', 0.45, 0.75, 1.13, 1.17, -0.67, -0.63, iron); box(at, 'metal', 0.71, 0.75, 1.13, 1.42, -0.67, -0.63, iron);
+      // The fall: from the drum up to the jib's end, and down from it to the hook, with a crate slung from it over the ship's hatch.
+      spar(at(0, 1.3, -0.6), head, 0.02, 'wood', rope);
+      const hook = 2.3;
+      spar(tip, at(0, hook, 4.9), 0.022, 'wood', rope);
+      const cw = 0.9, cd = 0.75, ctall = 0.7, cy = hook - 1.15;
+      crate(at, 0, 4.9, cy, cw, cd, ctall);
+      for (const [i, j] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) spar(at((i * cw) / 2, cy + ctall, 4.9 + (j * cd) / 2), at(0, hook, 4.9), 0.015, 'wood', rope);
+    }
+  }
+
   // ---- the house's terrace over the square: a wall of dressed stone along its front, with a balustrade, and the stair down
   {
     const h = rng.fork('terrace'), sq = t.square, lv = t.level, st = t.stair;
@@ -627,12 +721,69 @@ export function buildTown(b: IslandBuild): IslandResult {
     }
   }
 
+  // ---- the furniture of the streets: iron lamps along them, on the waterfront and round the square, whose lanterns are lit after dark
+  // (their glass is the window's, and glows as a lit window does); benches along the square's sides; and on the square's axis
+  // towards the harbour an obelisk of the country's stone on stepped plinths, with a gilt ball on its point.
+  const lampAt = (x: number, z: number, h: Rng) => {
+    const y = ground(x, z), iron: Colour = [0.05, 0.05, 0.055], at = frame(x, z, y, h.range(0, Math.PI * 2));
+    box(at, 'metal', -0.16, 0.16, -0.1, 0.5, -0.16, 0.16, iron);
+    box(at, 'metal', -0.11, 0.11, 0.5, 0.62, -0.11, 0.11, iron);
+    box(at, 'metal', -0.055, 0.055, 0.62, 3.35, -0.055, 0.055, iron);
+    box(at, 'metal', -0.09, 0.09, 3.35, 3.45, -0.09, 0.09, iron);
+    // The lantern: glass on four sides between corner bars, a floor and a cap.
+    box(at, 'metal', -0.2, 0.2, 3.45, 3.5, -0.2, 0.2, iron);
+    box(at, 'window', -0.16, 0.16, 3.5, 3.95, -0.16, 0.16, [1.0, 0.72, 0.36]);
+    for (const [a, f] of [[-0.18, -0.18], [0.18, -0.18], [-0.18, 0.18], [0.18, 0.18]]) box(at, 'metal', a - 0.025, a + 0.025, 3.5, 3.95, f - 0.025, f + 0.025, iron);
+    solid('metal', [at(-0.24, 3.95, -0.24), at(0.24, 3.95, -0.24), at(0.24, 3.95, 0.24), at(-0.24, 3.95, 0.24), at(-0.03, 4.22, -0.03), at(0.03, 4.22, -0.03), at(0.03, 4.22, 0.03), at(-0.03, 4.22, 0.03)], iron);
+  };
+  {
+    const h = rng.fork('lamps'), sq = t.square;
+    const clearOf = (x: number, z: number) => !t.buildings.some((bd) => Math.abs(bd.x - x) < 30 && Math.abs(bd.z - z) < 30 && outsideBuilt(bd, x, z) < 1.1) && !t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 2.5) && (!t.fountain || Math.hypot(t.fountain.x - x, t.fountain.z - z) > t.fountain.r + 1.5);
+    // (Along the waterfront by the quay's edge, between the bollards; round the square's edges; and along the streets, by turns on either side.)
+    for (let x = q.x0 + 5; x < q.x1 - 5; x += 15) if (clearOf(x, q.z - 1.5)) lampAt(x, q.z - 1.5, h);
+    for (const side of [-1, 1]) for (let z = t.stair.z1 + 2; z < sq.z1 - 1; z += 12) { const x = side < 0 ? sq.x0 + 1.4 : sq.x1 - 1.4; if (clearOf(x, z)) lampAt(x, z, h); }
+    for (const st of t.streets) {
+      if (st.kind !== 'street' && st.kind !== 'lane') continue;
+      let since = h.range(4, 14), side = 1;
+      for (let k = 1; k < st.line.length; k++) {
+        const [ax, az] = st.line[k - 1], [bx, bz] = st.line[k], run = Math.hypot(bx - ax, bz - az);
+        since += run;
+        if (since < 19 || run < 0.1) continue;
+        const px = -(bz - az) / run, pz = (bx - ax) / run, x = bx + px * side * (st.width / 2 - 0.55), z = bz + pz * side * (st.width / 2 - 0.55);
+        if (zoneAt(x, z) !== Z.street || !clearOf(x, z)) continue;
+        lampAt(x, z, h);
+        since = 0; side = -side;
+      }
+    }
+    // Benches along the square's sides, facing in.
+    for (const side of [-1, 1]) for (let z = t.stair.z1 + 8; z < sq.z1 - 4; z += h.range(9, 13)) {
+      const x = side < 0 ? sq.x0 + 1.3 : sq.x1 - 1.3;
+      if (!clearOf(x, z) || !clearOf(x, z + 1) || !clearOf(x, z - 1)) continue;
+      const at = frame(x, z, ground(x, z), side < 0 ? 0 : Math.PI), oak: Colour = [0.36, 0.26, 0.16];
+      for (const a of [-0.75, 0.75]) box(at, 'stone', a - 0.12, a + 0.12, 0, 0.42, -0.22, 0.2, shade(stone, 1.05));
+      for (let f = -0.2; f < 0.2; f += 0.1) box(at, 'wood', -0.95, 0.95, 0.42, 0.47, f, f + 0.085, oak, 0.9);
+      for (const yy of [0.62, 0.78]) box(at, 'wood', -0.95, 0.95, yy, yy + 0.1, -0.27, -0.22, oak, 0.9);
+      for (const a of [-0.75, 0.75]) box(at, 'metal', a - 0.03, a + 0.03, 0.45, 0.9, -0.28, -0.22, [0.06, 0.06, 0.06]);
+    }
+    // The obelisk.
+    const ox = (t.stair.x0 + t.stair.x1) / 2, oz = sq.z1 - 7, oy = squareY(t, oz), at = frame(ox, oz, oy, 0), granite = shade(stone, 0.92);
+    if (!t.stalls.some((st) => Math.hypot(st.x - ox, st.z - oz) < 4.5) && (!t.fountain || Math.hypot(t.fountain.x - ox, t.fountain.z - oz) > t.fountain.r + 5)) {
+      for (const [k, half] of [[0, 1.9], [1, 1.55], [2, 1.2]] as [number, number][]) box(at, 'stone', -half, half, -0.3 + k * 0.28, k * 0.28 + 0.28, -half, half, shade(granite, 1 - k * 0.04));
+      box(at, 'stone', -0.85, 0.85, 0.84, 2.3, -0.85, 0.85, shade(granite, 1.08));
+      box(at, 'stone', -0.98, 0.98, 2.3, 2.5, -0.98, 0.98, shade(granite, 1.12));
+      solid('stone', [at(-0.5, 2.5, -0.5), at(0.5, 2.5, -0.5), at(0.5, 2.5, 0.5), at(-0.5, 2.5, 0.5), at(-0.32, 9.6, -0.32), at(0.32, 9.6, -0.32), at(0.32, 9.6, 0.32), at(-0.32, 9.6, 0.32)], shade(granite, 0.98));
+      solid('stone', [at(-0.32, 9.6, -0.32), at(0.32, 9.6, -0.32), at(0.32, 9.6, 0.32), at(-0.32, 9.6, 0.32), at(0, 10.15, 0), at(0, 10.15, 0), at(0, 10.15, 0), at(0, 10.15, 0)], shade(granite, 0.98));
+      for (let k = 0; k < 8; k++) { const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2; for (const [y0, y1, r0, r1] of [[10.12, 10.32, 0.04, 0.22], [10.32, 10.52, 0.22, 0.04]]) solid('metal', [at(0, y0, 0), at(Math.cos(a0) * r0, y0, Math.sin(a0) * r0), at(Math.cos(a1) * r0, y0, Math.sin(a1) * r0), at(0, y0, 0), at(0, y1, 0), at(Math.cos(a0) * r1, y1, Math.sin(a0) * r1), at(Math.cos(a1) * r1, y1, Math.sin(a1) * r1), at(0, y1, 0)], [0.85, 0.66, 0.24]); }
+    }
+  }
+
   // ---- the buildings: each made in its own measures by the valley's builder, then turned to its street and set on its ground;
   // with a footing of stone under it, so that where the street falls away along its front no gap shows under its wall
+  const chimneys: { x: number; y: number; z: number }[][] = [];
   t.buildings.forEach((bd, n) => buildTurned(bd, n));
   function buildTurned(bd: Building, n: number) {
-    const local = new Map<string, MeshBuilder>(), y = bd.y ?? F;
-    buildBuilding({ ...bd, x: 0, z: 0, faces: 'w', turn: undefined }, y, (m) => { if (!local.has(m)) local.set(m, new MeshBuilder()); return local.get(m)!; }, rng.fork(`building${n}`), [0.86 * tint[0], 0.77 * tint[1], 0.63 * tint[2]], n % 9 === 0 && bd.style === 'timber');
+    const local = new Map<string, MeshBuilder>(), y = bd.y ?? F, tops: Vector3[] = [];
+    buildBuilding({ ...bd, x: 0, z: 0, faces: 'w', turn: undefined }, y, (m) => { if (!local.has(m)) local.set(m, new MeshBuilder()); return local.get(m)!; }, rng.fork(`building${n}`), [0.86 * tint[0], 0.77 * tint[1], 0.63 * tint[2]], n % 9 === 0 && bd.style === 'timber', tops);
     // (Built facing west, as the builder makes them; turned so that its front faces its bearing: by that bearing less a half turn.)
     const turn = (bd.turn ?? Math.PI) - Math.PI, c = Math.cos(turn), s = Math.sin(turn);
     for (const [m, src] of local) mesh(m).append(src, (v) => {
@@ -640,6 +791,7 @@ export function buildTown(b: IslandBuild): IslandResult {
       v.p[0] = bd.x + x * c - z * s; v.p[2] = bd.z + x * s + z * c;
       v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
     });
+    chimneys[n] = tops.map((p) => ({ x: bd.x + p.x * c - p.z * s, y: p.y, z: bd.z + p.x * s + p.z * c }));
     // The footing: down from its floor a couple of metres, under its main block and its wings.
     for (const r of footprintOf(bd)) {
       const corners = [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]].map(([u, v]) => turnedPoint(bd, u, v));
@@ -657,6 +809,7 @@ export function buildTown(b: IslandBuild): IslandResult {
   void inBuilding;
 
   // ---- the shacks
+  const pipes: { x: number; y: number; z: number }[] = [];
   t.shacks.forEach((sh, n) => buildShack(sh, rng.fork(`shack${n}`)));
   function buildShack(sh: Town['shacks'][number], h: Rng) {
     const at = frame(sh.x, sh.z, sh.y, sh.turn), hw = sh.w / 2, hd = sh.d / 2, plank = sh.colour, tar: Colour = [0.07, 0.065, 0.06], post: Colour = [0.24, 0.18, 0.12];
@@ -706,6 +859,7 @@ export function buildTown(b: IslandBuild): IslandResult {
     }
     const pipe = at(hw * 0.4, 0, -hd * 0.3);
     box(frame(pipe[0], pipe[2], sh.y, 0), 'metal', -0.08, 0.08, wallH - 0.3, wallH + ridgeUp + 0.7, -0.08, 0.08, [0.1, 0.09, 0.08]);
+    pipes.push({ x: pipe[0], y: sh.y + wallH + ridgeUp + 0.7, z: pipe[2] });
     // Inside: a cot, a crate, a barrel; outside, nets hung on a rack, or lobster pots, or firewood.
     box(at, 'wood', -hw + 0.15, -hw + 0.95, 0, 0.45, -hd + 0.2, -hd + 2.1, [0.35, 0.27, 0.18], 0.9);
     box(at, 'plaster', -hw + 0.18, -hw + 0.92, 0.45, 0.55, -hd + 0.25, -hd + 2.0, [0.5, 0.45, 0.38]);
@@ -718,6 +872,53 @@ export function buildTown(b: IslandBuild): IslandResult {
     } else for (let k = 0; k < h.int(2, 5); k++) box(at, 'wood', -hw + 0.3 + k * 0.6, -hw + 0.8 + k * 0.6, 0, 0.45, hd + 0.4, hd + 0.9, [0.4, 0.3, 0.2], 0.9);
     // Steps up to the door, if it stands on posts.
     if (sh.stilts) for (let k = 1; k <= 6; k++) { const y = -k * 0.25; box(at, 'wood', door - 0.45, door + 0.45, y - 0.05, y, hd + k * 0.3 - 0.3, hd + k * 0.3, post, 0.9); }
+  }
+
+  // ---- washing hung out on lines between neighbouring shacks: a line from a corner of one to the nearest corner of the other, sagging,
+  // and on it shirts, sheets and cloths of faded colours, pegged by their tops. (Not walked into: it is soft, as twigs are.)
+  {
+    const h = rng.fork('washing'), used = new Set<number>(), line: Colour = [0.55, 0.52, 0.46];
+    const cloths: Colour[] = [[0.86, 0.85, 0.8], [0.8, 0.78, 0.7], [0.55, 0.62, 0.72], [0.7, 0.42, 0.34], [0.42, 0.5, 0.4], [0.86, 0.84, 0.76], [0.3, 0.34, 0.45]];
+    const cornerNear = (sh: Town['shacks'][number], x: number, z: number): [number, number] => {
+      const at = frame(sh.x, sh.z, sh.y, sh.turn);
+      let best: [number, number] = [sh.x, sh.z], d = Infinity;
+      for (const [a, f] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const p = at((a * sh.w) / 2 + a * 0.1, 0, (f * sh.d) / 2 + f * 0.1), e = Math.hypot(p[0] - x, p[2] - z); if (e < d) { d = e; best = [p[0], p[2]]; } }
+      return best;
+    };
+    wild.group = 'soft';
+    t.shacks.forEach((a, i) => {
+      if (used.has(i) || a.stilts) return;
+      let best = -1, far = Infinity;
+      t.shacks.forEach((o, j) => { const d = Math.hypot(o.x - a.x, o.z - a.z); if (j !== i && !used.has(j) && !o.stilts && d < far) { far = d; best = j; } });
+      if (best < 0 || !h.chance(0.5)) return;
+      const o = t.shacks[best], [x0, z0] = cornerNear(a, o.x, o.z), [x1, z1] = cornerNear(o, a.x, a.z), run = Math.hypot(x1 - x0, z1 - z0);
+      const y0 = a.y + 2.25, y1 = o.y + 2.25;
+      if (run < 4 || run > 12 || Math.abs(y1 - y0) > 0.9) return;
+      // (Nothing in the way: no building, shack or wall between the two ends, and the ground under the line well below it.)
+      let clear = true;
+      for (let k = 1; k < 10 && clear; k++) {
+        const x = x0 + ((x1 - x0) * k) / 10, z = z0 + ((z1 - z0) * k) / 10, zn = zoneAt(x, z);
+        if (zn === Z.built || zn === Z.shack || zn === Z.harbour || ground(x, z) > y0 + ((y1 - y0) * k) / 10 - 2.1) clear = false;
+      }
+      if (!clear) return;
+      used.add(i); used.add(best);
+      const sag = 0.06 * run, yAt = (s: number) => y0 + (y1 - y0) * s - sag * 4 * s * (1 - s), dx = (x1 - x0) / run, dz = (z1 - z0) / run, nx = -dz * 0.006, nz = dx * 0.006;
+      // The line, in short straight pieces along its sag.
+      for (let k = 0; k < 8; k++) {
+        const s0 = k / 8, s1 = (k + 1) / 8, p0: P3 = [x0 + (x1 - x0) * s0, yAt(s0), z0 + (z1 - z0) * s0], p1: P3 = [x0 + (x1 - x0) * s1, yAt(s1), z0 + (z1 - z0) * s1];
+        solid('wood', [[p0[0] - nx, p0[1] - 0.008, p0[2] - nz], [p1[0] - nx, p1[1] - 0.008, p1[2] - nz], [p1[0] + nx, p1[1] - 0.008, p1[2] + nz], [p0[0] + nx, p0[1] - 0.008, p0[2] + nz], [p0[0] - nx, p0[1] + 0.008, p0[2] - nz], [p1[0] - nx, p1[1] + 0.008, p1[2] - nz], [p1[0] + nx, p1[1] + 0.008, p1[2] + nz], [p0[0] + nx, p0[1] + 0.008, p0[2] + nz]], line);
+      }
+      // The washing: pieces along it with gaps between, each hanging straight down from the line, a little stirred out of plumb.
+      for (let s = h.range(0.6, 1.2); s < run - 0.6;) {
+        const wide = h.range(0.4, 1.1), tall = h.range(0.45, 1.05), sa = s / run, sb = Math.min(run - 0.3, s + wide) / run;
+        const ta = yAt(sa), tb = yAt(sb), lean = h.range(-0.08, 0.08), c = h.pick(cloths), th = 0.012;
+        const A: P3 = [x0 + (x1 - x0) * sa, ta, z0 + (z1 - z0) * sa], B: P3 = [x0 + (x1 - x0) * sb, tb, z0 + (z1 - z0) * sb];
+        const ox = -dz * lean, oz = dx * lean;
+        solid('plaster', [[A[0] + ox - nx * 2, A[1] - tall, A[2] + oz - nz * 2], [B[0] + ox - nx * 2, B[1] - tall, B[2] + oz - nz * 2], [B[0] + ox + (-dz * th), B[1] - tall, B[2] + oz + dx * th], [A[0] + ox + (-dz * th), A[1] - tall, A[2] + oz + dx * th], [A[0], A[1], A[2]], [B[0], B[1], B[2]], [B[0] - dz * th, B[1], B[2] + dx * th], [A[0] - dz * th, A[1], A[2] + dx * th]], c, 0.8);
+        s += wide + h.range(0.12, 0.6);
+      }
+    });
+    wild.group = 'wild';
   }
 
   // ---- the waterfront beyond the harbour: quays of stone along the water, decks of planks on them, and on those the storehouses,
@@ -946,18 +1147,90 @@ export function buildTown(b: IslandBuild): IslandResult {
     const tr = rng.fork('trees');
     const grown: [number, number, number][] = [];
     const roomFor = (x: number, z: number, r: number) => !grown.some(([gx, gz, gr]) => Math.hypot(gx - x, gz - z) < gr + r);
-    for (let tries = 0; tries < 6000 && grown.length < 170; tries++) {
-      const x = tr.range(g.x0 + 10, g.x1 - 10), z = tr.range(g.z0 + 10, g.z1 - 10), w = woodAt(x, z);
-      if (w < 0.35 || tr.next() > w) continue;
+    // The woods: grown trees near the town, where they are walked among; beyond, painted ones, each a tree on a tuft of cards, standing
+    // thick in the same woods, so that the town is bordered by forest as far as the eye goes. (Grown, a wood that size would be millions
+    // of leaves; painted, it is a few thousand cards.)
+    const greens: Colour[] = season === 'autumn' ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
+      : season === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+    const conifer = (x: number, z: number, above: number) => above > 45 + 20 * fbm2(x * 0.02, z * 0.02, 2) || fbm2(x * 0.013 + 5, z * 0.013 + 5, 2) > 0.62;
+    const steep = (x: number, z: number) => Math.hypot(ground(x + 3, z) - ground(x - 3, z), ground(x, z + 3) - ground(x, z - 3)) / 6;
+    for (let tries = 0; tries < 9000 && grown.length < 230; tries++) {
+      const x = tr.range(g.x0 + 10, g.x1 - 10), z = tr.range(g.z0 + 10, g.z1 - 10);
+      if (Math.hypot(x - centre.x, (z - centre.z) * 1.2) > 260) continue;
+      const w = woodAt(x, z);
+      if (w < 0.3 || tr.next() > w * 1.2) continue;
       const y = ground(x, z), above = y - sea;
-      if (rocky.holds(x, z) && rocky.at(x, z) > 0.3) continue;
-      if (Math.hypot(ground(x + 3, z) - ground(x - 3, z), ground(x, z + 3) - ground(x, z - 3)) / 6 > 0.7) continue;
-      const pine = above > 45 + 20 * fbm2(x * 0.02, z * 0.02, 2) || tr.chance(0.15);
+      if ((rocky.holds(x, z) && rocky.at(x, z) > 0.3) || steep(x, z) > 0.7) continue;
+      const pine = conifer(x, z, above) || tr.chance(0.12);
       if (!roomFor(x, z, pine ? 2.6 : 3.6)) continue;
-      if (pine) growConifer(pl, pineWood, x, y - 0.05, z, tr.range(9, 16), tr.range(1.6, 2.6), tr.range(0.16, 0.28), { kind: tr.chance(0.5) ? 'spruce' : 'pine', detail: 1, needle: (r) => shade([0.06, 0.13, 0.06], r.range(0.8, 1.2)), bark: [0.8, 0.6, 0.48], soft: softPine }, tr.fork(`c${grown.length}`));
-      else growTree(pl, wood, x, y - 0.05, z, tr.range(6, 11), tr.range(0.2, 0.34), { kind: tr.chance(0.55) ? 'oak' : 'ash', detail: 1, cards: 620, cardSize: 0.7, leaf, bark: [0.42, 0.4, 0.36], soft }, tr.fork(`t${grown.length}`));
+      if (pine) growConifer(pl, pineWood, x, y - 0.05, z, tr.range(9, 17), tr.range(1.6, 2.6), tr.range(0.16, 0.28), { kind: tr.chance(0.5) ? 'spruce' : 'pine', detail: 1, needle: (r) => shade([0.06, 0.13, 0.06], r.range(0.8, 1.2)), bark: [0.8, 0.6, 0.48], soft: softPine }, tr.fork(`c${grown.length}`));
+      else growTree(pl, wood, x, y - 0.05, z, tr.range(7, 12), tr.range(0.22, 0.36), { kind: tr.chance(0.55) ? 'oak' : 'ash', detail: 1, cards: 620, cardSize: 0.7, leaf, bark: [0.42, 0.4, 0.36], soft }, tr.fork(`t${grown.length}`));
       grown.push([x, z, pine ? 2.6 : 3.6]);
     }
+    let painted = 0;
+    const pt = rng.fork('painted trees');
+    for (let z = L.z0 + 6; z < L.z1 - 6; z += 4.2) for (let x = L.x0 + 6; x < L.x1 - 6; x += 4.2) {
+      const px = x + pt.range(-2, 2), pz = z + pt.range(-2, 2);
+      if (Math.hypot(px - centre.x, (pz - centre.z) * 1.2) < 230) continue;
+      const w = woodAt(px, pz);
+      if (w < 0.25 || pt.next() > w) continue;
+      const y = ground(px, pz), above = y - sea;
+      if ((rocky.holds(px, pz) && rocky.at(px, pz) > 0.3) || steep(px, pz) > 0.9) continue;
+      const fir = conifer(px, pz, above), own = pt.next(), c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], tone = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
+      const tall = fir ? 9 + 7 * ((own * 3.7) % 1) : 7 + 5 * ((own * 3.7) % 1);
+      pl.farTree(fir, px, y - 0.4, pz, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * tone, c[1] * tone, c[2] * tone]);
+      painted++;
+    }
+    count('painted trees', painted);
+    // The town's own trees: limes along the sides of the square and the back of the waterfront, before the fronts; and in the yards
+    // within the blocks, a fruit tree or two in the gardens. None reaches a limb into a building.
+    const nearBuildings = (x: number, z: number, r: number) => t.buildings.filter((bd) => Math.abs(bd.x - x) < r + 24 && Math.abs(bd.z - z) < r + 24);
+    const keepOutOf = (list: Building[]) => (pnt: Vector3) => list.some((bd) => outsideBuilt(bd, pnt.x, pnt.z) < 0.4 && pnt.y < (bd.y ?? F) + 30);
+    const lime = (x: number, z: number, tall: number, k: string) => {
+      const y = ground(x, z), list = nearBuildings(x, z, 8);
+      growTree(pl, wood, x, y - 0.05, z, tall, tall * 0.028, { kind: 'oak', detail: 1, cards: 760, cardSize: 0.62, leaf: (r) => shade(season === 'autumn' ? [0.62, 0.48, 0.12] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.36, 0.34, 0.31], soft, wide: 0.8, keepOut: keepOutOf(list) }, tr.fork(k));
+      grown.push([x, z, 3]);
+    };
+    let townTrees = 0;
+    {
+      const sq = t.square, from = t.stair.z1 + 4;
+      for (const side of [-1, 1]) for (let z = from; z < sq.z1 - 3; z += tr.range(7.5, 9)) {
+        const x = side < 0 ? sq.x0 + 3.2 : sq.x1 - 3.2;
+        if (t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 3.5) || (t.fountain && Math.hypot(t.fountain.x - x, t.fountain.z - z) < t.fountain.r + 4)) continue;
+        if (nearBuildings(x, z, 3).some((bd) => outsideBuilt(bd, x, z) < 2.2)) continue;
+        lime(x, z, tr.range(9, 12), `lime${townTrees++}`);
+      }
+      const zf = q.z - q.apron + 2.4;
+      for (let x = q.x0 + 6; x < q.x1 - 6; x += tr.range(9, 11.5)) {
+        if (x > sq.x0 - 3 && x < sq.x1 + 3) continue;
+        if (zoneAt(x, zf - 3) === Z.street || nearBuildings(x, zf, 3).some((bd) => outsideBuilt(bd, x, zf) < 1.8)) continue;
+        lime(x, zf, tr.range(8, 11), `lime${townTrees++}`);
+      }
+    }
+    count('town trees', townTrees);
+    // Gardens in the yards: a fruit tree or two, beds of vegetables in rows, flowers along the walls.
+    let fruitInYards = 0;
+    for (const [n, blk] of t.blocks.entries()) {
+      const yq = rng.fork(`yard${n}`), list = nearBuildings((blk.x0 + blk.x1) / 2, (blk.z0 + blk.z1) / 2, 30);
+      const free = (x: number, z: number, m: number) => zoneAt(x, z) === Z.yard && !list.some((bd) => outsideBuilt(bd, x, z) < m);
+      for (let tries = 0, made = 0; tries < 30 && made < (blk.kind === 'timber' ? 2 : 1); tries++) {
+        const x = yq.range(blk.x0 + 5, blk.x1 - 5), z = yq.range(blk.z0 + 5, blk.z1 - 5);
+        if (!free(x, z, 3.2) || !roomFor(x, z, 3)) continue;
+        growTree(pl, wood, x, ground(x, z) - 0.05, z, yq.range(3.6, 5.5), yq.range(0.11, 0.16), { kind: yq.chance(0.6) ? 'oak' : 'ash', detail: 1, cards: 300, cardSize: 0.5, leaf: (r) => shade(season === 'autumn' ? [0.48, 0.42, 0.12] : season === 'spring' && yq.chance(0.5) ? [0.62, 0.5, 0.48] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.34, 0.3, 0.27], soft, wide: 1.2, keepOut: keepOutOf(list) }, yq.fork(`fruit${made}`));
+        grown.push([x, z, 2.8]);
+        made++; fruitInYards++;
+      }
+      // (A bed of vegetables in rows, in a timber block's yard.)
+      if (blk.kind === 'timber') for (let tries = 0; tries < 20; tries++) {
+        const x = yq.range(blk.x0 + 6, blk.x1 - 9), z = yq.range(blk.z0 + 6, blk.z1 - 8), w = yq.range(3, 5), d = yq.range(2.5, 4);
+        if (!free(x, z, 1.5) || !free(x + w, z + d, 1.5) || !free(x + w, z, 1.5) || !free(x, z + d, 1.5)) continue;
+        for (let rz = z; rz < z + d; rz += 0.55) for (let rx = x; rx < x + w; rx += 0.45) pl.tuft(pl.herbs, rx + yq.range(-0.08, 0.08), ground(rx, rz) - 0.05, rz, yq.range(0.35, 0.5), yq.range(0.25, 0.4), yq.range(0, 6.28), yq.pick([[0.1, 0.22, 0.06], [0.14, 0.24, 0.05], [0.12, 0.18, 0.08]] as Colour[]));
+        count('vegetable beds');
+        break;
+      }
+    }
+    count('fruit trees in yards', fruitInYards);
     count('trees', grown.length);
     let fruit = 0;
     for (const f of t.fields) {
@@ -1018,7 +1291,20 @@ export function buildTown(b: IslandBuild): IslandResult {
 
   // ---- the country round about: the coast either way, the hills and the mountains, drawn far
   wild.group = 'soft';
-  layCountry(mesh('far'), t, F, tint);
+  {
+    const season2 = site.setting.season ?? 'spring';
+    const greens: Colour[] = season2 === 'autumn' ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
+      : season2 === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+    let far = 0;
+    layCountry(mesh('far'), t, F, tint, (x, y, z, fir, own) => {
+      const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], tone = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
+      const tall = fir ? 9 + 7 * ((own * 3.7) % 1) : 7 + 5 * ((own * 3.7) % 1);
+      b.planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * tone, c[1] * tone, c[2] * tone]);
+      far++;
+    });
+    planted['far trees'] = far;
+  }
   wild.group = 'wild';
 
   // Where the player comes in: on the mole, a few strides short of the light, facing the town.
@@ -1026,7 +1312,21 @@ export function buildTown(b: IslandBuild): IslandResult {
   const [hx, hz] = lm.line[lm.line.length - 1], [px2, pz2] = lm.line[lm.line.length - 2], ml = Math.hypot(hx - px2, hz - pz2);
   const sx = hx + ((px2 - hx) / ml) * 8, sz = hz + ((pz2 - hz) / ml) * 8;
   const look = { x: (t.square.x0 + t.square.x1) / 2 - sx, z: (t.square.z0 + t.square.z1) / 2 - sz };
+  // Smoke from chimneys: from a share of the houses, rising from their ridges; and from the stovepipes of some of the shacks.
+  const smokes: { x: number; y: number; z: number; height: number }[] = [];
+  {
+    const h = rng.fork('smoke');
+    // (Each from one of the chimneys its builder put on it: smoke rising from the middle of a roof, where no chimney stood, was wrong.)
+    t.buildings.forEach((bd, n) => {
+      const from = chimneys[n];
+      if (!from?.length || !h.chance(bd.style === 'imperial' ? 0.12 : 0.18) || smokes.length > 26) return;
+      const top = h.pick(from);
+      smokes.push({ x: top.x, y: top.y + 0.1, z: top.z, height: h.range(6, 12) });
+    });
+    for (const top of pipes) if (h.chance(0.2)) smokes.push({ ...top, height: h.range(4, 7) });
+  }
   return {
+    smokes,
     torches,
     spawn: V(sx, lm.y + 1.75, sz),
     yaw: Math.atan2(-look.x, -look.z),
@@ -1079,7 +1379,7 @@ export function buildTown(b: IslandBuild): IslandResult {
  * land the town was found in, drawn in rings about it with the far material, with detail in fewer octaves the further out. Within
  * the town's own land the near sheet is drawn, and this is left out there, or sunk a little under it where the two overlap.
  */
-function layCountry(mesh: MeshBuilder, t: Town, F: number, stone: Colour): void {
+function layCountry(mesh: MeshBuilder, t: Town, F: number, stone: Colour, tree?: (x: number, y: number, z: number, fir: boolean, own: number) => void): void {
   const L = t.land, cx = (L.x0 + L.x1) / 2, cz = (L.z0 + L.z1) / 2, sea = t.sea;
   const around = 1280, radii: number[] = [];
   for (let r = 220; r <= 7600; r += 3 + (r - 220) * 0.011) radii.push(r);
@@ -1109,6 +1409,25 @@ function layCountry(mesh: MeshBuilder, t: Town, F: number, stone: Colour): void 
     const h = (H[q] - sea) / 220;
     return (ids[q] = mesh.addVertex(X[q], H[q], Zs[q], nx, ny, nz, X[q] * 0.012, Zs[q] * 0.012, 0.37 * (0.6 + 0.4 * stone[0]), 0.37 * (0.6 + 0.4 * stone[1]), 0.4 * (0.6 + 0.4 * stone[2]), 0, 0, hollow, h));
   };
+  // Woods on the nearer country: painted trees, thick on the near slopes and thinner further off, in stands, on land that is neither
+  // steep nor high nor by the water, and none within the town's own land, which has its own.
+  if (tree) {
+    const own = (i: number, salt: number) => { let v = Math.imul(i + 1, 374761393) ^ Math.imul(salt + 7919, 668265263); v = Math.imul(v ^ (v >>> 13), 1274126177); return ((v ^ (v >>> 16)) >>> 0) / 4294967296; };
+    for (let ri = 0; ri < rings - 1 && radii[ri] < 1700; ri++) for (let k = 0; k < around; k++) {
+      const a = at(ri, k), b2 = at(ri, k + 1), c = at(ri + 1, k + 1), d = at(ri + 1, k);
+      const area = Math.hypot(X[b2] - X[a], Zs[b2] - Zs[a]) * (radii[ri + 1] - radii[ri]), want = area / (16 + Math.max(0, radii[ri] - 300) * 0.3), n = Math.floor(want) + (own(a, 1) < want % 1 ? 1 : 0);
+      for (let j = 0; j < n; j++) {
+        const u = own(a * 7 + j, 2), v = own(a * 7 + j, 3);
+        const x = (X[a] * (1 - u) + X[b2] * u) * (1 - v) + (X[d] * (1 - u) + X[c] * u) * v, z = (Zs[a] * (1 - u) + Zs[b2] * u) * (1 - v) + (Zs[d] * (1 - u) + Zs[c] * u) * v;
+        if (within(x, z, 0)) continue;
+        const y = (H[a] * (1 - u) + H[b2] * u) * (1 - v) + (H[d] * (1 - u) + H[c] * u) * v, above = y - sea;
+        const fall = Math.max(Math.abs(H[b2] - H[a]) / (Math.hypot(X[b2] - X[a], Zs[b2] - Zs[a]) || 1), Math.abs(H[d] - H[a]) / (radii[ri + 1] - radii[ri]));
+        const wooded = 0.62 - above / 420 + 0.45 * (fbm2(x * 0.006 + 3.3, z * 0.006, 3) - 0.5) - (above < 8 ? 0.6 : 0);
+        if (wooded < 0.25 + 0.3 * own(a * 7 + j, 4) || fall > 1.1 || above > 520) continue;
+        tree(x, y, z, fbm2(x * 0.011 + 5, z * 0.011 + 5, 1) + (above / 300 - 0.2) * 0.6 > 0.55, own(a * 7 + j, 5));
+      }
+    }
+  }
   for (let ri = 0; ri < rings - 1; ri++) for (let k = 0; k < around; k++) {
     const qa = at(ri, k), qb = at(ri, k + 1), qc = at(ri + 1, k + 1), qd = at(ri + 1, k);
     if (Math.max(H[qa], H[qb], H[qc], H[qd]) < sea - 2) continue;

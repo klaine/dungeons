@@ -716,9 +716,22 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // ---- boats in the harbour, moored along the quay and the moles' inner sides
   {
     const q = rng.fork('boats');
+    // A schooner lying along the quay, and two or three smacks, each decked and with a mast; then the open boats in the gaps.
+    const taken: [number, number][] = [], vq = rng.fork('vessels');
+    const moor = (length: number, masts: number) => {
+      for (let tries = 0; tries < 20; tries++) {
+        const x = vq.range(t.quay.x0 + length / 2 + 5, t.quay.x1 - length / 2 - 5);
+        if (taken.some(([a, b]) => x + length / 2 > a - 2 && x - length / 2 < b + 2)) continue;
+        taken.push([x - length / 2, x + length / 2]);
+        t.boats.push({ x: round(x), z: round(qz + length * 0.13 + 0.9), heading: vq.chance(0.5) ? 0 : Math.PI, length: round(length), afloat: true, masts });
+        return;
+      }
+    };
+    if (t.quay.x1 - t.quay.x0 > 90) moor(vq.range(20, 25), 2);
+    for (let k = vq.int(2, 3); k > 0; k--) moor(vq.range(9, 13), 1);
     for (let x = t.quay.x0 + 8; x < t.quay.x1 - 8; x += q.range(7, 13)) {
-      if (q.chance(0.35)) continue;
-      t.boats.push({ x: round(x), z: round(qz + q.range(2.6, 3.4)), heading: q.chance(0.5) ? 0 : Math.PI, length: round(q.range(4.5, 8.5)), afloat: true });
+      if (q.chance(0.35) || taken.some(([a, b]) => x > a - 5 && x < b + 5)) continue;
+      t.boats.push({ x: round(x), z: round(qz + q.range(2.6, 3.4)), heading: q.chance(0.5) ? 0 : Math.PI, length: round(q.range(4.5, 7.5)), afloat: true });
     }
     for (let k = 0; k < 3; k++) {
       const x = q.range(t.quay.x0 + 25, t.quay.x1 - 25), z = qz + q.range(20, 45);

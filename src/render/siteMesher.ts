@@ -3575,6 +3575,7 @@ export function meshSite(site: Site): SceneDescription {
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    smokes.push(...made.smokes);
     arrival.spawn = made.spawn;
     arrival.track = made.track;
     farCover = made.far;

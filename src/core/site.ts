@@ -411,7 +411,8 @@ export interface Town {
   stalls: { x: number; z: number; w: number; d: number; turn: number; awning: [number, number, number]; goods: 'fish' | 'fruit' | 'cloth' | 'pots' | 'bread' }[];
   /** The fountain in the square. */
   fountain?: { x: number; z: number; r: number };
-  boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
+  /** Boats: open ones rowed or sailed from the beach; and, with `masts`, decked vessels (a smack of one mast, a schooner of two). */
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }[];
   /** Fields outside the town: each a four-cornered parcel and what is grown in it. */
   fields: { corners: [number, number][]; crop: 'wheat' | 'barley' | 'oats' | 'fallow' | 'pasture' | 'roots' | 'orchard' | 'vines' }[];
   /** Walls of dry stone about the fields, as the island's are. */
@@ -576,7 +577,8 @@ export interface Island {
    */
   cottages: { x: number; z: number; y: number; w: number; d: number; faces: number; roof: 'thatch' | 'slate'; wash: [number, number, number] }[];
   /** Boats drawn up on the beach, or moored in the cove: where, which way the bow points, and how long. */
-  boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
+  /** Boats: open ones rowed or sailed from the beach; and, with `masts`, decked vessels (a smack of one mast, a schooner of two). */
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }[];
   /** Pillars of rock standing out of the sea off the cliffs: where, how broad at the foot, how high their tops stand over the sea. */
   stacks: { x: number; z: number; r: number; height: number }[];
   /**
