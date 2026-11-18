@@ -1058,9 +1058,12 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // The scramble: on most mountains a third way, short and steep, up the summit's far ridge.
   if (rng.fork('scramble?').chance(0.85)) layScramble(site, m, F, rng.fork('scramble'));
 
+  // The hall under the top: on most mountains that have room for one.
+  if (rng.fork('hall?').chance(0.75)) layHall(site, m, F, rng.fork('hall'));
+
   // Tors on the top: where the ground would otherwise lie open and even, knobs and low crags of rock, clear of everything made.
   {
-    const q = rng.fork('tors'), all = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? []), ...(m.scramble?.line ?? [])];
+    const q = rng.fork('tors'), all = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? []), ...(m.scramble?.line ?? []), ...(m.hall?.stair.slice(0, 12) ?? [])];
     m.tors = [];
     for (let tries = 0, want = q.int(14, 24); tries < 600 && m.tors.length < want; tries++) {
       const a = q.range(0, TAU), d = rimAt(m, a) * Math.sqrt(q.next()) * 0.95, x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
@@ -1170,6 +1173,85 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   });
   for (const [x, z] of m.spur.crest ?? [m.spur.from, m.spur.to]) { x0 = Math.min(x0, x - m.spur.width); x1 = Math.max(x1, x + m.spur.width); z0 = Math.min(z0, z - m.spur.width); z1 = Math.max(z1, z + m.spur.width); }
   site.grounds = { x0: round(x0), x1: round(x1), z0: round(z0), z1: round(z1) };
+}
+
+/**
+ * Lays out the great hall under the top, if the mountain will hold one. It lies on a bearing over a high fall, away from the ridge:
+ * its far end a few metres in from the rim, so that its windows come out in the face, and its floor well down in the rock, with rock
+ * enough over every vault, its own and its side halls'. A chasm crosses it; two side halls open off it, one on either side, one with a
+ * shaft of daylight where open ground lies over it; a gallery runs along the wall on the side whose side hall is nearer the windows.
+ * The stair down to it starts in the open ground of the top, clear of the house, the ways and the summit's cairn, and comes down at
+ * no more than about one in two, with one turn beside the hall's near end.
+ */
+function layHall(site: Site, m: Mountain, F: number, rng: Rng): void {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const surf = (x: number, z: number) => landAt(m, F, x, z, true);
+  const lines = [...(m.way ?? []), ...(m.climb ?? []), ...(m.gallery?.line ?? []), ...(m.scramble?.line ?? [])];
+  const nearLine = (x: number, z: number, r: number) => lines.some(([px, pz]) => Math.hypot(px - x, pz - z) < r);
+  const spurAt = Math.atan2(m.spur.from[1] - m.z, m.spur.from[0] - m.x);
+  const WIDE = 22, HIGH = 24, DEEP = 34, floor = round(F - DEEP), SLOPE = 0.48;
+  for (let tries = 0; tries < 120; tries++) {
+    const a = rng.range(0, TAU), LONG = rng.range(52, 64);
+    // (Away from the ridge, where the way comes up, and from the gallery's windows; over a fall.)
+    if (Math.abs(Math.atan2(Math.sin(a - spurAt), Math.cos(a - spurAt))) < 0.8 || ringAt(m.drop, a) < 22) continue;
+    if ((m.gallery?.windows ?? []).some((w) => Math.abs(Math.atan2(Math.sin(Math.atan2(w.z - m.z, w.x - m.x) - a), Math.cos(Math.atan2(w.z - m.z, w.x - m.x) - a))) < 0.4)) continue;
+    const r = rimAt(m, a) - 3.5, ux = -Math.cos(a), uz = -Math.sin(a), ox = m.x - ux * r, oz = m.z - uz * r, ix = ox + ux * LONG, iz = oz + uz * LONG;
+    if (inside(m, ix, iz) < 14) continue;
+    const at = (u: number, v: number): [number, number] => [ox + ux * u - uz * v, oz + uz * u + ux * v];
+    // Side halls: one on either side, one between the window end and the chasm and one beyond it; and the gallery in the wall on the
+    // side whose side hall is the nearer the windows, so that its stair, which climbs inside that wall from the hall's near end, is clear.
+    const chasm = { at: round(LONG * rng.range(0.42, 0.56)), width: 7, depth: 18 };
+    const first: -1 | 1 = rng.chance(0.5) ? 1 : -1;
+    const sides: NonNullable<Mountain['hall']>['sides'] = [
+      { at: round(chasm.at * 0.45), side: first, long: round(rng.range(13, 18)), wide: round(rng.range(10, 13)) },
+      { at: round(chasm.at + (LONG - chasm.at) * 0.5), side: first === 1 ? -1 : 1, long: round(rng.range(13, 18)), wide: round(rng.range(10, 13)) },
+    ];
+    if (sides[0].at > LONG - 34) continue;
+    // Rock enough over every vault, the great hall's and the side halls'.
+    let roof = true;
+    for (let u = 0; u <= LONG && roof; u += 4) for (const v of [-WIDE / 2, 0, WIDE / 2]) { const [x, z] = at(u, v); if (surf(x, z) < floor + HIGH + 6) { roof = false; break; } }
+    for (const sh of sides) for (let d = 0; d <= sh.long && roof; d += 4) { const [x, z] = at(sh.at, sh.side * (WIDE / 2 + d)); if (surf(x, z) < floor + 16 || inside(m, x, z) < 8) roof = false; }
+    if (!roof) continue;
+    // A shaft of daylight down into one side hall, where its middle lies under open ground clear of everything made.
+    for (const sh of sides) {
+      const [x, z] = at(sh.at, sh.side * (WIDE / 2 + sh.long / 2));
+      if (outside(m.level, x, z) > 10 && !nearLine(x, z, 9) && inside(m, x, z) > 12 && (!m.cairn || Math.hypot(m.cairn.x - x, m.cairn.z - z) > 14)) { sh.shaft = 2.2; break; }
+    }
+    // The stair: from a point in the open ground of the top, down to a turn beside the hall's near end, and from there in to it.
+    const options: { x: number; z: number; y: number; tx: number; tz: number; score: number }[] = [];
+    for (const turn of [-1, 1]) {
+      const [tx, tz] = at(LONG + 6, turn * (WIDE / 2 + 6));
+      for (let k = 0; k < 24; k++) {
+        const b = a + Math.PI + ((k / 24) * 2 - 1) * (Math.PI / 2.2);
+        for (const run of [44, 54, 64]) {
+          const sx = tx + Math.cos(b) * run, sz = tz + Math.sin(b) * run, sy = surf(sx, sz), total = run + Math.hypot(tx - ix, tz - iz);
+          if ((sy - floor) / total > SLOPE || inside(m, sx, sz) < 14 || outside(m.level, sx, sz) < 9 || nearLine(sx, sz, 9)) continue;
+          if ((m.cairn && Math.hypot(m.cairn.x - sx, m.cairn.z - sz) < 14) || (m.shelter && Math.hypot(m.shelter.x - sx, m.shelter.z - sz) < 12)) continue;
+          if (Math.abs(surf(sx + Math.cos(b) * 4, sz + Math.sin(b) * 4) - sy) > 1.6) continue;
+          options.push({ x: sx, z: sz, y: sy, tx, tz, score: -run - Math.abs(k - 11.5) * 0.6 + rng.next() * 4 });
+        }
+      }
+    }
+    // (Of those, the first whose line passes under the house only deep below its cellars, and whose cutting, while it is open or
+    // shallow, crosses no way.)
+    for (const best of options.sort((p, q) => q.score - p.score)) {
+      const legs: [number, number][] = [[best.x, best.z], [best.tx, best.tz], [ix, iz]];
+      const total = Math.hypot(best.tx - best.x, best.tz - best.z) + Math.hypot(ix - best.tx, iz - best.tz), stair: [number, number, number][] = [];
+      let walked = 0;
+      for (let leg = 0; leg < 2; leg++) {
+        const [ax, az] = legs[leg], [bx, bz] = legs[leg + 1], l = Math.hypot(bx - ax, bz - az), n = Math.max(2, Math.round(l / 2));
+        for (let i = leg ? 1 : 0; i <= n; i++) {
+          const t = i / n, d = walked + l * t;
+          stair.push([round(ax + (bx - ax) * t), round(az + (bz - az) * t), round(best.y + (floor - best.y) * (d / total))]);
+        }
+        walked += l;
+      }
+      if (stair.some(([x, z, y]) => (outside(m.level, x, z) < 3 && y > F - 9) || (surf(x, z) - y < 4.5 && nearLine(x, z, 4)))) continue;
+      const windows = [-WIDE * 0.32, 0, WIDE * 0.32].map(round);
+      m.hall = { out: [round(ox), round(oz)], in: [round(ix), round(iz)], floor, wide: WIDE, high: HIGH, long: round(LONG), stair, windows, chasm, sides, gallery: { side: first } };
+      return;
+    }
+  }
 }
 
 /**

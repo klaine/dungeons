@@ -166,6 +166,28 @@ export function buildMountain(b: MountainBuild): MountainResult {
   /** Nothing below this is drawn, or carved: it is deep enough in the cloud never to be seen. */
   const HIDDEN = deck - 34;
 
+  // The hall under the top, if there is one, in its own measures (see where its air is reckoned, below).
+  const H = m.hall, hallFrame = H ? (() => {
+    const [ox, oz] = H.out, dx = H.in[0] - ox, dz = H.in[1] - oz, L = Math.hypot(dx, dz) || 1;
+    return { ox, oz, ux: dx / L, uz: dz / L, L, half: H.wide / 2, wall: H.high - H.wide / 2 };
+  })() : null;
+  const hallPillars: [number, number][] = [];
+  if (H && hallFrame) for (let u = 8; u < hallFrame.L - 5; u += 9) {
+    if (Math.abs(u - H.chasm.at) < H.chasm.width / 2 + 3) continue;
+    for (const v of [-hallFrame.half * 0.6, hallFrame.half * 0.6]) hallPillars.push([u, v]);
+  }
+  /** Where a point is in the hall's own measures: `u` in from the window end along its middle, `v` across it. */
+  const inHall = (x: number, z: number) => { const f = hallFrame!, dx = x - f.ox, dz = z - f.oz; return { u: dx * f.ux + dz * f.uz, v: -dx * f.uz + dz * f.ux }; };
+  const stairLine = H?.stair ?? [];
+  const stairBox = { x0: Infinity, x1: -Infinity, z0: Infinity, z1: -Infinity };
+  for (const [x, z] of stairLine) { stairBox.x0 = Math.min(stairBox.x0, x - 5); stairBox.x1 = Math.max(stairBox.x1, x + 5); stairBox.z0 = Math.min(stairBox.z0, z - 5); stairBox.z1 = Math.max(stairBox.z1, z + 5); }
+  const nearHall = (x: number, z: number) => {
+    if (!hallFrame) return Infinity;
+    const { u, v } = inHall(x, z);
+    const inside2 = Math.max(Math.max(-26 - u, u - hallFrame.L - 3), Math.abs(v) - hallFrame.half - 20);
+    return Math.min(inside2, stairLine.length ? nearestOn(stairLine, x, z, 6).off - 1.4 : Infinity);
+  };
+
   // ---- the band that is carved: round the rim and the ridge's edges, this far in and out; and wherever the ground inland is steep
   // (Carved at half a metre, where a valley's rim and an island's cliffs are carved at four tenths: there is twice as much rock
   // here, most of it seen from further off, and at four tenths it took a minute and a half to build.)
@@ -178,7 +200,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const d = inside(m, x, z);
     if (d < -OUT || plain(x, z) < HIDDEN) return false;
     // (Wherever a tunnel runs, the rock over it is carved with it, however level the ground above.)
-    return d < IN || steepAt(x, z) || (runs.under.length > 0 && nearUnder(x, z, 6).off < 5);
+    return d < IN || steepAt(x, z) || (runs.under.length > 0 && nearUnder(x, z, 6).off < 5) || nearHall(x, z) < 4;
   };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
@@ -340,7 +362,91 @@ export function buildMountain(b: MountainBuild): MountainResult {
     }
     return air;
   };
-  const bored = runs.under.length ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), tunnelAir(x, y, z)) : landAir;
+  const tunnelled = runs.under.length ? (x: number, y: number, z: number) => Math.max(landAir(x, y, z), tunnelAir(x, y, z)) : landAir;
+
+  // ---- the hall under the top, if there is one: a long hall hewn in the rock, vaulted, with two rows of the rock's own pillars
+  // left standing, its walls and vault rough from the pick; at its far end a great arched window out through the face, over the
+  // cloud, with a sill to lean on; and the stair down to it, a cutting that deepens into a tunnel. All of it air in the rock.
+  const hallAir = (x: number, y: number, z: number): number => {
+    if (!H || !hallFrame) return -9;
+    const f = hallFrame, { u, v } = inHall(x, z), fl = H.floor, C = H.chasm, av = Math.abs(v);
+    if (u < -26 || u > f.L + 3 || av > f.half + 21 || y < fl - C.depth - 2) return -9;
+    // (Shafts of daylight are open to the sky above; everything else ends under the vault.)
+    if (y > fl + H.high + 2 && !H.sides.some((sh) => sh.shaft)) return -9;
+    const rough = (fbm3(x * 0.4, y * 0.4, z * 0.4, 2) - 0.5) * 0.6;
+    let air = -9;
+    // The great hall: walls rising thirteen metres, then the vault; its pillars, swelling at the foot and at the head.
+    if (u > -0.5 && av < f.half + 2 && y < fl + H.high + 2) {
+      const ceil = fl + f.wall + Math.sqrt(Math.max(0, f.half * f.half - v * v));
+      air = Math.min(f.half - av + rough, y - fl, ceil - y + rough, f.L - u + rough);
+      const swell = 0.55 * Math.max(0, 1 - (y - fl) / 1.1) + 0.6 * Math.max(0, 1 - (fl + f.wall - y) / 1.6);
+      for (const [pu, pv] of hallPillars) air = Math.min(air, Math.hypot(u - pu, v - pv) - 1.75 - swell + rough * 0.3);
+      // (A lip of rock along both edges of the chasm, a metre high, except where the bridge goes over.)
+      const fromChasm = Math.abs(u - C.at) - C.width / 2;
+      if (fromChasm > -0.05 && fromChasm < 0.5 && av > 2.05) air = Math.min(air, y - (fl + 0.95));
+    }
+    // The chasm, from wall to wall and on into the rock as a cleft; and the bridge over it, arched beneath, with a parapet each side.
+    if (Math.abs(u - C.at) < C.width / 2 + 1 && av < f.half + 5) {
+      const top = av < f.half ? fl + H.high : fl + 2.5;
+      let chasm = Math.min(C.width / 2 - Math.abs(u - C.at) + rough * 0.7, y - (fl - C.depth), top - y, f.half + 4 - av + rough);
+      if (av < 2.05) {
+        const t = (u - C.at) / (C.width / 2), under = fl - 1.3 - 2.4 * Math.max(0, 1 - t * t);
+        chasm = Math.min(chasm, Math.max(under - y, y - (av > 1.6 ? fl + 0.95 : fl)));
+      }
+      air = Math.max(air, chasm);
+    }
+    // The windows: three tall arches out through the face, a sill a metre high past the first stride.
+    if (u < 2) for (const wv of H.windows) {
+      const dv = Math.abs(v - wv), top = fl + 12.5 + Math.sqrt(Math.max(0, 1.8 * 1.8 - dv * dv)) * 1.3;
+      air = Math.max(air, Math.min(1.8 - dv + rough * 0.4, y - (u < -1.5 ? fl + 1.0 : fl), top - y + rough * 0.4, u + 25));
+    }
+    // The gallery, cut into one long wall eleven metres up, opening on the hall through an arcade with a sill; and the stair to it,
+    // which climbs inside the wall behind the gallery from a doorway at the hall's near end.
+    {
+      const gs = H.gallery.side, d = v * gs - f.half, GF = fl + 11, sNear = f.L - 3, sFar = f.L - 27;
+      if (d > -1.5 && d < 8 && y > fl - 0.5 && y < GF + 6) {
+        let gal = -9;
+        if (u > 6 && u < f.L - 6) {
+          const ceil = GF + 3.6 + Math.sqrt(Math.max(0, 1.5 * 1.5 - (d - 2.3) * (d - 2.3))) * 0.6;
+          gal = Math.min(1.5 - Math.abs(d - 2.3) + rough * 0.4, y - GF, ceil - y + rough * 0.4, u - 6, f.L - 6 - u);
+          // (The arcade: an arch every four and a half metres through the wall between, from a metre over the gallery's floor.)
+          const k = (u - 6) % 4.5, arch = Math.min(k - 0.9, 3.6 - k);
+          if (arch > -0.6) gal = Math.max(gal, Math.min(arch + rough * 0.3, y - (GF + 1.0), GF + 3.9 + Math.sqrt(Math.max(0, 1.35 * 1.35 - (k - 2.25) * (k - 2.25))) - y, 1.2 - d));
+        }
+        // The doorway from the hall, and the stair climbing away from it towards the windows, then into the gallery's end.
+        // (The doorway ends where the stair begins, so that the stair's first tread is the first step up: centred on the stair's foot,
+        // its floor stayed at the hall's while the stair's rose beside it, and left a step of more than half a metre.)
+        const door = Math.min(1.3 - Math.abs(u - (sNear + 1.3)), d + 1, 7.4 - d, y - fl, fl + 3.1 - y);
+        const t = Math.min(1, Math.max(0, (sNear - u) / (sNear - sFar))), sf = fl + (GF - fl) * t;
+        const stair = Math.min(1.35 - Math.abs(d - 6) + rough * 0.3, u - (sFar - 1.4), sNear + 1.3 - u, y - sf, sf + 3.0 - y);
+        const into = Math.min(1.3 - Math.abs(u - (sFar - 0.2)), d - 1.4, 7.0 - d, y - GF, GF + 3.0 - y);
+        air = Math.max(air, gal, door, stair, into);
+      }
+    }
+    // The side halls, each through an arch in the great hall's wall; and a shaft of daylight down into one.
+    for (const sh of H.sides) {
+      const d = v * sh.side - f.half, e = u - sh.at, hw = sh.wide / 2;
+      if (d < -2 || d > sh.long + 2 || Math.abs(e) > hw + 2) continue;
+      const ceil = fl + 6.2 + Math.sqrt(Math.max(0, hw * hw - e * e)) * 0.5;
+      let side = Math.min(hw - Math.abs(e) + rough, y - fl, ceil - y + rough, sh.long - d + rough, d + 1.5);
+      if (d < 1.8) side = Math.min(side, 2.6 - Math.abs(e) + rough * 0.4, fl + 6.2 + Math.sqrt(Math.max(0, 2.6 * 2.6 - e * e)) - y);
+      air = Math.max(air, side);
+      if (sh.shaft) {
+        const r = Math.hypot(d - sh.long / 2, e);
+        air = Math.max(air, Math.min(sh.shaft - r + rough * 0.5, y - (fl + 6)));
+      }
+    }
+    return air;
+  };
+  const step = { x: NaN, z: NaN, off: Infinity, y: 0 };
+  const stairAir = (x: number, y: number, z: number): number => {
+    if (!stairLine.length || x < stairBox.x0 || x > stairBox.x1 || z < stairBox.z0 || z > stairBox.z1) return -9;
+    if (x !== step.x || z !== step.z) { step.x = x; step.z = z; const n = nearestOn(stairLine, x, z, 4); step.off = n.off; step.y = n.y; }
+    if (step.off > 3.2) return -9;
+    const rough = (fbm3(x * 0.45, y * 0.45, z * 0.45, 2) - 0.5) * 0.4;
+    return Math.min(1.4 - step.off + rough, y - step.y, step.y + 3.0 - (step.off / 1.4) ** 2 * 0.8 - y + rough);
+  };
+  const bored = H ? (x: number, y: number, z: number) => Math.max(tunnelled(x, y, z), hallAir(x, y, z), stairAir(x, y, z)) : tunnelled;
 
   // ---- cornices: in winter, along the rim on the side away from the wind, the snow is blown out over the edge into a lip that hangs
   // in the air, its top rising a little to the brink and its underside curling back to the face; and it is broken where a path
@@ -394,6 +500,19 @@ export function buildMountain(b: MountainBuild): MountainResult {
   for (const run of runs.under) for (const [x, z, y] of run) {
     for (let j = Math.floor((z - 4.5 - area.z0) / TILE); j <= Math.floor((z + 4.5 - area.z0) / TILE); j++) for (let i = Math.floor((x - 4.5 - area.x0) / TILE); i <= Math.floor((x + 4.5 - area.x0) / TILE); i++) {
       if (i >= 0 && j >= 0 && i < tilesX && j < tilesZ) tileLow[j * tilesX + i] = Math.min(tileLow[j * tilesX + i], y - 1.6);
+    }
+  }
+  // (And the hall and its stair.)
+  if (H) {
+    const deepen = (x: number, z: number, y: number, r: number) => {
+      for (let j = Math.floor((z - r - area.z0) / TILE); j <= Math.floor((z + r - area.z0) / TILE); j++) for (let i = Math.floor((x - r - area.x0) / TILE); i <= Math.floor((x + r - area.x0) / TILE); i++) {
+        if (i >= 0 && j >= 0 && i < tilesX && j < tilesZ) tileLow[j * tilesX + i] = Math.min(tileLow[j * tilesX + i], y - 1.6);
+      }
+    };
+    for (const [x, z, y] of stairLine) deepen(x, z, y, 4.5);
+    if (hallFrame) for (let u = -26; u <= hallFrame.L + 3; u += 2) for (let v = -hallFrame.half - 21; v <= hallFrame.half + 21; v += 2) {
+      const deep = Math.abs(u - H.chasm.at) < H.chasm.width / 2 + 2 && Math.abs(v) < hallFrame.half + 6 ? H.chasm.depth : 0;
+      deepen(hallFrame.ox + hallFrame.ux * u - hallFrame.uz * v, hallFrame.oz + hallFrame.uz * u + hallFrame.ux * v, H.floor - deep, 1);
     }
   }
 
@@ -519,7 +638,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
       min: V(c.x0, Math.floor(Math.max(lo - 2, HIDDEN) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
       cell: CELL, uvScale: 0.4, otherUvScale: (mm) => (mm === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
       // (A tunnel's floor is the rock it was cut in, whatever the ground is over it.)
-      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(runs.under.length && tunnelAir(at.x, at.y + 0.6, at.z) > 0) ? (loose.at(at.x, at.z) > 0.25 ? screeMesh : turfMesh) : null),
+      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(runs.under.length && tunnelAir(at.x, at.y + 0.6, at.z) > 0) && !(H && (hallAir(at.x, at.y + 0.6, at.z) > 0 || stairAir(at.x, at.y + 0.6, at.z) > 0 && landAt(m, F, at.x, at.z, true) - at.y > 1.5)) ? (loose.at(at.x, at.z) > 0.25 ? screeMesh : turfMesh) : null),
       shade: (q, n, field, other, open) => {
         if (other === turfMesh) { const col = turfAt(q.x, q.z); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return col; }
         if (other === screeMesh) return earth(q.x, q.z);
@@ -1064,6 +1183,21 @@ export function buildMountain(b: MountainBuild): MountainResult {
     };
     if (way.length) stepsOn(way, 1.25, 2);
     if (climb.length) stepsOn(climb, 1.15, 2);
+    // (And the stair down to the hall under the top, its treads under the rock and lit as such.)
+    if (m.hall) {
+      const from = new Map(['stone', 'rock'].map((mm) => [mm, wild.mesh(mm).vertexCount]));
+      stepsOn(m.hall.stair, 1.2, 0);
+      if (hallFrame) {
+        // (The gallery's stair, which climbs inside the wall: see where its air is reckoned.)
+        const f = hallFrame, gs = m.hall.gallery.side, line: [number, number, number][] = [];
+        for (let k = 0; k <= 12; k++) {
+          const u = f.L - 3 - k * 2, v = gs * (f.half + 6);
+          line.push([f.ox + f.ux * u - f.uz * v, f.oz + f.uz * u + f.ux * v, m.hall.floor + 11 * Math.min(1, (k * 2) / 24)]);
+        }
+        stepsOn(line, 1.15, 0);
+      }
+      for (const [mm, k] of from) wild.mesh(mm).setOpenBy((x, y, z) => (landAt(m, F, x, z, true) - y > 2.5 ? 0.12 : 1), k);
+    }
     // (Not on the scramble: a staircase up an arête is a monument. There the rock is the path, with a foothold cut here and there where it steepens.)
     if (scr.length) {
       let since = 0;
@@ -1095,6 +1229,57 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
   // And a fire burning on the floor of the shelter, for whoever comes up out of the cloud.
   if (m.shelter) torches.push({ position: V(m.shelter.x - Math.cos(m.shelter.facing) * 0.3, m.shelter.y + 0.05, m.shelter.z - Math.sin(m.shelter.facing) * 0.3), out: V(0, 0, 1), fire: 1.1 });
+
+  // The hall under the top: torches in brackets down both its walls and down the stair where it is under the rock; two piers and a
+  // lintel of dressed stone where the cutting goes in under the ground; and something left in it.
+  if (H && hallFrame) {
+    // (What is set up in the hall is under the rock, and sees little of the sky: marked so, or it is lit as if it stood outside.)
+    const begun = new Map(['stone', 'metal'].map((mm) => [mm, wild.mesh(mm).vertexCount]));
+    const f = hallFrame, at = (u: number, v: number, y: number) => V(f.ox + f.ux * u - f.uz * v, y, f.oz + f.uz * u + f.ux * v);
+    const bracket = (pos: Vector3, out: Vector3) => {
+      torches.push({ position: pos, out });
+      block('metal', pos.x - out.x * 0.12, pos.y - 0.28, pos.z - out.z * 0.12, 0.05, 0.3, 0.05, Math.atan2(out.z, out.x), [0.14, 0.13, 0.12]);
+    };
+    // Torches down both walls of the great hall, between the pillars, clear of the chasm and of the arches into the side halls.
+    for (let u = 4; u < f.L - 2; u += 9) for (const side of [-1, 1]) {
+      if (Math.abs(u - H.chasm.at) < H.chasm.width / 2 + 1.5 || H.sides.some((sh) => sh.side === side && Math.abs(u - sh.at) < 4.5)) continue;
+      bracket(at(u, side * (f.half - 0.6), H.floor + 3.2), V(f.uz * side, 0, -f.ux * side));
+    }
+    // Fires in iron bowls on stone plinths either side of the bridge's ends.
+    for (const end of [-1, 1]) {
+      const p0 = at(H.chasm.at + end * (H.chasm.width / 2 + 1.8), 3.2, H.floor);
+      block('stone', p0.x, H.floor - 0.1, p0.z, 0.8, 0.8, 1.15, 0, [stone[0] * 0.7, stone[1] * 0.7, stone[2] * 0.7]);
+      block('metal', p0.x, H.floor + 1.05, p0.z, 1.0, 1.0, 0.22, 0.4, [0.05, 0.045, 0.04]);
+      torches.push({ position: V(p0.x, H.floor + 1.2, p0.z), out: V(0, 1, 0), fire: 0.85 });
+    }
+    // Torches along the gallery's back wall, between the arches.
+    for (let u = 8.2; u < f.L - 7; u += 9) {
+      const gs = H.gallery.side;
+      bracket(at(u, gs * (f.half + 3.6), H.floor + 13.2), V(f.uz * gs, 0, -f.ux * gs));
+    }
+    // Two torches in each side hall, on its end wall.
+    for (const sh of H.sides) for (const e of [-sh.wide * 0.25, sh.wide * 0.25]) {
+      const d = sh.long - 0.6, pos = at(sh.at + e, sh.side * (f.half + d), H.floor + 2.8);
+      bracket(pos, V(f.uz * sh.side, 0, -f.ux * sh.side));
+    }
+    const line = H.stair, sy = (k: number) => landAt(m, F, line[k][0], line[k][1], true);
+    for (let k = 4; k < line.length - 2; k += 6) {
+      if (sy(k) - line[k][2] < 4) continue;
+      const [x, z, y] = line[k], [nx2, nz2] = line[k + 1], dx = nx2 - x, dz = nz2 - z, l = Math.hypot(dx, dz) || 1, px = -dz / l, pz = dx / l;
+      torches.push({ position: V(x + px * 1.0, y + 1.9, z + pz * 1.0), out: V(-px, 0, -pz) });
+    }
+    const mouth = line.findIndex(([x, z, y]) => landAt(m, F, x, z, true) - y > 3.6);
+    if (mouth > 0) {
+      const [x, z, y] = line[mouth], [nx2, nz2] = line[Math.min(line.length - 1, mouth + 1)], yaw = Math.atan2(nz2 - z, nx2 - x) + Math.PI / 2;
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
+      for (const side of [-1, 1]) block('stone', x + c * side * 1.75, y - 0.3, z + sn * side * 1.75, 0.75, 0.9, 3.55, yaw, stone);
+      block('stone', x, y + 3.2, z, 4.4, 1.0, 0.7, yaw, stone);
+    }
+    // Something left: in the side hall furthest in.
+    const last = H.sides[H.sides.length - 1];
+    if (last) { const p0 = at(last.at, last.side * (f.half + last.long - 1.4), H.floor); b.finds.push({ at: V(p0.x, H.floor + 0.35, p0.z), what: 'an iron-bound coffer, its lid broken open, at the end of a side hall under the top' }); }
+    for (const [mm, from] of begun) wild.mesh(mm).setOpenBy((x, y, z) => (landAt(m, F, x, z, true) - y > 2.5 ? 0.12 : 1), from);
+  }
 
   // The scramble's arête: iron stanchions let into the rock on the side the drop is steeper, every couple of strides, and a chain from
   // each to the next, hanging a little; and where it leaves the climb, a cairn and a post with a board on it pointing the way.
@@ -1197,6 +1382,16 @@ export function buildMountain(b: MountainBuild): MountainResult {
       // (And where a tunnel of the gallery way runs under a place, whatever the ground over it: its floor's level there.)
       if (runs.under.length) { const u = nearUnder(x, z, 3); if (u.off < 1.9) bored[j * nx + i] = u.y; }
     }
+    // (Under the hall and its stair a fence begins above the roof, as over a tunnel: whoever is in them walks under it. Its fences
+    // reaching down to the cloud cut the stair off halfway down, where it passes under ground nobody may stand on.)
+    const roofOver = (x: number, z: number): number => {
+      if (!H || !hallFrame) return -Infinity;
+      let top = -Infinity;
+      if (stairLine.length) { const n = nearestOn(stairLine, x, z, 4); if (n.off < 2.6) top = n.y + 3.6; }
+      const { u, v } = inHall(x, z);
+      if (u > -26 && u < hallFrame.L + 3 && Math.abs(v) < hallFrame.half + 21) top = Math.max(top, H.floor + H.high + 1.5);
+      return top;
+    };
     const reach = new Uint8Array(nx * nz), queue: number[] = [];
     const start = Math.round((p.z1 - 2 - gz0) / C) * nx + Math.round(((p.x0 + p.x1) / 2 - gx0) / C);
     if (ok[start]) { reach[start] = 1; queue.push(start); }
@@ -1212,13 +1407,13 @@ export function buildMountain(b: MountainBuild): MountainResult {
       const k = j * nx + i;
       // Over a tunnel, where the ground above is not ground anyone may stand on (the brink of the precipice, mostly), the fence
       // begins above the tunnel's roof: whoever is in the tunnel walks under it, and nobody above steps off the edge there.
-      if (reach[k] && !ok[k] && bored[k] === bored[k]) { const x = gx0 + i * C, z = gz0 + j * C; b.fences.push({ min: V(x - C / 2, bored[k] + 3.5, z - C / 2), max: V(x + C / 2, F + 160, z + C / 2) }); }
+      if (reach[k] && !ok[k] && bored[k] === bored[k]) { const x = gx0 + i * C, z = gz0 + j * C; b.fences.push({ min: V(x - C / 2, Math.max(bored[k] + 3.5, roofOver(x, z)), z - C / 2), max: V(x + C / 2, F + 160, z + C / 2) }); }
       if (reach[k]) continue;
       let touches = false;
       for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) { const ii = i + di, jj = j + dj; if (ii >= 0 && jj >= 0 && ii < nx && jj < nz && reach[jj * nx + ii]) touches = true; }
       if (!touches) continue;
       const x = gx0 + i * C, z = gz0 + j * C;
-      b.fences.push({ min: V(x - C / 2, Math.min(HIDDEN, ground(x, z) - 4), z - C / 2), max: V(x + C / 2, F + 160, z + C / 2) });
+      b.fences.push({ min: V(x - C / 2, Math.max(Math.min(HIDDEN, ground(x, z) - 4), roofOver(x, z)), z - C / 2), max: V(x + C / 2, F + 160, z + C / 2) });
     }
   }
 

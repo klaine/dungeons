@@ -120,6 +120,17 @@ for (let n = 0; n < (only && only !== 'mountain' ? 0 : plainPeaks + wornPeaks); 
       if (steepest > most) throw new Error(`the ${name} climbs at ${steepest.toFixed(2)}`);
     }
     if (m.cairn && inside(m, m.cairn.x, m.cairn.z) < 4) throw new Error('the cairn at the edge');
+    // The hall under the top, if there is one: its stair no steeper than a stair cut in rock can be walked, and it reaches the hall.
+    if (m.hall) {
+      const st = m.hall.stair;
+      for (let k = 1; k < st.length; k++) {
+        const slope = Math.abs(st[k][2] - st[k - 1][2]) / (Math.hypot(st[k][0] - st[k - 1][0], st[k][1] - st[k - 1][1]) || 1);
+        if (slope > 0.55) throw new Error(`the hall's stair climbs at ${slope.toFixed(2)}`);
+      }
+      const last = st[st.length - 1];
+      if (Math.hypot(last[0] - m.hall.in[0], last[1] - m.hall.in[1]) > 0.5 || Math.abs(last[2] - m.hall.floor) > 0.2) throw new Error("the hall's stair does not come to the hall");
+      tally3('hall=true');
+    } else tally3('hall=false');
     const cl = m.climb ?? [];
     if (m.cairn && cl.some(([x, z], k) => k < cl.length - 10 && Math.hypot(x - m.cairn!.x, z - m.cairn!.z) < 15)) throw new Error('the climb crosses the summit before it reaches it');
     if (m.shelter && inside(m, m.shelter.x, m.shelter.z) < 5) throw new Error('the shelter at the edge');

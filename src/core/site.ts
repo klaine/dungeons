@@ -592,6 +592,27 @@ export interface Mountain {
    * chain to hold. `line` is its points `[x, z, y]`, a couple of metres apart; it ends on the summit's platform.
    */
   scramble?: { line: [number, number, number][]; branch: number; steep: number };
+  /**
+   * A great hall cut in the rock under the top, on some mountains: its far end `out` stands a few metres in from the rim, and tall
+   * windows are cut from it through the face, looking out over the cloud; it runs in from there `long` metres along its middle line
+   * to its near end `in`, `wide` across, its floor at `floor`, its vault's crown `high` over the floor, with two rows of great pillars
+   * of the rock left standing. It is come down to by a stair cut in the rock, `stair`, as points `[x, z, y]`: from a cutting in the
+   * ground of the top, which deepens into a tunnel, down with one turn to the hall's near end.
+   */
+  hall?: {
+    out: [number, number]; in: [number, number]; floor: number; wide: number; high: number; long: number; stair: [number, number, number][];
+    /** The windows in its far end, each as how far across the hall from its middle line it is (`v`, metres). */
+    windows: number[];
+    /** A chasm across the hall, `at` metres in from the window end, `width` across and `depth` deep, with a bridge over its middle. */
+    chasm: { at: number; width: number; depth: number };
+    /**
+     * Side halls opening off it through arches: `at` metres in, on `side` (-1 to the left looking in, 1 to the right), `long` deep into
+     * the rock and `wide` across, vaulted; one may have a shaft open to the sky over its middle (`shaft`, its radius).
+     */
+    sides: { at: number; side: -1 | 1; long: number; wide: number; shaft?: number }[];
+    /** A gallery cut into one long wall (`side`) eleven metres up, opening on the hall through an arcade, and reached by a stair inside that wall from the hall's near end. */
+    gallery: { side: -1 | 1 };
+  };
   /** The cairn on the summit, with a cross of timber beside it, at the end of the climb. */
   cairn?: { x: number; z: number; y: number };
   /** Tors: knobs and low crags of bare rock standing out of the ground of the top, `height` high and `r` across the half. They are the land's own shape, and are carved as rock. */
