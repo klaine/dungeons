@@ -3782,6 +3782,43 @@ export function meshSite(site: Site): SceneDescription {
           tileFace(tilesC, pts, roofTone, along ? V((from + to) / 2, lowY - 1, line) : V(line, lowY - 1, (from + to) / 2));
           tileFace(tilesC, pts.map((q) => q.clone().setY(q.y - 0.08)), roofTone, along ? V((from + to) / 2, lowY + 2, line) : V(line, lowY + 2, (from + to) / 2));
         }
+        // The garth inside the walk is, in most cloisters, a garden: four plots of grass behind low kerbs of stone, the paths between
+        // them crossing at the well, and here and there flowers. Kept short where the house is kept, grown long where it is not; not
+        // under snow. (A broad court all of flags was a yard, not a cloister.) From a stream of its own.
+        const gq = rng.fork(`garth${p.id}`);
+        if (gq.chance(0.7) && site.setting.season !== 'winter') {
+          const { solid } = anyAngle((m) => kit.mesh(m));
+          const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number): [number, number, number][] => [
+            [x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]];
+          const edge = 2.3, path = 0.8, kerb = 0.13, k = 0.12, long = site.setting.condition === 'kept' ? 0 : site.setting.condition === 'damp' ? 0.5 : 1;
+          const levers = site.levers.filter((l) => l.place === p.id);
+          // (Four plots where the garth has room both ways; where it has room only one way, two, one either side of the well.)
+          const gx0 = p.x0 + edge, gx1 = p.x1 - edge, gz0 = p.z0 + edge, gz1 = p.z1 - edge, wideX = gx1 - gx0 >= 2.4 + 2 * path, wideZ = gz1 - gz0 >= 2.4 + 2 * path;
+          const split = wideX && wideZ ? path : 1.35;
+          const spansX = wideX ? [[gx0, wx - split], [wx + split, gx1]] : wideZ ? [[gx0, gx1]] : [];
+          const spansZ = wideZ ? [[gz0, wz - (wideX ? split : 1.35)], [wz + (wideX ? split : 1.35), gz1]] : wideX ? [[gz0, gz1]] : [];
+          for (const [ax, bx] of spansX) for (const [az, bz] of spansZ) {
+            if (bx - ax < 1.2 || bz - az < 1.2 || levers.some((l) => l.x > ax - 0.8 && l.x < bx + 0.8 && l.z > az - 0.8 && l.z < bz + 0.8)) continue;
+            for (const [x0, z0, x1, z1] of [[ax, az, bx, az + k], [ax, bz - k, bx, bz], [ax, az + k, ax + k, bz - k], [bx - k, az + k, bx, bz - k]]) {
+              kit.box('stone', V(x0, y - 0.05, z0), V(x1, y + kerb, z1), coping, coping, 'garthkerb');
+            }
+            solid('plaster', box(ax + k, y - 0.02, az + k, bx - k, y + kerb - 0.03, bz - k), [0.17, 0.12, 0.08]);
+            const top = y + kerb - 0.03, area = (bx - ax - 2 * k) * (bz - az - 2 * k);
+            // (Close set, and of a deeper green than the meadow's: it grows in the shade of the walls round it.)
+            for (let n = Math.round(area * 14); n > 0; n--) {
+              const x = gq.range(ax + k + 0.08, bx - k - 0.08), z = gq.range(az + k + 0.08, bz - k - 0.08), tone = gq.range(0.75, 1.1), tall = gq.range(0.2, 0.34) + long * gq.range(0.2, 0.55);
+              planting.tuft(planting.grass, x, top - 0.03, z, gq.range(0.4, 0.6), tall, gq.range(0, Math.PI), [0.05 * tone, 0.105 * tone, 0.024 * tone]);
+            }
+            const fq = rng.fork(`garth${p.id}/${Math.round(ax * 10)},${Math.round(az * 10)}`);
+            if (fq.chance(0.6)) {
+              const hue: [number, number, number] = fq.pick([[0.62, 0.1, 0.1], [0.8, 0.7, 0.2], [0.8, 0.8, 0.74], [0.45, 0.2, 0.55]]);
+              for (let n = fq.int(3, 9); n > 0; n--) {
+                const x = fq.range(ax + k + 0.15, bx - k - 0.15), z = fq.range(az + k + 0.15, bz - k - 0.15), size = fq.range(0.3, 0.45);
+                planting.tuft(planting.flowers, x, top - 0.02, z, size, size * fq.range(0.9, 1.3), fq.range(0, Math.PI), hue);
+              }
+            }
+          }
+        }
       }
     }
     if ((p.role === 'goal' || p.role === 'reward') && !cave) {

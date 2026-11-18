@@ -70,8 +70,10 @@ export class Torch {
       mergeParts(this.group);
     }
 
+    // (The fire drawn on the sheet starts at its foot, 0.35 below its middle; so the middle stands that far, less a little, over the
+    // top of the iron cup, and the flame comes out of the cup. Set along the brand instead, it hung beside the cup and below its rim.)
     if (fire) this.flamePosition.copy(position).add(new Vector3(0, 0.3 * fire, 0));
-    else this.flamePosition.copy(position).addScaledVector(axis, 0.16);
+    else this.flamePosition.copy(position).addScaledVector(axis, 0.01).add(new Vector3(0, 0.3, 0));
     // The flame is a sheet that turns to face whoever looks at it, staying upright, with fire drawn on it.
     const flame = (this.flame = new NodeMaterial());
     flame.transparent = true;

@@ -31,6 +31,7 @@ import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
 import { Rain, Snowfall } from '../render/rain';
 import { Fireflies } from '../render/fireflies';
+import { WindowGlow } from '../render/glow';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { inside as onMountain } from '../core/mountain';
@@ -456,6 +457,10 @@ async function start(): Promise<void> {
   const warm = !!site && (site.setting.hour === 'dusk' || site.setting.hour === 'night') && (site.setting.season === 'spring' || site.setting.season === 'summer');
   const fireflies = warm && desc.fireflies?.length ? new Fireflies(desc.fireflies, seed, site.setting.hour === 'night' ? 1.6 : 2.4) : null;
   if (fireflies) scene.add(fireflies.mesh);
+  // A haze of light about each lit window, after dark.
+  const windowPanes = lamps ? scenic.filter((m) => m.name === 'scenery:window').map((m) => ({ position: m.geometry.getAttribute('position').array, color: m.geometry.getAttribute('color').array })) : [];
+  const windowGlow = windowPanes.length ? new WindowGlow(windowPanes, lamps * 0.28) : null;
+  if (windowGlow) scene.add(windowGlow.mesh);
   const flocks = desc.flocks?.length ? (() => {
     const down = new Vector3(0, -1, 0), from = new Vector3(), ray = new Ray(from, down);
     const groundAtFlock = (x: number, z: number): number => { from.set(x, 400, z); const hit = bvh.raycastFirst(ray, DoubleSide); return hit ? hit.point.y : -1000; };
@@ -1047,6 +1052,7 @@ async function start(): Promise<void> {
       sound.rain = snowing ? 0 : raining;
       // (Fireflies keep in out of the rain.)
       fireflies?.update(time, camera, raining < 0.15, dt);
+      windowGlow?.update(camera);
     }
     beacon?.update(time);
 

@@ -137,6 +137,22 @@ export class Furnisher {
     const y = this.p.floor;
     this.box(r.x0, y - 0.02, r.z0, r.x1, y + 0.3, r.z1, board);
     this.box(r.x0 + 0.05, y + 0.3, r.z0 + 0.05, r.x1 - 0.05, y + 0.43, r.z1 - 0.05, straw);
+    // A blanket of undyed or dyed wool over the foot of it, falling a little over its sides, and a bolster at its head (the end
+    // nearer a wall). A forsaken house has kept fewer of them.
+    const q = this.small, alongX = r.x1 - r.x0 > r.z1 - r.z0, p = this.p;
+    const headLow = alongX ? r.x0 - p.x0 < p.x1 - r.x1 : r.z0 - p.z0 < p.z1 - r.z1;
+    if (q.next() > this.sparse) {
+      const wool: Colour = q.pick([[0.55, 0.5, 0.42], [0.42, 0.36, 0.28], [0.36, 0.14, 0.1], [0.2, 0.24, 0.3], [0.3, 0.32, 0.22]]);
+      const len = alongX ? r.x1 - r.x0 : r.z1 - r.z0, cover = len * q.range(0.55, 0.72);
+      const [a0, a1] = headLow ? [(alongX ? r.x1 : r.z1) - cover, alongX ? r.x1 : r.z1] : [alongX ? r.x0 : r.z0, (alongX ? r.x0 : r.z0) + cover];
+      if (alongX) this.block('plaster', a0, y + 0.33, r.z0 + 0.02, a1 - 0.03, y + 0.47, r.z1 - 0.02, wool);
+      else this.block('plaster', r.x0 + 0.02, y + 0.33, a0, r.x1 - 0.02, y + 0.47, a1 - 0.03, wool);
+    }
+    if (q.next() > this.sparse * 0.5) {
+      const h0 = headLow ? (alongX ? r.x0 : r.z0) + 0.08 : (alongX ? r.x1 : r.z1) - 0.34;
+      if (alongX) this.block('plaster', h0, y + 0.43, r.z0 + 0.1, h0 + 0.26, y + 0.55, r.z1 - 0.1, [0.78, 0.74, 0.64]);
+      else this.block('plaster', r.x0 + 0.1, y + 0.43, h0, r.x1 - 0.1, y + 0.55, h0 + 0.26, [0.78, 0.74, 0.64]);
+    }
     return true;
   }
 
@@ -269,7 +285,7 @@ export class Furnisher {
    * What is set on a table, by what the room is for: bowls and cups at the places down either side, a jug, a loaf and a candle
    * down the middle of a refectory's; a book open on a desk; a pot, bowls and a loaf on a kitchen's. A forsaken house has less.
    */
-  private setTable(r: Rect, kind: 'meal' | 'desk' | 'kitchen'): void {
+  private setTable(r: Rect, kind: 'meal' | 'desk' | 'kitchen' | 'work'): void {
     const q = this.small, y = this.p.floor + 0.78, alongX = r.x1 - r.x0 >= r.z1 - r.z0;
     const a0 = alongX ? r.x0 : r.z0, a1 = alongX ? r.x1 : r.z1, mid = alongX ? (r.z0 + r.z1) / 2 : (r.x0 + r.x1) / 2, half = alongX ? (r.z1 - r.z0) / 2 : (r.x1 - r.x0) / 2;
     const at = (a: number, b: number): [number, number] => (alongX ? [a, mid + b] : [mid + b, a]);
@@ -291,6 +307,19 @@ export class Furnisher {
       if (keep()) this.openBook(x, y, z, alongX);
       const [cx, cz] = at(a0 + 0.12, -half + 0.12);
       if (keep()) this.candle(cx, y, cz);
+    } else if (kind === 'work') {
+      // A workbench: a mallet, offcuts of board, a pot of glue, and an iron blade or two.
+      const wood: Colour = q.pick(WOODS);
+      for (let a = a0 + 0.3; a < a1 - 0.3; a += q.range(0.5, 0.9)) {
+        if (!keep()) continue;
+        const [x, z] = at(a, q.range(-half + 0.15, half - 0.15)), what = q.int(0, 3);
+        const lay = (u0: number, u1: number, v0: number, v1: number, h0: number, h1: number, c: Colour, m = 'wood') =>
+          alongX ? this.block(m, x + u0, y + h0, z + v0, x + u1, y + h1, z + v1, c) : this.block(m, x + v0, y + h0, z + u0, x + v1, y + h1, z + u1, c);
+        if (what === 0) { lay(-0.03, 0.03, -0.16, 0.12, 0, 0.03, shade(wood, 0.9)); lay(-0.06, 0.06, 0.12, 0.2, 0, 0.09, shade(wood, 0.7)); }
+        else if (what === 1) { const n = q.int(2, 4); for (let k = 0, h = 0; k < n; k++, h += 0.025) lay(-0.25 + k * 0.03, 0.25 - k * 0.02, -0.06 - k * 0.01, 0.07, h, h + 0.025, shade(wood, q.range(0.8, 1.1))); }
+        else if (what === 2) this.turned('plaster', x, y, z, [[0.045, 0], [0.05, 0.07], [0.04, 0.09]], q.pick(POTS), [0.3, 0.22, 0.1], 10);
+        else lay(-0.2, 0.2, -0.04, 0.04, 0, 0.006, [0.2, 0.2, 0.21], 'metal');
+      }
     } else {
       const [px, pz] = at(a0 + (a1 - a0) * q.range(0.25, 0.4), 0);
       if (keep()) this.pot(px, y, pz);
@@ -467,7 +496,7 @@ export class Furnisher {
       }
       case 'workshop': {
         const side = rng.pick(longWalls);
-        wallRow(side, Math.min(2.6, long - 2.4), 0.7, 9, (r) => this.table(r));
+        wallRow(side, Math.min(2.6, long - 2.4), 0.7, 9, (r) => { if (!this.table(r)) return false; this.setTable(r, 'work'); return true; });
         cluster(rng.int(0, 3));
         this.crate(cx + rng.range(-0.8, 0.8), cz + rng.range(-0.8, 0.8), 0.65);
         break;
@@ -477,7 +506,9 @@ export class Furnisher {
         const [x, z] = corners[rng.int(0, 3)];
         const bx = x < cx ? p.x0 + 0.2 : p.x1 - 0.2 - 0.86, bz = z < cz ? p.z0 + 0.2 : p.z1 - 0.2 - 1.9;
         this.bed({ x0: bx, x1: bx + 0.86, z0: bz, z1: bz + 1.9 });
-        this.crate(cx + rng.range(-0.5, 0.5), cz + rng.range(-0.5, 0.5), 0.5);
+        // A crate for a table, with a bowl and a jug on it.
+        const kx = cx + rng.range(-0.5, 0.5), kz = cz + rng.range(-0.5, 0.5);
+        if (this.crate(kx, kz, 0.5) && this.small.next() > this.sparse) { this.bowl(kx - 0.08, p.floor + 0.5, kz + 0.06); this.jug(kx + 0.1, p.floor + 0.5, kz - 0.08); }
         break;
       }
       case 'vestry':
