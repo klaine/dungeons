@@ -21,7 +21,9 @@ import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMater
  *
  * `?world=<seed>`, `?size=6x10`, `?at=valley1` (or `island2`, `mountain3`, or `x,z`); `?radius=` how
  * far squares are made (700 metres unless asked); `?hour=` and `?season=`, `?haze=` (0 to 1), `?tex=`
- * (texture size); `?webgl` as in the game.
+ * (texture size); `?webgl` as in the game. The world may be named after a `#` too (`#w3`), since a page
+ * shown inside another, as an artifact is, keeps a plain name there and nothing else; and the page's two
+ * menus choose the world and the place.
  */
 
 const params = new URLSearchParams(location.search);
@@ -49,7 +51,8 @@ async function start(): Promise<void> {
   window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
   // ---- the world, from its worker; and meanwhile the surfaces painted
-  const seed = params.get('world') || 'w2', sz = (params.get('size') ?? '').split('x').map(Number);
+  const named = /^[A-Za-z0-9-]{1,24}$/.test(location.hash.slice(1)) ? location.hash.slice(1) : '';
+  const seed = named || params.get('world') || 'w2', sz = (params.get('size') ?? '').split('x').map(Number);
   const size = sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined;
   const worldWorker = new Worker(new URL('./worldWorker.ts', import.meta.url), { type: 'module' });
   const t0 = performance.now();
@@ -178,7 +181,23 @@ async function start(): Promise<void> {
     const xz = spec.split(',').map(Number);
     return xz.length === 2 && xz.every(Number.isFinite) ? new Vector3(xz[0], 0, xz[1]) : new Vector3(W.places[0]?.x ?? 0, 0, W.places[0]?.z ?? 0);
   };
-  const me = place(params.get('at') ?? 'valley1');
+  const me = place(params.get('at') ?? (W.places.find((q) => q.kind === 'valley') ? 'valley1' : `${W.places[0]?.kind ?? 'valley'}1`));
+  // The menus: which world (the page made again for it), and which of its places to go to.
+  {
+    const worlds = document.getElementById('worlds') as HTMLSelectElement | null, where = document.getElementById('where') as HTMLSelectElement | null;
+    if (worlds) {
+      const list = ['w0', 'w1', 'w2', 'w3', 'w4', 'w5'];
+      if (!list.includes(seed)) list.unshift(seed);
+      worlds.innerHTML = list.map((s) => `<option value="${s}"${s === seed ? ' selected' : ''}>World ${s}</option>`).join('');
+      worlds.addEventListener('change', () => { location.hash = worlds.value; location.reload(); });
+    }
+    if (where) {
+      const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top' };
+      where.innerHTML = W.places.map((q) => `<option value="${q.kind}${q.n}">${q.name}, ${KIND[q.kind]}</option>`).join('');
+      where.addEventListener('change', () => { const to = place(where.value); me.set(to.x, 0, to.z); where.blur(); });
+    }
+  }
+  let placeIndex = 0;
   let yaw = 0, pitch = -0.05, flying = params.has('fly'), lift = 1.7;
   const keys = new Set<string>();
   const wireframe = (on: boolean) => { for (const k of ['turf', 'rock']) (materials[k] as MeshStandardNodeMaterial).wireframe = on; };
@@ -186,8 +205,10 @@ async function start(): Promise<void> {
     keys.add(e.code);
     if (e.code === 'KeyV' && !e.repeat) { flying = !flying; lift = flying ? Math.max(lift, 20) : 1.7; }
     if (e.code === 'KeyM' && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
+    // (Numbers for valley heads, with Shift for islands; P for the next place of any kind. Ctrl with a number changes the browser's tab.)
     const digit = /^Digit([1-4])$/.exec(e.code);
-    if (digit) { const kind = e.ctrlKey ? 'mountain' : e.shiftKey ? 'island' : 'valley', to = place(`${kind}${digit[1]}`); me.set(to.x, 0, to.z); e.preventDefault(); }
+    if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) { const kind = e.shiftKey ? 'island' : 'valley', to = place(`${kind}${digit[1]}`); me.set(to.x, 0, to.z); e.preventDefault(); }
+    if (e.code === 'KeyP' && !e.repeat && W.places.length) { const q = W.places[placeIndex++ % W.places.length]; me.set(q.x, 0, q.z); }
   });
   window.addEventListener('keyup', (e: KeyboardEvent) => keys.delete(e.code));
   canvas.addEventListener('click', () => canvas.requestPointerLock());
@@ -225,6 +246,8 @@ async function start(): Promise<void> {
   const wantedTrees = () => blocksNear(TREES).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
+    /** Goes to a place by its kind and number: `valley1`, `island2`, `mountain3`. */
+    to: (spec: string) => { const p = place(spec); me.set(p.x, 0, p.z); },
     goto: (x: number, z: number, y?: number, yawTo?: number, pitchTo?: number, fly?: boolean) => { me.set(x, 0, z); if (yawTo !== undefined) yaw = yawTo; if (pitchTo !== undefined) pitch = pitchTo; if (fly !== undefined) flying = fly; if (y !== undefined) lift = y; },
     settled: () => pending.size === 0 && [...squaresWanted()].every((k) => squares.get(k)?.meshes) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && farDirty.size === 0,
   };

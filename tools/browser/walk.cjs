@@ -23,9 +23,7 @@ const here0 = (st) => ({ x: st.x, z: st.z });
   console.log(`world ready after ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   for (const at of places.length ? places : ['valley1', 'island1', 'mountain1']) {
     const t1 = Date.now();
-    // (Placed by the page's own keys: the place's number, with Shift for an island and Ctrl for a mountain top.)
-    const m = /^(valley|island|mountain)(\d)$/.exec(at);
-    if (m) await page.keyboard.press(`${m[1] === 'island' ? 'Shift+' : m[1] === 'mountain' ? 'Control+' : ''}Digit${m[2]}`);
+    await page.evaluate((spec) => window.__walk.to(spec), at);
     await page.waitForFunction(() => window.__walk.settled(), null, { timeout: 900000, polling: 1000 });
     const settle = (Date.now() - t1) / 1000;
     await page.waitForTimeout(1500);
