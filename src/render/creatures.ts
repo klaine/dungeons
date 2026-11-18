@@ -40,8 +40,10 @@ export class Flocks {
    * `groundAt` says how high the ground is at a point; `free` whether a sheep may stand there (not in water, on a track's stones,
    * in a house). The ground under each flock is read once, on a lattice a metre apart, and kept.
    */
-  constructor(spots: FlockSpot[], seed: string, groundAt: (x: number, z: number) => number, free: (x: number, z: number) => boolean) {
+  /** `kind`: sheep, or goats, the wild goats of the high ground, which go where sheep will not. */
+  constructor(spots: FlockSpot[], seed: string, groundAt: (x: number, z: number) => number, free: (x: number, z: number) => boolean, kind: 'sheep' | 'goat' = 'sheep') {
     this.rng = new Rng(`flocks/${seed}`);
+    const steepest = kind === 'goat' ? 1.1 : 0.55;
     const r = this.rng;
     for (const spot of spots) {
       // The ground the flock may wander over, with a margin: a metre apart, and whether each point is fit to stand on.
@@ -51,7 +53,7 @@ export class Flocks {
       for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) {
         const k = j * n + i, slope = Math.max(Math.abs(grid[k + 1] - grid[k - 1]), Math.abs(grid[k + n] - grid[k - n])) / 2;
         // (Not up anything steeper than a sheep path goes, nor where there is no ground.)
-        ok[k] = slope < 0.55 && grid[k] > -500 && free(x0 + i, z0 + j) ? 1 : 0;
+        ok[k] = slope < steepest && grid[k] > -500 && free(x0 + i, z0 + j) ? 1 : 0;
       }
       const f = this.flocks.length;
       this.flocks.push({ x: spot.x, z: spot.z, r: spot.r, grid, x0, z0, n, ok });
@@ -67,8 +69,8 @@ export class Flocks {
     }
     const count = Math.max(1, this.sheep.length);
     const material = makeCreatureMaterial();
-    this.bodies = new InstancedMesh(bodyGeometry(), material, count);
-    this.heads = new InstancedMesh(headGeometry(), material, count);
+    this.bodies = new InstancedMesh(kind === 'goat' ? goatBodyGeometry() : bodyGeometry(), material, count);
+    this.heads = new InstancedMesh(kind === 'goat' ? goatHeadGeometry() : headGeometry(), material, count);
     // A soft dark patch under each, where the sky's light is kept off the grass: what sets a thing on the ground and not over it.
     const shadowMaterial = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false });
     shadowMaterial.colorNode = vec4(0, 0, 0, float(0.42).mul(smoothstep(0.5, 0.12, length(uv().sub(0.5)))));
@@ -80,6 +82,13 @@ export class Flocks {
     const tint = new Color();
     this.sheep.forEach((_, i) => {
       const k = r.next(), t = r.range(0.86, 1.06);
+      if (kind === 'goat') {
+        // (Goats: grey-brown, darker brown, or the odd pale one; head and body alike.)
+        if (k < 0.45) tint.setRGB(0.62 * t, 0.55 * t, 0.46 * t); else if (k < 0.85) tint.setRGB(0.42 * t, 0.33 * t, 0.25 * t); else tint.setRGB(0.88 * t, 0.84 * t, 0.76 * t);
+        this.bodies.setColorAt(i, tint);
+        this.heads.setColorAt(i, tint);
+        return;
+      }
       if (k < 0.08) tint.setRGB(0.42 * t, 0.36 * t, 0.3 * t);
       else if (k < 0.3) tint.setRGB(0.9 * t, 0.86 * t, 0.76 * t);
       else tint.setRGB(t, 0.97 * t, 0.9 * t);
@@ -92,7 +101,7 @@ export class Flocks {
       mesh.receiveShadow = true;
       this.group.add(mesh);
     }
-    this.group.name = `sheep:${this.sheep.length}`;
+    this.group.name = `${kind}:${this.sheep.length}`;
     this.update(0, 0, new Vector3(1e9, 0, 1e9));
   }
 
@@ -241,5 +250,33 @@ function headGeometry(): BufferGeometry {
     lump(1, 0.06, 0.016, 0.03, 0.11, 0.03, 0.12, face, 0, 8),
     lump(1, 0.06, 0.016, 0.03, -0.11, 0.03, 0.12, face, 0, 9),
   ];
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()), false)!;
+}
+
+/** A goat's body: leaner than a sheep's and smooth-coated, on longer legs, with a short tail cocked up. */
+function goatBodyGeometry(): BufferGeometry {
+  const coat: [number, number, number] = [1, 1, 1], hoof: [number, number, number] = [0.3, 0.27, 0.24];
+  const parts = [
+    lump(1, 0.2, 0.22, 0.45, 0, 0.66, 0, coat, 0.02, 11),
+    lump(1, 0.17, 0.2, 0.2, 0, 0.72, 0.3, coat, 0.02, 12),
+    lump(1, 0.05, 0.09, 0.05, 0, 0.82, -0.43, coat, 0, 13),
+  ];
+  for (const [x, z] of [[0.11, 0.3], [-0.11, 0.3], [0.11, -0.3], [-0.11, -0.3]]) parts.push(lump(1, 0.04, 0.27, 0.04, x, 0.27, z, hoof, 0, 14));
+  return mergeGeometries(parts.map((g) => g.toNonIndexed()), false)!;
+}
+
+/** A goat's head: long-faced, a beard under the chin, and horns sweeping back from the brow in a curve. */
+function goatHeadGeometry(): BufferGeometry {
+  const coat: [number, number, number] = [1, 1, 1], horn: [number, number, number] = [0.28, 0.25, 0.2], dark: [number, number, number] = [0.25, 0.22, 0.2];
+  const parts = [
+    lump(1, 0.08, 0.1, 0.1, 0, 0.02, 0.04, coat, 0, 15),
+    lump(1, 0.06, 0.075, 0.16, 0, -0.02, 0.2, coat, 0, 16),
+    lump(1, 0.025, 0.07, 0.025, 0, -0.1, 0.24, dark, 0, 17),
+  ];
+  // Each horn a run of shrinking lumps along a curve up and back.
+  for (const side of [-1, 1]) for (let k = 0; k < 6; k++) {
+    const t = k / 5, a = t * 1.9;
+    parts.push(lump(1, 0.026 * (1 - 0.6 * t), 0.026 * (1 - 0.6 * t), 0.05, side * (0.04 + 0.03 * t), 0.09 + Math.sin(a) * 0.16, 0.06 - (1 - Math.cos(a)) * 0.16, horn, 0, 18 + k));
+  }
   return mergeGeometries(parts.map((g) => g.toNonIndexed()), false)!;
 }

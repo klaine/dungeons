@@ -148,6 +148,10 @@ export interface SceneDescription {
   far?: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number] };
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
+  /** What kind of birds wheel at `birds`: gulls off sea cliffs, rooks over woods, choughs off a mountain's precipices. */
+  birdKind?: 'gull' | 'rook' | 'chough';
+  /** What grazes at `flocks`: sheep, or on a mountain top wild goats. */
+  flockKind?: 'sheep' | 'goat';
   /** Where sheep graze: about a point, within so many metres of it, so many of them. */
   flocks?: { x: number; z: number; r: number; count: number }[];
   /** The sea of cloud, if the place is a mountain top: the level of its top, and how high its billows stand above and below that. Drawn with the air. */

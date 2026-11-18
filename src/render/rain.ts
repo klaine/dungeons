@@ -1,11 +1,11 @@
-import { BufferAttribute, BufferGeometry, LineSegments, Vector3 } from 'three';
-import { LineBasicNodeMaterial } from 'three/webgpu';
+import { BufferAttribute, BufferGeometry, Camera, DoubleSide, LineSegments, Mesh, Vector3 } from 'three';
+import { LineBasicNodeMaterial, MeshBasicNodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { Rng } from '../core/rng';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, attribute, float, fract, positionLocal, select, uniform, vec3, vec4 } = TSL as N;
+const { Fn, attribute, cos, float, fract, length, positionLocal, select, sin, smoothstep, uniform, vec3, vec4 } = TSL as N;
 
 /**
  * Rain: streaks falling about whoever is looking, in a box of air some thirty metres across that goes with them, each drop at a
@@ -72,3 +72,73 @@ export class Rain {
     this.uLight.value = light;
   }
 }
+
+/**
+ * Snow falling, for when it is cold enough that what falls is snow: flakes drifting down slowly about whoever is looking, in the
+ * same box of air that goes with them, each swaying on its way as it falls and turning a little, drawn as a small soft patch of
+ * white facing the eye. As the rain, worked out where it is drawn, and not under a roof.
+ */
+export class Snowfall {
+  readonly mesh: Mesh;
+  private readonly uTime: N = uniform(0);
+  private readonly uEye: N = uniform(new Vector3());
+  private readonly uAmount: N = uniform(0);
+  private readonly uLight: N = uniform(1);
+  private readonly uRight: N = uniform(new Vector3(1, 0, 0));
+  private readonly uUp: N = uniform(new Vector3(0, 1, 0));
+  private shown = 0;
+
+  constructor(seed: string) {
+    const rng = new Rng(`snow/${seed}`), count = 7000, BOX = 26, HIGH = 16;
+    const where = new Float32Array(count * 4 * 3), flake = new Float32Array(count * 4 * 4), corner = new Float32Array(count * 4 * 2), index: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const x = rng.range(0, BOX), z = rng.range(0, BOX), start = rng.next(), speed = rng.range(0.7, 1.5), share = rng.next(), size = rng.range(0.012, 0.03);
+      const sway = rng.range(0, Math.PI * 2);
+      for (let c = 0; c < 4; c++) {
+        where.set([x, start, z], (i * 4 + c) * 3);
+        flake.set([speed, size, share, sway], (i * 4 + c) * 4);
+        corner.set([c & 1 ? 1 : -1, c & 2 ? 1 : -1], (i * 4 + c) * 2);
+      }
+      index.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4 + 1, i * 4 + 3, i * 4 + 2);
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute('position', new BufferAttribute(where, 3));
+    geometry.setAttribute('aFlake', new BufferAttribute(flake, 4));
+    geometry.setAttribute('aCorner', new BufferAttribute(corner, 2));
+    geometry.setIndex(index);
+    const material = new MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: DoubleSide });
+    const t = this.uTime, eye = this.uEye, amount = this.uAmount, right = this.uRight, up = this.uUp;
+    material.positionNode = Fn(() => {
+      const p: N = positionLocal, f: N = attribute('aFlake', 'vec4'), c: N = attribute('aCorner', 'vec2');
+      const fallen: N = fract(p.y.add(t.mul(f.x).div(HIGH)));
+      // (Swaying as it falls, this way and that, a stride or so across.)
+      const swayX: N = sin(t.mul(0.9).add(f.w)).mul(0.6), swayZ: N = cos(t.mul(0.7).add(f.w.mul(1.7))).mul(0.6);
+      const y: N = eye.y.add(HIGH * 0.55).sub(fallen.mul(HIGH));
+      const x: N = fract(p.x.add(swayX).sub(eye.x).div(BOX)).mul(BOX).add(eye.x).sub(BOX / 2);
+      const z: N = fract(p.z.add(swayZ).sub(eye.z).div(BOX)).mul(BOX).add(eye.z).sub(BOX / 2);
+      const gone: N = select(f.z.greaterThan(amount), float(-1000), float(0));
+      return vec3(x, y.add(gone), z).add(right.mul(c.x.mul(f.y))).add(up.mul(c.y.mul(f.y)));
+    })();
+    material.colorNode = Fn(() => {
+      const c: N = attribute('aCorner', 'vec2');
+      return vec4(vec3(0.95, 0.96, 1).mul(this.uLight), float(0.85).mul(smoothstep(1, 0.2, length(c))));
+    })();
+    this.mesh = new Mesh(geometry, material);
+    this.mesh.frustumCulled = false;
+    this.mesh.name = 'snowfall';
+    this.mesh.renderOrder = 2;
+    this.mesh.visible = false;
+  }
+
+  update(time: number, camera: Camera, amount: number, open: boolean, light: number, dt: number): void {
+    this.shown += ((open ? amount : 0) - this.shown) * Math.min(1, dt * 3);
+    this.mesh.visible = this.shown > 0.01;
+    this.uTime.value = time;
+    this.uEye.value.copy(camera.position);
+    this.uAmount.value = this.shown;
+    this.uLight.value = light;
+    // (Each flake faces the eye: the eye's own right and up, as the camera is turned.)
+    camera.matrixWorld.extractBasis(this.uRight.value, this.uUp.value, SCRATCH);
+  }
+}
+const SCRATCH = new Vector3();

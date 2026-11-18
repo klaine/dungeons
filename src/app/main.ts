@@ -29,7 +29,7 @@ import { Water } from '../render/water';
 import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
-import { Rain } from '../render/rain';
+import { Rain, Snowfall } from '../render/rain';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { inside as onMountain } from '../core/mountain';
@@ -393,7 +393,7 @@ async function start(): Promise<void> {
   if (sea) { scene.add(sea.mesh); scenic.push(sea.mesh); }
   // Gulls over the cliffs, white in the light of the hour.
   // (Over a mountain they are choughs, black against the cloud.)
-  const birds = desc.birds?.length ? new Birds(desc.birds, seed, desc.deck ? 0.04 : SUN_INTENSITY * 0.55 + 0.4) : null;
+  const birds = desc.birds?.length ? new Birds(desc.birds, seed, desc.deck ? 0.04 : SUN_INTENSITY * 0.55 + 0.4, desc.birdKind) : null;
   if (birds) scene.add(birds.mesh);
   // The lighthouse's beam turns once the sun is low enough for it to be lit.
   const lit = site?.setting.hour === 'night' ? 0.22 : site?.setting.hour === 'dusk' ? 0.1 : site?.setting.hour === 'sunset' ? 0.035 : 0;
@@ -442,8 +442,8 @@ async function start(): Promise<void> {
   merged.setIndex(new BufferAttribute(solidIndex, 1));
   const bvh = new MeshBVH(merged);
   // Sheep, where the place has pasture for them: stood on what the body walks on, and kept out of the house, the water and the sea.
-  const rainFall = new Rain(seed);
-  scene.add(rainFall.mesh);
+  const rainFall = new Rain(seed), snowFall = new Snowfall(seed);
+  scene.add(rainFall.mesh, snowFall.mesh);
   const flocks = desc.flocks?.length ? (() => {
     const down = new Vector3(0, -1, 0), from = new Vector3(), ray = new Ray(from, down);
     const groundAtFlock = (x: number, z: number): number => { from.set(x, 400, z); const hit = bvh.raycastFirst(ray, DoubleSide); return hit ? hit.point.y : -1000; };
@@ -453,7 +453,7 @@ async function start(): Promise<void> {
       if ((desc.water ?? []).some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 1.5)) return false;
       return !desc.sea || groundAtFlock(x, z) > desc.sea.level + 0.8;
     };
-    const made = new Flocks(desc.flocks, seed, groundAtFlock, free);
+    const made = new Flocks(desc.flocks, seed, groundAtFlock, free, desc.flockKind);
     scene.add(made.group);
     return made;
   })() : null;
@@ -603,7 +603,7 @@ async function start(): Promise<void> {
    */
   // Rain, 0 to 1: from the address (`?rain=`), or the weather menu.
   let raining = Math.min(1, Math.max(0, Number(params.get('rain') ?? 0) || 0));
-  weatherUniforms.uWet.value = raining;
+  weatherUniforms.uWet.value = snowUniforms.uSnow.value > 0.5 ? 0 : raining;
   const applyWeather = (w0: { cloud: number; layered: boolean; mist: number; haze: number; rain?: number }) => {
     // (Rain comes out of heavy cloud, low and in banks; the air is thick with it; and the sun is behind it.)
     const r = w0.rain ?? raining;
@@ -739,7 +739,7 @@ async function start(): Promise<void> {
     // (A row for rain, made here, before the note at the foot of the menu.)
     if (!document.getElementById('wRain')) {
       const label = document.createElement('label'), input = document.createElement('input'), out = document.createElement('output');
-      label.htmlFor = 'wRain'; label.textContent = 'Rain';
+      label.htmlFor = 'wRain'; label.textContent = snowUniforms.uSnow.value > 0.5 ? 'Snow' : 'Rain';
       Object.assign(input, { id: 'wRain', type: 'range', min: '0', max: '1', step: '0.01' });
       out.htmlFor.add('wRain');
       const note = panel.querySelector('.note');
@@ -1023,10 +1023,13 @@ async function start(): Promise<void> {
     {
       // The rain, where the sky is overhead; and everything under the sky soaks slowly while it falls and dries more slowly after.
       const here = site ? placeAt(site, player.position.x, player.position.z, player.position.y) : undefined;
-      rainFall.update(time, camera.position, raining, !site || !here || here.roof === 'sky', SUN_INTENSITY * 0.22, dt);
-      const wet = weatherUniforms.uWet;
-      wet.value += (raining - wet.value) * Math.min(1, dt * (raining > wet.value ? 0.12 : 0.02));
-      sound.rain = raining;
+      // (Where it is cold enough for snow on the ground, what falls is snow: silent, and it wets nothing.)
+      const snowing = snowUniforms.uSnow.value > 0.5, open = !site || !here || here.roof === 'sky';
+      rainFall.update(time, camera.position, snowing ? 0 : raining, open, SUN_INTENSITY * 0.22, dt);
+      snowFall.update(time, camera, snowing ? raining : 0, open, SUN_INTENSITY * 0.3, dt);
+      const wet = weatherUniforms.uWet, soak = snowing ? 0 : raining;
+      wet.value += (soak - wet.value) * Math.min(1, dt * (soak > wet.value ? 0.12 : 0.02));
+      sound.rain = snowing ? 0 : raining;
     }
     beacon?.update(time);
 

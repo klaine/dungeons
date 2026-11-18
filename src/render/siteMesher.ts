@@ -64,6 +64,8 @@ export function meshSite(site: Site): SceneDescription {
   const sky = SKIES[site.setting.hour];
   // Where sheep graze, if anywhere: worked out with the planting of each kind of place.
   let flockSpots: { x: number; z: number; r: number; count: number }[] | undefined;
+  // And rooks over a valley's woods, if it has any.
+  let rookSpots: { x: number; y: number; z: number }[] | undefined;
 
   // ------------------------------------------------------------------ helpers
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
@@ -2626,6 +2628,16 @@ export function meshSite(site: Site): SceneDescription {
       flockSpots = out;
       planting.crop(out);
     }
+    // Rooks: a rookery in the wood, its birds wheeling and cawing over the tops of the trees, now here, now there.
+    {
+      const q = rng.fork('rooks'), out: { x: number; y: number; z: number }[] = [];
+      for (let tries = 0; tries < 300 && out.length < 2; tries++) {
+        const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1);
+        if (!inGrounds(x, z, 0) || shadeAt(x, z) < 0.5 || inHouse(x, z, 10) || out.some((b) => Math.hypot(b.x - x, b.z - z) < 80)) continue;
+        out.push({ x, y: ground(x, z) + q.range(24, 34), z });
+      }
+      if (out.length) rookSpots = out;
+    }
     // Nettles and docks: rank green growth on the enriched ground about a ruin.
     for (const f of ruins) {
       for (let k = 0; k < 70; k++) {
@@ -3407,6 +3419,7 @@ export function meshSite(site: Site): SceneDescription {
     hallTorches.push(...made.torches);
     rockSharp = made.sharp;
     birdSpots = made.birds;
+    flockSpots = made.flocks;
     smokes.push(...made.smokes);
     scenery.cards.push(...planting.sets);
   };
@@ -4053,7 +4066,9 @@ export function meshSite(site: Site): SceneDescription {
     sea: islandSea,
     ...(rockSharp !== undefined ? { rockSharp } : {}),
     ...(cloudDeck ? { deck: cloudDeck, snow: site.setting.season === 'winter' ? 1 : 0.24, snowLine: [approach.floor + 22, site.setting.season === 'winter' ? 0 : 0.4] as [number, number] } : {}),
-    birds: birdSpots,
+    flockKind: site.mountain ? 'goat' : 'sheep',
+    birds: birdSpots ?? rookSpots,
+    birdKind: birdSpots ? (site.mountain ? 'chough' : 'gull') : 'rook',
     flocks: flockSpots,
     beacon,
     finds,

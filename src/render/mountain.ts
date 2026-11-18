@@ -56,6 +56,8 @@ export interface MountainResult {
   deck: NonNullable<import('./scene').SceneDescription['deck']>;
   /** Where birds wheel: off the precipices, below the rim, and about the summit. */
   birds: { x: number; y: number; z: number }[];
+  /** Where wild goats graze, on the top. */
+  flocks: { x: number; z: number; r: number; count: number }[];
   /** Where smoke rises: from the fire in the shelter. */
   smokes: { x: number; y: number; z: number; height: number }[];
   planted: Record<string, number>;
@@ -1309,6 +1311,17 @@ export function buildMountain(b: MountainBuild): MountainResult {
       })(),
     },
     // Choughs: off the precipices on four sides, a little under the rim, so that they are looked down on; and about the summit.
+    // Wild goats: a band of them on the top, well in from the rim, away from the house and the way up. (Nothing lived on the top.)
+    flocks: (() => {
+      const q = rng.fork('goats'), out: { x: number; z: number; r: number; count: number }[] = [];
+      for (let tries = 0; tries < 200 && out.length < 1; tries++) {
+        const a = q.range(0, Math.PI * 2), d = q.range(0.2, 0.7) * rimAt(m, a), x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
+        if (inside(m, x, z) < 25 || (x > m.level.x0 - 20 && x < m.level.x1 + 20 && z > m.level.z0 - 20 && z < m.level.z1 + 20)) continue;
+        if (m.way && nearestOn(m.way, x, z, 30).off < 14) continue;
+        out.push({ x, z, r: q.range(12, 20), count: q.int(3, 6) });
+      }
+      return out;
+    })(),
     birds: [
       ...[0.4, 1.9, 3.5, 5.1].map((a) => { const r = m.rim[Math.floor((a / (Math.PI * 2)) * m.rim.length) % m.rim.length] + 22; return { x: m.x + Math.cos(a + s1) * r, y: F - 12, z: m.z + Math.sin(a + s1) * r }; }),
       ...(m.cairn ? [{ x: m.cairn.x + 14, y: m.cairn.y + 6, z: m.cairn.z - 10 }] : []),

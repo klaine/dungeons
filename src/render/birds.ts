@@ -20,7 +20,11 @@ export class Birds {
   private readonly uTime: N = uniform(0);
 
   /** `spots` are where flocks wheel: points off the cliffs at about the height of their tops. */
-  constructor(spots: { x: number; y: number; z: number }[], seed: string, light: number) {
+  /**
+   * `kind`: gulls, white with black wing tips, wheeling wide off sea cliffs; rooks, black, over a valley's woods, in smaller loops
+   * and beating their wings more; choughs, black, tumbling off the precipices of a mountain top.
+   */
+  constructor(spots: { x: number; y: number; z: number }[], seed: string, light: number, kind: 'gull' | 'rook' | 'chough' = 'gull') {
     const rng = new Rng(`birds/${seed}`);
     const position: number[] = [], centre: number[] = [], orbit: number[] = [], wing: number[] = [], index: number[] = [];
     // One bird: in its own measures, x across the wings, z along the body (forward is +z), y up.
@@ -38,10 +42,10 @@ export class Birds {
       const flock = rng.int(3, 8);
       for (let k = 0; k < flock; k++) {
         const base = position.length / 3, size = rng.range(0.85, 1.25);
-        const along = rng.range(18, 60), across = along * rng.range(0.35, 0.8), speed = rng.range(5, 8.5) / along, phase = rng.range(0, Math.PI * 2), turn = rng.range(0, Math.PI * 2);
+        const small = kind === 'gull' ? 1 : 0.6, along = rng.range(18, 60) * small, across = along * rng.range(0.35, 0.8), speed = rng.range(5, 8.5) / along, phase = rng.range(0, Math.PI * 2), turn = rng.range(0, Math.PI * 2);
         const cx = spot.x + rng.range(-12, 12), cy = spot.y + rng.range(-6, 14), cz = spot.z + rng.range(-12, 12);
         // (Drawn once for the bird, not for each of its corners, or its corners would fly apart.)
-        const way = rng.chance(0.5) ? 1 : -1, own = rng.range(0, 100), beat = rng.range(2, 6);
+        const way = rng.chance(0.5) ? 1 : -1, own = rng.range(0, 100), beat = rng.range(2, 6) * (kind === 'gull' ? 1 : 1.6);
         for (const [x, y, z, w] of shape) {
           position.push(x * size, y * size, z * size);
           centre.push(cx, cy, cz);
@@ -74,7 +78,7 @@ export class Birds {
       // It rises and falls a little on the wind, and banks into the turn.
       const lift = sin(a.mul(2).add(w.z)).mul(2.5);
       // Mostly gliding with the wings bent a little down at the tips; now and then a few beats.
-      const beating = smoothstep(0.6, 0.85, sin(t.mul(0.35).add(w.z)));
+      const beating = smoothstep(kind === 'gull' ? 0.6 : 0.1, kind === 'gull' ? 0.85 : 0.4, sin(t.mul(0.35).add(w.z)));
       const flap: N = mix(float(-0.12), sin(t.mul(w.w.add(5)).add(w.z)).mul(0.5), beating).mul(abs(w.x));
       const p: N = positionLocal.add(vec3(0, flap, 0)).toVar();
       const bank: N = float(0.35).mul(o.z.sign());
@@ -87,7 +91,8 @@ export class Birds {
     material.colorNode = Fn(() => {
       const w: N = attribute('aWing', 'vec4');
       const tip = smoothstep(0.75, 0.95, abs(w.x));
-      return vec4(mix(vec3(0.8, 0.8, 0.78), vec3(0.06, 0.06, 0.07), tip).mul(light), 1);
+      // (Rooks and choughs are black all over.)
+      return vec4((kind === 'gull' ? mix(vec3(0.8, 0.8, 0.78), vec3(0.06, 0.06, 0.07), tip) : vec3(0.035, 0.035, 0.04)).mul(light), 1);
     })();
     this.mesh = new Mesh(geometry, material);
     this.mesh.frustumCulled = false;
