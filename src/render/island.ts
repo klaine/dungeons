@@ -396,7 +396,10 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const c = turfColour(x, z, s1), edge = 1 - smooth((inland(o, x, z) - 2) / 10), shelter = smooth((o.combe - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 30);
     // (Burnt yellow-grey at the edge; a deeper green in the hollow; brown under heather.)
     const heath = heathAt(x, z) * 0.7;
-    return [c[0] * (1 + 0.18 * edge) * (1 - 0.06 * shelter) * (1 - 0.15 * heath), c[1] * (1 - 0.08 * edge + 0.06 * shelter) * (1 - 0.42 * heath), c[2] * (1 - 0.25 * edge) * (1 - 0.3 * heath)];
+    // (And in broad patches, tens of metres across, rough grazing: moor grass and rush, olive and brown, between the sweeter green
+    // where the sheep keep it short. Without them the whole island from above was one even green, like a lawn.)
+    const rough = smooth((fbm2(x * 0.016 + s1 * 0.7, z * 0.016 - s2 * 0.4, 3) - 0.47) / 0.12) * 0.95 * (1 - shelter * 0.5);
+    return [c[0] * (1 + 0.18 * edge) * (1 - 0.06 * shelter) * (1 - 0.15 * heath) * (1 - 0.04 * rough), c[1] * (1 - 0.08 * edge + 0.06 * shelter) * (1 - 0.42 * heath) * (1 - 0.3 * rough), c[2] * (1 - 0.25 * edge) * (1 - 0.3 * heath) * (1 - 0.6 * rough)];
   };
   const earth = (x: number, z: number): Colour => {
     const t = 0.62 + 0.5 * fbm2(x * 0.5 + s2, z * 0.5 + s1, 3);
