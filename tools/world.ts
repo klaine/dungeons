@@ -108,7 +108,7 @@ for (const seed of seeds) {
   const stages = Object.entries(w.timing).filter(([k]) => !/ \d/.test(k)).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}`).join(', ');
   const tiles = Object.entries(w.timing).filter(([k]) => / \d/.test(k)), tileTime = tiles.reduce((s, [, v]) => s + v, 0);
   console.log(`${seed}: built in ${((t1 - t0) / 1000).toFixed(1)} s (${stages}; ${tiles.length} tiles ${(tileTime / 1000).toFixed(1)} s)`);
-  console.log(`  ${2 * w.plan.hx / 1000} by ${2 * w.plan.hz / 1000} km; land ${lo.toFixed(0)} to ${hi.toFixed(0)} m; inland ${((w.plan.inland * 180) / Math.PI).toFixed(0)}°, plains ${(w.plan.plains / 1000).toFixed(1)} km, upland ${(w.plan.upland / 1000).toFixed(1)} km, ${w.plan.peaks.length} great peaks`);
+  console.log(`  ${2 * w.plan.hx / 1000} by ${2 * w.plan.hz / 1000} km; land ${lo.toFixed(0)} to ${hi.toFixed(0)} m; inland ${((w.plan.inland * 180) / Math.PI).toFixed(0)}°, plains ${(w.plan.plains / 1000).toFixed(1)} km, upland ${(w.plan.upland / 1000).toFixed(1)} km, great peaks ${w.peaks.map((q) => Math.round(q.y)).join(", ")} m`);
   console.log(`  ${covers}`);
   console.log(`  found: ${count('island')} islands, ${count('valley')} valley heads, ${count('mountain')} mountain tops; ${w.towns.length} towns (${w.towns.filter((t) => t.kind !== 'village').length} not villages); ${w.rivers.length} rivers; ways ${['road', 'track', 'path', 'ferry'].map((k) => `${w.ways.filter((q) => q.kind === k).length} ${k}`).join(', ')}`);
   for (const [k, why] of Object.entries(w.why)) console.log(`  ${k} turned down: ${Object.entries(why).map(([a, b]) => `${a} ${b}`).join(', ') || 'none'}`);

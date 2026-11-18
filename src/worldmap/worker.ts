@@ -11,7 +11,7 @@ self.onmessage = (e: MessageEvent<{ seed: string; size?: { x: number; z: number 
     if (!s.done) { self.postMessage({ type: 'progress', text: s.value }); continue; }
     const w = s.value, f = w.field;
     const data = {
-      plan: w.plan, name: w.name, regions: w.regions, peakNames: w.peakNames,
+      plan: w.plan, name: w.name, regions: w.regions, peakNames: w.peakNames, peaks: w.peaks,
       field: { x0: f.x0, z0: f.z0, cell: f.cell, nx: f.nx, nz: f.nz, data: f.data },
       sea: w.sea, lake: w.lake, cover: w.cover, rivers: w.rivers, places: w.places, towns: w.towns, ways: w.ways, timing: w.timing,
     };

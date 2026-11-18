@@ -364,3 +364,125 @@ export function smoothLine(line: [number, number][], times = 3): [number, number
   }
   return pts;
 }
+
+/** How land is lifted and worn by rivers (`liftAndErode`). */
+export interface LiftAndErode {
+  /** How many steps, and how many years each is. */
+  steps: number;
+  dt: number;
+  /** How readily ground wears where water runs over it, and how much the ground draining through a point counts (the stream power law: wear = k · area^m · slope). */
+  k: number;
+  m: number;
+  /** How fast slopes creep down, square metres a year: rounds the ground between the rivers. */
+  creep: number;
+  /** How much ground must drain through a point, square metres, before a river wears it: above that, a hillside, which only creeps. */
+  channel: number;
+}
+
+/**
+ * Land made as land is made: lifted, at a rate given for each point (`uplift`, metres a year), and
+ * worn by the river through each point in proportion to the ground draining through it and the fall
+ * to the next point down (the stream power law), step after step until the two come near to balance;
+ * with the slopes creeping down between. Rivers then branch as rivers do, ridges stand between them,
+ * and every valley drains to an outlet by its own making (`outlet`: points held at their height, the
+ * sea). Solved as Braun and Willett showed (2013), each point in turn from the outlets upward, so that
+ * a step may be long; hollows are filled on the way, as water fills them (Cordonnier and others, 2016,
+ * "Large Scale Terrain Generation from Tectonic Uplift and Fluvial Erosion", make land this way).
+ */
+export function liftAndErode(f: HeightField, uplift: Float32Array, outlet: Uint8Array, o: LiftAndErode): void {
+  const nx = f.nx, nz = f.nz, n = nx * nz, h = f.data, cell = f.cell;
+  const order = new Int32Array(n), rec = new Int32Array(n), len = new Float32Array(n), area = new Float32Array(n), filled = new Float32Array(n), seen = new Uint8Array(n);
+  const heap = new Int32Array(n), key = new Float32Array(n), tmp = new Float32Array(n);
+  const NB = [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
+  // (Creep is taken in as many small passes as keep it steady: a pass may move a point no more than a fifth of the way to its neighbours' mean.)
+  const creepAll = (o.creep * o.dt) / (cell * cell), passes = Math.ceil(creepAll / 0.2), creep = creepAll / Math.max(1, passes);
+  /** A number from 0 to 1 belonging to a point and a step: the same each time the land is made. */
+  const chance = (k: number, step: number) => { let x = Math.imul(k, 374761393) ^ Math.imul(step + 1, 668265263); x = Math.imul(x ^ (x >>> 13), 1274126177); return ((x ^ (x >>> 16)) >>> 0) / 4294967296; };
+  for (let step = 0; step < o.steps; step++) {
+    // Where each point's water goes: hollows filled from the outlets inward, lowest first, as in `drain`.
+    seen.fill(0);
+    let size = 0, popped = 0;
+    const push = (k: number, y: number) => {
+      let i = size++;
+      heap[i] = k; key[i] = y;
+      while (i > 0) { const pa = (i - 1) >> 1; if (key[pa] <= key[i]) break; const tk = heap[pa], ty = key[pa]; heap[pa] = heap[i]; key[pa] = key[i]; heap[i] = tk; key[i] = ty; i = pa; }
+    };
+    for (let k = 0; k < n; k++) if (outlet[k]) { seen[k] = 1; filled[k] = h[k]; push(k, h[k]); }
+    while (size) {
+      const k = heap[0];
+      size--;
+      if (size > 0) {
+        heap[0] = heap[size]; key[0] = key[size];
+        for (let i = 0; ;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < size && key[l] < key[m]) m = l;
+          if (r < size && key[r] < key[m]) m = r;
+          if (m === i) break;
+          const tk = heap[m], ty = key[m]; heap[m] = heap[i]; key[m] = key[i]; heap[i] = tk; key[i] = ty; i = m;
+        }
+      }
+      order[popped++] = k;
+      const i = k % nx, j = (k - i) / nx;
+      for (const [di, dj] of NB) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        const q = jj * nx + ii;
+        if (seen[q]) continue;
+        seen[q] = 1; filled[q] = Math.max(h[q], filled[k] + 1e-3); push(q, filled[q]);
+      }
+    }
+    // Each point's water goes to a neighbour downhill over the filled surface: chosen afresh each step, the steeper the likelier.
+    // (Always the steepest, water ran only along the lattice's eight ways, and ridges and valleys came out squared to them.)
+    for (let o2 = 0; o2 < popped; o2++) {
+      const k = order[o2];
+      rec[k] = -1;
+      if (outlet[k]) continue;
+      const i = k % nx, j = (k - i) / nx;
+      let total = 0;
+      for (const [di, dj] of NB) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        const q = jj * nx + ii, d = di && dj ? cell * Math.SQRT2 : cell, s = (filled[k] - filled[q]) / d;
+        if (s > 0) total += s;
+      }
+      let pick = chance(k, step) * total;
+      for (const [di, dj] of NB) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        const q = jj * nx + ii, d = di && dj ? cell * Math.SQRT2 : cell, s = (filled[k] - filled[q]) / d;
+        if (s <= 0) continue;
+        rec[k] = q; len[k] = d;
+        if ((pick -= s) <= 0) break;
+      }
+    }
+    // What drains through each point, from the top down.
+    area.fill(cell * cell);
+    for (let o2 = popped - 1; o2 >= 0; o2--) { const k = order[o2], r = rec[k]; if (r >= 0) area[r] += area[k]; }
+    // Lifted, and worn towards the height of where its water goes: from the outlets upward, so that each point's receiver is
+    // already where it will be at the end of the step.
+    for (let o2 = 0; o2 < popped; o2++) {
+      const k = order[o2], r = rec[k];
+      if (outlet[k]) continue;
+      h[k] += o.dt * uplift[k];
+      if (r < 0 || area[k] < o.channel) continue;
+      const F = (o.dt * o.k * Math.pow(area[k], o.m)) / len[k];
+      h[k] = (h[k] + F * h[r]) / (1 + F);
+    }
+    // Creep: each point drawn a little towards the mean of its neighbours.
+    // (At the lattice's edge, towards the neighbours it has: skipped there, the edge rose with the land and never crept, into a wall.)
+    for (let pass = 0; pass < passes && creep > 0; pass++) {
+      tmp.set(h);
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        if (outlet[k]) continue;
+        let sum = 0, count = 0;
+        if (i > 0) { sum += tmp[k - 1]; count++; }
+        if (i < nx - 1) { sum += tmp[k + 1]; count++; }
+        if (j > 0) { sum += tmp[k - nx]; count++; }
+        if (j < nz - 1) { sum += tmp[k + nx]; count++; }
+        h[k] = tmp[k] + creep * (sum - count * tmp[k]);
+      }
+    }
+  }
+}

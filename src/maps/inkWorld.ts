@@ -15,7 +15,7 @@ import { COVER, World, WorldPlace, zonesAt } from '../core/world';
  */
 
 /** What the map needs of a world: all of it but what was only needed to make it. */
-export type WorldMap = Pick<World, 'plan' | 'name' | 'regions' | 'peakNames' | 'field' | 'sea' | 'lake' | 'cover' | 'rivers' | 'places' | 'towns' | 'ways'>;
+export type WorldMap = Pick<World, 'plan' | 'name' | 'regions' | 'peakNames' | 'peaks' | 'field' | 'sea' | 'lake' | 'cover' | 'rivers' | 'places' | 'towns' | 'ways'>;
 
 const INK = '#1d1a17';
 const PAPER = '#f1eadb';
@@ -272,15 +272,13 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
   };
   const mark = (x: number, y: number, r: number) => boxes.push([x - r, y - r, x + r, y + r]);
 
-  // The great peaks: a small mark, the name and the height, where the land is highest under the plan's peak (that is where its summit came out).
+  // The great peaks: a small mark, the name and the height.
   ctx.fillStyle = INK;
-  const peaks = p.peaks.map((q) => {
-    let bx = q.x, bz = q.z, by = -Infinity;
-    for (let dz = -300; dz <= 300; dz += 16) for (let dx = -300; dx <= 300; dx += 16) { const y = f.at(q.x + dx, q.z + dz); if (y > by) { by = y; bx = q.x + dx; bz = q.z + dz; } }
-    const x = X(bx), y = Z(bz), r = 6 * u;
+  const peaks = w.peaks.map((q) => {
+    const x = X(q.x), y = Z(q.z), r = 6 * u;
     ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.85, y + r * 0.55); ctx.lineTo(x - r * 0.85, y + r * 0.55); ctx.closePath(); ctx.fill();
     mark(x, y, r);
-    return { x: bx, z: bz, y: by };
+    return q;
   });
   // Towns: huddles of buildings, and for the harbour a quay out into the water.
   for (const t of w.towns) {

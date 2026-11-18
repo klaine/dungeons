@@ -46,67 +46,64 @@ place asks for it.
   islands lie to the south and the hills to the north; where the coast lies (some 800 metres of open
   sea, then a shelf 1.7 to 2.3 kilometres broad); how broad the low country (0.6 to 1.8 kilometres)
   and the upland (2.4 to 3.2) are, the range taking the rest, some 3.2 (these for a world ten kilometres
-  deep; for another, in proportion); a great bay; how deep and how far inland its fjords are cut; and
-  one to three great peaks, the only thing planned rather than left to the noise (below).
-- **The zones.** Going inland: open sea; a shelf with islands on it; the coast; the low country;
-  the upland; the range. Every point belongs to each zone in a share (`zonesAt`), the shares adding
-  to one and blending over a few hundred metres where zones meet. The boundaries wander: the coast in
-  bays and headlands a kilometre or two across, the foot of the upland so far that in places it comes
-  down to the sea and the low country is gone.
-- **The great bay and the fjords.** The bay is drowned land, as a firth or a sea loch is: the land
-  sunk in a broad hollow some 1.5 to 2.5 kilometres across and reaching 1.8 to 3 inland, its middle
-  wandering, sunk evenly over most of its breadth (seventy metres at its mouth, where the low country
-  need go down only a little to be under the sea, and 180 towards its head, where the upland's floors
-  go under but not its hills), and dying away slowly at its sides and head, its edge worn into coves and
-  points at two sizes and its depth uneven. The sea comes in as far as the land lies under it, so the
-  bay's shore is where the land's own shape meets the sea: valleys drowned into inlets, the spurs
-  between them left as headlands, hills standing in it as peninsulas and islands. (It was first an
-  outline cut out of the land, with the shelf's islands in it: its shore was one smooth sweep that cut
-  through hill and valley alike, sides like walls, "very unnatural", as was said. Then a hollow too deep
-  and too steep at its edge still drew its own outline as the shore wherever the land was gentle.) Only
-  the land is sunk; the upland and the range stand where they would without it. Fjords are cut
-  wherever the coast is high ground: the upland's straths, which run inland, are carried on under the
-  sea between their walls for 0.9 to 1.8 kilometres, deepest at their mouths, their floors rounded;
-  where low country lies in front of one, its carved floor is cut off from the sea and holds a long loch
-  instead. They follow one family of the straths only: cut down both, they met where two straths cross
-  in planes fanning out from the crossing, which drew as a fan of flat wedges at the bay's head.
-- **The land**: each zone has a land of its own, and a point's height is each zone's land in the
-  share it belongs to that zone (`worldShape`). One sea level for all of it; heights in metres over
-  the sea.
+  deep; for another, in proportion); and where a great bay comes in. Nothing else is planned: no peak,
+  no island, no place.
+- **The zones.** Going inland: open sea; a shelf; the coast; the low country; the upland; the range.
+  Every point belongs to each zone in a share (`zonesAt`), the shares adding to one and blending over a
+  few hundred metres where zones meet. The boundaries wander: the coast in bays and headlands a kilometre
+  or two across, the foot of the upland so far that in places it comes down to the sea. The zones say
+  only how fast the ground rises there and how far the sea has come up over it.
+- **The land: lifted, and worn by its rivers** ("yes lets fix how the land is made"). The land is made
+  as land is made: on a lattice of 24 metres (251 points by 417), the ground is lifted, at a rate each
+  zone sets, and worn by the river through each point in proportion to the ground draining through it
+  and the fall to the next point down (the stream power law), over some seven million years in steps of
+  fifty thousand (`liftAndErode` in `terrain.ts`, solved as Braun and Willett showed, from the outlets
+  upward, so that a step may be long; Cordonnier and others made land this way in 2016). The rivers end
+  in the open sea beyond the shelf. Between them the slopes creep down. Each point's water goes to a
+  neighbour downhill chosen afresh each step, the steeper the likelier (always the steepest, the water ran
+  only along the lattice's eight ways and the ridges came out squared to them); a river wears only where
+  two and a half hectares or more drain through, and above that it is hillside, which only creeps (wearing
+  every point, the hillsides were cut into combs of gullies). Then every height is brought in proportion
+  so that the highest three points in a thousand stand at 650 metres.
 
-  | Zone | Its land | Heights |
+  | Zone | How fast it rises | What comes of it |
   |---|---|---|
-  | Open sea, shelf and bay | The archipelago's own land (as `archipelago.ts`), lowered to stand in the world's sea, sparser and deeper further out; and the planned islands | islands 20–80 m, sea floor to −170 |
-  | Low country | Long gentle swells rising from the shore to the foot of the upland | 0 to about 60 m |
-  | Upland | Straths a kilometre or so apart running inland, and between them the glens of the valleys' frame (`highlands.ts`), branching, coming down into the straths | floors 40–150 m, tops to 350 |
-  | Range | Great valleys running inland, crossing and joining; side valleys down into them; massifs and cols along the ridges; a mass under each great peak and each planned summit | floors 90–200 m, summits 400–600, great peaks 650–800 |
+  | Range | 0.6 to 1.6 millimetres a year, more in some stretches, so its mountains stand in massifs | branching valleys and sharp ridges; summits 550 to 730 m, the floors of its valleys 100 to 250 |
+  | Upland | about 0.3, uneven | fells cut by the range's rivers and their own; tops 250 to 400 |
+  | Low country | about 0.07 | gentle ground the rivers cross, 0 to 80 m |
+  | Shelf | 0.03, and up to 0.5 in patches | the patches rise into hills, which the sea leaves as islands of every size |
+  | The bay | an eighth as fast as about it | low ground running far inland for the sea to come into |
 
+  Then the sea comes up over it (`drownAt`): nothing inland of the coast, 35 metres over the shelf, more
+  beyond it, 30 more over the bay; so the shore is where the land's own shape meets the sea: valleys
+  drowned into inlets, spurs left as headlands, hills as islands. Then, on the world's lattice of 8 metres,
+  detail finer than the land at 24 holds, next to nothing on level ground (on a valley's floor, more of it
+  dammed the floor with sills into lakes one after another) and some metres on the steep; worn by water
+  drops and frost as before. What this took the place of: zones each with a land of noise, two families of
+  drawn valley lines, a bay sunk as a hollow, fjords cut down the lines, and planned peaks, islands and
+  summits. The great peaks are now found: a map names the three highest summits, each the highest ground
+  within a kilometre.
 - **Only found places.** Every place is found in the land as the land came out; none is planned
   ("no planned locations, only found! if only two locations are found for island or other type, then
-  be it"). For a while seven to nine islands and five summits were planned into the land, shaped to suit
-  the searches, since the land alone gave few that did; they were taken out. The great peaks are still
-  planned: they are landmarks of the land, not places, and no place is looked for on them.
-- **Worn**, on a lattice of 8 metres (751 points by 1,251), by the same water and frost as every other
-  land (`terrain.ts`), so that rivers cut real valleys. The shelf and the floor of the sea are spared
-  here (its islands are worn in the tiles; and what the rivers bring down would build sills across the
-  fjords), and nothing is built up more than six metres (with more, the rivers built fans at the bay's
-  head, all at the limit, flat). Its shape from before the wear is kept too: the tiles need it.
+  be it"; then "if the great peaks are planned, remove them").
+- **Worn** by water drops and frost on the lattice of 8 metres (751 points by 1,251), as every other land
+  is (`terrain.ts`), the floor of the sea spared, and nothing built up more than six metres. Its shape
+  from before the drops is kept too.
 - **Water.** The sea is whatever lies below its level joined to the world's edge. Then the water is
   followed: hollows are filled to where they would spill, each point drains to its steepest neighbour
-  downhill, and what drains through each point is counted (`drain`). A hollow deeper than fifteen
-  metres has an outlet cut from its lowest point out through where it would spill, as a river cuts a
-  gorge (`breach`); shallower ones are lakes. Rivers are drawn from where forty hectares drain through a
+  downhill, and what drains through each point is counted (`drain`). A hollow deeper than four metres
+  keeps its water as a loch; a shallower one has an outlet cut from its lowest point out through where
+  it would spill, as a river cuts through a low sill (`breach`). Rivers are drawn from where forty hectares drain through a
   point, down to the sea.
 - **Cover**: what lies at each point, from its height, its slope, how wet it is and its zone:
   sea, lake, shore, marsh, fields, pasture, forest, heath, rock or snow (`COVER`). Fields on gentle low
   ground; woods on slopes and in patches, thinning up the upland, whose higher ground is heath with the
   woods down in its glens; heath above the trees (the treeline wanders about 300 metres); rock where it
-  is steep or high; snow lying late only on the great peaks.
+  is steep or high; snow lying late only on the highest summits.
 - **Tiles**: a finer lattice, 5 metres (as the islands' and the valleys' own frames are), in tiles
   2.4 kilometres square on a fixed grid, a tile every two kilometres (three by five), each reaching 200
-  metres over its neighbours (`worldTile`). A tile is the world's fine shape (more octaves of each zone's noise)
-  with what the world's wear did laid on it, so the rivers keep their valleys; worn again at its own
-  scale; and drained. Because the grid is the world's, a tile's land is the same whichever place asks.
+  metres over its neighbours (`worldTile`). A tile is the world's land as worn, with detail laid on finer
+  than 8 metres holds (more on the steep); worn again at its own scale; and drained. Because the grid is the world's, a tile's land is the same whichever place asks.
 - **Places**, looked for where their kind of land is, four hundred metres in from the world's edge at
   least; each list best first, up to four of each kept, the search stopping when it has them, and
   however few it has when the land is searched through:
@@ -150,15 +147,18 @@ kilometre's scale; the frame barred every half kilometre. `?world=<seed>` names 
 ## Measured
 
 Without a browser, in a cloud container with four cores (`npx tsx tools/world.ts`), November 2026,
-six kilometres by ten: a world builds in 20 to 28 seconds: its shape 1.7 to 1.9, the wear by water and
-frost on the world's lattice about 10, following the water 1, the cover 0.5, and three to seven tiles
-for islands and valley heads 7 to 15 (each some two seconds, nearly all of it the wear). Six worlds
-tried (`w0` to `w5`), with only found places, gave four valley heads each, but islands 0, 2, 1, 0, 0 and 2,
-and mountain tops 2, 0, 2, 3, 2 and 0; eleven towns each and 19 to 27 rivers. The land too rarely makes
-an island of the size an island's house wants with a shoulder at its height (most of the shelf's islands
-are too small), and the range too rarely a summit standing alone with a ridge to come up by; and the
-places want a shape too exactly. Both are taken up below (*Where next*). (At eight kilometres square, before: 24 to 30 seconds; in the browser, headless, the
-world page made and drew one in 23 to 28.)
+six kilometres by ten, the land lifted and worn by its rivers: a world builds in 34 to 41 seconds: the
+lifting and wearing 7 to 9, the shape on the lattice of 8 metres 1, the wear by drops and frost on it
+about 10, following the water 1, the cover 0.5, and eight to ten tiles for islands and valley heads 15 to
+17. In the browser (headless) the world page made and drew `w3` in 35. Five worlds (`w0` to `w4`) gave
+four valley heads each and four mountain tops each (one gave two before the creep was mended), and
+islands 0, 0, 0, 1 and 0: the sea now leaves hills as islands of every size, but most of them a kilometre
+and more across, larger than the island's search will take (it wants 200 to 400 metres across and a
+shoulder at a set height), which is the next thing (*Where next*). The squares at a metre made from this
+land still meet their neighbours exactly (96 shared edges about `w0`'s places).
+
+Before, with the land drawn (zones of noise, drawn valley lines): 20 to 28 seconds; with only found
+places, valley heads four each, islands 0 to 2 and mountain tops 0 to 3.
 
 What the time goes on, nine tenths of it: the drops of water that wear the land, a million on the
 world's lattice and some quarter of a million on each tile. What could be done about it: keep a world
@@ -282,7 +282,7 @@ Asked: "do we need better noise/fractal/erosion algorithm for terrain? also we s
 locations maybe better to the landscapes generated somehow; the location layouts should be anyway
 adaptable".
 
-**The land.** What it is made of: value noise summed in octaves (plain, Quilez's eroded, and ridged),
+**The land.** *Done: it is now lifted and worn by its rivers, as described above.* What it was made of before: value noise summed in octaves (plain, Quilez's eroded, and ridged),
 its coordinates warped; worn by drops of water and by frost on each lattice; the great valleys and the
 straths drawn as two families of wandering lines running inland, the bay a sunk hollow, the fjords cut
 down the straths, and hollows breached where they would not drain. What shows of its limits: the
