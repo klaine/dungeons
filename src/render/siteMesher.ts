@@ -101,8 +101,12 @@ export function meshSite(site: Site): SceneDescription {
   };
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
+  // (The front of a house that stands free is the forecourt's wall, and is built with it: the windows of the rooms behind it are cut
+  // through it too. Without them they were walled up from outside, and open from inside, where the wall's face cannot be seen.)
+  const frontWindows = (p: Place, side: Side): Way[] => p.role !== 'approach' || side !== 'n' ? []
+    : [...outerWindows.values()].flat().filter((w) => w.side === 's' && Math.abs(places[w.a].z1 + T - p.z0) < 0.05);
   const holesOn = (p: Place, side: Side, e: number): Hole[] =>
-    [...site.ways, ...(outerWindows.get(p.id) ?? [])].filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side)
+    [...[...site.ways, ...(outerWindows.get(p.id) ?? [])].filter((w) => w.kind !== 'stair' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === side), ...frontWindows(p, side)]
       .map((w) => ({ way: w, at: w.at, c: alongFrame(p, side, w.at, e), w: w.halfWidth, ...shape(w), ...(hiddenFrom(w, p) ? { band: 0.03 } : {}) }));
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
@@ -278,7 +282,9 @@ export function meshSite(site: Site): SceneDescription {
             for (let k = 1; k <= n; k++) ribs.push(a0 + (length * k) / (n + 1));
           }
           const stairs = [...stairsFrom(q), ...stairsInto(q)].filter((w) => w.side === side).map((w) => [Math.min(w.at, w.to ?? w.at) - 0.7, Math.max(w.at, w.to ?? w.at) + 0.7]);
-          const doors = site.ways.filter((w) => (w.a === q.id || w.b === q.id) && sideOf(w, q) === side && w.kind !== 'stair').map((w) => [w.at - w.halfWidth - 0.9, w.at + w.halfWidth + 0.9]);
+          // (The door to the forecourt has a bay standing forward round it, which a window must clear.)
+          const doors = site.ways.filter((w) => (w.a === q.id || w.b === q.id) && sideOf(w, q) === side && w.kind !== 'stair')
+            .map((w) => { const m = places[w.a === q.id ? w.b : w.a].role === 'approach' ? 2.3 : 0.9; return [w.at - w.halfWidth - m, w.at + w.halfWidth + m]; });
           for (let k = 0; k < count; k++) {
             const at = count === 1 ? (a + b) / 2 : a + ((b - a) * k) / (count - 1);
             // (Moved off a rib if it falls on one: to the middle of the bay beside it.)
