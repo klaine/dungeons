@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -204,6 +204,8 @@ async function start(): Promise<void> {
     // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
     thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
     lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
+    // Coloured glass in the sanctum's windows, glowing with the day through it (dim at dusk, nearly dark at night).
+    stained: makeStainedMaterial(),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -634,6 +636,8 @@ async function start(): Promise<void> {
     u.uCloudFlat.value = layered ? 1 : 0;
   };
   const night = desc.sun?.night ?? 0;
+  // (The sanctum's coloured glass glows with the day through it: dim at dusk, nearly dark at night.)
+  glassUniforms.uGlow.value = SUN_INTENSITY * 0.022 * (1 - 0.85 * night);
   {
     const u = atmosphere.uniforms;
     if (cloudSteps > 0) {

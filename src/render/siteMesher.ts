@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
+import { anyAngle } from './coast';
 import { Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
@@ -110,6 +111,59 @@ export function meshSite(site: Site): SceneDescription {
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
     if (p.roof === 'cave') return p.floor + p.wall + 1.3;
     return site.top;
+  };
+
+  /**
+   * The sanctum's altar dressed as the end of the way should be: a cloth of deep red over it, hanging down its front, with a band of
+   * gold at its foot; a candle at either end, in an iron pricket, burning; and between them a casket bound in gilt. And the sanctum's
+   * windows glazed in coloured glass, which the day comes through. (It was a bare stone chest and a torch: the end of the game.)
+   */
+  const dressAltar = (p: Place, f: Frame, u: number, half: number, near: number, deep: number, body: { min: Vector3; max: Vector3 }, lid: { min: Vector3; max: Vector3 }) => {
+    const { solid } = anyAngle((m) => kit.mesh(m));
+    const was = kit.group;
+    kit.group = `p${p.id}`;
+    const corners = (a: { min: Vector3; max: Vector3 }): [number, number, number][] => [
+      [a.min.x, a.min.y, a.min.z], [a.max.x, a.min.y, a.min.z], [a.max.x, a.min.y, a.max.z], [a.min.x, a.min.y, a.max.z],
+      [a.min.x, a.max.y, a.min.z], [a.max.x, a.max.y, a.min.z], [a.max.x, a.max.y, a.max.z], [a.min.x, a.max.y, a.max.z]];
+    const top = lid.max.y, red: [number, number, number] = [0.32, 0.035, 0.04], gold: [number, number, number] = [0.62, 0.45, 0.12];
+    // The cloth: over the lid, and down the front of the chest to a hand above the floor; its band of gold along the foot.
+    solid('plaster', corners(wallBox(f, u - half + 0.12, u + half - 0.12, top, top + 0.012, -(near + 0.05), -(near + deep + 0.115))), red);
+    solid('plaster', corners(wallBox(f, u - half + 0.12, u + half - 0.12, body.min.y + 0.16, top + 0.012, -(near + deep + 0.1), -(near + deep + 0.118))), red);
+    solid('metal', corners(wallBox(f, u - half + 0.12, u + half - 0.12, body.min.y + 0.12, body.min.y + 0.22, -(near + deep + 0.1), -(near + deep + 0.122))), gold);
+    // The candles: an iron pricket, a pale candle on it, and its flame.
+    for (const end of [-1, 1]) {
+      const a = u + end * (half - 0.08), mid = -(near + deep / 2), base = wallBox(f, a - 0.07, a + 0.07, top, top + 0.03, mid + 0.07, mid - 0.07);
+      solid('metal', corners(base), [0.05, 0.045, 0.04]);
+      solid('metal', corners(wallBox(f, a - 0.015, a + 0.015, top + 0.03, top + 0.34, mid + 0.015, mid - 0.015)), [0.05, 0.045, 0.04]);
+      solid('metal', corners(wallBox(f, a - 0.06, a + 0.06, top + 0.34, top + 0.36, mid + 0.06, mid - 0.06)), [0.05, 0.045, 0.04]);
+      solid('plaster', corners(wallBox(f, a - 0.025, a + 0.025, top + 0.36, top + 0.6, mid + 0.025, mid - 0.025)), [0.92, 0.88, 0.76]);
+      const flame = wallBox(f, a - 0.012, a + 0.012, top + 0.61, top + 0.68, mid + 0.012, mid - 0.012);
+      solid('lamp', corners(flame), [1, 0.85, 0.5]);
+    }
+    // The casket: a little chest of dark wood bound with gilt straps, on the cloth between the candles.
+    const mid = -(near + deep / 2);
+    solid('wood', corners(wallBox(f, u - 0.22, u + 0.22, top + 0.012, top + 0.2, mid + 0.14, mid - 0.14)), [0.18, 0.1, 0.06]);
+    solid('wood', corners(wallBox(f, u - 0.23, u + 0.23, top + 0.2, top + 0.26, mid + 0.15, mid - 0.15)), [0.2, 0.11, 0.06]);
+    for (const k of [-0.13, 0.13]) solid('metal', corners(wallBox(f, u + k - 0.02, u + k + 0.02, top + 0.012, top + 0.265, mid + 0.155, mid - 0.155)), gold);
+    // The windows glazed: each a lattice of coloured panes, deep blue and red with gold and green among them, the leading dark between.
+    const glass = rng.fork(`glass${p.id}`), hues: [number, number, number][] = [[0.08, 0.18, 0.75], [0.7, 0.06, 0.06], [0.85, 0.62, 0.1], [0.08, 0.45, 0.18], [0.35, 0.1, 0.55]];
+    for (const w of outerWindows.get(p.id) ?? []) {
+      const q = places[p.id], wf = frameOf(q, w.side, 0.1), c = alongFrame(q, w.side, w.at, 0.1), { y0, ys } = shape(w);
+      const cols = Math.max(2, Math.round((w.halfWidth * 2) / 0.16)), rows = Math.max(4, Math.round((ys - y0) / 0.16)), cw = (w.halfWidth * 2) / cols, ch = (ys - y0) / rows;
+      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        // (A pattern, not noise: bands of colour across the window, the middle column picked out, a border of gold.)
+        // (A slit only two panes across has no border: blue and red in bands up it, with a gold or a green one here and there.)
+        const wide = cols >= 4, edge = wide && (i === 0 || i === cols - 1 || j === 0), centre = wide && Math.abs(i - (cols - 1) / 2) < 0.6;
+        const odd = glass.int(0, 6);
+        const hue = edge ? hues[2] : centre ? hues[(Math.floor(j / 2) % 2) + 0] : odd === 0 ? hues[3] : odd === 1 ? hues[2] : hues[(Math.floor(j / 3) + i) % 2 === 0 ? 0 : 1];
+        const t = glass.range(0.8, 1.15);
+        const pane = wallBox(wf, c - w.halfWidth + i * cw + 0.008, c - w.halfWidth + (i + 1) * cw - 0.008, y0 + j * ch + 0.008, y0 + (j + 1) * ch - 0.008, T * 0.5 - 0.01, T * 0.5 + 0.01);
+        solid('stained', corners(pane), [hue[0] * t, hue[1] * t, hue[2] * t]);
+      }
+      // The leading behind the panes: one dark sheet, so the joints between them read as lead.
+      solid('metal', corners(wallBox(wf, c - w.halfWidth, c + w.halfWidth, y0, ys, T * 0.5 + 0.012, T * 0.5 + 0.02)), [0.03, 0.03, 0.03]);
+    }
+    kit.group = was;
   };
 
   /** A box given in a wall's own terms: along it, up, and through it away from the place. */
@@ -3723,6 +3777,7 @@ export function meshSite(site: Site): SceneDescription {
       const lid = wallBox(f, u - half - 0.1, u + half + 0.1, body.max.y, body.max.y + 0.17, -(near - 0.1), -(near + deep + 0.1));
       kit.box('stone', lid.min, lid.max, { ...coping, length: [1.1, 1.3], course: [0.17, 0.17] }, { ...coping, length: [2.4, 2.4], course: [1.2, 1.2] }, 'lid');
       anchors.set(p.id, V((lid.min.x + lid.max.x) / 2, lid.max.y, (lid.min.z + lid.max.z) / 2));
+      if (big) dressAltar(p, f, u, half, near, deep, body, lid);
     } else if (site.items.some((it) => it.place === p.id)) {
       // Something is kept here and there is no chest: a pedestal in the middle of the floor.
       kit.box('stone', V(cx - 0.3, p.floor - 0.4, cz - 0.3), V(cx + 0.3, p.floor + 0.14, cz + 0.3), coping, coping, 'base');

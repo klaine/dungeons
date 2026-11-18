@@ -406,6 +406,18 @@ export function makeCreatureMaterial(): MeshStandardNodeMaterial {
   return m;
 }
 
+/**
+ * Coloured glass in a window, seen from within: lit by the day that comes through it, so its colours glow whatever falls on its
+ * inner face; dull from without, as glass with the light behind the eye is. `uGlow` is how bright the day is through it.
+ */
+export const glassUniforms: { uGlow: { value: number } } = { uGlow: uniform(1) as N };
+export function makeStainedMaterial(): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.25, metalness: 0, vertexColors: true, color: new Color(1, 1, 1) });
+  m.colorNode = vertexColor().mul(0.12);
+  m.emissiveNode = vertexColor().mul(glassUniforms.uGlow as N);
+  return m;
+}
+
 export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({
     color: o.color, roughness: o.roughness, metalness: o.metalness,
