@@ -472,6 +472,12 @@ export interface Island {
    * across, its top at the level `top`, and under it the sea cut through in an opening whose crown stands `under` metres over the sea.
    */
   arch?: { from: [number, number]; to: [number, number]; width: number; top: number; under: number };
+  /**
+   * Streams, on an island that was found: where its land drains to the sea, from a spring to the coast. `course` is the line of
+   * the bed as points `[x, z, y]`, falling all the way; `width` how broad the water is; `fall`, if present, how far it drops from
+   * the cliff top to the sea where it goes over.
+   */
+  streams?: { course: [number, number, number][]; width: number; fall?: number }[];
   /** A cave in the cliff of the cove, entered dry-shod from the end of its beach at `x`, `z`, running in towards `heading` for `length` metres. */
   seaCave?: { x: number; z: number; heading: number; length: number };
   /** The mainland, seen across the water: its nearest shore lies `distance` metres off at the bearing `bearing` (radians), and it spans `spread` radians either way. `height` scales its hills and mountains: low green country at 0.3, a snowy range at 1. */

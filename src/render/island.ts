@@ -57,6 +57,9 @@ export interface IslandResult {
   birds: { x: number; y: number; z: number }[];
   /** The lighthouse's lamp, where its beam turns. */
   lamp?: { x: number; y: number; z: number };
+  /** Running water, and where it falls, for the water's drawing: as `SceneDescription.streams` and `falls`. */
+  streams: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
+  falls: { x: number; y: number; z: number; height: number; width: number }[];
 }
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
@@ -69,7 +72,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
   const s1 = rng.range(0, 60), s2 = rng.range(0, 60);
   const plain = (x: number, z: number) => landAt(o, F, x, z);
   const rockKind = ROCK[site.setting.stone];
-  const strata = new Strata(rockKind, rng.fork('strata'), sea);
+  // (The island's cliffs show hundreds of metres of face: its beds are folded, and broken by faults, so they do not read as one pattern.)
+  const strata = new Strata(rockKind, rng.fork('strata'), sea, { fold: 7, faults: 5, around: [o.x, o.z, Math.max(...o.coast)] });
   const relief = cliffRelief(strata, rng.fork('relief').int(1, 9999));
   const insideOuter = (x: number, z: number, m = 0) => b.outerRects.some((r) => x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m);
 
@@ -159,6 +163,12 @@ export function buildIsland(b: IslandBuild): IslandResult {
   // ---- steepness, the way uphill, and how far the ground is rock: read off the worn heights, as for the valley
   // (The box that holds the stair, with room about it, for asking quickly whether a point could be on it.)
   const stairBox = o.stair ? [Math.min(...o.stair.map((q) => q[0])) - 3, Math.max(...o.stair.map((q) => q[0])) + 3, Math.min(...o.stair.map((q) => q[1])) - 3, Math.max(...o.stair.map((q) => q[1])) + 3] : null;
+  // Where streams go over the cliffs: from the lip out along the way the water was going, for as far as a face could fall
+  // (`[x, z, along x, along z, length, half its breadth]`).
+  const fallLines: number[][] = (o.streams ?? []).filter((st) => st.fall).map((st) => {
+    const c = st.course, [ax, az] = c[Math.max(0, c.length - 3)], [bx, bz] = c[c.length - 1], l = Math.hypot(bx - ax, bz - az) || 1;
+    return [bx, bz, (bx - ax) / l, (bz - az) / l, 26, st.width / 2 + 0.6];
+  });
   const steepness = land.like(), rocky = land.like(), upX = land.like(), upZ = land.like();
   {
     const H = land.data, nxL = land.nx, raw = new Float32Array(H.length);
@@ -192,6 +202,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
       rocky.data[k] = raw[k];
       // (The stair is cut clean: no broken rock on its treads.)
       if (stairBox) { const x = land.x0 + (k % nxL) * CELL, z = land.z0 + Math.floor(k / nxL) * CELL; if (known[k] && x > stairBox[0] && x < stairBox[1] && z > stairBox[2] && z < stairBox[3] && onStair(o, x, z).off < 2.1) rocky.data[k] = 0; }
+      // (Down the line of a fall the face is worn smooth, so that the water lies on it.)
+      if (fallLines.length && known[k]) { const x = land.x0 + (k % nxL) * CELL, z = land.z0 + Math.floor(k / nxL) * CELL; for (const fl of fallLines) { const t = Math.max(0, Math.min(1, ((x - fl[0]) * fl[2] + (z - fl[1]) * fl[3]) / fl[4])), off = Math.hypot(x - fl[0] - fl[2] * fl[4] * t, z - fl[1] - fl[3] * fl[4] * t); if (off < fl[5] + 2.5) rocky.data[k] *= smooth((off - fl[5]) / 2.5) * 0.85 + 0.15 * smooth((off - fl[5] - 1) / 1.5); } }
       const l = Math.hypot(upX.data[k], upZ.data[k]), f = l > 1e-6 ? smooth(l / 0.8) / l : 0;
       upX.data[k] *= f; upZ.data[k] *= f;
     }
@@ -288,6 +300,17 @@ export function buildIsland(b: IslandBuild): IslandResult {
     const pale = rockKind.pale, dark = rockKind.dark;
     c[0] *= dark[0] + (pale[0] - dark[0]) * t; c[1] *= dark[1] + (pale[1] - dark[1]) * t; c[2] *= dark[2] + (pale[2] - dark[2]) * t;
     const up = Math.max(0, n.y), h = q.y - sea;
+    // Each stretch of cliff its own: darker in one, paler in the next where the rock has lately fallen and the fresh face shows,
+    // stained the rust and ochre of iron where water seeps out of it; and down the faces, streaks: dark where the seeps run, from
+    // under the turf at the top, pale where the birds' droppings have run down from a ledge.
+    const stretch = fbm2(q.x / 38 + 5.3, q.z / 38, 2, blotSeed + 21), warm = smooth((fbm2(q.x / 26, q.z / 26 + 2.7, 2, blotSeed + 23) - 0.55) / 0.15);
+    const k = 0.78 + 0.5 * stretch;
+    c[0] *= k * (1 + 0.28 * warm); c[1] *= k * (1 + 0.08 * warm); c[2] *= k * (1 - 0.18 * warm);
+    const steepFace = 1 - Math.abs(n.y);
+    const streak = fbm3(q.x * 0.42, q.y * 0.035, q.z * 0.42, 2, blotSeed + 25), seep = smooth((streak - 0.6) / 0.08) * steepFace * smooth((h - 2) / 3);
+    mixC(c, [c[0] * 0.45, c[1] * 0.42, c[2] * 0.4], seep * 0.7);
+    const runs = smooth((fbm3(q.x * 0.6 + 9, q.y * 0.05, q.z * 0.6, 2, blotSeed + 27) - 0.66) / 0.06) * steepFace * smooth((h - 6) / 4);
+    mixC(c, [0.66, 0.65, 0.6], runs * 0.45);
     const patch = fbm3(q.x * 0.21 + 3, q.y * 0.35, q.z * 0.21, 3, blotSeed + 11), fleck = fbm3(q.x * 1.1, q.y * 1.1, q.z * 1.1, 2, blotSeed + 5);
     field[0] = Math.min(1, up * 0.6 + soft * 0.3 * (1 - open));
     field[1] = 0;
@@ -520,6 +543,31 @@ export function buildIsland(b: IslandBuild): IslandResult {
   layMainland(wild.mesh('far'), site, tint, F);
   wild.group = 'wild';
 
+  // ---- running water: each stream's surface along its bed, and where it goes over a cliff, down the face to the sea, lying on
+  // the rock (worn smooth for it), and spray and the sound of it at the foot
+  const streamLines: IslandResult['streams'] = [], fallsAt: IslandResult['falls'] = [];
+  for (const st of o.streams ?? []) {
+    const depth = 0.14 + 0.06 * st.width, line: number[] = [], banks: number[] = [], fade: number[] = [];
+    const n = st.course.length;
+    st.course.forEach(([x, z, y], k) => { line.push(x, y + depth, z); banks.push(st.width / 2 + 0.25, st.width / 2 + 0.25); fade.push(smooth(k / 2.5)); });
+    if (st.fall) {
+      const [ax, az] = st.course[Math.max(0, n - 3)], [bx, bz, by] = st.course[n - 1], l = Math.hypot(bx - ax, bz - az) || 1, ux = (bx - ax) / l, uz = (bz - az) / l;
+      let y = by + depth, foot = { x: bx, z: bz };
+      for (let d = 0.3; d < 26; d += 0.3) {
+        const x = bx + ux * d, z = bz + uz * d;
+        // (Water does not run uphill, whatever the rock does; and it ends in the sea.)
+        y = Math.max(sea + 0.05, Math.min(y, ground(x, z) + 0.09));
+        // (Spreading as it falls, and broken: a fall over a sea cliff is a broad veil by the time it reaches the foot.)
+        const spread = st.width / 2 + 0.6 + Math.min(2.2, Math.max(0, by - y) * 0.12);
+        line.push(x, y, z); banks.push(spread, spread); fade.push(1);
+        foot = { x, z };
+        if (y <= sea + 0.06) break;
+      }
+      fallsAt.push({ x: foot.x, y: sea, z: foot.z, height: by - sea, width: st.width + 3 });
+    }
+    streamLines.push({ line, width: st.width + 0.5, banks, fade });
+  }
+
   // Where the player comes in: at the end of the jetty, facing the land.
   const [jx, jz] = o.jetty.to, [rx, rz] = o.jetty.from, jl = Math.hypot(jx - rx, jz - rz);
   const ex = jx + ((rx - jx) / jl) * 1.6, ez = jz + ((rz - jz) / jl) * 1.6;
@@ -545,6 +593,8 @@ export function buildIsland(b: IslandBuild): IslandResult {
     },
     planted,
     lamp: coast.lamp,
+    streams: streamLines,
+    falls: fallsAt,
     // Gulls: off the cliffs at the height of their tops, off the stacks, and over the cove.
     birds: [
       ...Array.from({ length: 4 }, (_, k) => { const a = (k / 4) * Math.PI * 2 + s1, r = coastAt(o, a) + 14; return { x: o.x + Math.cos(a) * r, y: F + 4, z: o.z + Math.sin(a) * r }; }),

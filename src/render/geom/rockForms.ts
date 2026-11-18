@@ -57,16 +57,30 @@ export class Strata {
   readonly seed: number;
   private uneven: number;
 
-  constructor(readonly rock: RockCharacter, q: Rng, readonly datum: number) {
+  /** Broad folds, how high in metres; and faults, each a line across which the beds have been moved up or down by `throw`. */
+  private fold = 0;
+  private faults: { x: number; z: number; nx: number; nz: number; throw: number }[] = [];
+
+  /**
+   * `o.fold` bends the beds up and down by that many metres over a hundred or two; `o.faults` breaks them along that many lines
+   * through the ground about `o.around` (`[x, z, how far]`). For long faces, where beds at one spacing everywhere read as a pattern.
+   */
+  constructor(readonly rock: RockCharacter, q: Rng, readonly datum: number, o: { fold?: number; faults?: number; around?: [number, number, number] } = {}) {
     this.dipX = q.range(-0.08, 0.08);
     this.dipZ = q.range(-0.05, 0.05);
     this.seed = q.int(1, 9999);
     this.uneven = 0.55 * rock.uneven;
+    this.fold = o.fold ?? 0;
+    const [cx, cz, far] = o.around ?? [0, 0, 100];
+    for (let k = 0; k < (o.faults ?? 0); k++) { const a = q.range(0, Math.PI); this.faults.push({ x: cx + q.range(-far, far), z: cz + q.range(-far, far), nx: Math.cos(a), nz: Math.sin(a), throw: q.range(1.2, 5) * (q.chance(0.5) ? 1 : -1) }); }
   }
 
   /** Where a point lies among the beds: whole numbers are the planes between them. Beds dip a little and roll. */
   at(x: number, y: number, z: number): number {
-    const u = (y - this.datum + this.dipX * x + this.dipZ * z + (fbm2(x * 0.021 + this.seed, z * 0.021, 2) - 0.5) * 1.8) / this.rock.bed;
+    let shift = 0;
+    if (this.fold) shift += this.fold * (fbm2(x * 0.0065 + this.seed * 0.1, z * 0.0065, 2) - 0.5) * 2;
+    for (const f of this.faults) { const d = (x - f.x) * f.nx + (z - f.z) * f.nz; shift += f.throw * Math.min(1, Math.max(0, d / 0.35 + 0.5)); }
+    const u = (y - this.datum + shift + this.dipX * x + this.dipZ * z + (fbm2(x * 0.021 + this.seed, z * 0.021, 2) - 0.5) * 1.8) / this.rock.bed;
     this.rate = 1;
     if (this.uneven <= 0) return u;
     // Beds of unequal thickness: the count of beds runs ahead of the height in some stretches and

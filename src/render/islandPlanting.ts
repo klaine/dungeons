@@ -57,7 +57,26 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     return Math.hypot(x - ax, z - az) < 2.5 + m;
   };
   /** How sheltered a point is: in the hollow above the cove, or in the lee of the house. */
-  const shelterAt = (x: number, z: number) => Math.max(smooth((o.combe * 0.9 - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 25), smooth(1 - (Math.max(hx0 - x, 0, x - hx1) + Math.max(hz0 - z, 0, z - approach.z1)) / 10) * 0.6);
+  const shelterDrawn = (x: number, z: number) => Math.max(smooth((o.combe * 0.9 - Math.hypot(x - o.cove.x, z - o.cove.z) + o.cove.r) / 25), smooth(1 - (Math.max(hx0 - x, 0, x - hx1) + Math.max(hz0 - z, 0, z - approach.z1)) / 10) * 0.6);
+  // (On an island that was found, the land says where the shelter is: in a hollow, with higher ground between a point and the nearest
+  // sea. Worked out on a lattice six metres apart, and read between its points.)
+  const leeOf = (x: number, z: number): { lee: number; wind: { x: number; z: number } } => {
+    const y = c.ground(x, z);
+    let ring = 0;
+    for (let k = 0; k < 8; k++) ring += c.ground(x + Math.cos(k * 0.785) * 14, z + Math.sin(k * 0.785) * 14) / 8;
+    const gx = inland(o, x + 2, z) - inland(o, x - 2, z), gz = inland(o, x, z + 2) - inland(o, x, z - 2), gl = Math.hypot(gx, gz) || 1;
+    let high = -Infinity;
+    for (const r of [10, 20, 30]) high = Math.max(high, c.ground(x - (gx / gl) * r, z - (gz / gl) * r));
+    return { lee: smooth((ring - y - 0.6) / 2) * smooth((high - y - 1) / 4), wind: { x: gx / gl, z: gz / gl } };
+  };
+  const SH = 6, sg = site.grounds!, snx = Math.ceil((sg.x1 - sg.x0) / SH) + 2, snz = Math.ceil((sg.z1 - sg.z0) / SH) + 2, leeLattice = new Float32Array(o.terrain ? snx * snz : 0);
+  if (o.terrain) for (let j = 0; j < snz; j++) for (let i = 0; i < snx; i++) { const x = sg.x0 + i * SH, z = sg.z0 + j * SH; leeLattice[j * snx + i] = inland(o, x, z) > 6 ? leeOf(x, z).lee : 0; }
+  const shelterAt = (x: number, z: number): number => {
+    if (!o.terrain) return shelterDrawn(x, z);
+    const fx = Math.min(snx - 1.001, Math.max(0, (x - sg.x0) / SH)), fz = Math.min(snz - 1.001, Math.max(0, (z - sg.z0) / SH)), i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, k = j * snx + i;
+    const lee = leeLattice[k] * (1 - tx) * (1 - tz) + leeLattice[k + 1] * tx * (1 - tz) + leeLattice[k + snx] * (1 - tx) * tz + leeLattice[k + snx + 1] * tx * tz;
+    return Math.max(lee, shelterDrawn(x, z) * 0.6 * (Math.hypot(x - o.cove.x, z - o.cove.z) < o.cove.r + 30 ? 1 : 0));
+  };
   const green = (base: Colour, k = 1): Colour => [base[0] * k, base[1] * k, base[2] * k];
   // (Tints as the valley's are, which the card's paint and the light then brighten: a grass card tinted a third green is a full green on the screen.)
   const dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : 0;
@@ -88,7 +107,9 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
     // Heath: in from the edge, out of the hollow, where the patches say: heather, and gorse in thick bushes.
     const heath = c.heathAt(px, pz);
     if (heath > 0.5 && fine > 0.3) {
-      if (fbm2(px * 0.23 + 7, pz * 0.23, 2) > 0.6) {
+      // (Gorse grows in thickets, a few tens of metres across, dense within; outside them only the odd bush.)
+      const thicket = smooth((fbm2(px * 0.045 + 7, pz * 0.045, 3) - 0.56) / 0.08);
+      if (thicket > 0.5 ? fbm2(px * 0.3 + 7, pz * 0.3, 2) > 0.36 : fbm2(px * 0.23 + 7, pz * 0.23, 2) > 0.74) {
         const big = q.range(0.9, 1.6);
         planting.tuft(gorse, px, y - 0.1, pz, big * 1.3, big, yaw, green(gorseGreen, q.range(0.8, 1.2)));
         // Its flowers are among the spines, not on top of them: a smaller card, inside the bush.
@@ -132,12 +153,28 @@ export function plantIsland(c: IslandPlanting): Record<string, number> {
   const leaf = (r: Rng): Colour => green(leafTint, r.range(0.75, 1.2));
   const t = rng.fork('trees');
   let grown = 0;
-  for (let tries = 0; tries < 900 && grown < 26; tries++) {
-    const a = t.range(0, Math.PI * 2), r = o.cove.r + t.range(6, o.combe * 0.9), x = o.cove.x + Math.cos(a) * r, z = o.cove.z + Math.sin(a) * r;
-    if (shelterAt(x, z) < 0.5 || inland(o, x, z) < 8 || built(x, z, 3) || Math.abs(c.trackOff(x, z)) < 4 || c.offFoot(x, z) < 2.5) continue;
+  // (Where the shelter is, the land says: on an island that was found, a tree grows only down in a hollow or a gully, with the land
+  // standing higher between it and the nearest sea. Even there the wind has had it: it is low, and swept away from the sea.)
+  const sheltered = leeOf;
+  const want = o.terrain ? t.int(8, 18) : 26;
+  for (let tries = 0; tries < 900 && grown < want; tries++) {
+    let x: number, z: number, wind = { x: 0, z: 1 }, lean = 0.25;
+    if (o.terrain) {
+      const g2 = site.grounds!;
+      x = t.range(g2.x0, g2.x1); z = t.range(g2.z0, g2.z1);
+      if (inland(o, x, z) < 18) continue;
+      const sh = sheltered(x, z);
+      if (sh.lee < 0.15 || t.next() > sh.lee * 1.6) continue;
+      wind = sh.wind; lean = 0.75 - 0.4 * sh.lee;
+    } else {
+      const a = t.range(0, Math.PI * 2), r = o.cove.r + t.range(6, o.combe * 0.9);
+      x = o.cove.x + Math.cos(a) * r; z = o.cove.z + Math.sin(a) * r;
+      if (shelterAt(x, z) < 0.5) continue;
+    }
+    if (inland(o, x, z) < 8 || built(x, z, 3) || Math.abs(c.trackOff(x, z)) < 4 || c.offFoot(x, z) < 2.5) continue;
     const y = c.ground(x, z);
     if (y - sea < 3) continue;
-    growTree(planting, wood, x, y - 0.05, z, t.range(3.5, 6.5), t.range(0.13, 0.22), { kind: t.chance(0.6) ? 'oak' : 'ash', detail: 1, cards: 520, cardSize: 0.6, leaf, bark: [0.42, 0.4, 0.36], soft }, t.fork(`tree${grown}`));
+    growTree(planting, wood, x, y - 0.05, z, o.terrain ? t.range(2.6, 4.8) : t.range(3.5, 6.5), t.range(0.13, 0.22), { kind: t.chance(0.6) ? 'oak' : 'ash', detail: 1, cards: 520, cardSize: 0.6, leaf, bark: [0.42, 0.4, 0.36], soft, wide: o.terrain ? 1.25 : 1, wind: o.terrain ? { ...wind, strength: lean } : undefined }, t.fork(`tree${grown}`));
     grown++;
   }
   counts.trees = grown;

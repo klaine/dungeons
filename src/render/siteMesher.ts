@@ -3340,6 +3340,8 @@ export function meshSite(site: Site): SceneDescription {
     unders.push(...made.unders);
     birdSpots = made.birds;
     beacon = made.lamp;
+    flows.push(...made.streams);
+    falls.push(...made.falls);
     scenery.cards.push(...planting.sets);
   };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).

@@ -175,6 +175,11 @@ export interface TreeOptions {
   shaded?: boolean;
   /** Where to build roots and other small wood that nobody should be stopped by. */
   soft?: MeshBuilder;
+  /**
+   * A wind it has grown in, blowing towards `x`, `z`: every limb is bent that way by `strength` (0 to 1), the young growth the
+   * more, so that a tree by the sea grows swept away from it, its crown low and thrown to the lee.
+   */
+  wind?: { x: number; z: number; strength: number };
 }
 
 const UP = new Vector3(0, 1, 0);
@@ -324,6 +329,7 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
   // buttresses between the flutes, some are oval, some nearly round. (Drawn from a stream of its
   // own, so the branching of trees already seen is not changed.)
   const wide = o.wide ?? 1;
+  const windAt = o.wind ? new Vector3(o.wind.x, 0, o.wind.z).normalize() : null;
   const form = rng.fork('trunk-form');
   const bendAt = form.range(0, Math.PI * 2), bendBy = form.chance(0.4) ? form.range(0.12, 0.3) : form.range(0, 0.08);
   const bend = new Vector3(Math.cos(bendAt) * bendBy, 0, Math.sin(bendAt) * bendBy);
@@ -371,6 +377,8 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
       const lean = Math.min(1.35, (leader ? rng.range(0.05, 0.2) : level === 0 ? (oak ? rng.range(0.6, 1.0) : rng.range(0.7, 0.95)) : rng.range(0.45, 0.8)) + (leader ? 0 : 0.18 * (wide - 1)));
       const az = turn + (k / forks) * Math.PI * 2 + rng.range(-0.4, 0.4);
       const nd = d.clone().multiplyScalar(Math.cos(lean)).addScaledVector(a, Math.sin(lean) * Math.cos(az)).addScaledVector(b, Math.sin(lean) * Math.sin(az));
+      // (Bent to the lee, and held down: a limb that would grow into the wind is turned, one that would rise is laid over.)
+      if (windAt) { nd.addScaledVector(windAt, o.wind!.strength * (0.5 + 0.3 * level)); nd.y *= 1 - 0.35 * o.wind!.strength; nd.normalize(); }
       const share = leader ? 0.82 : forks === 2 ? 0.74 : 0.64;
       const nl = level === 0 ? height * (oak ? 0.32 : leader ? 0.3 : 0.24) * rng.range(0.85, 1.15) * wide : length * rng.range(0.62, 0.8);
       branch(end, nd, nl, endRadius * share, level + 1);
@@ -384,7 +392,9 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
     }
   };
   const lean = oak ? 0.1 : 0.05;
-  branch(new Vector3(x, base, z), new Vector3(rng.range(-lean, lean), 1, rng.range(-lean, lean)).normalize(), height * (oak ? 0.3 : 0.48), girth, 0);
+  const trunkDir = new Vector3(rng.range(-lean, lean), 1, rng.range(-lean, lean));
+  if (windAt) trunkDir.addScaledVector(windAt, 0.35 * o.wind!.strength);
+  branch(new Vector3(x, base, z), trunkDir.normalize(), height * (oak ? 0.3 : 0.48), girth, 0);
   // Roots: the trunk does not go into the ground like a post, but spreads into it.
   if (o.soft && o.detail > 0.6) {
     const roots = 4 + rng.int(0, 2), turn = rng.range(0, Math.PI * 2);

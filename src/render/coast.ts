@@ -99,8 +99,19 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (let f = 0; f < len - 1e-6;) {
       const f1 = Math.min(len, f + q.range(1.1, 1.6)), y0 = rootY + (deck - rootY) * Math.min(1, f / 4), y1 = rootY + (deck - rootY) * Math.min(1, f1 / 4);
       const foot = Math.min(c.ground(...at2(at, 0, f)), c.ground(...at2(at, 0, f1))) - 0.6;
-      // Each length is a course of big blocks, with its top following the ramp.
-      solid('stone', [at(-half, foot, f), at(half, foot, f), at(half, foot, f1), at(-half, foot, f1), at(-half, y0, f), at(half, y0, f), at(half, y1, f1), at(-half, y1, f1)], shade(stone, q.range(0.85, 1.05)), 0.35);
+      // Each length is a course of big blocks, two or three across, each set a little proud or sunk of its neighbours and each its
+      // own shade; below where the tide comes they are dark with weed. (One block the width of the pier read as a slab of concrete.)
+      const across = q.chance(0.5) ? 2 : 3, gap = 0.035, weed = Math.min(y0, sea + 0.55);
+      for (let k = 0; k < across; k++) {
+        const a0 = -half + (k / across) * 2 * half + (k ? gap : 0), a1 = -half + ((k + 1) / across) * 2 * half - (k < across - 1 ? gap : 0);
+        // (Weathered: darker than new-cut stone, greyed and greened by the salt air, the odd block stained with rust or lichen.)
+        const lift = q.range(-0.025, 0.02), tone = q.range(0.56, 0.82), t0 = y0 + lift, t1 = y1 + lift;
+        if (weed > foot) solid('stone', [at(a0, foot, f), at(a1, foot, f), at(a1, foot, f1 - gap), at(a0, foot, f1 - gap), at(a0, weed, f), at(a1, weed, f), at(a1, weed, f1 - gap), at(a0, weed, f1 - gap)], [0.16 * tone, 0.17 * tone, 0.11 * tone], 0.35);
+        const b0 = Math.max(foot, weed);
+        const weathered = shade(stone, tone), stain = q.next();
+        if (stain < 0.15) { weathered[0] *= 1.12; weathered[1] *= 0.98; weathered[2] *= 0.82; } else if (stain < 0.35) { weathered[0] *= 0.92; weathered[1] *= 1.02; weathered[2] *= 0.9; }
+        solid('stone', [at(a0, b0, f), at(a1, b0, f), at(a1, b0, f1 - gap), at(a0, b0, f1 - gap), at(a0, t0, f), at(a1, t0, f), at(a1, t1, f1 - gap), at(a0, t1, f1 - gap)], weathered, 0.35);
+      }
       f = f1;
     }
     // Coping along either edge, bollards, and a ladder of iron down the end into the water.
