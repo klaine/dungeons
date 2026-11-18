@@ -626,6 +626,20 @@ export function buildMountain(b: MountainBuild): MountainResult {
     const at = (a: number, f: number, up: number): [number, number, number] => [x + c * a - s * f + lean[0] * up, y + up, z + s * a + c * f + lean[1] * up];
     solid(material, [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), at(-w / 2, -d / 2, h), at(w / 2, -d / 2, h), at(w / 2, d / 2, h), at(-w / 2, d / 2, h)], colour);
   };
+  /**
+   * A slab laid as a step: as `block`, but no face of it square. Its top is drawn in from the edges a little, by a different amount
+   * at each corner, and its corners stand at heights of their own; and its nose, the edge feet come down over, is worn back and
+   * down, as on any step walked for a few hundred years. (Cut as boxes, the steps up the ridge read as poured concrete.)
+   */
+  const slab = (x: number, y: number, z: number, w: number, d: number, h: number, yaw: number, nose: number, colour: Colour, q: Rng) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw);
+    const at = (a: number, f: number, up: number): [number, number, number] => [x + c * a - s * f, y + up, z + s * a + c * f];
+    const top = (ea: number, ef: number): [number, number, number] => {
+      const front = ea === nose, inA = front ? q.range(0.05, 0.11) : q.range(0, 0.04), inF = q.range(0.015, 0.06);
+      return at(ea * (w / 2 - inA), ef * (d / 2 - inF), h + (front ? -q.range(0.03, 0.07) : q.range(-0.02, 0.02)));
+    };
+    solid('rock', [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), top(-1, -1), top(1, -1), top(1, 1), top(-1, 1)], colour);
+  };
   /** A cairn: stones laid in rings, each ring smaller and set in the hollows of the one under it, to a point. */
   const cairn = (x: number, z: number, high: number, q: Rng) => {
     const y = ground(x, z) - 0.15;
@@ -1041,7 +1055,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
           const px = -(bz - az) / run, pz = (bx - ax) / run, split = q.chance(0.55) ? q.range(-0.4, 0.4) * halfWidth : null;
           for (const [c0, c1] of split === null ? [[-halfWidth, halfWidth]] : [[-halfWidth, split - 0.02], [split + 0.02, halfWidth]]) {
             const mid = (c0 + c1) / 2 + q.range(-0.06, 0.06), tone = q.range(0.62, 0.95);
-            block('rock', ax + (bx - ax) * f + px * mid, top - 0.36 + q.range(-0.03, 0.02), az + (bz - az) * f + pz * mid, run / n * q.range(0.9, 1.04), (c1 - c0) * q.range(0.9, 1.06), 0.38, heading + q.range(-0.07, 0.07), rockColour(tone), [q.range(-0.05, 0.05), q.range(-0.05, 0.05)]);
+            slab(ax + (bx - ax) * f + px * mid, top - 0.36 + q.range(-0.03, 0.02), az + (bz - az) * f + pz * mid, run / n * q.range(0.9, 1.04), (c1 - c0) * q.range(0.9, 1.06), 0.38, heading + q.range(-0.07, 0.07), up ? -1 : 1, rockColour(tone), q);
           }
         }
       }
