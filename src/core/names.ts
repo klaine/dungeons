@@ -20,7 +20,7 @@ function root(rng: Rng): string {
   return cap(rng.chance(0.7) ? a + rng.pick(SECOND) : a);
 }
 
-export type NameKind = 'world' | 'sea' | 'upland' | 'range' | 'peak' | 'harbour' | 'town' | 'village' | 'island' | 'valley' | 'mountain';
+export type NameKind = 'world' | 'sea' | 'bay' | 'upland' | 'range' | 'peak' | 'harbour' | 'town' | 'village' | 'island' | 'valley' | 'mountain';
 
 /** Hands out names for one world, none twice. */
 export class Namer {
@@ -37,6 +37,7 @@ export class Namer {
     switch (kind) {
       case 'world': return x;
       case 'sea': return r.pick([`The ${x} Sound`, `The Sea of ${x}`, `The ${x} Firth`]);
+      case 'bay': return r.pick([`The Bay of ${x}`, `${x} Firth`, `The ${x} Fjord`]);
       case 'upland': return r.pick([`The ${x} Fells`, `The ${x} Moors`, `The Heights of ${x}`]);
       case 'range': return r.pick([`The ${x} Mountains`, `The ${x} Range`, `The Wall of ${x}`]);
       case 'peak': return `The ${r.pick(PEAK_WORDS.a)} ${r.pick(PEAK_WORDS.b)}`;

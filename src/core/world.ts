@@ -51,13 +51,21 @@ export interface WorldPlan {
   upland: number;
   /** The great peaks of the range: the landmarks, seen from everywhere. */
   peaks: { x: number; z: number; r: number; height: number }[];
+  /**
+   * A great bay, the coast pushed inland: where its middle lies along the coast (metres from the
+   * world's middle, eastward when inland is north), how broad it is at its mouth, and how far inland
+   * it reaches.
+   */
+  bay: { at: number; width: number; depth: number };
+  /** Fjords, where the coast is high ground: how deeply they are cut (0 to 1), and how far inland of the coast they run. */
+  fjords: { strength: number; reach: number };
 }
 
 export function planWorld(seed: string): WorldPlan {
   const rng = new Rng(`world/${seed}`), q = rng.fork('plan');
   const half = 24000;
-  // (Inland is one of the four quarters, turned a little: so the zones lie across the square and each has its share of it.)
-  const inland = q.int(0, 3) * (Math.PI / 2) + q.range(-0.35, 0.35);
+  // (Inland is north, turned a little: the sea and its islands to the south, the mountains to the north, as asked.)
+  const inland = -Math.PI / 2 + q.range(-0.3, 0.3);
   const span = half * (Math.abs(Math.cos(inland)) + Math.abs(Math.sin(inland)));
   const shelf = q.range(6500, 9000);
   const p: WorldPlan = {
@@ -66,13 +74,19 @@ export function planWorld(seed: string): WorldPlan {
     coast: -span + 4500 + shelf, shelf,
     // (Broad in some worlds, a strip in others, and in places none at all: there the upland comes down to the sea.)
     // (The range takes what is left, some third of the world: with more, it filled half of it and the rest was squeezed.)
-    plains: q.range(3000, 10000), upland: q.range(10000, 14000), peaks: [],
+    plains: q.range(2500, 9000), upland: q.range(10000, 14000), peaks: [],
+    bay: { at: 0, width: 0, depth: 0 }, fjords: { strength: 0, reach: 0 },
   };
+  // The bay: somewhere along the coast, not hard by the world's edge; broad, and reaching well inland, past the low country into
+  // the upland, where its sides and its head are fjord coast. (From a stream of its own, so the rest of the plan stays as it was.)
+  const b = rng.fork('bay');
+  p.bay = { at: Math.round(b.range(-0.45, 0.45) * half), width: Math.round(b.range(9000, 14000)), depth: Math.round(b.range(10000, 15000)) };
+  p.fjords = { strength: Math.round(b.range(0.6, 1) * 100) / 100, reach: Math.round(b.range(6000, 12000)) };
   // The great peaks: four to seven, well back in the range and well apart.
   const g = rng.fork('peaks'), want = g.int(4, 7);
   for (let tries = 0; tries < 600 && p.peaks.length < want; tries++) {
     const x = g.range(-half * 0.9, half * 0.9), z = g.range(-half * 0.9, half * 0.9), zn = zonesAt(p, x, z);
-    if (zn.d - zn.U < 3500) continue;
+    if (zn.d0 - zn.U < 3500) continue;
     const r = g.range(1800, 2800);
     if (p.peaks.some((o) => Math.hypot(o.x - x, o.z - z) < (o.r + r) * 1.15)) continue;
     p.peaks.push({ x: Math.round(x), z: Math.round(z), r: Math.round(r), height: Math.round(g.range(2300, 2900)) });
@@ -80,19 +94,29 @@ export function planWorld(seed: string): WorldPlan {
   return p;
 }
 
-/** Where a point lies among the zones: how far inland of the coast (`d`), where the upland and the range begin there, and how much it belongs to each zone (the four add to one). */
-export interface Zones { d: number; P: number; U: number; wI: number; wP: number; wU: number; wR: number }
-const ZN: Zones = { d: 0, P: 0, U: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
+/**
+ * Where a point lies among the zones: how far inland of the coast (`d`, the bay's shore included) and
+ * of the coast as it would run without the bay (`d0`); where the upland and the range begin there,
+ * measured as `d0` is; how far it is upland or range rather than low country (`up`), and range
+ * rather than upland (`high`); and how much it belongs to each zone (the four add to one).
+ */
+export interface Zones { d: number; d0: number; P: number; U: number; up: number; high: number; wI: number; wP: number; wU: number; wR: number }
+const ZN: Zones = { d: 0, d0: 0, P: 0, U: 0, up: 0, high: 0, wI: 0, wP: 0, wU: 0, wR: 0 };
 
 /** The zones at a point. (Written into one object, reused: read what is wanted before asking again.) */
 export function zonesAt(p: WorldPlan, x: number, z: number): Zones {
   const n = p.n, s = x * Math.cos(p.inland) + z * Math.sin(p.inland);
   // (The coast wanders in bays and headlands some kilometres across, and in smaller ones on them.)
-  const d = s - p.coast + 5000 * fbmd(x / 11000 + 1.7, z / 11000 - 0.3, 3, n + 1) + 900 * fbmd(x / 3000, z / 3000 + 2.2, 3, n + 2);
+  const d0 = s - p.coast + 5000 * fbmd(x / 11000 + 1.7, z / 11000 - 0.3, 3, n + 1) + 900 * fbmd(x / 3000, z / 3000 + 2.2, 3, n + 2);
+  // The great bay: the coast pushed back inland, furthest along its middle, which wanders; rounded at its head. Only the coast is
+  // moved: the upland and the range stand where they would without it, so where it reaches them its shores are high ground.
+  const B = p.bay, lat = -x * Math.sin(p.inland) + z * Math.cos(p.inland);
+  const across = (lat - B.at + 1800 * fbmd(d0 / 7000 + 2.7, 0.4, 2, n + 6)) / (B.width / 2);
+  const d = d0 - B.depth * Math.pow(Math.max(0, 1 - Math.pow(Math.abs(across), 1.6)), 0.6);
   const P = p.plains + 7000 * fbmd(x / 10000 + 3.3, z / 10000 - 1.2, 2, n + 3);
   const U = Math.max(P, -400) + p.upland + 4000 * fbmd(x / 10000 - 4.1, z / 10000 + 2.2, 2, n + 4);
-  const a = smooth((d + 600) / 2000), b = smooth((d - P + 1500) / 3000), c = smooth((d - U + 2500) / 5000);
-  ZN.d = d; ZN.P = P; ZN.U = U;
+  const a = smooth((d + 600) / 2000), b = smooth((d0 - P + 1500) / 3000), c = smooth((d0 - U + 2500) / 5000);
+  ZN.d = d; ZN.d0 = d0; ZN.P = P; ZN.U = U; ZN.up = b; ZN.high = c;
   ZN.wI = 1 - a; ZN.wP = a * (1 - b); ZN.wU = a * b * (1 - c); ZN.wR = a * b * c;
   return ZN;
 }
@@ -142,9 +166,9 @@ function valleyLines(p: WorldPlan, x: number, z: number, apart: number, shape: n
 /**
  * The upland: as the valleys' frame has it (`highlands.ts`), ridged noise turned over so that its
  * crests are the floors of glens four or five hundred metres apart, branching and joining; and
- * under those, broad straths a couple of kilometres apart, made the same way at a larger size.
- * The glens fade out on the straths' floors, so that they come down into the straths and do not
- * dam them. Higher the further inland.
+ * under those, broad straths a few kilometres apart running inland (`valleyLines`). The glens fade
+ * out on the straths' floors, so that they come down into the straths and do not dam them. Higher
+ * the further inland.
  */
 function uplandAt(p: WorldPlan, x: number, z: number, d: number, P: number, U: number, fine: boolean): number {
   const n = p.n, t = clamp01((d - P) / Math.max(3000, U - P));
@@ -190,12 +214,21 @@ function rangeAt(p: WorldPlan, x: number, z: number, d: number, U: number, fine:
 
 /** The plain shape of the world's land at a point: each zone's land, in the share the point belongs to it. `fine` for the tiles' lattice, with more octaves. */
 export function worldShape(p: WorldPlan, x: number, z: number, fine = false): number {
-  const { d, P, U, wI, wP, wU, wR } = zonesAt(p, x, z);
+  const { d, d0, P, U, up, high, wI, wP, wU, wR } = zonesAt(p, x, z);
   let h = 0;
-  if (wI > 1e-4) h += wI * islesAt(p, x, z, d, fine);
+  // (The bay's floor is reckoned as the shelf's near the coast, so that it is shallow and has its islands, and is not open sea;
+  // in front of its mouth a channel a little deeper than the shelf around leads in.)
+  if (wI > 1e-4) h += wI * islesAt(p, x, z, Math.max(d, Math.min(d0, 0) - 2500), fine);
   if (wP > 1e-4) h += wP * plainsAt(p, x, z, d, P, fine);
-  if (wU > 1e-4) h += wU * uplandAt(p, x, z, d, P, U, fine);
-  if (wR > 1e-4) h += wR * rangeAt(p, x, z, d, U, fine);
+  if (wU > 1e-4) h += wU * uplandAt(p, x, z, d0, P, U, fine);
+  if (wR > 1e-4) h += wR * rangeAt(p, x, z, d0, U, fine);
+  // Fjords: where the coast is high ground (the upland come down to the sea, or the bay's shores cut into it), the straths, deep
+  // as the ice left them, run on under the sea for some kilometres inland, shallowing towards their heads, between walls.
+  const F = p.fjords, reach = 1 - smooth((d - F.reach) / 2500);
+  if (F.strength > 0 && d > -2000 && reach > 0 && up > 0.05 && high < 0.95) {
+    const v = valleyLines(p, x, z, 2300, 1, p.n + 36), w = Math.pow(Math.max(0, 1 - v / 0.45), 1.5) * up * (1 - high) * F.strength * reach;
+    if (w > 0) h -= w * (200 + 0.75 * Math.max(0, h));
+  }
   return h;
 }
 
@@ -240,7 +273,7 @@ export interface World {
   plan: WorldPlan;
   /** Its name; the names of its sea, its upland and its range; and of each great peak, in the plan's order. */
   name: string;
-  regions: { sea: string; upland: string; range: string };
+  regions: { sea: string; bay: string; upland: string; range: string };
   peakNames: string[];
   /** The land, worn; and as it was shaped before it was worn. */
   field: HeightField;
@@ -435,8 +468,9 @@ export function* worldSteps(seed: string): Generator<string, World> {
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const x = f.x0 + i * CELL, z = f.z0 + j * CELL, k = j * N + i;
     f.data[k] = worldShape(p, x, z);
-    // (The shelf is spared on this lattice: its islands are a few points across here, and are worn in the tiles instead.)
-    keep[k] = zonesAt(p, x, z).wI;
+    // (The shelf is spared on this lattice: its islands are a few points across here, and are worn in the tiles instead. So is the
+    // floor of the sea wherever it is, fjords' too: what the water brought down would build sills across them.)
+    keep[k] = Math.max(zonesAt(p, x, z).wI, smooth(-f.data[k] / 15));
   }
   lap('shape');
   yield 'Wearing it with water and frost';
@@ -485,7 +519,7 @@ export function* worldSteps(seed: string): Generator<string, World> {
   yield 'Seeing what grows';
   const cover = coverOf(p, f, sea, lake, acc);
   lap('cover');
-  const w: World = { plan: p, name: '', regions: { sea: '', upland: '', range: '' }, peakNames: [], field: f, shaped, sea, lake, cover, acc, down, rivers, places: [], towns: [], ways: [], timing, why };
+  const w: World = { plan: p, name: '', regions: { sea: '', bay: '', upland: '', range: '' }, peakNames: [], field: f, shaped, sea, lake, cover, acc, down, rivers, places: [], towns: [], ways: [], timing, why };
 
   // ---- the places
   // Islands and valley heads, in the tiles where the shelf has land and where the upland is.
@@ -557,7 +591,7 @@ export function* worldSteps(seed: string): Generator<string, World> {
   // ---- names, in a fixed order, so that a world's names stay as they are while its places do
   const namer = new Namer(rng.fork('names'));
   w.name = namer.name('world');
-  w.regions = { sea: namer.name('sea'), upland: namer.name('upland'), range: namer.name('range') };
+  w.regions = { sea: namer.name('sea'), bay: namer.name('bay'), upland: namer.name('upland'), range: namer.name('range') };
   w.peakNames = p.peaks.map(() => namer.name('peak'));
   for (const t of w.towns) t.name = namer.name(t.kind);
   for (const q of w.places) q.name = namer.name(q.kind);

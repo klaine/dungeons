@@ -27,21 +27,35 @@ finer near the mountain. What was missing was one land holding them all.
 All in `src/core/world.ts`, decided from the world's seed alone; nothing in it depends on which
 place asks for it.
 
-- **The plan** (`planWorld`): which way is inland (one of the four quarters, turned a little), where
-  the coast lies, how far out the shelf of islands reaches, how broad the low country and the upland
-  are, and four to seven great peaks well back in the range.
+- **The plan** (`planWorld`): inland is north, turned up to 17 degrees either way, so the sea and its
+  islands lie to the south and the mountains to the north (asked: "would prefer orientation of having the
+  ocean and islands in south and mountains in the north"); where the coast lies, how far out the shelf of
+  islands reaches, how broad the low country and the upland are; four to seven great peaks well back in
+  the range; a great bay; and how deep and how far inland its fjords are cut.
 - **The zones.** Going inland: open sea; a shelf with islands on it; the coast; the low country;
   the upland; the range. Every point belongs to each zone in a share (`zonesAt`), the shares adding
   to one and blending over a few kilometres where zones meet. The boundaries wander: the coast in
   bays and headlands some kilometres across, the foot of the upland so far that in places it comes
   down to the sea and the low country is gone.
+- **The great bay and the fjords** (asked: "how could we have a large bay on the world map extending
+  inland and having possibly fjord coasts also?"). The bay is the coast pushed back inland over a stretch
+  nine to fourteen kilometres broad at its mouth, ten to fifteen kilometres deep, furthest along its middle
+  (which wanders) and rounded at its head. Only the coast is moved: the upland and the range stand where
+  they would without it, so the bay cuts past the low country into high ground, and its sides and head are
+  steep. Its floor is reckoned as the shelf's near the coast, so it is shallow and has islands in it, and a
+  channel a little deeper leads in at its mouth. Fjords are cut wherever the coast is high ground (the
+  bay's sides and head, and wherever the upland comes down to the sea): the straths, which already run
+  inland, are carried on under the sea between their walls for six to twelve kilometres inland, deepest at
+  their mouths and shallowing towards their heads. Where low country lies in front of one, its carved floor
+  is cut off from the sea and holds a long loch instead. The world's wear spares the floor of the sea, so
+  that what the rivers bring down does not build sills across the fjords.
 - **The land**: each zone has a land of its own, and a point's height is each zone's land in the
   share it belongs to that zone (`worldShape`). One sea level for all of it; heights in metres over
   the sea.
 
   | Zone | Its land | Heights |
   |---|---|---|
-  | Open sea and shelf | The archipelago's own land (as `archipelago.ts`), lowered to stand in the world's sea, sparser and deeper further out | islands to 20–110 m, sea floor to −300 |
+  | Open sea, shelf and bay | The archipelago's own land (as `archipelago.ts`), lowered to stand in the world's sea, sparser and deeper further out | islands to 20–110 m, sea floor to −300 |
   | Low country | Long gentle swells rising from the shore to the foot of the upland | 0 to about 200 m |
   | Upland | Broad straths running inland, and between them the glens of the valleys' frame (`highlands.ts`), branching, coming down into the straths | floors 60–400 m, tops to 800 |
   | Range | Great valleys running inland, crossing and joining; side valleys down into them; massifs and cols along the ridges; a mass under each great peak | floors 330–800 m, summits 1,000–2,300, great peaks 2,300–3,000 |
@@ -110,15 +124,21 @@ world. `tools/browser/worldmap.cjs` saves both pictures of any worlds without a 
 
 ## Measured
 
-Without a browser, in a cloud container with four cores (`npx tsx tools/world.ts 3`), November 2026:
-a world builds in 26 to 34 seconds. Its shape takes 1.6, the wear 10.5 to 11, following the water and
-cutting outlets 1.0 to 1.2, the cover 0.4; the tiles searched for islands and valley heads, 10 to 16
-of them at a little over a second each, 12 to 19 (the search stops once it has twelve of a kind, so a
-world whose islands are few or near its edge looks in more tiles); and the summits, towns and ways
-under a second together. In the browser (Chromium, headless, on the same machine), the world page made
-and drew each of the same three in 26 to 32 seconds. Of the three, two gave twelve places of each kind;
-`w0`, whose shelf runs along the world's edge, eleven islands, the rest being too near the edge. Each
-had nineteen towns (the harbour, four towns and fourteen villages) and 110 to 116 rivers.
+Without a browser, in a cloud container with four cores (`npx tsx tools/world.ts`), November 2026:
+a world builds in 25 to 33 seconds; in the browser (Chromium, headless, on the same machine) the world
+page makes and draws one in 25 to 28. Every world tried gave twelve places of each kind, nineteen towns
+(the harbour, four towns and fourteen villages) and a hundred or so rivers.
+
+What the time goes on, measured stage by stage for one world (`w2`): the shape 1.7 seconds; the wear by
+water 10.6 (a million drops, each running up to ninety steps), by frost 0.3; cutting outlets and following
+the water 0.8; the cover 0.4; then the tiles, 10 to 15 of them, each 1.25 seconds, of which 1.07 is its wear
+by water (130,000 drops), 0.11 its shape and 0.07 its frost and drainage; the summits, towns, ways and names
+under half a second together. So some nine tenths of the time is the drops. What could be done about it,
+cheapest first: keep the world once made (in the browser's storage, some ten megabytes with its tiles), so
+that only the first visit pays; wear the tiles side by side, one worker to a core, since each is made alone
+(on four cores, their twelve to eighteen seconds to four or five); fewer drops on the world's lattice (half
+as many, half the time, the rivers' valleys a little shallower); or the drops run on the graphics card, which
+is a piece of work of its own.
 
 What it took to make the land drain, for whoever changes it next: first the range was made of the
 ridged noise's crests alone, as the mountain's country is, and the hollows between the crests filled

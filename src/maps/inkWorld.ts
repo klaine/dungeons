@@ -309,18 +309,19 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
 
   // The names of the sea, the upland and the range, spaced out across them, along the run of the coast.
   {
-    const sums: Record<string, [number, number, number]> = { sea: [0, 0, 0], upland: [0, 0, 0], range: [0, 0, 0] };
+    const sums: Record<string, [number, number, number]> = { sea: [0, 0, 0], bay: [0, 0, 0], upland: [0, 0, 0], range: [0, 0, 0] };
     for (let z = -half + 480; z < half; z += 960) for (let x = -half + 480; x < half; x += 960) {
       const zn = zonesAt(p, x, z), k = cellOf(x, z);
       const add = (key: string) => { sums[key][0] += x; sums[key][1] += z; sums[key][2]++; };
-      if (w.sea[k] && dist[k] > 1500) add('sea');
+      if (w.sea[k] && dist[k] > 1500 && zn.d0 < -1500) add('sea');
+      if (w.sea[k] && dist[k] > 400 && zn.d0 > 1500) add('bay');
       if (zn.wU > 0.7) add('upland');
       if (zn.wR > 0.8) add('range');
     }
     let a = p.inland + Math.PI / 2;
     while (a > Math.PI / 2) a -= Math.PI;
     while (a < -Math.PI / 2) a += Math.PI;
-    for (const [key, size] of [['sea', 46], ['upland', 38], ['range', 44]] as const) {
+    for (const [key, size] of [['sea', 46], ['bay', 30], ['upland', 38], ['range', 44]] as const) {
       const [sx, sz, n] = sums[key];
       if (!n) continue;
       const text = w.regions[key].toUpperCase().split('').join(String.fromCharCode(8202) + ' ');
@@ -330,7 +331,7 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       // (Lettered over the hachures, with the paper showing round each letter so it can be read.)
       ctx.lineWidth = 7 * u; ctx.strokeStyle = PAPER; ctx.globalAlpha = 0.75;
       ctx.strokeText(text, 0, 0, ms * 0.8);
-      ctx.globalAlpha = 0.8; ctx.fillStyle = key === 'sea' ? RIVER : INK;
+      ctx.globalAlpha = 0.8; ctx.fillStyle = key === 'sea' || key === 'bay' ? RIVER : INK;
       ctx.fillText(text, 0, 0, ms * 0.8);
       ctx.restore();
     }
@@ -359,7 +360,7 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
   ctx.font = `italic ${58 * u}px ${SERIF}`;
   ctx.fillText(`The Country of ${w.name}`, W / 2, 92 * u);
   ctx.font = `${22 * u}px ${SERIF}`;
-  ctx.fillText(`with ${w.regions.sea}, ${w.regions.upland} and ${w.regions.range}; the places of adventure in red`, W / 2, 132 * u, W - 2 * edge);
+  ctx.fillText(`with ${w.regions.sea}, ${w.regions.bay}, ${w.regions.upland} and ${w.regions.range}; the places of adventure in red`, W / 2, 132 * u, W - 2 * edge);
   {
     const sx = edge, sy = 160 * u, kmPx = 1000 * scale;
     ctx.lineWidth = 1.4 * u; ctx.strokeStyle = INK;
