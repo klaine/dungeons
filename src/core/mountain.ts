@@ -479,10 +479,30 @@ function countryShape(m: Mountain, floor: number, x: number, z: number): number 
     // and not a needle either, its faces at forty-five degrees and more but not much more. Only the
     // mountains that stand well over the cloud have one; the rest are what the noise makes of them.)
     if (q.height < 180 || d > reach * 1.6) continue;
+    // Its faces are planes, each cut back by the ice a distance of its own and turned a little from where an even pyramid would have
+    // it, so that no two are alike and the arêtes between them do not meet the summit at even angles; the height is reckoned from
+    // whichever face a point is furthest out on, as a solid cut by planes is. Each face hollowed, steeper towards the summit.
     const faces = 3 + (k % 2), sector = TAU / faces, turn = k * 2.39 + 0.5 * fbmd(x / 500 + k, z / 500, 2, seed + 41);
-    const off = ((((Math.atan2(z - q.z, x - q.x) - turn) % sector) + sector) % sector) - sector / 2;
-    const th = (d * Math.cos(off)) / (reach * 0.95 * Math.cos(sector / 2));
-    if (th < 1) horn = Math.max(horn, 0.97 * Math.pow(1 - th, 1.1) * (0.85 + 0.15 * ridgedFbm(x / 380 + k, z / 380, 3, seed + 43)));
+    const px = x - q.x, pz = z - q.z, base = reach * 0.95 * Math.cos(sector / 2);
+    let th = -Infinity, th2 = -Infinity, ax = 1, az = 0;
+    for (let f = 0; f < faces; f++) {
+      const a = turn + f * sector + 0.3 * Math.sin(k * 4.1 + f * 2.3), cut = base * (0.84 + 0.28 * (0.5 + 0.5 * Math.sin(k * 7.3 + f * 3.7)));
+      const t = (px * Math.cos(a) + pz * Math.sin(a)) / cut;
+      if (t > th) { th2 = th; th = t; ax = Math.cos(a); az = Math.sin(a); } else if (t > th2) th2 = t;
+    }
+    if (th >= 1) continue;
+    // Down each face, couloirs: gullies the rock falls and the snow slides down, running straight down the face as its fall line
+    // does, a little wandering, a few to a face; cut deepest across the middle of the face, and fading out towards the summit,
+    // on the arêtes, and at the foot, where what came down them lies in fans. Between them the face stands out in ribs; across it
+    // run bands, ledges where the beds of the rock come out, on which snow lies; and the arêtes are notched by towers and gaps.
+    // (Without them each face was one smooth plane, and a horn far off read as a pyramid of glass.)
+    const across = -px * az + pz * ax, fall = px * ax + pz * az, w = Math.min(230, Math.max(80, reach * 0.13)), arete = 1 - smooth((th - th2) / 0.07);
+    const n = fbmd(across / w + k * 3.1 + 0.25 * fbmd(fall / (w * 2.5), k, 1, seed + 49), fall / (w * 5), 2, seed + 47);
+    const couloir = Math.pow(Math.max(0, 1 - Math.abs(n) / 0.2), 1.5) * smooth(th / 0.12) * smooth((0.97 - th) / 0.3) * (1 - arete);
+    const shape = 0.97 * Math.pow(1 - th, 1.4);
+    const band = 0.014 * smooth((Math.sin(shape * 38 + 3 * fbmd(across / (w * 3), fall / (w * 3), 1, seed + 51)) - 0.55) / 0.3);
+    const notch = 0.08 * arete * smooth((ridgedFbm(fall / (w * 0.8) + k * 5.3, k * 2.9, 2, seed + 53) - 0.35) / 0.4) * smooth(th / 0.08);
+    horn = Math.max(horn, shape * (0.85 + 0.15 * ridgedFbm(x / 380 + k, z / 380, 3, seed + 43)) * (1 - 0.16 * couloir - notch) - band * (1 - th));
   }
   // The ridged noise, its coordinates warped so that its crests wander and branch.
   const u = x / 1300 + 0.3 * fbmd(x / 1000, z / 1000, 3, seed + 21), v = z / 1300 + 0.3 * fbmd(x / 1000 + 7, z / 1000, 3, seed + 22);

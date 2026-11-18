@@ -667,7 +667,10 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   land = mix(land, green.mul(mix(0.84, tone, seen)).mul(mix(0.6, 1, smoothstep(0.3, 0.7, n0.y))), mix(max(wood, one(smoothstep(0.3, 0.6, n0.y)).mul(step(high, 0.5)).mul(0.9)), standing, seen).mul(step(0.0001, wood)));
   const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(step(0.0001, wood)))).toVar();
   // Snow on what is high, lying deeper in hollows and blown off what is steep.
-  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(0.5, 0.72, farN.y)).toVar();
+  // (On a face too steep to hold it, snow still lodges in the gullies and on the ledges of the beds, and lies down the face in
+  // streaks and bands; without them a steep face high up was all one dark grey.)
+  const lodged: N = max(hollow, 0).mul(0.5).add(max(run.negate(), 0).mul(3).mul(sloping).mul(smoothstep(0.32, 0.62, broad.add(fine.sub(0.5).mul(0.3))))).add(step(0.7, bed).mul(smoothstep(0.42, 0.56, fine.add(broad.sub(0.5).mul(0.8)))).mul(0.42).mul(steep)).toVar();
+  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(lodged.mul(-0.4).add(0.5), lodged.mul(-0.4).add(0.72), farN.y)).toVar();
   land = mix(land, vec3(1.3, 1.34, 1.42), snow);
   // Water, where the sheet says there is some (in the field other materials use for moss): a lake in a valley floor far below, dark,
   // taking the sky's colour, and bright where the sun is on it.

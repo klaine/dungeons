@@ -124,11 +124,81 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
       const local = c.rockAt ? c.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
       box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), local ? shade(local, 1.25) : shade(stone, 1.08), 0.4);
     }
+    // Bollards of cast iron, as harbours have: a waisted barrel on a broad foot, and a flared head that a rope cannot slip over;
+    // painted black long ago and gone rusty brown where the ropes wear them. (Plain six-sided posts read as stumps of slate.)
+    const BOLLARD: [number, number][] = [[0, 0.19], [0.05, 0.17], [0.12, 0.145], [0.36, 0.118], [0.44, 0.125], [0.5, 0.19], [0.58, 0.185], [0.62, 0.12], [0.64, 0]];
+    const ring = (cx: number, cf: number, y0: number, y1: number, r0: number, r1: number, material: string, colour: Colour, n = 10, turn = 0) => {
+      for (let k = 0; k < n; k++) {
+        const t0 = turn + (k / n) * Math.PI * 2, t1 = turn + ((k + 1) / n) * Math.PI * 2;
+        solid(material, [at(cx, y0, cf), at(cx + Math.cos(t0) * r0, y0, cf + Math.sin(t0) * r0), at(cx + Math.cos(t1) * r0, y0, cf + Math.sin(t1) * r0), at(cx, y0, cf),
+          at(cx, y1, cf), at(cx + Math.cos(t0) * r1, y1, cf + Math.sin(t0) * r1), at(cx + Math.cos(t1) * r1, y1, cf + Math.sin(t1) * r1), at(cx, y1, cf)], colour);
+      }
+    };
+    const bollards: [number, number][] = [];
     for (const f of [len * 0.55, len - 0.9]) for (const side of [-1, 1]) {
-      const a = side * (half - 0.7);
-      for (let k = 0; k < 6; k++) {
-        const t0 = (k / 6) * Math.PI * 2, t1 = ((k + 1) / 6) * Math.PI * 2, r = 0.16;
-        solid('metal', [at(a, deck, f), at(a + Math.cos(t0) * r, deck, f + Math.sin(t0) * r), at(a + Math.cos(t1) * r, deck, f + Math.sin(t1) * r), at(a, deck, f), at(a, deck + 0.55, f), at(a + Math.cos(t0) * r, deck + 0.55, f + Math.sin(t0) * r), at(a + Math.cos(t1) * r, deck + 0.55, f + Math.sin(t1) * r), at(a, deck + 0.55, f)], [0.05, 0.05, 0.05]);
+      const a = side * (half - 0.7), rust = q.range(0, 1);
+      bollards.push([a, f]);
+      for (let k = 0; k + 1 < BOLLARD.length; k++) {
+        const [y0, r0] = BOLLARD[k], [y1, r1] = BOLLARD[k + 1], worn = k >= 2 && k <= 4 ? rust : rust * 0.3;
+        ring(a, f, deck + y0, deck + y1, r0, r1, 'metal', [0.05 + 0.13 * worn, 0.045 + 0.06 * worn, 0.04 + 0.02 * worn]);
+      }
+    }
+    // What lies about on a working jetty, along one edge where it does not stand in the way: a coil of rope, fish boxes stacked
+    // two or three high, a creel or two (a lobster pot: a flat base, hoops of bent wood and the net between them), and a rope
+    // from the end bollard down into the water to the mooring of a boat that is out.
+    {
+      const side = q.chance(0.5) ? 1 : -1, inner = half - 0.92, rope: Colour = [0.4, 0.34, 0.22];
+      // The coil: turns of rope lying flat, one on another, a little loose.
+      {
+        const [ba, bf] = bollards[side > 0 ? 3 : 2], cf = bf - 0.75, ca = ba - side * 0.05;
+        for (let t = 0; t < 3; t++) ring(ca + q.range(-0.02, 0.02), cf, deck + t * 0.035, deck + t * 0.035 + 0.04, 0.27 - t * 0.03, 0.27 - t * 0.03, 'wood', rope, 12, q.range(0, 1));
+      }
+      // Fish boxes and creels near the root, where things are landed and carted off.
+      // (On the level deck only, not the ramp down to a beach; and not against the bollard halfway out, nor the coil by the end one.)
+      let f = o.landing === 'stair' ? 1 : 4.3;
+      const end = len - 2.95, mid = len * 0.55;
+      while (f < end) {
+        if (f > mid - 1.3 && f < mid + 0.35) { f = mid + 0.35; continue; }
+        const a0 = side * inner, a1 = side * (half - 0.44);
+        const lo = Math.min(a0, a1), hi = Math.max(a0, a1);
+        if (q.chance(0.55)) {
+          // A stack of fish boxes: shallow boxes of grey boards, each a little askew of the one below.
+          const n = q.int(2, 4), d = 0.42, wood: Colour = q.chance(0.5) ? [0.34, 0.31, 0.27] : [0.3, 0.22, 0.15];
+          for (let k = 0; k < n; k++) {
+            const j = q.range(-0.03, 0.03), y = deck + k * 0.17;
+            box(at, 'wood', lo + j, hi + j, y, y + 0.03, f + j, f + d + j, shade(wood, q.range(0.85, 1.1)), 0.9);
+            for (const [u0, u1, v0, v1] of [[lo, lo + 0.025, f, f + d], [hi - 0.025, hi, f, f + d], [lo, hi, f, f + 0.025], [lo, hi, f + d - 0.025, f + d]] as const)
+              box(at, 'wood', u0 + j, u1 + j, y + 0.03, y + 0.16, v0 + j, v1 + j, shade(wood, q.range(0.85, 1.1)), 0.9);
+          }
+          f += d + q.range(0.35, 0.9);
+        } else {
+          // A creel: a base of boards, three hoops over it, and the net, dark with tar.
+          const d = q.range(0.62, 0.75), mid = (lo + hi) / 2, w = (hi - lo) / 2, h = 0.34, frame: Colour = [0.28, 0.21, 0.14], net: Colour = [0.1, 0.1, 0.08];
+          box(at, 'wood', lo, hi, deck, deck + 0.04, f, f + d, frame, 0.9);
+          for (const v of [f + 0.03, f + d / 2, f + d - 0.03]) for (let k = 0; k < 6; k++) {
+            const t0 = (k / 6) * Math.PI, t1 = ((k + 1) / 6) * Math.PI;
+            const p = (t: number, r: number, dv: number) => at(mid + Math.cos(t) * w * r, deck + 0.04 + Math.sin(t) * h * r, v + dv);
+            solid('wood', [p(t0, 0.92, -0.015), p(t1, 0.92, -0.015), p(t1, 0.92, 0.015), p(t0, 0.92, -0.015 + 0.03), p(t0, 1, -0.015), p(t1, 1, -0.015), p(t1, 1, 0.015), p(t0, 1, 0.015)], frame);
+          }
+          // (The net as a thin skin just inside the hoops, darker, so the hoops stand out on it.)
+          for (let k = 0; k < 6; k++) {
+            const t0 = (k / 6) * Math.PI, t1 = ((k + 1) / 6) * Math.PI;
+            const p = (t: number, r: number, v: number) => at(mid + Math.cos(t) * w * r, deck + 0.04 + Math.sin(t) * h * r, v);
+            solid('wood', [p(t0, 0.9, f + 0.03), p(t1, 0.9, f + 0.03), p(t1, 0.9, f + d - 0.03), p(t0, 0.9, f + d - 0.03), p(t0, 0.92, f + 0.03), p(t1, 0.92, f + 0.03), p(t1, 0.92, f + d - 0.03), p(t0, 0.92, f + d - 0.03)], net, 0.9);
+          }
+          f += d + q.range(0.3, 0.8);
+        }
+        if (q.chance(0.3)) f += q.range(1, 2.5);
+      }
+      // The mooring rope: from the head of the end bollard on the other side, over the coping, and in a sag down into the water.
+      {
+        const [ba, bf] = bollards[side > 0 ? 2 : 3], out = -side;
+        const pts: [number, number, number][] = [[ba, deck + 0.5, bf], [out * (half - 0.05), deck + 0.17, bf + 0.25]];
+        for (let k = 1; k <= 5; k++) { const t = k / 5; pts.push([out * (half + 1.7 * t), deck + 0.17 + (sea - 0.25 - deck - 0.17) * t - Math.sin(t * Math.PI) * 0.12 + 0.25 * t * (1 - t), bf + 0.25 + 0.5 * t]); }
+        for (let k = 0; k + 1 < pts.length; k++) {
+          const [a0, y0, f0] = pts[k], [a1, y1, f1] = pts[k + 1], r = 0.022;
+          solid('wood', [at(a0, y0 - r, f0 - r), at(a1, y1 - r, f1 - r), at(a1, y1 - r, f1 + r), at(a0, y0 - r, f0 + r), at(a0, y0 + r, f0 - r), at(a1, y1 + r, f1 - r), at(a1, y1 + r, f1 + r), at(a0, y0 + r, f0 + r)], rope, 0.9);
+        }
       }
     }
     for (const a of [-0.22, 0.22]) box(at, 'metal', a - 0.025, a + 0.025, sea - 1.2, deck + 0.9, len + 0.02, len + 0.07, [0.12, 0.07, 0.04]);

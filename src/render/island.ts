@@ -50,7 +50,7 @@ export interface IslandResult {
   spawn: Vector3;
   yaw: number;
   track: [number, number][];
-  far: { wood: [number, number, number]; grass: [number, number, number] };
+  far: { wood: [number, number, number]; grass: [number, number, number]; bare?: [number, number, number, number] };
   sea: SeaDesc;
   planted: Record<string, number>;
   /** Space under the cliff, out of doors: the sea cave, where no mist lies. */
@@ -421,7 +421,13 @@ export function buildIsland(b: IslandBuild): IslandResult {
       // (Not below a few metres under the sea, where the water is too deep to see through: there the rock is closed off flat.)
       min: V(c.x0, Math.floor((Math.max(lo - 2, sea - 4.8)) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((Math.max(hi, sea - 3) + 2.8) / CELL) * CELL, c.z1),
       cell: CELL, uvScale: 0.4, otherUvScale: (m) => (m === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
-      meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 ? (loose.at(at.x, at.z) > 0.3 && at.y > sea + 0.6 ? screeMesh : turfMesh) : null),
+      meshFor: (n, at) => {
+        if (!(n.y > 0.74 && rocky.at(at.x, at.z) < 0.5)) return null;
+        // (Not in the stair's cut: the ledge either side of the steps, and the floor they stand on, are the rock they are cut in. As
+        // ground they were turf, and so close to the sea it was drawn as sand: a band of yellow up the cliff beside the steps.)
+        if (stairBox && at.x > stairBox[0] && at.x < stairBox[1] && at.z > stairBox[2] && at.z < stairBox[3]) { const st = onStair(o, at.x, at.z); if (st.off < 2.6 && at.y < st.y + 1.6) return null; }
+        return loose.at(at.x, at.z) > 0.3 && at.y > sea + 0.6 ? screeMesh : turfMesh;
+      },
       shade: (q, n, field, other, open) => {
         if (other === turfMesh) { const col = turfAt(q.x, q.z, q.y); field[0] = lay.track; field[1] = lay.wet; field[2] = lay.bare; return col; }
         if (other === screeMesh) return earth(q.x, q.z);
@@ -581,7 +587,12 @@ export function buildIsland(b: IslandBuild): IslandResult {
     // (Yaw is measured so that 0 looks towards lesser z.)
     yaw: Math.atan2(-(rx - jx), -(rz - jz)),
     track: [...track].reverse().slice(1, -1) as [number, number][],
-    far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07] },
+    far: {
+      wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.22, 0.2, 0.09] : season === 'summer' ? [0.15, 0.2, 0.07] : [0.14, 0.22, 0.07],
+      // (Bare earth on an island is peat over thin soil, dark and brown: the track and the footpaths worn into it are that colour, not
+      // the pale soil of a valley's lane, which in the open sun out here read as chalk, and a footpath across the turf as a white line.)
+      bare: [0.66, 0.56, 0.46, 0],
+    },
     sea: {
       level: sea, x: o.x, z: o.z, bed,
       // Where the swell breaks at the foot of a cliff, every few strides round the coast that is not beach, and round the stacks.
