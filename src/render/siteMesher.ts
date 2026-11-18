@@ -1300,11 +1300,15 @@ export function meshSite(site: Site): SceneDescription {
       let bx0 = Infinity, bx1 = -Infinity;
       const zStart = Math.min(ZNo, snapTo(vale.z0 - 9.6, false));
       for (let z = zStart; z <= zEnd; z += 2) { bx0 = Math.min(bx0, sideAt('w', z)); bx1 = Math.max(bx1, sideAt('e', z)); }
-      bx0 = snapTo(bx0 - OUT - 3, false); bx1 = snapTo(bx1 + OUT + 3, true);
+      bx0 = snapTo(bx0 - OUT - 33, false); bx1 = snapTo(bx1 + OUT + 33, true);
       const shelves = terraces.map((t) => ({ t, za: (t.rise === 'n' ? t.z0 - t.run : t.z0) - 4.5, zb: (t.rise === 's' ? t.z1 + t.run : t.z1) + 4.5 }));
+      // (Past the gap at the foot the crag dies away over a broader and broader slope, which reaches further out behind the side than
+      // the band does; where that slope is still steep, it is carved with the band. Laid as the plain sheet, the crag went on from
+      // where the band stopped as a wall of smooth grey, the seam between them a straight line down it.)
+      const dying = (z: number) => Math.min(30, 44 * smooth((z - vale.mouth - 2) / 20)) * smooth((vale.mouth + 34 - z) / 6);
       const inBand = (x: number, z: number): boolean => {
         const d = insideAt(x, z);
-        if (d < -OUT) return false;
+        if (d < -OUT - dying(z)) return false;
         if (d <= IN || (!free && z <= ZNi && z >= ZNo)) return true;
         return shelves.some((q) => z > q.za && z < q.zb && fromSide(q.t.side, x, z) < 4.7 + q.t.depth + 5);
       };
