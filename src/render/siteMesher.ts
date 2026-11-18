@@ -451,6 +451,10 @@ export function meshSite(site: Site): SceneDescription {
 
   // ------------------------------------------------------------------ torches, decided first so soot can follow them
   const torchesByPlace = new Map<number, TorchSpec[]>();
+  // Other lights, decided with the torches: a hearth against a wall (kitchens always, some great rooms and chambers), a ring of candles
+  // hung from the ceiling of a great room, a standing candelabrum in a corner of a chamber. Each burns as a torch does, lights its room
+  // and is baked, and a room that has one has a torch fewer.
+  const hearthOf = new Map<number, { side: Side; at: number }>(), ringOf = new Map<number, Vector3>(), standOf = new Map<number, Vector3>();
   const pilasterSlots = new Map<number, { pos: number; side: Side; clear: boolean }[]>();
   for (const p of places) {
     const slots: { pos: number; side: Side; clear: boolean }[] = [];
@@ -474,7 +478,64 @@ export function meshSite(site: Site): SceneDescription {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
       // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none. (A long hall, of two cells
       // of the plan, has more.)
-      const want = p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : area < 90 ? 3 : 4) : p.light === 'day' ? (area >= 90 ? 2 : area >= 40 ? 1 : 0) : 0;
+      const lq = rng.fork(`lights${p.id}`), built = (p.roof === 'barrel' || p.roof === 'timber') && !p.fallen;
+      const into: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
+      const wallPoint = (side: Side, at: number) => (side === 'n' ? V(at, 0, p.z0) : side === 's' ? V(at, 0, p.z1) : side === 'w' ? V(p.x0, 0, at) : V(p.x1, 0, at));
+      // A hearth: on a wall with three metres clear of doors, windows, a stair and a vault's pilasters, and room before it; under a
+      // vault on an end wall, where the vault does not come down.
+      const hearthChance = ({ kitchen: 1, refectory: 0.6, 'chapter house': 0.4, dormitory: 0.4, solar: 0.5, 'upper chamber': 0.4, gatehall: 0.3, 'muniment room': 0.3 } as Record<string, number>)[p.name] ?? 0;
+      if (built && hearthChance && lq.chance(hearthChance)) {
+        const options: { side: Side; at: number; score: number }[] = [];
+        for (const side of SIDES) {
+          if (p.roof === 'barrel' && !isEndWall(p, side)) continue;
+          const along = side === 'n' || side === 's', lo = along ? p.x0 : p.z0, hi = along ? p.x1 : p.z1, deep = along ? p.z1 - p.z0 : p.x1 - p.x0;
+          if (hi - lo < 3.4 || deep < 3.6) continue;
+          const holes = holesOn(p, side, 0), stairs = [...stairsFrom(p), ...stairsInto(p)].filter((w) => w.side === side);
+          for (const shift of [0, -1, 1, -2, 2]) {
+            const at = (lo + hi) / 2 + shift;
+            if (at - 1.6 < lo || at + 1.6 > hi) continue;
+            if (holes.some((h) => Math.abs(h.at - at) < h.w + 1.55) || stairs.some((w) => Math.max(w.at, w.to ?? w.at) > at - 1.9 && Math.min(w.at, w.to ?? w.at) < at + 1.9)) continue;
+            if (slots.some((sl) => sl.side === side && Math.abs(sl.pos - at) < 1.7)) continue;
+            options.push({ side, at, score: -Math.abs(shift) + lq.next() * 0.5 });
+            break;
+          }
+        }
+        const best = options.sort((a, b) => b.score - a.score)[0];
+        if (best) {
+          hearthOf.set(p.id, { side: best.side, at: best.at });
+          // (The fire: three flames along the logs, and the light over them.)
+          const flames = [-0.2, 0.03, 0.22].map((o) => wallPoint(best.side, best.at + o).addScaledVector(into[best.side], 0.5).setY(p.floor + 0.34));
+          list.push({ position: wallPoint(best.side, best.at).addScaledVector(into[best.side], 0.5).setY(p.floor + 0.75), out: into[best.side], fire: 1.25, flames });
+        }
+      }
+      // A ring of candles hung over the middle of a great room, high enough to walk under and clear of the ceiling.
+      const ringChance = ({ refectory: 0.6, 'chapter house': 0.6, gatehall: 0.35, dormitory: 0.3, sanctum: 0.5, scriptorium: 0.4, solar: 0.3 } as Record<string, number>)[p.name] ?? 0;
+      const ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : p.floor + p.wall;
+      if (built && area >= 26 && ceiling - p.floor >= 3.3 && ringChance && lq.chance(ringChance)) {
+        const at = V((p.x0 + p.x1) / 2, Math.max(p.floor + 2.55, Math.min(ceiling - 0.8, p.floor + 3.0)), (p.z0 + p.z1) / 2);
+        ringOf.set(p.id, at);
+        const wicks = Array.from({ length: 6 }, (_, k) => V(at.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), at.y + 0.2, at.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)));
+        list.push({ position: at.clone().setY(at.y + 0.15), out: V(0, -1, 0), flames: wicks });
+      }
+      // A standing candelabrum in a corner clear of doors and stairs, and far enough along each wall from its middle to keep clear of
+      // whatever stands against it there.
+      const standChance = ({ sanctum: 0.7, 'chapter house': 0.4, vestry: 0.5, reliquary: 0.6, antechamber: 0.3, 'muniment room': 0.3, scriptorium: 0.3 } as Record<string, number>)[p.name] ?? 0;
+      if (built && standChance && lq.chance(standChance)) {
+        const corners = [[p.x0 + 0.5, p.z0 + 0.5, 'w', 'n'], [p.x1 - 0.5, p.z0 + 0.5, 'e', 'n'], [p.x0 + 0.5, p.z1 - 0.5, 'w', 's'], [p.x1 - 0.5, p.z1 - 0.5, 'e', 's']] as [number, number, Side, Side][];
+        const fits = corners.filter(([x, z, sx, sz]) => {
+          if (Math.abs(x - (p.x0 + p.x1) / 2) < 1.9 || Math.abs(z - (p.z0 + p.z1) / 2) < 1.9) return false;
+          if (holesOn(p, sx, 0).some((h) => Math.abs(h.at - z) < h.w + 1.0) || holesOn(p, sz, 0).some((h) => Math.abs(h.at - x) < h.w + 1.0)) return false;
+          return ![...stairsFrom(p), ...stairsInto(p)].some((w) => { const r = flightRect(w); return x > r.x0 - 1.2 && x < r.x1 + 1.2 && z > r.z0 - 1.2 && z < r.z1 + 1.2; });
+        });
+        if (fits.length) {
+          const [x, z] = lq.pick(fits), foot = V(x, p.floor, z);
+          standOf.set(p.id, foot);
+          const top = p.floor + 1.62, wicks = [V(x - 0.24, top, z), V(x, top + 0.1, z), V(x + 0.24, top, z)];
+          list.push({ position: V(x, top + 0.1, z), out: V(0, -1, 0), flames: wicks });
+        }
+      }
+      const extra = list.length;
+      const want = Math.max(0, (p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : area < 90 ? 3 : 4) : p.light === 'day' ? (area >= 90 ? 2 : area >= 40 ? 1 : 0) : 0) - (extra ? 1 : 0)) + extra;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
       const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
@@ -500,6 +561,12 @@ export function meshSite(site: Site): SceneDescription {
       for (const w of [...stairsFrom(p), ...stairsInto(p)]) {
         const r = flightRect(w);
         for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
+      }
+      // (Nor on the wall over a hearth.)
+      const hearth = hearthOf.get(p.id);
+      if (hearth) for (let i = candidates.length - 1; i >= 0; i--) {
+        const c = candidates[i].position, along = hearth.side === 'n' || hearth.side === 's' ? c.x : c.z, on = hearth.side === 'n' ? Math.abs(c.z - p.z0) < 0.7 : hearth.side === 's' ? Math.abs(c.z - p.z1) < 0.7 : hearth.side === 'w' ? Math.abs(c.x - p.x0) < 0.7 : Math.abs(c.x - p.x1) < 0.7;
+        if (on && Math.abs(along - hearth.at) < 2.0) candidates.splice(i, 1);
       }
       // Spread them out: take the candidate farthest from those already chosen.
       while (list.length < want && candidates.length) {
@@ -3821,6 +3888,84 @@ export function meshSite(site: Site): SceneDescription {
         }
       }
     }
+    // The hearth, the hung ring of candles and the standing candelabrum this room has, if any (decided with its torches).
+    {
+      const { solid } = anyAngle((m) => kit.mesh(m));
+      const corners = (a: { min: Vector3; max: Vector3 }): [number, number, number][] => [
+        [a.min.x, a.min.y, a.min.z], [a.max.x, a.min.y, a.min.z], [a.max.x, a.min.y, a.max.z], [a.min.x, a.min.y, a.max.z],
+        [a.min.x, a.max.y, a.min.z], [a.max.x, a.max.y, a.min.z], [a.max.x, a.max.y, a.max.z], [a.min.x, a.max.y, a.max.z]];
+      const cube = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => corners({ min: V(x0, y0, z0), max: V(x1, y1, z1) });
+      /** A thin square rod of iron from one point to another, as a chain or a leg is drawn from far enough off. */
+      const rod = (a: Vector3, b: Vector3, w: number, colour: [number, number, number]) => {
+        const d = b.clone().sub(a).normalize(), side = Math.abs(d.y) > 0.9 ? V(1, 0, 0) : V(0, 1, 0);
+        const u = side.clone().cross(d).normalize().multiplyScalar(w), v = d.clone().cross(u).normalize().multiplyScalar(w);
+        const ring = (q: Vector3): [number, number, number][] => [q.clone().sub(u).sub(v), q.clone().add(u).sub(v), q.clone().add(u).add(v), q.clone().sub(u).add(v)].map((r) => [r.x, r.y, r.z]);
+        solid('metal', [...ring(a), ...ring(b)], colour);
+      };
+      const IRON: [number, number, number] = [0.05, 0.045, 0.04], WAX: [number, number, number] = [0.9, 0.86, 0.74];
+      /** A candle on a dish, its wick's tip at `wick`. */
+      const candle = (wick: Vector3, dishAt: number) => {
+        solid('metal', cube(wick.x - 0.05, dishAt, wick.z - 0.05, wick.x + 0.05, dishAt + 0.015, wick.z + 0.05), IRON);
+        solid('plaster', cube(wick.x - 0.016, dishAt + 0.015, wick.z - 0.016, wick.x + 0.016, wick.y - 0.01, wick.z + 0.016), WAX);
+      };
+      const hearth = hearthOf.get(p.id);
+      if (hearth) {
+        // A hearth of dressed stone against the wall: the hearthstone, a cheek either side, a mantel across them, and over that a hood
+        // and then a breast up to the ceiling, which carries the flue. Inside, the back black with soot, and logs on two iron dogs.
+        const f = frameOf(p, hearth.side, 0), u = alongFrame(p, hearth.side, hearth.at, 0), y = p.floor, top = roofY - 0.02;
+        const at = (u0: number, u1: number, y0: number, y1: number, t0: number, t1: number) => wallBox(f, u + u0, u + u1, y0, y1, t0, t1);
+        const put = (b: { min: Vector3; max: Vector3 }, style: typeof dressed, tag: string) => kit.box('stone', b.min, b.max, style, coping, tag);
+        put(at(-1.35, 1.35, y - 0.03, y + 0.07, 0, -1.0), coping, 'hearthstone');
+        put(at(-1.35, -0.95, y + 0.07, y + 1.3, 0, -0.8), dressed, 'cheek');
+        put(at(0.95, 1.35, y + 0.07, y + 1.3, 0, -0.8), dressed, 'cheek');
+        put(at(-1.45, 1.45, y + 1.3, y + 1.62, 0, -0.9), coping, 'mantel');
+        put(at(-1.25, 1.25, y + 1.62, Math.min(top, y + 2.3), 0, -0.75), dressed, 'hood');
+        if (top > y + 2.4) put(at(-0.95, 0.95, y + 2.3, top, 0, -0.55), dressed, 'breast');
+        solid('stone', corners(at(-0.95, 0.95, y + 0.07, y + 1.3, 0.0, -0.05)), [0.05, 0.045, 0.04]);
+        for (const side of [-1, 1]) {
+          solid('metal', corners(at(side * 0.42 - 0.025, side * 0.42 + 0.025, y + 0.07, y + 0.32, -0.15, -0.65)), IRON);
+        }
+        // (Logs drawn as two square rods turned an eighth of a turn to one another, which from a step away is a round log.)
+        const log = (u0: number, u1: number, h: number, t: number, r: number, colour: [number, number, number]) => {
+          const a = at(u0, u0, h, h, t, t).min, b = at(u1, u1, h, h, t, t).min, d = b.clone().sub(a).normalize();
+          for (const turn of [0, Math.PI / 4]) {
+            const n = V(0, 1, 0).applyAxisAngle(d, turn).multiplyScalar(r), m = d.clone().cross(n).normalize().multiplyScalar(r);
+            const ring = (q: Vector3): [number, number, number][] => [q.clone().sub(n).sub(m), q.clone().add(m).sub(n), q.clone().add(n).add(m), q.clone().add(n).sub(m)].map((v) => [v.x, v.y, v.z]);
+            solid('wood', [...ring(a), ...ring(b)], colour);
+          }
+        };
+        log(-0.55, 0.5, y + 0.28, -0.38, 0.07, [0.14, 0.09, 0.055]);
+        log(-0.45, 0.55, y + 0.3, -0.56, 0.065, [0.12, 0.08, 0.05]);
+        log(-0.4, 0.42, y + 0.42, -0.47, 0.06, [0.1, 0.065, 0.04]);
+        solid('wood', corners(at(-0.35, 0.35, y + 0.07, y + 0.12, -0.25, -0.62)), [0.04, 0.03, 0.025]);
+      }
+      const ring = ringOf.get(p.id);
+      if (ring) {
+        // An iron ring of six candles, hung on three chains to a hook and from the hook on one to the ceiling.
+        const R0 = 0.46, R1 = 0.54, n = 16;
+        for (let k = 0; k < n; k++) {
+          const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2, y0 = ring.y - 0.02, y1 = ring.y + 0.02;
+          const c = (r: number, a: number, h: number): [number, number, number] => [ring.x + r * Math.cos(a), h, ring.z + r * Math.sin(a)];
+          solid('metal', [c(R0, a0, y0), c(R1, a0, y0), c(R1, a1, y0), c(R0, a1, y0), c(R0, a0, y1), c(R1, a0, y1), c(R1, a1, y1), c(R0, a1, y1)], IRON);
+        }
+        const hook = ring.clone().setY(ring.y + 0.8), ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : roofY;
+        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.5; rod(V(ring.x + 0.5 * Math.cos(a), ring.y + 0.02, ring.z + 0.5 * Math.sin(a)), hook, 0.008, IRON); }
+        rod(hook, hook.clone().setY(ceiling + 0.05), 0.012, IRON);
+        for (let k = 0; k < 6; k++) candle(V(ring.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), ring.y + 0.2, ring.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)), ring.y + 0.02);
+      }
+      const stand = standOf.get(p.id);
+      if (stand) {
+        // A candelabrum of iron: three splayed feet, a shaft with a knop, an arm across with a candle at each end, and one above in the middle.
+        const { x, z } = stand, y = p.floor;
+        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + Math.PI / 2; rod(V(x, y + 0.28, z), V(x + 0.28 * Math.cos(a), y + 0.01, z + 0.28 * Math.sin(a)), 0.014, IRON); }
+        solid('metal', cube(x - 0.018, y + 0.26, z - 0.018, x + 0.018, y + 1.48, z + 0.018), IRON);
+        solid('metal', cube(x - 0.045, y + 0.86, z - 0.045, x + 0.045, y + 0.94, z + 0.045), IRON);
+        solid('metal', cube(x - 0.27, y + 1.45, z - 0.016, x + 0.27, y + 1.48, z + 0.016), IRON);
+        solid('metal', cube(x - 0.016, y + 1.48, z - 0.016, x + 0.016, y + 1.55, z + 0.016), IRON);
+        for (const dx2 of [-0.24, 0.24]) candle(V(x + dx2, y + 1.62, z), y + 1.48);
+        candle(V(x, y + 1.72, z), y + 1.55);
+      }
+    }
     if ((p.role === 'goal' || p.role === 'reward') && !cave) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
@@ -3887,6 +4032,17 @@ export function meshSite(site: Site): SceneDescription {
     }
     const anchor = anchors.get(p.id);
     const solids: Rect[] = [];
+    // (The hearth, with room before it; and the candelabrum's feet.)
+    {
+      const h = hearthOf.get(p.id);
+      if (h) {
+        const f = frameOf(p, h.side, 0), u = alongFrame(p, h.side, h.at, 0), a = wallBox(f, u - 1.45, u + 1.45, 0, 1, 0, -1.0), b = wallBox(f, u - 1.5, u + 1.5, 0, 1, 0, -2.1);
+        solids.push({ x0: a.min.x, x1: a.max.x, z0: a.min.z, z1: a.max.z });
+        keepClear.push({ x0: b.min.x, x1: b.max.x, z0: b.min.z, z1: b.max.z });
+      }
+      const st = standOf.get(p.id);
+      if (st) { solids.push({ x0: st.x - 0.32, x1: st.x + 0.32, z0: st.z - 0.32, z1: st.z + 0.32 }); keepClear.push({ x0: st.x - 0.6, x1: st.x + 0.6, z0: st.z - 0.6, z1: st.z + 0.6 }); }
+    }
     if (anchor) {
       // The chest or pedestal: solid itself, with room kept round it to walk up to it.
       solids.push({ x0: anchor.x - 1.2, x1: anchor.x + 1.2, z0: anchor.z - 0.6, z1: anchor.z + 0.6 });
@@ -4127,6 +4283,22 @@ export function meshSite(site: Site): SceneDescription {
       kit.group = 'roofs';
       ledge(r, dir < 0 ? end : end - 0.95, dir < 0 ? end + 0.95 : end, low - 0.4, site.top - 0.75, 0.42, ashlar, 'corner');
       ledge(r, dir < 0 ? end : end - 1.05, dir < 0 ? end + 1.05 : end, site.top - 0.75, site.top - 0.6, 0.5, coping, 'cornercap');
+    }
+    // A chimney stack over every hearth, on the wall it stands against, rising through the roof to above its ridge: ashlar, with a
+    // coping and the dark of the flue on top.
+    for (const [id, h] of hearthOf) {
+      const q = places[id], under = places.find((r) => (r.level ?? 0) === 0 && r.role !== 'approach' && r.x0 === q.x0 && r.x1 === q.x1 && r.z0 === q.z0 && r.z1 === q.z1);
+      const ridge = under && ridgeOf.get(under.id);
+      if (!ridge) continue;
+      kit.group = 'roofs';
+      const line = h.side === 'n' ? q.z0 - T / 2 : h.side === 's' ? q.z1 + T / 2 : h.side === 'w' ? q.x0 - T / 2 : q.x1 + T / 2, along = h.side === 'n' || h.side === 's';
+      const box = (a: number, c: number, y0: number, y1: number) => along ? [V(h.at - a, y0, line - c), V(h.at + a, y1, line + c)] : [V(line - c, y0, h.at - a), V(line + c, y1, h.at + a)];
+      const top = ridge.y + 0.9;
+      const [s0, s1] = box(0.55, 0.62, site.top - 0.4, top), [c0, c1] = box(0.66, 0.72, top, top + 0.14);
+      kit.box('stone', s0, s1, ashlar, coping, 'stack');
+      kit.box('stone', c0, c1, coping, coping, 'stackcope');
+      const [f0, f1] = box(0.28, 0.32, top + 0.14, top + 0.15);
+      anyAngle((m) => kit.mesh(m)).solid('stone', [[f0.x, f0.y, f0.z], [f1.x, f0.y, f0.z], [f1.x, f0.y, f1.z], [f0.x, f0.y, f1.z], [f0.x, f1.y, f0.z], [f1.x, f1.y, f0.z], [f1.x, f1.y, f1.z], [f0.x, f1.y, f1.z]], [0.02, 0.02, 0.02]);
     }
     // The entrance: the bay of the front with the door in it stands forward, its door dressed through the depth it stands out,
     // and rises over the cornice in a gable of stepped courses.

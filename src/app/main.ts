@@ -579,7 +579,7 @@ async function start(): Promise<void> {
   scene.environmentIntensity = 0.5;
 
   // ------------------------------------------------------------------ torches
-  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire));
+  const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire, t.flames));
   for (const t of torches) scene.add(t.group);
   // Four real lights serve however many torches there are; see TorchLights.
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);

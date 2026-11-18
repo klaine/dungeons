@@ -10,6 +10,8 @@ export interface TorchSpec {
   out: Vector3;
   /** If given, this is no torch on a wall but an open fire on the ground at `position`, its flame this many times a torch's. */
   fire?: number;
+  /** If given, this is no torch but candles (on a ring hung from the ceiling, or on a stand): a small flame on each of these wicks, and the light at `position`. */
+  flames?: Vector3[];
 }
 
 /** A door leaf to hang: where its hinge is, how it swings, and what it blocks while shut. */

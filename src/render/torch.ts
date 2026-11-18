@@ -41,7 +41,7 @@ export class Torch {
   private readonly uTime: { value: number } = uniform(0);
   private readonly uGain: { value: number } = uniform(1);
 
-  constructor(position: Vector3, out: Vector3, phase: number, fire = 0) {
+  constructor(position: Vector3, out: Vector3, phase: number, fire = 0, flames?: Vector3[]) {
     this.phase = phase;
 
     // (One iron and one wood for every torch: a material of its own for each was a set of uniforms and a pipeline for each.)
@@ -63,8 +63,8 @@ export class Torch {
     const arm = new Mesh(new CylinderGeometry(0.014, 0.014, 0.3, 6), iron);
     arm.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), out);
     arm.position.copy(ring.position).addScaledVector(out, -0.13);
-    // (An open fire has none of that: only the flame, standing on whatever was built for it to burn on.)
-    if (!fire) {
+    // (An open fire has none of that: only the flame, standing on whatever was built for it to burn on; nor have candles.)
+    if (!fire && !flames) {
       for (const m of [brand, head, ring, arm]) { m.castShadow = false; this.group.add(m); }
       // (The iron parts drawn as one.)
       mergeParts(this.group);
@@ -101,12 +101,28 @@ export class Torch {
       const col = mix(vec3(1, 0.16, 0.01), vec3(1, 0.55, 0.12), body).mul(body).mul(2.2).add(vec3(1, 0.85, 0.55).mul(core).mul(4));
       return vec4(col.mul(this.uGain as N), body);
     })();
-    const quad = new Mesh(new PlaneGeometry(0.4 * (fire || 1), 0.7 * (fire || 1)), this.flame);
-    quad.position.copy(this.flamePosition);
-    quad.frustumCulled = false;
-    this.group.add(quad);
+    if (flames) {
+      // Candles: a small flame on each wick, its foot just below the wick's tip; all drawn with the one material. (With `fire` too,
+      // the flames of a hearth along its logs: larger, each its own size, and every other one turned about, so they are not alike.)
+      const S = fire ? 0.62 * fire : 0.13;
+      this.flamePosition.copy(position);
+      flames.forEach((wick, k) => {
+        const s = fire ? [1, 0.78, 0.9, 0.7][k % 4] : 1;
+        // (A hearth's flames drawn twice as broad as a torch's: a fire of logs is a broad low fire, not a tongue.)
+        const quad = new Mesh(new PlaneGeometry(0.4 * S * s * (k % 2 ? -1 : 1) * (fire ? 2.1 : 1), 0.7 * S * s), this.flame);
+        quad.position.copy(wick).add(new Vector3(0, 0.35 * S * s - 0.008, 0));
+        quad.frustumCulled = false;
+        this.group.add(quad);
+      });
+    } else {
+      const quad = new Mesh(new PlaneGeometry(0.4 * (fire || 1), 0.7 * (fire || 1)), this.flame);
+      quad.position.copy(this.flamePosition);
+      quad.frustumCulled = false;
+      this.group.add(quad);
+    }
 
-    if (fire) this.lightPosition.copy(position).add(new Vector3(0, 0.55, 0));
+    if (flames) this.lightPosition.copy(position);
+    else if (fire) this.lightPosition.copy(position).add(new Vector3(0, 0.55, 0));
     else this.lightPosition.copy(position).addScaledVector(out, 0.36).add(new Vector3(0, 0.26, 0));
   }
 
