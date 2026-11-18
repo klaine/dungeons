@@ -2,7 +2,7 @@ import { fbm2, Rng } from './rng';
 import { archipelago, findIslands, frameHeight, islandDetail, islandFrame, IslandSpot } from './archipelago';
 import { HeightField, leastPath, smoothLine, wornLattice } from './terrain';
 import { Building, Island, Place, Site } from './site';
-import { footprintOf, planClassical } from './building';
+import { classicalVariations, footprintOf, planClassical } from './building';
 
 /**
  * An island in the sea. Where a valley is a strip of land between two lines of rock, an island
@@ -985,6 +985,7 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
       if (!clear(b.x, b.z, span) || fromTrack(b.x, b.z) < span) continue;
       const doorX = b.x - turn * (b.d / 2 + 3), doorZ = b.z;
       if (inland(island, doorX, doorZ) < 6 || !reached(doorX, doorZ)) continue;
+      classicalVariations(b, m.fork('variations'));
       b.plan = planClassical(b, m.fork('plan'));
       island.mansion = { building: b, y: round(y) };
       taken.push({ x: b.x, z: b.z, r: span });

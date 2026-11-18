@@ -1,0 +1,87 @@
+// The building lab: buildings of the town's two styles made by the game's own generator and shown plainly, lit by a sun and a sky,
+// for judging their shapes without building a whole place. Open /lab/buildings.html on the dev server. The address chooses:
+// `?style=imperial|timber`, `bays`, `storeys`, `wings=0|1|2`, `towers=0|1|2|3`, `extra` (storeys of the towers), `pediment=0`, and
+// `seed`; with none, a row of classical buildings is dealt their variations as the town deals them. `turn` turns them all, in degrees.
+import { AmbientLight, BufferGeometry, Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Scene, SRGBColorSpace, WebGLRenderer } from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildBuilding } from '../src/render/buildings';
+import { MeshBuilder } from '../src/render/geom/meshBuilder';
+import { classicalVariations, planClassical, planTimber } from '../src/core/building';
+import { Rng } from '../src/core/rng';
+import type { Building } from '../src/core/site';
+
+const q = new URLSearchParams(location.search), num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
+const renderer = new WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.outputColorSpace = SRGBColorSpace;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+const scene = new Scene();
+scene.background = new Color(0.62, 0.72, 0.82);
+scene.add(new HemisphereLight(0xc8dcf0, 0x6a5a48, 1.2), new AmbientLight(0xffffff, 0.15));
+const sun = new DirectionalLight(0xfff1dc, 2.6);
+sun.position.set(-60, 90, 70); sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+Object.assign(sun.shadow.camera, { left: -90, right: 90, top: 90, bottom: -90, far: 400 });
+scene.add(sun);
+const ground = new Mesh(new PlaneGeometry(600, 600), new MeshStandardMaterial({ color: 0x8a8670, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+const looks: Record<string, { roughness: number; metalness?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 } };
+/** Builds a building at the origin facing -x (its own way), and lays it in the scene turned to face `turn` at (`x`, `z`). */
+function show(b: Building, x: number, z: number, turn: number, rng: Rng) {
+  const meshes = new Map<string, MeshBuilder>();
+  buildBuilding({ ...b, x: 0, z: 0, faces: 'w' }, 0, (m) => { if (!meshes.has(m)) meshes.set(m, new MeshBuilder()); return meshes.get(m)!; }, rng, [0.8, 0.78, 0.72], false);
+  for (const [name, m] of meshes) {
+    const g: BufferGeometry = m.build();
+    const mesh = new Mesh(g, new MeshStandardMaterial({ vertexColors: true, roughness: looks[name]?.roughness ?? 0.85, metalness: looks[name]?.metalness ?? 0 }));
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.rotation.y = -(turn - Math.PI); mesh.position.set(x, 0, z);
+    scene.add(mesh);
+  }
+}
+
+const style = q.get('style') ?? 'imperial', seed = q.get('seed') ?? 'lab', turn = (num('turn', 90) * Math.PI) / 180;
+const made: string[] = [];
+const classical = (r: Rng, bays: number, storeys: number): Building => {
+  const heights = [3.8, 4.4, ...Array.from({ length: storeys - 2 }, () => 3.2)].slice(0, storeys);
+  return { style: 'imperial', x: 0, z: 0, w: bays * 2.55 + 1.6, d: 10.6, faces: 'w', storeys, heights, bays, colour: r.pick([[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78]] as [number, number, number][]), portico: bays >= 7 || bays === 5 };
+};
+if (style === 'timber') {
+  for (let k = 0; k < 5; k++) {
+    const r = new Rng(`${seed}/${k}`), storeys = r.pick([2, 3, 3, 4]);
+    const b: Building = { style: 'timber', x: 0, z: 0, w: r.range(6, 8.6), d: r.range(6.5, 8.5), faces: 'w', storeys, heights: [3, ...Array.from({ length: storeys - 1 }, () => 2.6)], bays: 3, colour: [0.82, 0.62, 0.3], jetty: 0.4, gable: r.chance(0.6), door: 0.24 };
+    b.plan = planTimber(b);
+    show(b, (k - 2) * 12, 0, turn, r);
+  }
+} else if (q.has('bays') || q.has('wings') || q.has('towers')) {
+  // One building, as asked.
+  const r = new Rng(seed), b = classical(r, num('bays', 11), num('storeys', 3)), wings = num('wings', 2);
+  if (wings) b.wings = (wings === 2 ? [-1, 1] as const : [1] as const).map((side) => ({ side, width: 7.6, length: num('length', 12) }));
+  if (q.get('pediment') === '0') b.pediment = false;
+  const n = num('towers', 0), extra = num('extra', 2);
+  if (n) b.towers = [{ corner: 'front', side: -1, size: 6, extra }, { corner: 'front', side: 1, size: 6, extra }, { corner: 'wing', side: 1, size: 6, extra: Math.min(3, extra + 1) }].slice(0, n) as Building['towers'];
+  b.plan = planClassical(b, r.fork('plan'));
+  show(b, 0, 0, turn, r);
+  made.push(JSON.stringify({ pediment: b.pediment, towers: b.towers }));
+} else {
+  // A row of them, each dealt its variations as the town deals them.
+  for (let k = 0; k < 6; k++) {
+    const r = new Rng(`${seed}/${k}`), bays = r.pick([7, 9, 9, 11]), b = classical(r, bays, r.pick([2, 3, 3, 4]));
+    if (r.chance(0.8)) b.wings = (r.chance(0.6) ? [-1, 1] as const : [r.chance(0.5) ? -1 : 1] as const).map((side) => ({ side: side as -1 | 1, width: 7.2, length: r.range(8, 13) }));
+    classicalVariations(b, r.fork('variations'));
+    b.plan = planClassical(b, r.fork('plan'));
+    show(b, ((k % 3) - 1) * 42, Math.floor(k / 3) * 46 - 23, turn, r);
+    made.push(`${k}: ${bays} bays${b.wings ? `, ${b.wings.length === 2 ? 'U' : 'L'}` : ''}${b.pediment === false ? ', no pediment' : ''}${b.towers ? `, towers ${b.towers.map((t) => `${t.corner}${t.side > 0 ? 'R' : 'L'}+${t.extra}`).join(' ')}` : ''}`);
+  }
+}
+document.getElementById('note')!.textContent = made.join(' · ');
+const camera = new PerspectiveCamera(40, innerWidth / innerHeight, 0.5, 2000);
+const cam = (q.get('cam') ?? '-70,55,95,0,8,0').split(',').map(Number);
+camera.position.set(cam[0], cam[1], cam[2]);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(cam[3], cam[4], cam[5]); controls.update();
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+(window as unknown as { __ready: boolean }).__ready = true;

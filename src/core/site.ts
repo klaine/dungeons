@@ -287,6 +287,12 @@ export interface Building {
   w: number;
   d: number;
   faces: 'e' | 'w';
+  /**
+   * Of a building in a town, which stands along a street whichever way it runs: the bearing its front faces, in radians from the
+   * direction of greater x towards greater z (so `faces` is not read); and the height of the ground it stands on.
+   */
+  turn?: number;
+  y?: number;
   storeys: number;
   heights: number[];
   bays: number;
@@ -304,6 +310,14 @@ export interface Building {
   /** Of a timber house: burnt out. Its roof and glass are gone, its timbers charred and its walls smoke-blackened; its stone chimney stands. */
   burnt?: boolean;
   portico?: boolean;
+  /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
+  pediment?: boolean;
+  /**
+   * Of a classical building with wings: towers at its corners, rising `extra` storeys over its cornice, each `size` metres square
+   * and standing on the corner named: the ends of the front (`front`), the far ends of the wings (`wing`), or the back corner of an end
+   * that has no wing (`back`), on the left (-1) or right (1) as one stands before the front.
+   */
+  towers?: { corner: 'front' | 'wing' | 'back'; side: -1 | 1; size: number; extra: number }[];
   /**
    * For a building set into rising ground: how much higher the ground stands at its back than
    * before its door. Its lowest storey is then half a basement, open to the front and buried at
@@ -320,6 +334,61 @@ export interface Building {
   wings?: { side: -1 | 1; width: number; length: number }[];
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
+}
+
+/**
+ * A harbour town on a coast, in a bay between headlands, with the mountains behind it. The land
+ * was found (`coastland.ts`) and the town laid on it: the sea lies south, and everything is in the
+ * site's measures. The house stands at the head of the market square on a terrace, its forecourt
+ * the terrace's top; a broad stair comes down from it into the square, which opens at its foot
+ * onto the waterfront and the quay. Blocks of buildings stand about the square in streets laid
+ * square to it: the classical buildings nearest the square and the harbour, timber houses beyond,
+ * and on the fringes, along the shore and up the slopes, shacks. Outside the town are fields, and
+ * woods up the hills.
+ */
+export interface Town {
+  /**
+   * Where the land was found: the frame's seed, the point of the frame under the middle of the quay's edge, how far the frame is
+   * turned, and the height in the frame of the house's ground; and the lattice, in metres, that the town's own land is made on.
+   */
+  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number };
+  /** The sea's level. */
+  sea: number;
+  /** The box the town's own land is made over: beyond it the country is the frame's, seen and not walked. */
+  land: { x0: number; x1: number; z0: number; z1: number };
+  /** The quay: its edge runs along `x` at `z`, from `x0` to `x1`, its top at `y`; the waterfront behind it is `apron` deep. */
+  quay: { x0: number; x1: number; z: number; y: number; apron: number };
+  /** The market square: its ground falls from `yN` at its north side to `yS` at its south, where it opens onto the waterfront. */
+  square: { x0: number; x1: number; z0: number; z1: number; yN: number; yS: number };
+  /** The stair from the forecourt down into the square: `x0` to `x1` broad, from the forecourt's edge at `z0` to its foot at `z1`. */
+  stair: { x0: number; x1: number; z0: number; z1: number };
+  /** The moles that close the harbour: each a line of points from where it leaves the quay, `width` across, its top at `y`. */
+  moles: { line: [number, number][]; width: number; y: number }[];
+  /** The harbour light at the end of a mole, which can be climbed. */
+  light?: { x: number; z: number; y: number; r: number; height: number; door: number };
+  /** Streets, lanes, stepped lanes and tracks, as lines of points `[x, z, y]`, `width` across. */
+  streets: { line: [number, number, number][]; width: number; kind: 'street' | 'lane' | 'track' | 'path' }[];
+  /** Blocks of the town between its streets, and which of its three kinds of building each is built up with. */
+  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber' }[];
+  /** The buildings of the blocks and the farms: each with its `turn` and its `y`. */
+  buildings: Building[];
+  /**
+   * Shacks: one room of boards under a roof of tarred boards, tin or turf, on the fringes of the town and along the shore; each
+   * `w` across its front by `d` deep, its front facing the bearing `turn`, its floor at `y`; `stilts` if it stands on posts over
+   * low ground or the water's edge, `lean` if its roof is one slope.
+   */
+  shacks: { x: number; z: number; y: number; w: number; d: number; turn: number; roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number; colour: [number, number, number] }[];
+  /** Stalls on the market square, each `w` by `d`, its counter facing `turn`, its awning's colours. */
+  stalls: { x: number; z: number; w: number; d: number; turn: number; awning: [number, number, number]; goods: 'fish' | 'fruit' | 'cloth' | 'pots' | 'bread' }[];
+  /** The fountain in the square. */
+  fountain?: { x: number; z: number; r: number };
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
+  /** Fields outside the town: each a four-cornered parcel and what is grown in it. */
+  fields: { corners: [number, number][]; crop: 'wheat' | 'barley' | 'oats' | 'fallow' | 'pasture' | 'roots' | 'orchard' | 'vines' }[];
+  /** Walls of dry stone about the fields, as the island's are. */
+  walls: { line: [number, number][]; gaps: [number, number][]; fallen: [number, number][]; height: number }[];
+  /** The outlook on the headland beside the town: a level place at the cliff's edge, with a parapet towards the sea and a belvedere. */
+  outlook?: { x: number; z: number; y: number; facing: number };
 }
 
 /**
@@ -660,6 +729,8 @@ export interface Site {
   island?: Island;
   /** If present, the site is neither a valley nor an island but the top of a mountain above a sea of cloud; `valley` is absent. */
   mountain?: Mountain;
+  /** If present, the site is a harbour town on a coast between the sea and the mountains, and the house stands at the head of its square; `valley` is absent. */
+  town?: Town;
   /**
    * How the house stands: built into the end of a ridge, its rooms under the hill with courts
    * open through it (`hill`, and so when absent); standing free in the valley, walled and

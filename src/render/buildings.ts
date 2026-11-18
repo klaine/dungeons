@@ -715,8 +715,9 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       for (const side of [-1, 1]) stick(p(side < 0 ? ua - e : ub + e, y + 0.02, v), p(side < 0 ? ua - e + reach : ub + e - reach, y + reach * slope + 0.02, v), 0.035, 0.05, shade(roofTone, 0.85), 'metal');
     }
   }
-  if (b.portico) {
+  if (b.portico && b.pediment !== false) {
     // The pediment over the middle: its face set back within mouldings that follow its slopes.
+    // (Unless it has none: then the middle that stands forward ends at the cornice, which runs straight across it.)
     const half = (centreRight - centreLeft) / 2 + 0.4, mid = (centreLeft + centreRight) / 2, rise = half * 0.42, v = -out - 0.4;
     wedge(at(mid - half, attic, v + 0.22), at(mid + half, attic, v + 0.22), at(mid, attic + rise, v + 0.22), at(0, 0, 2.2 + out).sub(at(0, 0, 0)), ['metal', roofTone], ['plaster', wash], ['plaster', WHITE]);
     for (const side of [-1, 1]) stick(at(mid + side * half, attic + 0.06, v + 0.1), at(mid, attic + rise + 0.06, v + 0.1), 0.26, 0.16, WHITE, 'plaster');
@@ -744,6 +745,61 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, shade(wash, 0.92));
       box('plaster', u - 0.52, u + 0.52, y + rise + 0.95, y + rise + 1.07, v - 0.37, v + 0.37, WHITE);
     }
+  }
+  // Towers at the corners, rising storeys of their own over the cornice: walls standing a hand proud of the front below so that the
+  // low wall over the cornice is lost in them, windows in every face of every storey, a cornice of their own, and a pyramid roof of
+  // the same sheet metal with an iron finial. Nothing in them can be reached; the roofs below run on into them.
+  for (const tw of b.towers ?? []) {
+    const wing = tw.corner === 'wing' ? (b.wings ?? []).find((g) => g.side === tw.side) : undefined;
+    if (tw.corner === 'wing' && !wing) continue;
+    const S = tw.size, P = 0.06, outer = tw.side * W / 2, inner = tw.side * (W / 2 - S);
+    const v0 = tw.corner === 'front' ? 0 : tw.corner === 'back' ? D - S : D + wing!.length - S, v1 = v0 + S;
+    const u0 = Math.min(outer, inner) - P, u1 = Math.max(outer, inner) + P, a0 = v0 - P, a1 = v1 + P;
+    const faces: Face[] = [
+      { L: u1 - u0, P: (s0, y, t) => at(u0 + s0, y, a0 + t) },
+      { L: a1 - a0, P: (s0, y, t) => at(u1 - t, y, a0 + s0) },
+      { L: u1 - u0, P: (s0, y, t) => at(u1 - s0, y, a1 - t) },
+      { L: a1 - a0, P: (s0, y, t) => at(u0 + t, y, a1 - s0) },
+    ];
+    const heights = Array.from({ length: tw.extra }, (_, n) => 3.1 - n * 0.15), from = attic;
+    let y = from;
+    const each = Math.max(1, Math.round((S - 1.2) / 2.6));
+    heights.forEach((h, storey) => {
+      const yb = y, ye = y + h;
+      for (const f of faces) {
+        const pitch = f.L / each, gaps: Gap[] = Array.from({ length: each }, (_, n) => ({ s0: (n + 0.5) * pitch - 0.55, s1: (n + 0.5) * pitch + 0.55, y0: yb + (storey === 0 ? 0.85 : 0.6), y1: ye - 0.75 }));
+        pierced(f, 'plaster', 0, f.L, yb, ye, 0, T, wash, gaps);
+        for (const g of gaps) {
+          glazed(f, g, 2, 3, frame);
+          for (const [a, e] of [[g.s0 - 0.15, g.s0], [g.s1, g.s1 + 0.15]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.15, -0.04, 0.06, WHITE);
+          on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.15, -0.04, 0.06, WHITE);
+          on(f, 'plaster', g.s0 - 0.22, g.s1 + 0.22, g.y0 - 0.09, g.y0, -0.17, 0.08, WHITE);
+          on(f, 'plaster', g.s0 - 0.2, g.s1 + 0.2, g.y1 + 0.15, g.y1 + 0.27, -0.1, 0.03, WHITE);
+        }
+        // A band at each floor, and strips at the corners.
+        on(f, 'plaster', -0.06, f.L + 0.06, yb, yb + 0.16, -0.06, 0.05, WHITE);
+        for (const sx of [0.25, f.L - 0.25]) on(f, 'plaster', sx - 0.25, sx + 0.25, yb, ye, -0.05, 0.03, WHITE);
+      }
+      y = ye;
+    });
+    // Its cornice, three mouldings each further out; then the roof.
+    for (const [lo, hi, reach] of [[y, y + 0.36, 0.04], [y + 0.36, y + 0.46, 0.15], [y + 0.46, y + 0.6, 0.3]] as [number, number, number][]) for (const f of faces) on(f, 'plaster', -reach, f.L + reach, lo, hi, -reach, 0.5, WHITE);
+    const ey = y + 0.6, e = 0.32, mu = (u0 + u1) / 2, mv = (a0 + a1) / 2, rise = (S / 2 + e) * Math.tan((36 * Math.PI) / 180);
+    const c0 = at(u0 - e, ey, a0 - e), c1 = at(u1 + e, ey, a0 - e), c2 = at(u1 + e, ey, a1 + e), c3 = at(u0 - e, ey, a1 + e), apex = at(mu, ey + rise, mv), up = new Vector3(0, 1, 0);
+    const outOf = (du: number, dv: number) => at(du, 0, dv).sub(at(0, 0, 0)).add(up);
+    poly('metal', [c0, c1, apex], roofTone, outOf(0, -1));
+    poly('metal', [c1, c2, apex], roofTone, outOf(1, 0));
+    poly('metal', [c2, c3, apex], roofTone, outOf(0, 1));
+    poly('metal', [c3, c0, apex], roofTone, outOf(-1, 0));
+    poly('metal', [c0, c1, c2, c3], shade(roofTone, 0.6), new Vector3(0, -1, 0));
+    // (Seams down each face of the roof, from the eaves to the hips.)
+    for (let d = -S / 2 + 0.3; d < S / 2 - 0.1; d += 0.6) for (const [du, dv] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+      const along = (q: number) => (du === 0 ? mu + q : mu + du * (S / 2 + e)), across = (q: number) => (dv === 0 ? mv + q : mv + dv * (S / 2 + e));
+      const reach = S / 2 + e - Math.abs(d), foot = at(along(d), ey + 0.02, across(d)), head = at(along(d) - du * reach, ey + reach * Math.tan((36 * Math.PI) / 180) + 0.02, across(d) - dv * reach);
+      stick(foot, head, 0.03, 0.045, shade(roofTone, 0.85), 'metal');
+    }
+    stick(at(mu, ey + rise - 0.05, mv), at(mu, ey + rise + 1.1, mv), 0.07, 0.07, [0.08, 0.08, 0.085], 'metal');
+    box('metal', mu - 0.11, mu + 0.11, ey + rise + 0.55, ey + rise + 0.77, mv - 0.11, mv + 0.11, [0.62, 0.5, 0.2]);
   }
   // ------------------------------------------------------------------ inside
   // The rooms are as the site document plans them; this builds them. Each is its clear floor, and

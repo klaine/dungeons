@@ -4,7 +4,7 @@ import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
-import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
+import { classicalFront, classicalVariations, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
 /**
@@ -894,6 +894,8 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
         b.sunk = round(floorOf(b, 1) - 0.2);
         b.backDoor = round(classicalFront(b).windows[(b.bays >> 1) + (b.portico || b.bays >= 7 ? 2 : 1)]);
       }
+      // (Its variations: a middle without its pediment, towers at the corners of an L or a U. From a stream of their own.)
+      classicalVariations(b, rng.fork('variations'));
       b.plan = planClassical(b, rng.fork('plan'));
     }
   }

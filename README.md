@@ -123,6 +123,8 @@ opens `lab/materials.html`: a small stage apart from the game, for working on ho
 
 It is for development and is not part of what is published. (`lab/rock-lab.html` is an older page of the same kind, with materials of its own that the game does not use.)
 
+`lab/buildings.html`, on the same server (`npm run dev`, then that address), shows buildings made by the game's own generator, lit plainly by a sun and a sky, for judging their shapes. With nothing in the address it deals a row of classical buildings their variations as a place deals them (an L or a U, a middle without its pediment, towers at the corners) and names what each got; `?bays=11&wings=2&towers=3&extra=2&pediment=0` builds one as asked (`storeys`, `length` of the wings, `turn` in degrees, `seed` too), and `?style=timber` a row of timber houses. Drag to turn about it.
+
 ## Publishing
 
 Every push to the default branch is built by GitHub Actions and written to the `gh-pages` branch (`.github/workflows/pages.yml`). To serve it, set Settings > Pages > Source to "Deploy from a branch", branch `gh-pages`, folder `/ (root)`. That is a one-time step.

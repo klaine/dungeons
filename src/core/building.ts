@@ -66,6 +66,30 @@ export function footprintOf(b: Building): { u0: number; u1: number; v0: number; 
   return out;
 }
 
+/**
+ * The variations a classical building may have, dealt from `rng` (a stream of its own, so that adding them changed nothing else):
+ * now and then its middle stands forward without a pediment over it; and a building with wings, an L or a U, may have towers at one
+ * to three of its corners, rising one to three storeys over its cornice. Towers go in pairs where they can (the two ends of the front,
+ * or the two ends of a U's wings), and a third, if there is one, at a wing's end.
+ */
+export function classicalVariations(b: Building, rng: Rng): void {
+  if (b.style !== 'imperial') return;
+  if (b.portico && rng.fork('pediment').chance(0.3)) b.pediment = false;
+  const wings = b.wings ?? [], q = rng.fork('towers');
+  if (!wings.length || !q.chance(0.65)) return;
+  const count = q.pick([1, 2, 2, 3]), extra = q.pick([1, 1, 2, 2, 3]);
+  const front = Math.min(6.4, b.w / 2 - 3.5, q.range(4.6, 6.4)), wingSize = (side: number) => Math.min(front, wings.find((g) => g.side === side)?.width ?? 0, q.range(4.6, 6.4));
+  if (front < 4) return;
+  const pairFront: NonNullable<Building['towers']> = [-1, 1].map((side) => ({ corner: 'front' as const, side: side as -1 | 1, size: Math.round(front * 10) / 10, extra }));
+  const atWing = (side: -1 | 1) => ({ corner: 'wing' as const, side, size: Math.round(wingSize(side) * 10) / 10, extra: Math.min(3, extra + (q.chance(0.3) ? 1 : 0)) });
+  const towers: NonNullable<Building['towers']> = [];
+  if (count === 1) towers.push(q.chance(0.5) ? atWing(wings[q.int(0, wings.length - 1)].side) : pairFront[q.int(0, 1)]);
+  else if (count === 2) towers.push(...(wings.length === 2 && q.chance(0.4) ? [atWing(-1), atWing(1)] : pairFront));
+  else towers.push(...pairFront, atWing(wings[q.int(0, wings.length - 1)].side));
+  b.towers = towers.filter((t) => t.size >= 4);
+  if (!b.towers.length) delete b.towers;
+}
+
 /** Whether an opening whose foot is at `y0` would be under the ground, at a place `v` back from the front. */
 export const buried = (b: Building, v: number, y0: number): boolean => y0 < groundOf(b, v) + 0.25;
 
