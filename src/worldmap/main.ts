@@ -4,7 +4,7 @@ import { drawInkWorld, drawWorldRelief, WorldMap } from '../maps/inkWorld';
 /**
  * The world page: a world made from its seed (`?world=<seed>`), drawn as an ink map with the places
  * of adventure found in it, or as shaded relief. The world is made in a worker, so the page stays
- * answering while it is; it takes half a minute or so.
+ * answering while it is; it takes half a minute or so at most.
  */
 
 const WORDS_A = ['amber', 'ashen', 'bitter', 'cold', 'drowned', 'elder', 'fallow', 'gilded', 'hollow', 'iron', 'lost', 'mossy', 'pale', 'quiet', 'red', 'salt', 'thorn', 'winter'];

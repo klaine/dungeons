@@ -14,7 +14,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { COVER, world, worldSteps, World } from '../src/core/world';
 
-const arg = process.argv[2] ?? '2', out = process.argv[3] ?? 'world-pictures', px = Number(process.argv[4] ?? 24);
+const arg = process.argv[2] ?? '2', out = process.argv[3] ?? 'world-pictures', px = Number(process.argv[4] ?? 4);
 const seeds = /^\d+$/.test(arg) ? Array.from({ length: Number(arg) }, (_, k) => `w${k}`) : [arg];
 mkdirSync(out, { recursive: true });
 
@@ -49,7 +49,7 @@ function draw(w: World): Buffer {
     const c = w.cover[fj * f.nx + fi], col = COLOUR[c];
     const lit = c === COVER.sea || c === COVER.lake ? 1 : 0.35 + 0.8 * shade;
     // (The sea darker where it is deep.)
-    const deep = c === COVER.sea ? Math.max(0.55, 1 + H[k] / 250) : 1;
+    const deep = c === COVER.sea ? Math.max(0.55, 1 + H[k] / 80) : 1;
     const o = (j * W + i) * 3;
     for (let q = 0; q < 3; q++) rgb[o + q] = Math.max(0, Math.min(255, col[q] * lit * deep));
   }
