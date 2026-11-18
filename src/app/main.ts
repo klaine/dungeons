@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, snowUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -29,6 +29,7 @@ import { Water } from '../render/water';
 import { Sea } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
+import { Rain } from '../render/rain';
 import { Beacon } from '../render/beacon';
 import { inland } from '../core/island';
 import { inside as onMountain } from '../core/mountain';
@@ -441,6 +442,8 @@ async function start(): Promise<void> {
   merged.setIndex(new BufferAttribute(solidIndex, 1));
   const bvh = new MeshBVH(merged);
   // Sheep, where the place has pasture for them: stood on what the body walks on, and kept out of the house, the water and the sea.
+  const rainFall = new Rain(seed);
+  scene.add(rainFall.mesh);
   const flocks = desc.flocks?.length ? (() => {
     const down = new Vector3(0, -1, 0), from = new Vector3(), ray = new Ray(from, down);
     const groundAtFlock = (x: number, z: number): number => { from.set(x, 400, z); const hit = bvh.raycastFirst(ray, DoubleSide); return hit ? hit.point.y : -1000; };
@@ -598,7 +601,15 @@ async function start(): Promise<void> {
    * mist lies in the low ground, and how thick the air is with distance. All of it is read by the
    * air as it is drawn, so it can be changed as one watches.
    */
-  const applyWeather = (w: { cloud: number; layered: boolean; mist: number; haze: number }) => {
+  // Rain, 0 to 1: from the address (`?rain=`), or the weather menu.
+  let raining = Math.min(1, Math.max(0, Number(params.get('rain') ?? 0) || 0));
+  weatherUniforms.uWet.value = raining;
+  const applyWeather = (w0: { cloud: number; layered: boolean; mist: number; haze: number; rain?: number }) => {
+    // (Rain comes out of heavy cloud, low and in banks; the air is thick with it; and the sun is behind it.)
+    const r = w0.rain ?? raining;
+    const w = { ...w0, cloud: r > 0 ? Math.max(w0.cloud, 0.7 + 0.3 * r) : w0.cloud, layered: w0.layered || r > 0.3, haze: Math.min(1, w0.haze + 0.4 * r), mist: Math.max(w0.mist, 0.3 * r) };
+    sun.intensity = SUN_INTENSITY * (1 - 0.72 * r);
+    atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7 * (1 - 0.72 * r));
     const u = atmosphere.uniforms, floor = desc.sun?.floor ?? 0, low = site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk', { haze, mist, layered } = w;
     u.uCloudCover.value = w.cloud;
     // Haze: thin enough that the valley is clear across, thick enough that each range of hills
@@ -614,7 +625,7 @@ async function start(): Promise<void> {
     // (On a mountain top the cloud below is the mist, and there is no other: a veil over the cloud made a grey sea of it.)
     if (desc.deck) { u.uMist.value.x = 0; u.uMistFar.value.x = 0; }
     // The haze is alight towards the sun only while the sun is up.
-    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze));
+    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze) * (1 - 0.8 * r));
     // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
     // banks it is a thin layer; heaped, it towers.
     u.uCloudBase.value = floor + 310 - 150 * w.cloud;
@@ -724,26 +735,39 @@ async function start(): Promise<void> {
   {
     // The weather menu. What it changes is written into the address too, so that the place comes back as it was left.
     const panel = document.getElementById('weatherMenu')!, field = (id: string) => document.getElementById(id) as HTMLInputElement;
-    const now = { cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5, wind: vegetationUniforms.uWind.value };
+    const now = { cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5, wind: vegetationUniforms.uWind.value, rain: raining };
+    // (A row for rain, made here, before the note at the foot of the menu.)
+    if (!document.getElementById('wRain')) {
+      const label = document.createElement('label'), input = document.createElement('input'), out = document.createElement('output');
+      label.htmlFor = 'wRain'; label.textContent = 'Rain';
+      Object.assign(input, { id: 'wRain', type: 'range', min: '0', max: '1', step: '0.01' });
+      out.htmlFor.add('wRain');
+      const note = panel.querySelector('.note');
+      for (const el of [label, input, out]) panel.insertBefore(el, note);
+    }
+    field('wRain').value = String(now.rain);
     field('wCloud').value = String(now.cloud); field('wMist').value = String(now.mist); field('wHaze').value = String(now.haze); field('wWind').value = String(now.wind);
     (document.getElementById('wForm') as HTMLSelectElement).value = now.layered ? 'layered' : 'heaped';
     (document.getElementById('wHour') as HTMLSelectElement).value = site?.setting.hour ?? 'midday';
-    const show = () => { for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind']) (panel.querySelector(`output[for=${id}]`) as HTMLOutputElement).value = Number(field(id).value).toFixed(2); };
+    const show = () => { for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind', 'wRain']) (panel.querySelector(`output[for=${id}]`) as HTMLOutputElement).value = Number(field(id).value).toFixed(2); };
     const remember = () => {
       const next = new URLSearchParams(params);
       next.set('cloud', now.cloud.toFixed(2)); next.set('mist', now.mist.toFixed(2)); next.set('haze', now.haze.toFixed(2)); next.set('layered', now.layered ? '1' : '0');
       if (now.wind !== 1) next.set('wind', now.wind.toFixed(2)); else next.delete('wind');
+      if (now.rain > 0) next.set('rain', now.rain.toFixed(2)); else next.delete('rain');
       keep(next);
     };
     const change = () => {
       now.cloud = Number(field('wCloud').value); now.mist = Number(field('wMist').value); now.haze = Number(field('wHaze').value); now.wind = Number(field('wWind').value);
       now.layered = (document.getElementById('wForm') as HTMLSelectElement).value === 'layered';
+      now.rain = Number(field('wRain').value);
+      raining = now.rain;
       applyWeather(now);
       vegetationUniforms.uWind.value = now.wind;
       show();
       remember();
     };
-    for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind', 'wForm']) document.getElementById(id)!.addEventListener('input', change);
+    for (const id of ['wCloud', 'wMist', 'wHaze', 'wWind', 'wForm', 'wRain']) document.getElementById(id)!.addEventListener('input', change);
     // A new hour moves the sun, and with it every shadow and all the light that was worked out: the place is built again, and the eye put back where it was.
     document.getElementById('wHour')!.addEventListener('change', (e) => {
       remember();
@@ -996,6 +1020,14 @@ async function start(): Promise<void> {
     sea?.update(time);
     birds?.update(time);
     flocks?.update(dt, time, player.position);
+    {
+      // The rain, where the sky is overhead; and everything under the sky soaks slowly while it falls and dries more slowly after.
+      const here = site ? placeAt(site, player.position.x, player.position.z, player.position.y) : undefined;
+      rainFall.update(time, camera.position, raining, !site || !here || here.roof === 'sky', SUN_INTENSITY * 0.22, dt);
+      const wet = weatherUniforms.uWet;
+      wet.value += (raining - wet.value) * Math.min(1, dt * (raining > wet.value ? 0.12 : 0.02));
+      sound.rain = raining;
+    }
     beacon?.update(time);
 
     siteUniforms.uBake.value += (bakeTarget - siteUniforms.uBake.value) * (1 - Math.exp(-dt * 4));

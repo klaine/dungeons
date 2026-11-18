@@ -41,6 +41,15 @@ export const siteUniforms: SiteUniforms = {
 };
 const uBake = siteUniforms.uBake as N, uFallback = siteUniforms.uFallback as N;
 
+/** The weather's hold on what is drawn: `uWet`, how wet everything out under the sky is, 0 dry to 1 after long rain. */
+export const weatherUniforms: { uWet: { value: number } } = { uWet: uniform(0) as N };
+const uWet = weatherUniforms.uWet as N;
+/**
+ * How wet the rain has made a point, from what the bake says of how much sky it sees: nothing under a roof, all of it in the open.
+ * (Before the bake arrives, everything is taken as open.)
+ */
+const rainWet = (bk: N): N => uWet.mul(mix(1, smoothstep(0.12, 0.45, bk.x), uBake));
+
 // What every point of the site carries besides where it is and which way it faces: baked light
 // (for each colour a level and the way it comes from), four fields (moss, damp, soot and one
 // more, used differently by each material), and two numbers from the bake: the share of sky
@@ -123,7 +132,8 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   });
   const f = fieldOf(), bk = bakeOf();
   const stone: N = texture(base.map, uv()), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
-  const wet = f.y;
+  // (Damp from the place, and the rain's wetting where the sky reaches.)
+  const wet = max(f.y, rainWet(bk).mul(0.8));
   // Moss wants sky above it and little direct sun; before the bake arrives, use the raw field.
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
@@ -171,7 +181,7 @@ function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?:
     return p;
   })().toVar();
   const stone: N = (texture(base.map, at) as N).toVar(), orm: N = (texture(base.ormMap, at) as N).toVar(), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
-  const wet = f.y;
+  const wet = max(f.y, rainWet(bk).mul(0.8));
   const lightOk = mix(0.4, smoothstep(0.03, 0.3, bk.x).mul(one(smoothstep(0.2, 0.8, bk.y).mul(0.92))), uBake);
   const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
   // (The hollows are darker than the texture alone makes them: little light of any kind gets down a furrow.)
@@ -264,7 +274,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const rutFloor: N = one(smoothstep(0, 0.16, abs(off.sub(0.58)).sub(0.08).sub(wander.mul(0.08)))).mul(onTrack).toVar();
   const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
   const bareV: N = max(select(f.x.greaterThan(50).and(f.x.lessThan(150)), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z), footBare.mul(0.85)).toVar();
-  const wetV = f.y, litV = f.w;
+  const wetV = max(f.y, rainWet(bk).mul(0.7)), litV = f.w;
   const stony: N = max(smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))), (groundUniforms.uBare as N).w.mul(smoothstep(0.25, 0.6, mid.add(macro.sub(0.5).mul(0.6))).mul(0.6).add(0.4))).toVar();
   // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
   // line meets the height the texture has there, so stones stand up and hide what is behind them.
@@ -331,7 +341,9 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // The floor of a rut is pressed hard and smooth, and darker; and in its low places water stands after rain.
   ground = mix(ground, ground.mul(vec3(0.58, 0.54, 0.5)), rutFloor.mul(bare));
   const lowSpot = lowSpotOf(at0);
-  const puddle: N = smoothstep(0.55, 0.6, lowSpot).mul(rutFloor).mul(one(stony)).toVar();
+  // (In rain more of the low places hold water, on bare ground too, not only in the ruts.)
+  const pool: N = uWet.mul(0.09);
+  const puddle: N = smoothstep(float(0.55).sub(pool), float(0.6).sub(pool), lowSpot).mul(max(rutFloor, bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
   const wetRim: N = smoothstep(0.45, 0.56, lowSpot).mul(rutFloor).toVar();
   ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
   ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
@@ -528,7 +540,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   const fluteX: N = flute(P.z.add(0.05), 0).sub(flute(P.z.sub(0.05), 0)).mul(w.x).toVar(), fluteZ: N = flute(P.x.add(0.05), 0.5).sub(flute(P.x.sub(0.05), 0.5)).mul(w.z).toVar();
   const runnel = flute(P.z, 0).mul(w.x).add(flute(P.x, 0.5).mul(w.z));
   rock = rock.mul(mix(1, mix(0.86, 1.06, smoothstep(0.3, 0.7, runnel)), fluteNear.mul(w.x.add(w.z))));
-  const wet: N = max(f.y, stain.mul(0.25)).toVar();
+  const wet: N = max(max(f.y, stain.mul(0.25)), rainWet(bk).mul(0.9)).toVar();
   // Moss: from above on what is level, from the side on what is not.
   const mossUv = select(w.x.greaterThan(w.z), ux, uz).mul(5.5);
   const mossTex: N = mix(texture(moss.map, mossUv), texture(moss.map, uy.mul(5.5)), w.y);

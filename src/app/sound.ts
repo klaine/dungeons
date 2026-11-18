@@ -21,6 +21,11 @@ export class Sound {
   private brook: GainNode | null = null;
   private fall: { gain: GainNode; filter: BiquadFilterNode } | null = null;
   private plink = 0;
+  private rainOpen: { gain: GainNode; filter: BiquadFilterNode } | null = null;
+  private rainRoof: GainNode | null = null;
+  private tick = 0;
+  /** How hard it is raining, 0 to 1. */
+  rain = 0;
   private stride = 0;
   private outdoors = 1;
   muted = false;
@@ -92,6 +97,19 @@ export class Sound {
     pour.gain.value = 0;
     loop().connect(roar).connect(pour).connect(this.master);
     this.fall = { gain: pour, filter: roar };
+    // Rain: in the open, the upper noise, a steady hiss of drops on everything; under a roof, a drumming muffled by it, only the low
+    // part; and near at hand, single drops ticking on stone and leaf, at no regular time (see `update`).
+    const hiss = ctx.createBiquadFilter();
+    hiss.type = 'bandpass'; hiss.frequency.value = 3400; hiss.Q.value = 0.35;
+    const open = ctx.createGain();
+    open.gain.value = 0;
+    loop().connect(hiss).connect(open).connect(this.master);
+    this.rainOpen = { gain: open, filter: hiss };
+    const drum = ctx.createBiquadFilter();
+    drum.type = 'lowpass'; drum.frequency.value = 520; drum.Q.value = 0.4;
+    this.rainRoof = ctx.createGain();
+    this.rainRoof.gain.value = 0;
+    loop().connect(drum).connect(this.rainRoof).connect(this.master);
   }
 
   toggleMute(): boolean {
@@ -116,6 +134,26 @@ export class Sound {
     this.wind.filter.frequency.setTargetAtTime(320 + 260 * gust, now, 0.5);
     this.leaves.gain.setTargetAtTime(0.022 * gust * gust * this.outdoors, now, 0.3);
     this.room.gain.setTargetAtTime(0.09 * (1 - this.outdoors), now, 0.4);
+    if (this.rainOpen && this.rainRoof) {
+      const r = this.rain;
+      this.rainOpen.gain.gain.setTargetAtTime(0.075 * r * (0.2 + 0.8 * this.outdoors), now, 0.6);
+      this.rainOpen.filter.frequency.setTargetAtTime(2600 + 1600 * r, now, 0.6);
+      this.rainRoof.gain.setTargetAtTime(0.12 * r * (1 - this.outdoors), now, 0.6);
+      // Drops near at hand: a burst of noise a few thousandths of a second long, high or low as what it struck, a few a second in
+      // light rain and many in heavy.
+      this.tick -= dt;
+      if (r > 0.02 && this.outdoors > 0.3 && this.tick <= 0 && this.noise && this.master) {
+        this.tick = (0.01 + Math.random() * 0.12) / (0.15 + r * 1.6);
+        const src = ctx.createBufferSource(), band = ctx.createBiquadFilter(), g = ctx.createGain();
+        src.buffer = this.noise;
+        band.type = 'bandpass'; band.frequency.value = 1800 + 5200 * Math.random(); band.Q.value = 2 + Math.random() * 4;
+        const peak = (0.01 + 0.03 * Math.random()) * this.outdoors;
+        g.gain.setValueAtTime(peak, now);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.02 + 0.03 * Math.random());
+        src.connect(band).connect(g).connect(this.master);
+        src.start(now, Math.random() * 1.5, 0.06);
+      }
+    }
     if (this.brook && this.fall) {
       // Water is heard a little way indoors too, through a door, but not much.
       const heard = 0.12 + 0.88 * this.outdoors, brook = water.brook * heard, fall = water.fall * heard;
