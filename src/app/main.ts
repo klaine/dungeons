@@ -977,6 +977,9 @@ async function start(): Promise<void> {
     last = now;
     const time = fixedTime ?? now / 1000;
     player.update(dt);
+    // (The eye's matrix brought up to date at once: what reads where the eye is below this, the water's mirror, the facing of falling
+    // snow and of fireflies, would otherwise read where it was a frame ago.)
+    camera.updateMatrixWorld();
     game?.update(dt, time);
     for (const t of torches) t.update(time);
     // Held low and to the right, so it models what it lights instead of flattening it.

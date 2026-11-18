@@ -603,6 +603,10 @@ export class Atmosphere {
   /** To be called before each picture is drawn: where the eye is. */
   update(): void {
     const u = this.uniforms;
+    // (The camera has been moved this frame, but its matrix is brought up to date only when the scene is drawn, after this: read
+    // as it was, the sky, the cloud and the haze were drawn from where the eye was a frame ago, and slid against the land whenever
+    // the view turned or moved.)
+    this.camera.updateWorldMatrix(true, false);
     u.uInvProj.value.copy(this.camera.projectionMatrixInverse);
     u.uInvView.value.copy(this.camera.matrixWorld);
     u.uCamPos.value.setFromMatrixPosition(this.camera.matrixWorld);
