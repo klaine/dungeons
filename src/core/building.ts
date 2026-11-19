@@ -1,6 +1,6 @@
 import { brickFootprint } from './brick';
 import { Rng } from './rng';
-import { Building, BuildingPlan } from './site';
+import { Building, BuildingPlan, ClassicalDress } from './site';
 
 /**
  * How a classical building is laid out: where its windows stand, how its rooms are planned, and
@@ -18,29 +18,71 @@ export const CLASSICAL = {
   spine: 0.5,
   /** A wall between one room and the next. */
   cross: 0.3,
-  /** How far the middle stands forward, where it does. */
-  out: 0.4,
+  /** How far the middle stands forward, where it does; a pavilion at an end; and how far before the middle's wall its columns stand, where it has them. */
+  out: 0.4, pavilion: 0.25, columns: 1.0,
   plinth: 0.5,
 };
 
-/** The height of a storey's floor above the ground before the door. */
-export const floorOf = (b: Building, storey: number): number => CLASSICAL.plinth + b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0);
+/** How a classical building is dressed where its document does not say: as the first of them were. */
+export const PLAIN_DRESS: ClassicalDress = {
+  centre: 3, order: 'pilasters', pavilions: 0, arches: 0, heads: 'alternate', rusticated: true, frieze: false, balustrade: false,
+  tympanum: 'window', flag: false, doors: 1, plinth: CLASSICAL.plinth, fall: 0, roof: 'dealt', style: 'empire',
+};
+export const dressOf = (b: Building): ClassicalDress => ({ ...PLAIN_DRESS, ...(b.dress ?? {}) });
 
-/** How high the ground stands at a point of a building on a slope, above the ground before its door: none at the front, all of `sunk` at the back. */
-export const groundOf = (b: Building, v: number): number => {
-  const t = Math.min(1, Math.max(0, v / b.d));
-  return (b.sunk ?? 0) * t * t * (3 - 2 * t);
+/** How high the floor of a classical building's ground storey stands over the ground before its door. */
+export const plinthOf = (b: Building): number => b.dress?.plinth ?? CLASSICAL.plinth;
+
+/** The height of a storey's floor above the ground before the door. */
+export const floorOf = (b: Building, storey: number): number => plinthOf(b) + b.heights.slice(0, storey).reduce((sum, h) => sum + h, 0);
+
+/**
+ * How high the ground stands at a point of a building, above the ground before its door: set into rising ground, none at the front and
+ * all of `sunk` at the back; where the ground falls along the front, half the fall higher at its upper end and half lower at the other.
+ */
+export const groundOf = (b: Building, v: number, u = 0): number => {
+  const t = Math.min(1, Math.max(0, v / b.d)), fall = b.dress?.fall ?? 0;
+  return (b.sunk ?? 0) * t * t * (3 - 2 * t) - (fall ? (fall * Math.min(1, Math.max(-1, (2 * u) / b.w))) / 2 : 0);
 };
 
-/** Where the windows of a classical front stand (as `u`), and where the part of it that stands forward begins and ends. */
-export function classicalFront(b: Building): { windows: number[]; standL: number; standR: number } {
-  const W = b.w, middle = b.bays >> 1, pitch = (W - 1.6) / b.bays;
-  if (!b.portico) return { windows: Array.from({ length: b.bays }, (_, n) => -W / 2 + 0.8 + (n + 0.5) * pitch), standL: 0, standR: 0 };
-  // (Two wings, and between them three bays standing forward: each laid out evenly across its own breadth.)
-  const a = 0.8 + (middle - 1) * pitch - 0.3, c = 0.8 + (middle + 2) * pitch + 0.3;
-  const wing = (from: number, to: number) => Array.from({ length: middle - 1 }, (_, i) => -W / 2 + from + 0.5 + (i + 0.5) * ((to - from - 1.0) / (middle - 1)));
-  const stand = Array.from({ length: 3 }, (_, i) => -W / 2 + a + 0.3 + (i + 0.5) * ((c - a - 0.6) / 3));
-  return { windows: [...wing(0, a), ...stand, ...wing(c, W)], standL: a - W / 2, standR: c - W / 2 };
+/**
+ * The flight of steps up to a classical building's door from the ground before it, `rise` high: four low steps where it stands on its
+ * plinth of half a metre, more where it stands higher, none of them higher than a hand and a half; how deep each is, how much broader
+ * than the one over it, and how far before the front the whole reaches.
+ */
+export function stepsUp(rise: number): { steps: number; rise: number; tread: number; spread: number; run: number } {
+  // (Four low ones at the least: the ground before a door is never quite the height it was levelled to, and a step and a bit stops a walker dead.)
+  const steps = rise <= 0.62 ? 4 : Math.ceil(rise / 0.165), tread = steps === 4 ? 0.32 : 0.34;
+  return { steps, rise: rise / steps, tread, spread: steps === 4 ? 0.3 : 0.06, run: 0.4 + steps * tread };
+}
+
+/**
+ * Where the windows of a classical front stand (as `u`); where the middle that stands forward begins and ends (`standL`, `standR`,
+ * nothing where nothing does); and where the pavilions at its ends give way to the rest of the front (`pavL`, `pavR`, the ends of
+ * the front where there are none). A pavilion's edge stands midway between two windows, as a wall between rooms does.
+ */
+export function classicalFront(b: Building): { windows: number[]; standL: number; standR: number; pavL: number; pavR: number; centre: number; pavilions: number } {
+  const W = b.w, n = b.bays, middle = n >> 1, pitch = (W - 1.6) / n, d = dressOf(b), p = d.pavilions;
+  const centre = b.portico ? d.centre : 0, k = (centre - 1) / 2;
+  let windows: number[], standL = 0, standR = 0;
+  if (!b.portico) windows = Array.from({ length: n }, (_, i) => -W / 2 + 0.8 + (i + 0.5) * pitch);
+  else {
+    // (Two wings, and between them the bays standing forward: each laid out evenly across its own breadth.)
+    const side = middle - k, a = 0.8 + side * pitch - 0.3, c = 0.8 + (middle + k + 1) * pitch + 0.3;
+    const wing = (from: number, to: number) => Array.from({ length: side }, (_, i) => -W / 2 + from + 0.5 + (i + 0.5) * ((to - from - 1.0) / side));
+    const stand = Array.from({ length: centre }, (_, i) => -W / 2 + a + 0.3 + (i + 0.5) * ((c - a - 0.6) / centre));
+    windows = [...wing(0, a), ...stand, ...wing(c, W)];
+    standL = a - W / 2; standR = c - W / 2;
+  }
+  return { windows, standL, standR, centre, pavilions: p, pavL: p ? (windows[p - 1] + windows[p]) / 2 : -W / 2, pavR: p ? (windows[n - p - 1] + windows[n - p]) / 2 : W / 2 };
+}
+
+/** How far the wall of a classical front stands forward of its line at a point across it: where the middle or a pavilion does. */
+export function frontAt(b: Building, u: number): number {
+  if (b.style !== 'imperial') return 0;
+  const f = classicalFront(b);
+  if (b.portico && u > f.standL && u < f.standR) return CLASSICAL.out;
+  return u < f.pavL || u > f.pavR ? CLASSICAL.pavilion : 0;
 }
 
 /** Where the windows of the end walls stand, as `v`: an even number of them, so that the wall down the middle meets each end wall between two. */
@@ -63,7 +105,12 @@ export function wingWindows(b: Building, wing: NonNullable<Building['wings']>[nu
 export function footprintOf(b: Building): { u0: number; u1: number; v0: number; v1: number }[] {
   if (b.style === 'brick') return brickFootprint(b);
   const out = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
-  if (b.style === 'imperial' && b.portico) { const f = classicalFront(b); out.push({ u0: f.standL, u1: f.standR, v0: -CLASSICAL.out, v1: 0 }); }
+  if (b.style === 'imperial') {
+    const f = classicalFront(b);
+    // (Where there are columns, the ground storey of the middle comes forward to carry them.)
+    if (b.portico) out.push({ u0: f.standL, u1: f.standR, v0: -CLASSICAL.out - (dressOf(b).order === 'columns' ? CLASSICAL.columns : 0), v1: 0 });
+    if (f.pavilions) out.push({ u0: -b.w / 2, u1: f.pavL, v0: -CLASSICAL.pavilion, v1: 0 }, { u0: f.pavR, u1: b.w / 2, v0: -CLASSICAL.pavilion, v1: 0 });
+  }
   for (const g of b.wings ?? []) out.push({ u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d - 0.01, v1: b.d + g.length });
   return out;
 }
@@ -109,8 +156,74 @@ export function classicalVariations(b: Building, rng: Rng): void {
   if (!b.towers.length) delete b.towers;
 }
 
-/** Whether an opening whose foot is at `y0` would be under the ground, at a place `v` back from the front. */
-export const buried = (b: Building, v: number, y0: number): boolean => y0 < groundOf(b, v) + 0.25;
+/**
+ * How a classical building is dressed, dealt from `rng` (a stream of its own, so that dressing them changed nothing else about a
+ * place). A broad one is now and then a palace's front: a middle of five or seven bays under columns or pilasters, pavilions at its
+ * ends, round-headed windows, a wreathed frieze, a clock in its pediment, a flagpole, three doors into its hall. A small one is now
+ * and then plainer than the first of them were: no ornament over its windows, its ground storey smooth. Where the place has room
+ * before it (`raise`), it may stand on a high base of granite with a basement in it, up a longer flight (its floor up to `raise` metres
+ * over the ground); and where the ground falls along its front (`fall`, how much lower at its right end than its left), it takes up as
+ * much of that as its base allows. `columns` says whether there is room before it for the middle to come forward on columns.
+ */
+export function dealDress(b: Building, rng: Rng, o: { raise?: number; fall?: number; columns?: boolean } = {}): void {
+  if (b.style !== 'imperial') return;
+  const r1 = (v: number) => Math.round(v * 10) / 10, middle = b.bays >> 1, several = !!(b.entrances && b.entrances.length > 1);
+  const grand = b.bays >= 11 && rng.chance(0.55), plain = !grand && b.bays <= 7 && rng.chance(0.35);
+  const d: ClassicalDress = { ...PLAIN_DRESS };
+  if (b.portico && grand && !several) {
+    d.centre = rng.pick([3, 5, 5, ...(b.bays >= 17 ? [7] : [])]);
+    if (o.columns !== false && b.bays >= 9 && rng.chance(0.5)) d.order = 'columns';
+  }
+  const beside = b.portico ? middle - (d.centre - 1) / 2 : middle - (b.bays >= 7 ? 1 : 0);
+  if (grand && !several && !b.arch && beside >= 3 && rng.chance(0.5)) d.pavilions = Math.min(beside - 1, rng.pick([1, 2, 2, 3]));
+  d.arches = plain ? 0 : rng.pick(grand ? [0, 1, 1, 2] : [0, 0, 0, 1, 2]) as 0 | 1 | 2;
+  if (b.storeys < 2 && d.arches > 1) d.arches = 1;
+  d.heads = plain ? rng.pick(['plain', 'cornice'] as const) : rng.pick(['alternate', 'alternate', 'cornice', 'pediments', ...(grand ? ['pediments' as const] : [])] as const);
+  d.rusticated = plain ? rng.chance(0.4) : rng.chance(0.9);
+  d.frieze = grand ? rng.chance(0.6) : !plain && rng.chance(0.2);
+  d.balustrade = grand ? rng.chance(0.35) : !plain && rng.chance(0.1);
+  d.tympanum = rng.pick(grand ? ['clock', 'oculus', 'window'] as const : ['window', 'window', 'oculus', 'plain'] as const);
+  d.flag = grand && rng.chance(0.5);
+  d.roof = rng.pick(grand ? ['dealt', 'dealt', 'copper', 'black', 'grey'] as const : plain ? ['dealt', 'dealt', 'tiles', 'dark', 'grey'] as const : ['dealt', 'dealt', 'dealt', 'tiles', 'copper', 'black'] as const);
+  d.doors = grand && b.portico && !several && rng.chance(0.5) ? 3 : 1;
+  // (Of its own stream, so that the rest is dealt as it was before there were styles.)
+  d.style = rng.fork('style').pick(grand ? ['empire', 'empire', 'quoins'] as const : plain ? ['empire', 'lesenes', 'lesenes', 'bare'] as const : ['empire', 'empire', 'empire', 'quoins', 'lesenes'] as const);
+  if (o.raise && o.raise > CLASSICAL.plinth && !b.sunk && (grand ? rng.chance(0.6) : rng.chance(0.2))) d.plinth = r1(rng.range(Math.min(1.1, o.raise), o.raise));
+  // (The ground at its upper end stays a little under its floor.)
+  if (o.fall && !b.sunk) { const most = 2 * (d.plinth - 0.35); d.fall = r1(Math.min(most, Math.max(-most, o.fall))); }
+  if ((Object.keys(PLAIN_DRESS) as (keyof ClassicalDress)[]).some((key) => d[key] !== PLAIN_DRESS[key])) b.dress = d;
+}
+
+/** How near something may stand before a window: nearer than this, it would look into a wall, and it is left out. */
+export const CLOSE = 2.4;
+
+/**
+ * Whether a window whose middle is at `u` across and `v` back, its sill `y` over the ground before the door, looking out along
+ * (`nu`, `nv`), would look into something the document says stands close (`near`): anything within CLOSE of it, across its width,
+ * whose top is over its sill. Then it is left out.
+ */
+export function blinded(b: Building, u: number, v: number, nu: number, nv: number, y = 0, half = 0.6): boolean {
+  if (!b.near?.length) return false;
+  const l = Math.hypot(nu, nv) || 1, du = nu / l, dv = nv / l;
+  for (const n of b.near) {
+    if (y >= n.top) continue;
+    for (const d of [0.05, 0.5, 1, 1.7, CLOSE]) for (const a of [-half, 0, half]) if (within(n.at, u + du * d - dv * a, v + dv * d + du * a)) return true;
+  }
+  return false;
+}
+
+/** Whether a point lies inside an outline (each crossing of a line from it outward counts once). */
+function within(ring: [number, number][], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Whether an opening whose foot is at `y0` would be under the ground, at a place `v` back from the front and `u` across it. */
+export const buried = (b: Building, v: number, y0: number, u = 0): boolean => y0 < groundOf(b, v, u) + 0.25;
 
 /**
  * The plan of a classical building, worked out from its bays as such houses were. Each window is
@@ -124,14 +237,15 @@ export const buried = (b: Building, v: number, y0: number): boolean => y0 < grou
  * room behind it. Every storey is planned alike.
  */
 export function planClassical(b: Building, rng: Rng): BuildingPlan {
-  const { outer: T, spine: SPINE, cross: CROSS, out: OUT } = CLASSICAL;
-  const W = b.w, D = b.d, { windows, standL, standR } = classicalFront(b);
-  const bays = b.bays, middle = bays >> 1, broad = b.portico || bays >= 7 ? 3 : 1, flank = (broad - 1) / 2;
+  const { outer: T, spine: SPINE, cross: CROSS, out: OUT, pavilion: PAV } = CLASSICAL;
+  const W = b.w, D = b.d, { windows, standL, standR, centre, pavilions, pavL, pavR } = classicalFront(b);
+  const bays = b.bays, middle = bays >> 1, broad = b.portico || bays >= 7 ? 3 : 1, flank = (broad - 1) / 2, k = (centre - 1) / 2;
   // The middle line of each wall between bays: midway between two windows, or at the cheeks of what stands forward.
   const edge: number[] = [-W / 2];
   for (let i = 1; i < bays; i++) edge.push((windows[i - 1] + windows[i]) / 2);
   edge.push(W / 2);
-  if (b.portico) { edge[middle - 1] = standL + CROSS / 2; edge[middle + 2] = standR - CROSS / 2; }
+  if (b.portico) { edge[middle - k] = standL + CROSS / 2; edge[middle + k + 1] = standR - CROSS / 2; }
+  if (pavilions) { edge[pavilions] = pavL - CROSS / 2; edge[bays - pavilions] = pavR + CROSS / 2; }
   const lo = (i: number) => (i === 0 ? -W / 2 + T : edge[i] + CROSS / 2), hi = (i: number) => (i === bays ? W / 2 - T : edge[i] - CROSS / 2);
   const spine = D / 2, sF = spine - SPINE / 2, sB = spine + SPINE / 2, front = T, back = D - T;
   const uL = lo(middle - flank), uR = hi(middle + flank + 1);
@@ -146,19 +260,27 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
   }
   if (b.entrances && b.entrances.length > 1) { planEntrances(b, rng, plan, { edge, lo, hi, lined, middle, broad, spine, sF, sB, front, back }); return planWings(b, rng, plan); }
   // A wing: rooms of one, two or three bays; and the other wing its mirror. (With a carriage way through its end, the outermost two
-  // bays are one, the way on the ground storey and a pair of rooms over it on every other.)
-  const sizes: number[] = [], arch = !!b.arch && middle - flank >= 2 && !b.wings?.length;
-  for (let left = middle - flank - (arch ? 2 : 0); left > 0;) {
+  // bays are one, the way on the ground storey and a pair of rooms over it on every other.) Each part of the front that stands
+  // forward (the rest of a broad middle beyond the hall, and a pavilion) has rooms of its own, so that no room's front is broken by a
+  // step, and its front rooms reach forward into it.
+  const arch = !!b.arch && middle - flank >= 2 && !b.wings?.length && !pavilions;
+  const parts: { bays: number; out: number }[] = [];
+  if (k > flank) parts.push({ bays: k - flank, out: OUT });
+  parts.push({ bays: middle - flank - Math.max(0, k - flank) - pavilions - (arch ? 2 : 0), out: 0 });
+  if (pavilions) parts.push({ bays: pavilions, out: PAV });
+  const sizes: { size: number; out: number }[] = [];
+  for (const part of parts) for (let left = part.bays; left > 0;) {
     const take = left <= 3 && rng.chance(0.45) ? left : Math.min(left, rng.pick([1, 2, 2, 3]));
-    sizes.push(take);
+    sizes.push({ size: take, out: part.out });
     left -= take;
   }
-  if (arch) sizes.push(2);
+  if (arch) sizes.push({ size: 2, out: 0 });
   for (const side of [-1, 1]) {
     let bay = side < 0 ? middle - flank : middle + flank + 1;
-    for (const size of sizes) {
+    for (const { size, out } of sizes) {
       const first = side < 0 ? bay - size : bay, last = side < 0 ? bay : bay + size;
       const u0 = lo(first), u1 = hi(last), inner = side < 0 ? last : first, atMiddle = side < 0 ? last === middle - flank : first === middle + flank + 1;
+      const forward = front - out;
       // (The carriage way: on the ground storey one room from the front wall to the back, entered from neither neighbour; over it the
       // rooms are as anywhere else, and so named storey by storey.)
       const through = arch && side === b.arch!.side && (side < 0 ? first === 0 : last === bays);
@@ -166,7 +288,7 @@ export function planClassical(b: Building, rng: Rng): BuildingPlan {
       if (through) plan.rooms.push({ kind: 'carriage', u0, u1, v0: front, v1: back, linings: lined(front, back, u0, u1), storey: 0 });
       for (const storey of storeys) {
         const on = storey === undefined ? {} : { storey };
-        plan.rooms.push({ kind: 'front', u0, u1, v0: front, v1: sF, linings: lined(front, sF, u0, u1), ...on }, { kind: 'back', u0, u1, v0: sB, v1: back, linings: lined(sB, back, u0, u1), ...on });
+        plan.rooms.push({ kind: 'front', u0, u1, v0: forward, v1: sF, linings: lined(forward, sF, u0, u1), ...on }, { kind: 'back', u0, u1, v0: sB, v1: back, linings: lined(sB, back, u0, u1), ...on });
         plan.doors.push({ line: 'u', at: edge[inner], c: front + 1.25, w: 1.1, ...on });
         // (Beside a passage the back rooms are reached from the front rooms: the passage's far end is its stair.)
         if (!atMiddle || broad === 3) plan.doors.push({ line: 'u', at: edge[inner], c: atMiddle ? sB + 0.9 : back - 1.25, w: 1.0, ...on });
@@ -271,7 +393,7 @@ export function classicalArch(b: Building): { u: number; w: number; crown: numbe
   const room = b.plan?.rooms.find((r) => r.kind === 'carriage');
   if (!room) return null;
   const { windows } = classicalFront(b), n = b.arch!.side < 0 ? 0 : b.bays - 2;
-  const u = (windows[n] + windows[n + 1]) / 2, w = Math.min(3.3, windows[n + 1] - windows[n] + 0.9, 2 * Math.min(u - room.u0, room.u1 - u) - 0.3), crown = Math.min(CLASSICAL.plinth + b.heights[0] - 0.35, 4.1);
+  const u = (windows[n] + windows[n + 1]) / 2, w = Math.min(3.3, windows[n + 1] - windows[n] + 0.9, 2 * Math.min(u - room.u0, room.u1 - u) - 0.3), crown = Math.min(plinthOf(b) + b.heights[0] - 0.35, 4.1);
   return { u, w, crown, spring: crown - w / 2 };
 }
 
@@ -325,16 +447,22 @@ export const timberBays = (length: number): number => Math.max(2, Math.round(len
  */
 export function timberWindows(b: Building, storey: number): [number, number][][] {
   const W = b.w, D = b.d - timberFront(b, storey);
+  // (None where something stands close before the wall: each wall's line, and the way it looks out, in the building's measures.)
+  const front = timberFront(b, storey), sill = timberFloor(b, storey) + 0.9;
+  const open = (i: number) => ([s0, s1]: [number, number]) => {
+    const c = (s0 + s1) / 2, [u, v, nu, nv] = i === 0 ? [-W / 2 + c, front, 0, -1] : i === 1 ? [W / 2, front + c, 1, 0] : i === 2 ? [W / 2 - c, b.d, 0, 1] : [-W / 2, b.d - c, -1, 0];
+    return !blinded(b, u, v, nu, nv, sill, (s1 - s0) / 2);
+  };
   if (storey === 0) {
     const door = W * (b.door ?? 0.24);
-    return [[0.2, 0.5, 0.8].filter((c) => Math.abs(c * W - door) > 1.5).map((c): [number, number] => [c * W - 0.55, c * W + 0.55]), [[D / 2 - 0.4, D / 2 + 0.4]], [[W / 2 - 0.4, W / 2 + 0.4]], [[D / 2 - 0.4, D / 2 + 0.4]]];
+    return ([[0.2, 0.5, 0.8].filter((c) => Math.abs(c * W - door) > 1.5).map((c): [number, number] => [c * W - 0.55, c * W + 0.55]), [[D / 2 - 0.4, D / 2 + 0.4]], [[W / 2 - 0.4, W / 2 + 0.4]], [[D / 2 - 0.4, D / 2 + 0.4]]] as [number, number][][]).map((wall, i) => wall.filter(open(i)));
   }
   return [W, D, W, D].map((L, i) => {
     const bays = timberBays(L), pitch = L / bays, lit = new Set<number>();
     if (i === 0) for (let n = 0; n < b.bays; n++) lit.add(Math.min(bays - 1, Math.floor(((n + 0.5) * bays) / b.bays)));
     else if (i === 2) lit.add(Math.floor(bays / 2));
     else for (let n = 1; n < bays; n += 2) lit.add(n);
-    return [...lit].sort((p, q) => p - q).map((n): [number, number] => [n * pitch + 0.2, (n + 1) * pitch - 0.2]);
+    return [...lit].sort((p, q) => p - q).map((n): [number, number] => [n * pitch + 0.2, (n + 1) * pitch - 0.2]).filter(open(i));
   });
 }
 

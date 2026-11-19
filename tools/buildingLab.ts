@@ -19,7 +19,7 @@ const push = (lo: number, hi: number) => rng.range(lo - (hi - lo) * 0.25, hi + (
 
 function shake(kind: Kind, s: Shape): Shape {
   const t: Shape = JSON.parse(JSON.stringify(s));
-  t.w = push(4, 50); t.d = push(5, 20); t.storeys = Math.round(push(1, 7)); t.bays = Math.round(push(1, 15));
+  t.w = push(4, 80); t.d = push(5, 20); t.storeys = Math.round(push(1, 7)); t.bays = Math.round(push(1, kind === 'classical' ? 27 : 15));
   t.heights = Array.from({ length: 8 }, () => push(2, 6));
   if (rng.chance(0.2)) t.colour = [rng.range(0, 1), rng.range(0, 1), rng.range(0, 1)];
   if (kind === 'timber') { t.jetty = push(0, 0.6); t.gable = rng.chance(0.5); t.door = rng.pick([0.24, 0.5, 0.76]); t.burnt = rng.chance(0.2); }
@@ -32,6 +32,13 @@ function shake(kind: Kind, s: Shape): Shape {
     t.entrances = rng.chance(0.5) ? Array.from({ length: rng.int(1, 3) }, () => rng.int(0, 20)) : undefined;
     t.arch = rng.chance(0.4) ? { side: rng.pick([-1, 1] as const) } : undefined;
     t.brick = rng.pick([undefined, 'stucco', 'bare'] as const);
+    // And its dress, every part of it pushed about.
+    t.dress = rng.chance(0.2) ? undefined : {
+      centre: Math.round(push(1, 11)), order: rng.pick(['pilasters', 'columns'] as const), pavilions: Math.round(push(0, 4)), arches: rng.int(0, 2) as 0 | 1 | 2,
+      heads: rng.pick(['plain', 'cornice', 'alternate', 'pediments'] as const), rusticated: rng.chance(0.5), frieze: rng.chance(0.5), balustrade: rng.chance(0.5),
+      tympanum: rng.pick(['window', 'oculus', 'clock', 'plain'] as const), flag: rng.chance(0.5), doors: rng.pick([1, 3] as const), plinth: push(0.3, 3), fall: push(-5, 5),
+      roof: rng.pick(['dealt', 'grey', 'green', 'red', 'black', 'copper', 'tiles', 'dark'] as const), style: rng.pick(['empire', 'quoins', 'lesenes', 'bare'] as const),
+    };
     t.towers = rng.chance(0.5) ? Array.from({ length: rng.int(1, 4) }, () => ({ corner: rng.pick(['front', 'wing', 'back'] as const), side: rng.pick([-1, 1] as const), size: push(3, 7), extra: Math.round(push(0, 4)) })) : undefined;
   }
   if (kind === 'wooden') {
@@ -69,7 +76,12 @@ for (const kind of KIND_ORDER) {
     const meshes = new Map<string, MeshBuilder>();
     const began = performance.now();
     try {
-      buildItem(item, 'greystone', (m) => { let x = meshes.get(m); if (!x) meshes.set(m, (x = new MeshBuilder())); return x; });
+      // (Now and then with other buildings standing close about it, of any height, which shut the windows that would look into them.)
+      const near = n % 2 ? Array.from({ length: rng.int(1, 4) }, () => {
+        const u = rng.range(-shape.w, shape.w), v = rng.range(-6, shape.d + 6), a = rng.range(0, Math.PI), c = Math.cos(a), sn = Math.sin(a), hw = rng.range(1, 8), hd = rng.range(1, 6);
+        return { at: ([[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]] as [number, number][]).map(([x, y]): [number, number] => [u + x * c - y * sn, v + x * sn + y * c]), top: rng.range(0, 25) };
+      }) : undefined;
+      buildItem(item, 'greystone', (m) => { let x = meshes.get(m); if (!x) meshes.set(m, (x = new MeshBuilder())); return x; }, near);
     } catch (e) {
       failed++;
       console.log(`${kind} ${n}: did not build: ${(e as Error).message}\n  ${JSON.stringify(shape)}`);

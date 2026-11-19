@@ -1,5 +1,6 @@
 import { ShapeUtils, Vector2, Vector3 } from 'three';
 import { BRICK, brickEaves, brickFloor, churchParts } from '../core/brick';
+import { blinded } from '../core/building';
 import { Rng } from '../core/rng';
 import { Building } from '../core/site';
 import { buildingTools, litRoom } from './buildings';
@@ -256,6 +257,15 @@ function buildFront(k: BrickKit, f: Face, plan: FrontPlan, T: number, material: 
     else if (g.fill === 'hatch') doorLeaves(k, f, g, deep, o.paint);
     else if (g.fill === 'dark') k.prism(f, shapeOf(g), [], deep + 0.3, deep + 0.34, 'wood', [0.02, 0.02, 0.02]);
   }
+}
+
+/** Leaves out of a front the windows that would look into something standing close before it (what the document's `near` says); a niche stays, blind. */
+function shutWindows(b: Building, k: BrickKit, f: Face, plan: FrontPlan) {
+  plan.openings = plan.openings.filter((g) => {
+    if (g.fill !== 'window') return true;
+    const c = (g.s0 + g.s1) / 2, p = k.local(f.P(c, 0, 0)), q = k.local(f.P(c, 0, -1));
+    return !blinded(b, p.u, p.v, q.u - p.u, q.v - p.v, g.y0, (g.s1 - g.s0) / 2);
+  });
 }
 
 /** How far each order of a portal steps back from the one outside it, across the face, and into the wall. */
@@ -536,6 +546,7 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   plan.openings.push(...g.openings);
   const top = g.top.filter(([s]) => s > -1e-6 && s < W + 1e-6);
   plan.outline = [[0, -0.45], [W, -0.45], ...(top[top.length - 1][0] < W - 1e-6 ? [[W, E] as Pt] : []), ...[...top].reverse(), ...(top[0][0] > 1e-6 ? [[0, E] as Pt] : [])];
+  shutWindows(b, k, front, plan);
   buildFront(k, front, plan, T, material, colour, { frame: FRAME, paint, door: paint });
   g.after.forEach((f) => f());
 
@@ -679,6 +690,7 @@ function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   // (The gable's own outline may begin and end above the dormer's eaves: then its sides run straight down to them.)
   plan.outline.splice(4, 0, [zr, Ed]);
   plan.outline.splice(plan.outline.length - 2, 0, [zl, Ed]);
+  shutWindows(b, k, front, plan);
   buildFront(k, front, plan, T, material, colour, { frame: FRAME, paint });
   g.after.forEach((f) => f());
 

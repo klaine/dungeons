@@ -7,10 +7,10 @@
 // from a site document, as a valley builds it; only where it stands, which way it is turned and how
 // it is scaled are the lab's. The document is always made at the origin facing `w`, and the lab
 // places what is built.
-import { classicalVariations, floorOf, freeAtEnds, planClassical, planTimber, timberFloor } from '../src/core/building';
+import { classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
 import { brickCountry, brickEaves, dealBrickHouse, dealChurch } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
-import { BrickWork, Building, Stone, Town } from '../src/core/site';
+import { BrickWork, Building, ClassicalDress, Stone, Town } from '../src/core/site';
 import { buildBuilding } from '../src/render/buildings';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
@@ -95,7 +95,7 @@ export function entrancesFor(bays: number, count: 2 | 3): number[] {
  */
 export const RANGES = {
   timber: { w: [5, 11], d: [5.5, 10], storeys: [1, 4], height: [2.2, 3.8], bays: [1, 4], jetty: [0, 0.6] },
-  classical: { bays: [3, 15], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 14], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], towerSize: [4, 6.4], towerExtra: [1, 3] },
+  classical: { bays: [3, 25], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 16], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], towerSize: [4, 6.4], towerExtra: [1, 3], plinth: [0.5, 2.5] },
   wooden: { w: [9, 24], d: [7, 12], storeys: [1, 2], height: [2.7, 3.8], basement: [0.4, 2], dormers: [0, 5], wingWidth: [5, 10], wingLength: [5, 14] },
   shack: { w: [2.6, 6], d: [3, 6.5], stilts: [0, 2.5] },
   gabled: { w: [5.5, 11], d: [8, 18], storeys: [1, 5], height: [2.4, 5.2], bays: [1, 5], pitch: [40, 66] },
@@ -211,6 +211,29 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
       else s.arch = { side: s.arch.side < 0 ? -1 : 1 };
     }
     if (s.brick !== 'stucco' && s.brick !== 'bare') delete s.brick;
+    // Its dress (see `ClassicalDress`), within what the plan can make of it: a middle that leaves at least a bay either side of it, and
+    // pavilions that leave a bay between them and the middle; one entrance where there is a broad middle or pavilions; three doors
+    // only into a hall three bays broad; the ground never falling so far that its upper end comes up to the floor.
+    const d: ClassicalDress = { ...PLAIN_DRESS, ...(s.dress ?? {}) }, middle = s.bays >> 1;
+    d.centre = s.portico ? clamp(odd(d.centre), 3, Math.max(3, Math.min(9, s.bays - 2))) : 3;
+    d.order = s.portico && d.order === 'columns' ? 'columns' : 'pilasters';
+    const beside = s.portico ? middle - (d.centre - 1) / 2 : middle - (s.bays >= 7 ? 1 : 0);
+    d.pavilions = clamp(Math.round(d.pavilions), 0, Math.max(0, Math.min(3, beside - 1)));
+    if ((d.centre > 3 || d.pavilions) && s.entrances) delete s.entrances;
+    if (d.pavilions && s.arch) delete s.arch;
+    d.arches = clamp(Math.round(d.arches), 0, s.storeys > 1 ? 2 : 1) as 0 | 1 | 2;
+    d.heads = (['plain', 'cornice', 'alternate', 'pediments'] as const).includes(d.heads) ? d.heads : 'alternate';
+    d.rusticated = d.rusticated !== false; d.frieze = !!d.frieze; d.balustrade = !!d.balustrade; d.flag = !!d.flag;
+    d.tympanum = (['window', 'oculus', 'clock', 'plain'] as const).includes(d.tympanum) ? d.tympanum : 'window';
+    d.roof = (['dealt', 'grey', 'green', 'red', 'black', 'copper', 'tiles', 'dark'] as const).includes(d.roof) ? d.roof : 'dealt';
+    d.style = (['empire', 'quoins', 'lesenes', 'bare'] as const).includes(d.style) ? d.style : 'empire';
+    d.doors = d.doors === 3 && (s.portico || s.bays >= 7) && !s.entrances ? 3 : 1;
+    d.plinth = r2(clamp(d.plinth, R.plinth[0], R.plinth[1]));
+    const steepest = 2 * (d.plinth - 0.35);
+    d.fall = r2(clamp(d.fall, -steepest, steepest));
+    // (Dressed as the first of them were, it carries no dress at all.)
+    if ((Object.keys(PLAIN_DRESS) as (keyof ClassicalDress)[]).every((key) => d[key] === PLAIN_DRESS[key])) delete s.dress;
+    else s.dress = d;
     if (s.towers?.length && s.wings?.length) {
       const front = Math.min(R.towerSize[1], s.w / 2 - 3.5), seen = new Set<string>();
       s.towers = s.towers.filter((t) => {
@@ -321,8 +344,9 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
       const width = round(winged.range(5.4, Math.min(8.8, w / 2 - 4))), length = round(winged.range(8, 14));
       s.wings = winged.chance(0.5) ? [{ side: -1, width, length }, { side: 1, width, length }] : [{ side: winged.chance(0.5) ? -1 : 1, width, length }];
     }
-    // (And the variations, from a stream of their own, as every place deals them.)
+    // (And the variations and the dress, each from a stream of its own, as a place deals them; with room before it to stand high.)
     classicalVariations(s as Building, rng.fork('variations'));
+    dealDress(s as Building, rng.fork('dress'), { raise: 1.8, columns: true });
     return normalise(kind, s);
   }
   if (kind === 'wooden') {
@@ -340,6 +364,66 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
   const country = brickCountry(stone);
   if (kind === 'church') return normalise(kind, dealChurch(rng, 70, country)!);
   return normalise(kind, dealBrickHouse(rng, 15, kind, country));
+}
+
+/**
+ * A classical building of one character, dealt from the seed: a palace, as on a capital's square (a long front of twenty-odd bays, a
+ * rusticated ground storey of round-headed windows on a high base of granite, a broad middle under columns and a pediment with a clock,
+ * pavilions at the ends, a wreathed frieze, a flagpole, and the square falling away along it); or a plain block, three to nine bays,
+ * with nothing on it but its windows, its bands and its cornice.
+ */
+export function dealCharacter(character: 'palace' | 'plain', seed: string): Shape {
+  const rng = new Rng(`lab ${character} ${seed}`), round = (v: number) => Math.round(v * 10) / 10;
+  if (character === 'palace') {
+    const bays = rng.pick([19, 21, 23, 25, 25]), storeys = rng.pick([3, 3, 3, 4]), plinth = round(rng.range(1.3, 1.9));
+    const s: Shape = {
+      style: 'imperial', w: round(bays * 2.55 + 1.6), d: round(rng.range(13, 15)), storeys, bays, portico: true, colour: rng.pick([[0.9, 0.78, 0.45], [0.92, 0.8, 0.5], [0.86, 0.62, 0.56], [0.88, 0.84, 0.72]] as Colour[]),
+      heights: [round(rng.range(4.2, 4.6)), round(rng.range(4.4, 4.9)), ...Array.from({ length: storeys - 2 }, () => round(rng.range(3.8, 4.2)))],
+      dress: {
+        centre: rng.pick([5, 5, 7]), order: rng.chance(0.75) ? 'columns' : 'pilasters', pavilions: rng.pick([2, 3, 3]), arches: rng.pick([1, 1, 2] as const), heads: rng.pick(['cornice', 'alternate', 'pediments'] as const),
+        rusticated: true, frieze: true, balustrade: rng.chance(0.35), tympanum: rng.pick(['clock', 'clock', 'oculus'] as const), flag: true, doors: 3, plinth,
+        fall: round((rng.chance(0.5) ? 1 : -1) * rng.range(0.6, 2 * (plinth - 0.35))), roof: rng.pick(['dealt', 'green', 'grey', 'copper', 'black'] as const),
+        style: rng.fork('style').pick(['empire', 'empire', 'quoins'] as const),
+      },
+    };
+    return normalise('classical', s, 'bays');
+  }
+  const bays = rng.pick([3, 5, 5, 7, 7, 9]), storeys = rng.pick([2, 2, 3]);
+  const s: Shape = {
+    style: 'imperial', w: round(bays * 2.55 + 1.6), d: round(rng.range(9.4, 11)), storeys, bays, portico: false, colour: rng.pick(CLASSICAL_WASHES),
+    heights: [round(rng.range(3.3, 3.8)), ...Array.from({ length: storeys - 1 }, () => round(rng.range(3.1, 3.5)))],
+    dress: { ...PLAIN_DRESS, heads: rng.pick(['plain', 'plain', 'cornice'] as const), rusticated: rng.chance(0.4), tympanum: 'plain', style: rng.fork('style').pick(['lesenes', 'lesenes', 'bare', 'empire'] as const) },
+  };
+  return normalise('classical', s, 'bays');
+}
+
+/**
+ * The ground a building stands on in the lab, where it is not level: a paving that falls along its front as its dress says, from the
+ * square at its lower end to as high as the fall at its upper, reaching out before it far enough for its steps and a little round it.
+ * Laid in the building's own measures (the ground before its door at nothing); the lab sets the building up by half the fall so that
+ * the paving's lower end meets the square. Nothing for a building on level ground.
+ */
+export function liftOf(item: Item): number {
+  return item.kind === 'classical' ? Math.abs(item.shape.dress?.fall ?? 0) / 2 : 0;
+}
+export function buildGround(item: Item, mesh: (material: string) => MeshBuilder, colour: Colour): void {
+  const lift = liftOf(item);
+  if (!lift) return;
+  const b = { ...item.shape, x: 0, z: 0, faces: 'w' } as Building, s = item.shape, m = mesh('floor');
+  const reach = Math.max(0, ...(s.wings ?? []).map((g) => g.length)), v0 = -9, v1 = s.d + reach + 2.5, u0 = -s.w / 2 - 3, u1 = s.w / 2 + 3;
+  const us = [u0, -s.w / 2, s.w / 2, u1], top = (u: number) => groundOf(b, 0, u), P = (u: number, y: number, v: number): [number, number, number] => [-s.d / 2 + v, y, u];
+  const quad = (p: [number, number, number][], n: [number, number, number]) => {
+    const ids = p.map(([x, y, z]) => m.addVertex(x, y, z, n[0], n[1], n[2], z * 0.5, x * 0.5, colour[0], colour[1], colour[2]));
+    m.addTriangle(ids[0], ids[1], ids[2]); m.addTriangle(ids[0], ids[2], ids[3]);
+  };
+  for (let i = 0; i < 3; i++) {
+    const a = us[i], c = us[i + 1], ya = top(a), yc = top(c), len = Math.hypot(c - a, yc - ya), ny = (c - a) / len, nu = -(yc - ya) / len;
+    // (The top, as the ground falls; and its two faces at the front and the back, down to the square.)
+    quad([P(a, ya, v0), P(a, ya, v1), P(c, yc, v1), P(c, yc, v0)], [0, ny, nu]);
+    quad([P(a, -lift, v0), P(a, ya, v0), P(c, yc, v0), P(c, -lift, v0)], [-1, 0, 0]);
+    quad([P(c, -lift, v1), P(c, yc, v1), P(a, ya, v1), P(a, -lift, v1)], [1, 0, 0]);
+  }
+  for (const [u, n] of [[u0, -1], [u1, 1]] as [number, number][]) quad(n < 0 ? [P(u, -lift, v1), P(u, top(u), v1), P(u, top(u), v0), P(u, -lift, v0)] : [P(u, -lift, v0), P(u, top(u), v0), P(u, top(u), v1), P(u, -lift, v1)], [0, 0, n]);
 }
 
 /** The site document of an item, as the builders read it: at the origin, facing `w`, with its rooms planned. */
@@ -363,10 +447,46 @@ export function shackOf(item: Item): Town['shacks'][number] {
 }
 
 /** Builds an item's building into meshes by material, at the origin facing `w` (its front towards -x, its middle at x = 0). */
-export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder): void {
+export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder, near?: Building['near']): void {
   // (A shack's posts go down to the ground, which here is level and nowhere near the sea.)
   if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return; }
-  buildBuilding(documentOf(item), 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  const b = documentOf(item);
+  if (near?.length) b.near = near;
+  buildBuilding(b, 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+}
+
+/** Where a point of an item's ground plan (`u` across its front, `v` back from it, in its own measures) stands in the square. */
+function squareAt(item: Item, u: number, v: number): [number, number] {
+  const a = Math.PI / 2 + (item.turn * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  const x = (-item.shape.d / 2 + v) * item.scale[2], z = u * item.scale[0];
+  return [item.x + x * c + z * s, item.z - x * s + z * c];
+}
+/** And back: where a point of the square falls on an item's ground plan, in its own measures. */
+function planAt(item: Item, X: number, Z: number): [number, number] {
+  const a = Math.PI / 2 + (item.turn * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a), dx = X - item.x, dz = Z - item.z;
+  return [(dx * s + dz * c) / item.scale[0], (dx * c - dz * s) / item.scale[2] + item.shape.d / 2];
+}
+const footprintOfItem = (item: Item) => footprintOf({ ...item.shape, x: 0, z: 0, faces: 'w' } as Building);
+
+/**
+ * What stands close about an item, as the document's `near` records it: the ground plan of every other building near enough to shut
+ * one of its windows, in its own measures, and how high that one's walls rise over its ground. (To a tenth of a metre, so that one
+ * standing still does not make another be built again.)
+ */
+export function nearOf(item: Item, others: Item[]): Building['near'] {
+  const own = footprintOfItem(item), reach = CLOSE + 0.8;
+  const u0 = Math.min(...own.map((r) => r.u0)) - reach, u1 = Math.max(...own.map((r) => r.u1)) + reach, v0 = Math.min(...own.map((r) => r.v0)) - reach, v1 = Math.max(...own.map((r) => r.v1)) + reach;
+  const out: NonNullable<Building['near']> = [], tenth = (x: number) => Math.round(x * 10) / 10;
+  for (const q of others) {
+    if (q.id === item.id) continue;
+    const top = tenth((eavesOf(q) * q.scale[1] + liftOf(q) - liftOf(item)) / item.scale[1]);
+    for (const r of footprintOfItem(q)) {
+      const at = ([[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]] as [number, number][]).map(([u, v]) => planAt(item, ...squareAt(q, u, v)));
+      if (at.every(([u]) => u < u0) || at.every(([u]) => u > u1) || at.every(([, v]) => v < v0) || at.every(([, v]) => v > v1)) continue;
+      out.push({ at: at.map(([u, v]) => [tenth(u), tenth(v)]), top });
+    }
+  }
+  return out.length ? out : undefined;
 }
 
 /** The height of the top of a building's walls, where its roof begins, above the ground before its door. */

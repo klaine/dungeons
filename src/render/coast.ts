@@ -6,7 +6,7 @@ import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
 import { buildLandmark } from './landmarks';
 import { buildBuilding, litRoom } from './buildings';
-import { CLASSICAL } from '../core/building';
+import { CLASSICAL, plinthOf } from '../core/building';
 import { Colour } from './planting';
 import { anyAngle } from './geom/anyAngle';
 
@@ -584,7 +584,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const b = o.mansion.building, turn = b.faces === 'w' ? 1 : -1;
     buildBuilding(b, o.mansion.y, mesh, rng.fork('mansion'), c.stoneTint, false);
     // Somebody left something in its entrance hall.
-    c.finds.push({ at: new Vector3(b.x - turn * (b.d / 2 - 3), o.mansion.y + CLASSICAL.plinth + 0.3, b.z + 0.6), what: 'a silver snuffbox' });
+    c.finds.push({ at: new Vector3(b.x - turn * (b.d / 2 - 3), o.mansion.y + plinthOf(b) + 0.3, b.z + 0.6), what: 'a silver snuffbox' });
   }
   return { deck, lamp: o.lighthouse ? { x: o.lighthouse.x, y: o.lighthouse.y + o.lighthouse.height + 1.6, z: o.lighthouse.z } : undefined };
 }

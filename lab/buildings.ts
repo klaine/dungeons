@@ -26,7 +26,10 @@ import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
 import { makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { buildItem, deal, documentOf, eavesOf, Item, Kind, KIND_ORDER, KINDS, normalise, RANGES, shackOf, Shape, stoneColour } from './buildingKinds';
+import { buildGround, buildItem, deal, dealCharacter, documentOf, eavesOf, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, shackOf, Shape, stoneColour } from './buildingKinds';
+import { dealDress, PLAIN_DRESS } from '../src/core/building';
+import { Rng } from '../src/core/rng';
+import type { ClassicalDress } from '../src/core/site';
 
 type Tool = 'move' | 'extrude' | 'scale';
 type Colour = [number, number, number];
@@ -258,6 +261,8 @@ async function start(): Promise<void> {
     stone: generateTextureSet('stone', size, 3), wood: generateTextureSet('wood', size, 5), moss: generateTextureSet('moss', size / 2, 9),
     plaster: generateTextureSet('plaster', size, 41), tile: generateTextureSet('tile', size, 43),
     redBrick: generateTextureSet('redBrick', size, 73), buffBrick: generateTextureSet('buffBrick', size, 79),
+    // (The brown brick of the towns' classical buildings, laid in running bond: what a classical front of brick is built of.)
+    brick: generateTextureSet('brick', size, 83),
   };
   doneGenerating();
   const materials: Record<string, Material> = {
@@ -269,6 +274,7 @@ async function start(): Promise<void> {
     tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3 }),
     redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
     buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
+    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3 }),
     metal: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.25, roughness: 0.5 }),
     copper: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1 }),
@@ -356,12 +362,16 @@ async function start(): Promise<void> {
   scene.add(world);
   const itemOf = (id: number | null) => (id === null ? undefined : state.items.find((it) => it.id === id));
   const selectedItem = () => itemOf(state.selected);
-  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone]);
+  // (What stands close about a building is part of what it is built from: a window that would look into another building is left out,
+  // and comes back when that one is moved away.)
+  const nearItem = (it: Item) => nearOf(it, state.items);
+  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null]);
   /** Puts what is built of an item where the item says it stands, turned and scaled. (Built facing `w`, its front towards -x: a quarter turn more faces it to +z.) */
   const placeItem = (it: Item) => {
     const b = built.get(it.id);
     if (!b) return;
-    b.holder.position.set(it.x, 0, it.z);
+    // (Set up by half its fall, where the ground falls along its front, so that the lower end of its sloping ground meets the square.)
+    b.holder.position.set(it.x, liftOf(it), it.z);
     b.holder.rotation.set(0, Math.PI / 2 + rad(it.turn), 0);
     b.holder.scale.set(it.scale[2], it.scale[1], it.scale[0]);
     b.holder.updateMatrixWorld(true);
@@ -370,7 +380,10 @@ async function start(): Promise<void> {
   const rebuild = (it: Item): boolean => {
     const builders = new Map<string, MeshBuilder>(), t0 = performance.now();
     try {
-      buildItem(it, state.stone, (m) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; });
+      const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
+      buildItem(it, state.stone, into, nearItem(it));
+      const c = stoneColour(state.stone);
+      buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     } catch (e) {
       console.error(e);
       say(`${KINDS[it.kind].name} could not be built as it is: ${(e as Error).message}`, 'bad', 20);
@@ -393,6 +406,8 @@ async function start(): Promise<void> {
     changed(true);
     return true;
   };
+  /** Marks to be built again every building whose neighbours have come or gone close enough to shut a window of it, or open one. */
+  const neighbours = () => { for (const it of state.items) { const b = built.get(it.id); if (b && b.sig !== sigOf(it)) dirty.add(it.id); } };
   /** Brings what is built into line with what is set out: new items built, changed ones built again (in the loop, a few at a time), gone ones taken away. */
   const sync = () => {
     for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); built.delete(id); dirty.delete(id); }
@@ -522,9 +537,9 @@ async function start(): Promise<void> {
     const p = levelAt(new Ray(camera.position.clone(), controls.target.clone().sub(camera.position).normalize())) ?? controls.target.clone();
     return { x: snapped(p.x), z: snapped(p.z) };
   };
-  const add = (kind: Kind, o: { follow?: boolean; seed?: string; x?: number; z?: number; turn?: number } = {}): Item => {
+  const add = (kind: Kind, o: { follow?: boolean; seed?: string; x?: number; z?: number; turn?: number; shape?: (seed: string) => Shape } = {}): Item => {
     const seed = o.seed ?? Math.random().toString(36).slice(2, 8), at = viewCentre();
-    const it: Item = { id: state.next++, kind, seed, x: o.x ?? at.x, z: o.z ?? at.z, turn: o.turn ?? 0, scale: [1, 1, 1], inn: false, shape: deal(kind, seed, state.stone) };
+    const it: Item = { id: state.next++, kind, seed, x: o.x ?? at.x, z: o.z ?? at.z, turn: o.turn ?? 0, scale: [1, 1, 1], inn: false, shape: o.shape ? o.shape(seed) : deal(kind, seed, state.stone) };
     state.items.push(it);
     sync();
     rebuild(it); dirty.delete(it.id);
@@ -914,7 +929,7 @@ async function start(): Promise<void> {
   const layoutOf = (it: Item | undefined) => {
     if (!it) return '';
     const s = it.shape, bw = s.brickwork;
-    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
   };
   let shownLayout = '', sliding = false;
   /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
@@ -982,6 +997,10 @@ async function start(): Promise<void> {
     // (A click with the mouse puts the new building on the pointer; a tap stands it in the middle of the view.)
     b.addEventListener('click', (e) => { add(kind, { follow: (e as PointerEvent).pointerType === 'mouse' }); b.blur(); });
   }
+  buttons(panel, [
+    ['A palace', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('palace', seed) }); }, 'A long classical front on a high base, its middle under columns and a pediment, pavilions at its ends, the ground falling along it'],
+    ['A plain block', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('plain', seed) }); }, 'A classical block with nothing on it but its windows, its bands and its cornice'],
+  ]);
   buttons(panel, [['A street of brick', street, 'Seven houses wall to wall, dealt as a town deals them']]);
 
   // The building chosen.
@@ -1101,6 +1120,35 @@ async function start(): Promise<void> {
         if (s().towers?.length) ints('Tower storeys', () => s().towers![0].extra, (t, v) => { for (const q of t.towers!) q.extra = v; }, 1, 'w', 'How many storeys the towers rise over the cornice');
       }
       wash();
+      // How it is dressed: from a plain block to a palace on a sloping square.
+      el('h3', selBox, 'Dress');
+      const newSeed = () => Math.random().toString(36).slice(2, 8);
+      buttons(selBox, [
+        ['Palace', () => { it.seed = newSeed(); it.shape = dealCharacter('palace', it.seed); dirty.add(it.id); renderSelected(); commit(); }, 'Deals it again as a palace'],
+        ['Plain', () => { it.seed = newSeed(); it.shape = dealCharacter('plain', it.seed); dirty.add(it.id); renderSelected(); commit(); }, 'Deals it again as a plain block'],
+        ['Deal dress', () => change((t) => { delete t.dress; dealDress(t as Building, new Rng(newSeed()).fork('dress'), { raise: 1.8, columns: true }); }, 'w', true), 'Keeps its measures and dresses it as a place might'],
+      ]);
+      const dd = (): ClassicalDress => ({ ...PLAIN_DRESS, ...(s().dress ?? {}) });
+      const dressed = (f: (d: ClassicalDress) => void) => (t: Shape) => { const d = { ...PLAIN_DRESS, ...(t.dress ?? {}) }; f(d); t.dress = d; };
+      pick('Style', [['Empire: strips and heads', 'empire'], ['Renaissance: quoins', 'quoins'], ['Nordic: lesenes', 'lesenes'], ['None: bare walls', 'bare']], () => dd().style, (t, v) => dressed((d) => { d.style = v; })(t), 'How richly the walls are dressed: strips at the corners and heads over the windows; stones long and short up the corners; flat strips and plain frames; or nothing but the openings');
+      if (s().portico) {
+        ints('Middle bays', () => dd().centre, (t, v) => dressed((d) => { d.centre = v; })(t), 2, 'w', 'How many bays of the middle stand forward: three to nine');
+        pick('Middle', [['Pilasters', 'pilasters'], ['Columns', 'columns']], () => dd().order, (t, v) => dressed((d) => { d.order = v; })(t), 'Columns stand clear of the wall through the upper storeys, on the ground storey brought forward');
+      }
+      ints('Pavilions', () => dd().pavilions, (t, v) => dressed((d) => { d.pavilions = v; })(t), 1, 'w', 'Bays at each end standing forward under pilasters of their own');
+      pick('Round heads', [['None', 0], ['Ground storey', 1], ['Ground and first', 2]], () => dd().arches, (t, v) => dressed((d) => { d.arches = v as 0 | 1 | 2; })(t), 'Windows (and doors) with round heads');
+      pick('Window heads', [['Surround only', 'plain'], ['Cornice', 'cornice'], ['Every other pediment', 'alternate'], ['Pediments', 'pediments']], () => dd().heads, (t, v) => dressed((d) => { d.heads = v; })(t), 'Over the windows of the principal storey');
+      tick([
+        ['Rusticated', () => dd().rusticated, (t, v) => dressed((d) => { d.rusticated = v; })(t), 'The ground storey cut in courses'],
+        ['Wreaths', () => dd().frieze, (t, v) => dressed((d) => { d.frieze = v; })(t), 'A wreath in the frieze over each window'],
+        ['Balustrade', () => dd().balustrade, (t, v) => dressed((d) => { d.balustrade = v; })(t), 'Along the top of the cornice, before the roof'],
+        ['Flagpole', () => dd().flag, (t, v) => dressed((d) => { d.flag = v; })(t)],
+      ]);
+      if (s().portico && s().pediment !== false) pick('In the pediment', [['Small window', 'window'], ['Round window', 'oculus'], ['Clock', 'clock'], ['Nothing', 'plain']], () => dd().tympanum, (t, v) => dressed((d) => { d.tympanum = v; })(t));
+      pick('Roof', [['Sheet metal, as dealt', 'dealt'], ['Grey sheet metal', 'grey'], ['Green sheet metal', 'green'], ['Red-brown sheet metal', 'red'], ['Black sheet metal', 'black'], ['Copper', 'copper'], ['Red tiles', 'tiles'], ['Dark tiles', 'dark']], () => dd().roof, (t, v) => dressed((d) => { d.roof = v; })(t), 'What the roof is covered with');
+      if (s().portico || s().bays >= 7) pick('Doors', [['One', 1], ['Three', 3]], () => dd().doors, (t, v) => dressed((d) => { d.doors = v as 1 | 3; })(t), 'Three side by side into the one hall');
+      num('Base', R.classical.plinth, () => dd().plinth, (t, v) => dressed((d) => { d.plinth = v; })(t), 'How high its floor stands over the ground before the door; over a metre, a basement with windows of its own, up a longer flight', 0.05);
+      num('Ground falls', [-4.3, 4.3], () => dd().fall, (t, v) => dressed((d) => { d.fall = v; })(t), 'How much lower the ground is at its right end than its left (less than nothing: the left is lower). As much as the base allows; the building stands level, its granite base showing the more.', 0.05);
     } else if (it.kind === 'wooden') {
       const RW = R.wooden;
       num('Width', RW.w, () => s().w, (t, v) => { t.w = v; t.bays = Math.max(3, Math.round((v - 2) / 2.2)); }, 'A little over two metres to a window: more windows as it grows', 0.1);
@@ -1410,7 +1458,7 @@ async function start(): Promise<void> {
         if (it) rebuild(it);
       }
     }
-    if (tick % 10 === 0) findClashes();
+    if (tick % 10 === 0) { findClashes(); neighbours(); }
     controls.update();
     if (shadowsDue > 0) { shadowsDue--; sun.shadow.needsUpdate = true; }
     if (staticAt && now > staticAt && !held && !press?.moved) {
@@ -1454,9 +1502,10 @@ async function start(): Promise<void> {
   // For driving the lab from a script: add, choose, move the camera, and take a picture of what is drawn.
   (window as unknown as Record<string, unknown>).__lab = {
     state, camera, controls, built, renderer,
-    add: (kind: Kind, o?: { seed?: string; x?: number; z?: number; turn?: number }) => add(kind, o).id,
+    add: (kind: Kind, o?: { seed?: string; x?: number; z?: number; turn?: number; character?: 'palace' | 'plain' }) => add(kind, { ...o, shape: o?.character ? (seed) => dealCharacter(o.character!, seed) : undefined }).id,
     select, setTool, frame, look, placeCamera: (from: number[], to: number[]) => placeCamera(new Vector3(...from), new Vector3(...to)),
     reshape: (id: number, f: (s: Shape) => void) => { const it = itemOf(id); if (it) { const t = clone(it.shape); f(t); it.shape = normalise(it.kind, t); dirty.add(id); renderSelected(); commit(); } },
+    remove, clear: () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); },
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     pending: () => dirty.size,
     ready: true,
