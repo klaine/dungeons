@@ -417,7 +417,8 @@ which the world was about one. Its four mountain tops built without fault, laid 
 and built in 63 to 102, with 2.5 to 3.8 million triangles of rock, the summits 50 to 60 metres over the
 forecourts, and 19 on the one whose only ground for a hospice is on its summit's dome (the same seed's top
 drawn alone has 3.7 million and takes 94). In the browser, drawing in software, houses at three world valley
-heads and on a world island were played through to the end (`WORLD=w2 node tools/browser/play.cjs`). Not yet: the squares
+heads, on a world island and on two world summits were played through to the end (`WORLD=w2 node
+tools/browser/play.cjs`, with `PLACE=island` or `mountain`). Not yet: the squares
 at a metre under a place (the
 site reads the tiles at 5 metres, as it read its upland at 5, and lays its own detail); a world's lakes and
 rivers in its places.
