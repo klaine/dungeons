@@ -171,7 +171,8 @@ it covers no mark or name. **Relief** shows the same world as shaded relief colo
 kilometre's scale; the frame barred every half kilometre. `?world=<seed>` names the world;
 `tools/browser/worldmap.cjs` saves both pictures. Over the map, each place found is listed with two
 ways to it: **Build a house here** opens the game on it (`?world=<seed>&place=<kind>&n=<k>`), and **Walk
-the land** the walk page there; and the game, built on a world's place, has a **World map** link back.
+the land** the walk page there; the walk page has a **Build a house here** of its own, for the place its
+menu shows; and the game, built on a world's place, has a **World map** link back.
 
 ![The ink map of a world](images/world-ink.jpg)
 

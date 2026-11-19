@@ -27,6 +27,7 @@
     #menus select { font: inherit; border: 1px solid var(--panel-edge); padding: 6px 8px; max-width: 46vw; }
     #menus .box { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--panel-edge); padding: 6px 10px; cursor: pointer; white-space: nowrap; }
     #menus .box input { margin: 0; width: 16px; height: 16px; accent-color: var(--focus); }
+    #menus a.box { color: var(--focus); text-decoration: none; }
     #menus select:focus-visible, #menus .box:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 
     /* Touch: a stick where the left thumb lands, and buttons on the right (Up and Down only while flying). */
@@ -61,6 +62,7 @@
     <select id="worlds" aria-label="World"></select>
     <select id="where" aria-label="Go to"></select>
     <label class="box" title="Lay the ground near you at half a metre, with tussocks, stones and rills"><input type="checkbox" id="fine"> Half-metre ground</label>
+    <a class="box" id="play" href="./index.html">Build a house here</a>
   </div>
   <div id="hint"><span class="keys">Click to look about · W A S D to move · Shift to run · V to fly (Space up, C down) · P next place · 1 to 4 a valley head, Shift+1 to 4 an island · M triangles</span><span class="touch">Left thumb to walk, push far to run · drag on the right to look · Fly, Up and Down · Next place</span></div>
   <script type="module" src="/src/worldwalk/main.ts"></script>

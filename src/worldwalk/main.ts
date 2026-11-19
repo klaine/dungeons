@@ -239,16 +239,32 @@ async function start(): Promise<void> {
       worlds.innerHTML = list.map((s) => `<option value="${s}"${s === seed ? ' selected' : ''}>World ${s}</option>`).join('');
       worlds.addEventListener('change', () => { location.hash = worlds.value; location.reload(); });
     }
+    // The game, built on the place chosen: where it is, as the page's head says (`<meta name="dungeons-game">`), or the usual file.
+    const play = document.getElementById('play') as HTMLAnchorElement | null;
+    const game = document.querySelector<HTMLMetaElement>('meta[name="dungeons-game"]')?.content || './index.html';
+    const playAt = (spec: string) => {
+      const m = spec.match(/^(valley|island|mountain)(\d)$/);
+      if (play) play.hidden = !m;
+      if (play && m) play.href = `${game}#${new URLSearchParams({ world: seed, place: m[1], n: m[2] })}`;
+    };
     if (where) {
       const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top' };
       where.innerHTML = W.places.map((q) => `<option value="${q.kind}${q.n}">${q.name}, ${KIND[q.kind]}</option>`).join('');
-      where.addEventListener('change', () => { const to = place(where.value); me.set(to.x, 0, to.z); where.blur(); });
-    }
+      const start = params.get('at') ?? '';
+      if (W.places.some((q) => `${q.kind}${q.n}` === start)) where.value = start;
+      where.addEventListener('change', () => { const to = place(where.value); me.set(to.x, 0, to.z); playAt(where.value); where.blur(); });
+      playAt(where.value);
+    } else playAt('');
   }
   let placeIndex = 0;
   let yaw = 0, pitch = -0.05, flying = params.has('fly'), lift = 1.7;
   const keys = new Set<string>();
-  const nextPlace = () => { if (!W.places.length) return; const q = W.places[placeIndex++ % W.places.length]; me.set(q.x, 0, q.z); };
+  const nextPlace = () => {
+    if (!W.places.length) return;
+    const q = W.places[placeIndex++ % W.places.length], menu = document.getElementById('where') as HTMLSelectElement | null;
+    // (By the menu, where there is one, so that it and the link to the game follow.)
+    if (menu) { menu.value = `${q.kind}${q.n}`; menu.dispatchEvent(new Event('change')); } else me.set(q.x, 0, q.z);
+  };
   const turn = (dYaw: number, dPitch: number) => { yaw += dYaw; pitch = Math.max(-1.5, Math.min(1.5, pitch + dPitch)); };
   const touch = new WalkTouch(canvas, { look: turn, next: nextPlace, fly: () => toggleFly() });
   function toggleFly(): boolean { flying = !flying; lift = flying ? Math.max(lift, 20) : 1.7; touch.flying(flying); return flying; }
@@ -274,7 +290,11 @@ async function start(): Promise<void> {
     if (e.code === 'KeyM' && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
     // (Numbers for valley heads, with Shift for islands; P for the next place of any kind. Ctrl with a number changes the browser's tab.)
     const digit = /^Digit([1-4])$/.exec(e.code);
-    if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) { const kind = e.shiftKey ? 'island' : 'valley', to = place(`${kind}${digit[1]}`); me.set(to.x, 0, to.z); e.preventDefault(); }
+    if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const spec = `${e.shiftKey ? 'island' : 'valley'}${digit[1]}`, menu = document.getElementById('where') as HTMLSelectElement | null;
+      if (menu && W.places.some((q) => `${q.kind}${q.n}` === spec)) { menu.value = spec; menu.dispatchEvent(new Event('change')); } else { const to = place(spec); me.set(to.x, 0, to.z); }
+      e.preventDefault();
+    }
     if (e.code === 'KeyP' && !e.repeat) nextPlace();
   });
   window.addEventListener('keyup', (e: KeyboardEvent) => keys.delete(e.code));
