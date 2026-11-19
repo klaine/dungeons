@@ -120,6 +120,11 @@ const newPlace = () => {
   go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
+// The world's map: of the world this place is in, if it is in one, where its other places can be gone to.
+{
+  const link = document.getElementById('worldmap') as HTMLAnchorElement | null;
+  if (link && worldSeed) { link.href = `world.html?${new URLSearchParams({ world: worldSeed })}`; link.textContent = 'World map'; }
+}
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.
 {

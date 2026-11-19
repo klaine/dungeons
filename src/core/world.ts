@@ -795,11 +795,15 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
     }
     if (!best) { no('no ridge'); continue; }
     // The hospice's ground: on a shoulder of the ridge below the summit, its front turned down the ridge, fitted where it fits best.
+    // (Well under the summit, so that it stands over the house as a summit does over a hospice in its saddle: the flattest ground
+    // is on the summit's own dome, a few metres under it, and taken for that alone the summit was hardly a climb. Taken still if
+    // there is nothing lower to build on.)
     let ground: Ground | null = null, groundCost = Infinity;
-    for (let t = 40; t <= 240; t += 20) for (let off = -30; off <= 30; off += 15) {
+    for (let t = 40; t <= 320; t += 20) for (let off = -30; off <= 30; off += 15) {
       const gx = x + Math.cos(best.angle) * t - Math.sin(best.angle) * off, gz = z + Math.sin(best.angle) * t + Math.cos(best.angle) * off;
       const g = fitGround((px, pz) => f.smoothAt(px, pz), gx, gz, best.angle - Math.PI / 2, HOUSE.w, HOUSE.d);
-      const cost = g.work + 0.4 * (g.terraces.length - 1) + Math.abs(t - 100) / 300;
+      const under = y - g.terraces.reduce((a, q) => a + q.y, 0) / g.terraces.length;
+      const cost = g.work + 0.4 * (g.terraces.length - 1) + Math.abs(t - 150) / 400 + 2 * smooth((50 - under) / 35);
       if (cost < groundCost) { groundCost = cost; ground = g; }
     }
     if (!ground || ground.work > 4) { no('no ground for the hospice'); continue; }

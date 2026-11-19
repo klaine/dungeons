@@ -128,8 +128,10 @@ place asks for it.
     metres, standing alone over the cloud (nothing higher joined to it above a level forty metres under
     its top, within 1.2 kilometres), 180 metres or more over the valleys a kilometre off, with a ridge
     down from it that a way could come up (falling steadily for 450 metres along a crest, the ground
-    lower on both hands); and the hospice's ground on a shoulder of that ridge, 40 to 240 metres below
-    the summit, its front turned down the ridge, where it fits best.
+    lower on both hands); and the hospice's ground on a shoulder of that ridge, 40 to 320 metres along it
+    from the summit, its front turned down the ridge, where it fits best and stands some fifty metres or
+    more under the summit (the flattest ground is on the summit's own dome, a few metres under it, and a
+    hospice there had hardly a summit to climb to; taken still where nothing lower will do).
 - **Grounds fitted to the land** (`fit.ts`; asked: "locations need to be adaptable, best found location
   can be then slightly flattened or smoothed in places for a town or other needs if must, but terraced
   adaptations are good also"). A house's ground, 46 metres across by 62 deep, is made level where the
@@ -162,7 +164,9 @@ of buildings. The places of adventure are in red and listed under the map with t
 the sea, the bay, the upland and the range are lettered across them, each near its zone's middle where
 it covers no mark or name. **Relief** shows the same world as shaded relief coloured by cover. A
 kilometre's scale; the frame barred every half kilometre. `?world=<seed>` names the world;
-`tools/browser/worldmap.cjs` saves both pictures.
+`tools/browser/worldmap.cjs` saves both pictures. Over the map, each place found is listed with two
+ways to it: **Build a house here** opens the game on it (`?world=<seed>&place=<kind>&n=<k>`), and **Walk
+the land** the walk page there; and the game, built on a world's place, has a **World map** link back.
 
 ![The ink map of a world](images/world-ink.jpg)
 
@@ -252,6 +256,8 @@ world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already
 4. **Mountain tops fitted to the world's summits.** The mountain top's rim, ridge and summits laid on
    the summit found, turned to its ridge, at this country's scale (its cloud forty to sixty metres under
    the top, the valleys three hundred metres under that, not seven hundred); its country the world's.
+   *Done, the near way* (below, *Places built in the world*): the top as the game draws it, laid on the
+   world's summit, its country the world's.
 5. **One far land, from the world.** From a place, the rest of the world and the land beyond its edge
    (the shape continued, unworn), in place of the three kinds of far sheet each place has now.
 6. **The map leads to the places**, and **more kinds of place** where the world has room (the low
@@ -383,12 +389,25 @@ metre to five high, which is what low islands have. A house is still the site's 
 not the world's; a draft that will not go on the place (its cove will not fit, say) gives way to the next
 best draft of the same seed, and if none will, the place says why rather than quietly being made elsewhere.
 
+A mountain top (`place=mountain`) is the furthest from the land's way round: the game draws its top whole,
+its rim, the precipices under it, the ridge the way comes up and its crest, the summits, and wears that.
+So it is laid on the world rather than read from it. The house's level ground goes where the world found
+the hospice's, turned so that the ridge runs south from it as the drawn ridge does; the first summit is
+the world's, where it is and as high over the forecourt as it is; the top is drawn out along the line from
+the house to the summit, as broad as a top drawn alone, so that the summit stands on it; the cloud lies as
+the game lays it, under where the player arrives at the ridge's foot. Beyond the top the country round
+about is the world's (`countryShape` in `mountain.ts`), not worn again, with the drawn top standing on it
+where it is the higher; no far range is drawn, since the world has its own, and its sea is the water.
+
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
 (`WORLD=w2 npx tsx tools/land.ts 4`) with nothing wrong, laid out in 0.1 to 6 seconds (the tiles about it
 made first) and built in 18 to 23, with 730,000 to 950,000 triangles of rock; its first island laid out in
 8 and built in 38, 513,000 of rock; its second found room for a cove on the third draft of its house. In the
 browser, drawing in software, the game built the house at Strath Cal from the world in some ten minutes, of
-which the world was about one. Not yet: mountain tops (step 4); the squares at a metre under a place (the
+which the world was about one. Its first two mountain tops built without fault, laid out in 15 and 24
+seconds and built in 92 and 123, with 3.2 and 4.2 million triangles of rock, the summits 58 and 60 metres
+over the forecourts (the same seed's top drawn alone has 3.7 million and takes 94). Not yet: the squares
+at a metre under a place (the
 site reads the tiles at 5 metres, as it read its upland at 5, and lays its own detail); a world's lakes and
 rivers in its places.
 

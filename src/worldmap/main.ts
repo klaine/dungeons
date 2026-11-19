@@ -16,6 +16,7 @@ const params = new URLSearchParams(location.search);
 const input = document.getElementById('seed') as HTMLInputElement;
 const status = document.getElementById('status')!;
 const canvas = document.getElementById('map') as HTMLCanvasElement;
+const placesEl = document.getElementById('places');
 const inkTab = document.getElementById('ink') as HTMLButtonElement, reliefTab = document.getElementById('relief') as HTMLButtonElement;
 let map: WorldMap | null = null, view: 'ink' | 'relief' = params.get('view') === 'relief' ? 'relief' : 'ink', worker: Worker | null = null;
 declare global { interface Window { __worldReady?: boolean; __world?: WorldMap } }
@@ -26,7 +27,25 @@ function draw(): void {
   if (view === 'ink') drawInkWorld(canvas, map); else drawWorldRelief(canvas, map);
 }
 
+/** The places found, each with the way to it: a house built there and played (the game), or its land walked (the walk page). */
+function listPlaces(seed: string): void {
+  if (!placesEl || !map) return;
+  placesEl.replaceChildren();
+  const KIND = { island: 'Island', valley: 'Valley head', mountain: 'Mountain top' } as const;
+  for (const q of map.places) {
+    const card = document.createElement('div'), name = document.createElement('b'), kind = document.createElement('span');
+    card.className = 'place'; kind.className = 'kind';
+    name.textContent = q.name;
+    kind.textContent = `${KIND[q.kind]} ${q.n} · ${Math.round(q.y)} m`;
+    const link = (text: string, href: string) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
+    const game = new URLSearchParams({ world: seed, place: q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
+    card.append(name, kind, document.createElement('br'), link('Build a house here', `./?${game}`), link('Walk the land', `./walk.html?${walk}`));
+    placesEl.append(card);
+  }
+}
+
 function make(seed: string): void {
+  placesEl?.replaceChildren();
   input.value = seed;
   const url = new URL(location.href);
   url.searchParams.set('world', seed);
@@ -44,6 +63,7 @@ function make(seed: string): void {
     const found = (k: string) => map!.places.filter((q) => q.kind === k).length;
     status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads and ${found('mountain')} mountain tops found.`;
     draw();
+    listPlaces(seed);
     window.__worldReady = true;
     worker?.terminate(); worker = null;
   };

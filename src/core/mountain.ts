@@ -753,7 +753,17 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // The rim: an oval turned any way, with spurs of the top standing out from it and gullies cut
   // back into it, as a mountain's top is; the precipice under it high in one place and less in the next.
   const shape = rng.fork('rim');
-  const R = shape.range(120, 160), turn = shape.range(0, Math.PI), seed = shape.range(0, 500), squash = shape.range(0.68, 0.95);
+  let R = shape.range(120, 160), turn = shape.range(0, Math.PI), squash = shape.range(0.68, 0.95);
+  const seed = shape.range(0, 500);
+  // (On a world's summit, the top is drawn out along the line from the house to the summit, as broad as a top drawn alone: a
+  // summit ridge, with the house at its lower end. Grown all round to reach a summit three hundred metres off, it was twice as
+  // broad every way, and twice the rock round its rim to carve.)
+  if (onWorld) {
+    const along = Math.hypot(onWorld.summit.x - hx, onWorld.summit.z - hz), wide = R * squash;
+    turn = Math.atan2(onWorld.summit.z - hz, onWorld.summit.x - hx);
+    R = Math.max(R, along / 2 + 80);
+    squash = Math.min(0.95, Math.max(0.35, wide / R));
+  }
   const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24), wide: shape.range(0.1, 0.22) }));
   const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15), wide: shape.range(0.04, 0.08) }));
   const rimOf = (scale: number) => Array.from({ length: N }, (_, k) => {

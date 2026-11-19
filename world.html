@@ -17,12 +17,19 @@
     button:hover, button[aria-pressed="true"] { background: rgba(224, 176, 112, .35); }
     #status { opacity: .7; }
     canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: #f1eadb; }
+    #places { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px 12px; margin: 0 0 16px; }
+    #places:empty { display: none; }
+    .place { min-width: 0; padding: 8px 10px; border: 1px solid rgba(232, 226, 214, .2); border-radius: 4px; }
+    .place b { display: block; font: 600 15px/1.3 ui-serif, Georgia, serif; }
+    .place .kind { opacity: .7; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+    .place a { display: inline-block; margin: 4px 12px 0 0; color: #e0b070; }
+    .place a:focus-visible { outline: 2px solid #e0b070; outline-offset: 2px; }
   </style>
 </head>
 <body>
   <header>
     <h1>Dungeons: world</h1>
-    <p>One country, six kilometres by ten, from the sea and its islands in the south across the low country and the fells to the hills in the north. The islands, the valley heads and the mountain tops a house could stand on are found in it, not drawn, and marked in red. Making a world takes half a minute or so.</p>
+    <p>One country, six kilometres by ten, from the sea and its islands in the south across the low country and the fells to the hills in the north. The islands, the valley heads and the mountain tops a house could stand on are found in it, not drawn, and marked in red; each can be gone to, a house built on it and played, or its land walked. Making a world takes half a minute or so.</p>
   </header>
   <nav>
     <label>World <input id="seed" spellcheck="false"></label>
@@ -33,6 +40,7 @@
     <button id="save" type="button">Save picture</button>
     <span id="status"></span>
   </nav>
+  <section id="places" aria-label="The places in this world"></section>
   <canvas id="map" width="2400" height="3060"></canvas>
   <script type="module" src="/src/worldmap/main.ts"></script>
 </body>
