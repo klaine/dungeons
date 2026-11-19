@@ -10,7 +10,8 @@
 import { classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
 import { brickCountry, brickEaves, dealBrickHouse, dealChurch } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
-import { BrickWork, Building, ClassicalDress, Stone, Town } from '../src/core/site';
+import { BrickWork, Building, CanalWork, ClassicalDress, Stone, Town } from '../src/core/site';
+import { canalEaves, dealCanalHouse } from '../src/core/canal';
 import { buildBuilding } from '../src/render/buildings';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
@@ -19,7 +20,7 @@ import { buildShack } from '../src/render/shack';
 import { CardSet } from '../src/render/scene';
 import { boulderOne, crownOf, growOne, Season, TREE_DEALT, TREE_RANGES, TreeKind, TREES, TreeWork } from './nature';
 
-export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'church' | 'shack' | 'tree' | 'boulder';
+export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'canal' | 'church' | 'shack' | 'tree' | 'boulder';
 /** A shack's own measures, beyond its breadth, depth and colour: its roof, whether the roof is one slope, and how high it stands on posts. */
 export interface ShackWork { roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number }
 /**
@@ -58,10 +59,11 @@ export const KINDS: Record<Kind, { name: string; note: string }> = {
   eaves: { name: 'Eaves house', note: 'Brick, broader and later, its eaves to the street and a small gable over its middle.' },
   store: { name: 'Warehouse', note: 'Brick, many low storeys, a column of loading doors under a hoist.' },
   church: { name: 'Church', note: 'Brick Gothic: a buttressed hall church, a tower or two with a spire, and a choir.' },
+  canal: { name: 'Canal house', note: 'Amsterdam: narrow, tall and deep, its front leaning out over the quay, a stoop to its door, and over the eaves a spout, stepped, neck or bell gable, or a cornice.' },
   tree: { name: 'Tree', note: 'Grown as the valley grows its trees: an oak, an ash, an old oak, a spruce, a pine, a pine of the coast, or a bush.' },
   boulder: { name: 'Boulder', note: 'A boulder of the country’s stone, carved as the valley’s are, bedded and broken as its rock is.' },
 };
-export const KIND_ORDER: Kind[] = ['classical', 'wooden', 'timber', 'gabled', 'eaves', 'store', 'church', 'shack'];
+export const KIND_ORDER: Kind[] = ['classical', 'wooden', 'timber', 'gabled', 'eaves', 'store', 'canal', 'church', 'shack'];
 /** What grows and what lies about, set out one by one as buildings are; and every kind the lab knows. */
 export const NATURE_ORDER: Kind[] = ['tree', 'boulder'];
 export const ALL_KINDS: Kind[] = [...KIND_ORDER, ...NATURE_ORDER];
@@ -85,6 +87,7 @@ const OWN = {
   timber: ['jetty', 'gable', 'door', 'burnt'],
   brick: ['brickwork'],
   shack: ['shack'],
+  canal: ['canalwork'],
   tree: ['tree'],
   boulder: ['boulder'],
 } as const;
@@ -111,6 +114,7 @@ export const RANGES = {
   wooden: { w: [9, 24], d: [7, 12], storeys: [1, 2], height: [2.7, 3.8], basement: [0.4, 2], dormers: [0, 5], wingWidth: [5, 10], wingLength: [5, 14] },
   shack: { w: [2.6, 6], d: [3, 6.5], stilts: [0, 2.5] },
   boulder: { size: [0.3, 8] },
+  canal: { bays: [1, 7], pitch: [1.6, 2.5], margin: 1.1, d: [7, 22], storeys: [2, 7], height: [2.3, 4.8], stoop: [0, 1.6], lean: [0, 0.035], roof: [35, 62] },
   gabled: { w: [5.5, 11], d: [8, 18], storeys: [1, 5], height: [2.4, 5.2], bays: [1, 5], pitch: [40, 66] },
   eaves: { bays: [3, 9], pitch: [1.9, 2.8], margin: 1.3, d: [8, 14], storeys: [2, 5], height: [2.6, 4.6], roof: [38, 56] },
   store: { w: [6, 11.5], d: [10, 18], storeys: [3, 7], height: [2.3, 4.2], pitch: [48, 64] },
@@ -159,6 +163,33 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     Object.assign(s, { style: 'timber', w: r2(Math.max(0.8, crownOf(s.tree) * 1.4)), storeys: 1, heights: [s.tree.height], bays: 1 });
     s.d = s.w;
     keep(s, 'tree');
+    return s;
+  }
+  if (kind === 'canal') {
+    // (A canal house: its measures as any building's, the bays filling its breadth; the rest of what it is in `canalwork`, each choice
+    // kept to what the builder makes, and those that go together kept together: a stepped gable has two to five steps a side and a neck
+    // gable one or two tiers, a cornice has no crown on it, a warehouse has shutters.)
+    const R = RANGES.canal;
+    s.style = 'canal';
+    fitBays(s, R.bays, R.pitch, R.margin, false, asked);
+    s.d = r2(clamp(s.d, R.d[0], R.d[1]));
+    s.storeys = clamp(Math.round(s.storeys), R.storeys[0], R.storeys[1]);
+    fitHeights(s, R.height[0], R.height[1]);
+    const c = s.canalwork ?? (deal('canal', 'lab').canalwork as CanalWork), one = <T>(v: T, list: readonly T[]) => (list.includes(v) ? v : list[0]);
+    const col = (v: Colour | null | undefined, d: Colour): Colour => (Array.isArray(v) && v.length === 3 ? (v.map((x) => clamp(x, 0, 1.2)) as Colour) : d);
+    const kind = one(c.kind, ['house', 'warehouse'] as const), gable = one(c.gable, ['spout', 'stepped', 'neck', 'bell', 'cornice', 'raised'] as const);
+    s.canalwork = {
+      kind, gable,
+      tiers: gable === 'stepped' ? clamp(Math.round(c.tiers), 2, 5) : gable === 'neck' ? clamp(Math.round(c.tiers), 1, 2) : 1,
+      crown: gable === 'cornice' ? 'flat' : one(c.crown, ['triangle', 'segment', 'scroll', 'flat'] as const),
+      front: one(c.front, ['brick', 'painted'] as const), clay: one(c.clay, ['red', 'buff'] as const), tone: col(c.tone, [0.78, 0.66, 0.64]), trim: col(c.trim, [0.92, 0.91, 0.88]),
+      ornament: clamp(Math.round(c.ornament), 0, 3) as 0 | 1 | 2 | 3, windows: one(c.windows, ['cross', 'small', 'large'] as const),
+      frame: col(c.frame, [0.92, 0.91, 0.88]), shutters: c.shutters || kind === 'warehouse' ? col(c.shutters, [0.1, 0.22, 0.14]) : null, paint: col(c.paint, [0.06, 0.16, 0.1]),
+      pui: c.pui ? col(c.pui, [0.1, 0.2, 0.13]) : null, stoop: r2(clamp(c.stoop, R.stoop[0], R.stoop[1])), basement: !!c.basement,
+      lean: Math.round(clamp(c.lean, R.lean[0], R.lean[1]) * 1000) / 1000, door: clamp(Math.round(c.door), 0, s.bays - 1),
+      pitch: r2(clamp(c.pitch, R.roof[0], R.roof[1])), roof: one(c.roof, ['red', 'dark'] as const), hoist: !!c.hoist,
+    };
+    keep(s, 'canal');
     return s;
   }
   if (kind === 'boulder') {
@@ -363,6 +394,8 @@ export function dealTree(kind: TreeKind, seed: string): Shape {
 export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shape {
   const rng = new Rng(`lab ${kind} ${seed}`), round = (v: number) => Math.round(v * 10) / 10;
   if (kind === 'tree') return dealTree(rng.pick(['oak', 'oak', 'ash', 'spruce', 'pine', 'bush'] as const), seed);
+  // (As a town deals them, of the country's clay.)
+  if (kind === 'canal') return normalise(kind, dealCanalHouse(rng, { country: brickCountry(stone) })!, 'bays');
   if (kind === 'boulder') return normalise(kind, { style: 'timber', w: 1, d: 1, storeys: 1, heights: [1], bays: 1, colour: [0.5, 0.5, 0.5], boulder: { size: round(rng.range(0.6, 2.6)) } });
   if (kind === 'timber') {
     const w = round(rng.range(6, 8.6)), d = round(rng.range(6.2, 7.8)), storeys = rng.chance(0.4) ? 3 : 2, jetty = round(rng.range(0.3, 0.45)), gable = rng.chance(0.6);
@@ -545,6 +578,7 @@ export function eavesOf(item: Item): number {
   if (item.kind === 'wooden') return (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0);
   if (item.kind === 'shack') return item.shape.shack!.stilts + 2.3;
   if (item.kind === 'tree') return item.shape.tree!.height;
+  if (item.kind === 'canal') return canalEaves(b);
   if (item.kind === 'boulder') return item.shape.boulder!.size * 0.7;
   return brickEaves(b);
 }
