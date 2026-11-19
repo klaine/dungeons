@@ -68,7 +68,9 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
   // rounded tops, cover as much of the sky as the day calls for, and are frayed at their edges.
   // (`fine`, where given, is how much of the finest fraying to take, 0 to 1: none where the walk's steps are too long to see it, or
   // it only speckles.)
-  const cloudOf = (fine: boolean): N => Fn(([p, fineW]: [N, N]) => {
+  // (`billow` is how much of the smaller billows to take, 0 to 1: less far off, where only the broad shapes are seen, and where a
+  // line of sight grazing the layer caught them at a different place from one point of the picture to the next.)
+  const cloudOf = (fine: boolean): N => Fn(([p, fineW, billow]: [N, N, N]) => {
     const thick: N = float(0).toVar();
     const h: N = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase)).toVar();
     If(h.greaterThan(0).and(h.lessThan(1)), () => {
@@ -87,8 +89,11 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
       const bar: N = float(0.535).sub(u.uCloudCover.mul(0.33)).add(pow(h, 1.4).mul(0.26)).add(one(smoothstep(0, 0.07, h)).mul(0.6)).toVar();
       If(shape.greaterThanEqual(bar.sub(0.1)), () => {
         // Smaller billows on the large ones give it the knobbly outline of a heap of cloud.
-        shape.subAssign(one(noise(q.mul(3.9).add(0.37)).g).mul(0.2).sub(0.07));
+        shape.subAssign(one(noise(q.mul(3.9).add(0.37)).g).mul(0.2).sub(0.07).mul(billow));
         const d: N = shape.sub(bar).div(0.1).toVar();
+        // (Air near a cloud but not in it says so, as a whisker less than nothing, so that the walk can take short steps there and
+        // not stride over a cloud's thin edge, which one point of the picture caught and the next missed, drawing it as a speckle.)
+        if (fine) thick.assign(-1e-6);
         If(d.greaterThan(0), () => {
           // And its edges are eaten away by finer noise still; the body of the cloud is left whole.
           if (fine) d.subAssign(one(noise(q.mul(12.3).add(0.11)).g).mul(one(min(d, 1))).mul(0.8).mul(fineW));
@@ -107,7 +112,7 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
       const through: N = float(0).toVar();
       for (let j = 0; j < 3; j++) {
         const h = mix(u.uCloudBase, u.uCloudTop, 0.22 + 0.22 * j);
-        through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(h.sub(p.y).div(u.uSunDir.y))), float(0)));
+        through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(h.sub(p.y).div(u.uSunDir.y))), float(0), float(1)));
       }
       through.mulAssign(u.uCloudTop.sub(u.uCloudBase).div(3).div(max(u.uSunDir.y, 0.2)));
       shade.assign(one(exp(through.mul(-1.1))));
@@ -130,28 +135,35 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
         const toSun: N = dot(rd, u.uSunDir).toVar();
         const deepen: N = max(u.uCloudTop.sub(u.uCloudBase).div(360), 1).pow(0.6).toVar(), away: N = one(max(toSun, 0)).mul(0.45).toVar();
         // (The walk goes in long steps through clear air and, from the first step that finds cloud, goes back most of a step and on
-        // in quarter steps: cloud is so thick that one long step into it was nearly the whole of what was seen, and whether that step
+        // in sixth steps: cloud is so thick that one long step into it was nearly the whole of what was seen, and whether that step
         // fell at the cloud's skin or well inside, on its lit side or its shaded, differed from one point of the picture to the next,
         // which drew the cloud as a speckle. A little more of the walk is allowed for the shorter steps.)
-        const stride: N = dt.toVar(), shortened: N = float(0).toVar();
+        // (Near cloud too, not only in it; and once the air is clear again for three short steps, the long steps take up again.)
+        const stride: N = dt.toVar(), shortened: N = float(0).toVar(), clearFor: N = float(0).toVar();
         // Light goes mostly forward through cloud, so edges towards the sun are bright.
         const phase: N = min(mix(phaseHG(toSun, float(0.7)), phaseHG(toSun, float(-0.15)), 0.25).mul(3.2).add(0.55), 2.4).toVar();
         const left: N = float(1).toVar(), lit: N = vec3(0).toVar();
         Loop(Math.round(cloudSteps * 1.4), () => {
           const p: N = ro.add(rd.mul(t)).toVar();
-          const d: N = cloudFine(p, one(smoothstep(70, 160, stride))).toVar();
-          If(d.greaterThan(0).and(shortened.lessThan(0.5)), () => {
+          const billow: N = one(smoothstep(7000, 20000, t).mul(0.65));
+          const d: N = cloudFine(p, one(smoothstep(70, 160, stride)), billow).toVar();
+          If(d.notEqual(0).and(shortened.lessThan(0.5)), () => {
             shortened.assign(1);
-            t.subAssign(stride.mul(0.75));
-            stride.mulAssign(0.25);
+            clearFor.assign(0);
+            t.subAssign(stride.mul(0.8));
+            stride.assign(dt.div(6));
+          }).ElseIf(d.equal(0), () => {
+            clearFor.addAssign(shortened);
+            If(clearFor.greaterThan(2.5), () => { shortened.assign(0); clearFor.assign(0); stride.assign(dt); });
           }).ElseIf(d.greaterThan(0), () => {
+            clearFor.assign(0);
             // How much cloud lies between here and the sun: four points towards it, each the cloud's thickness there times the length
             // of the walk it stands for, so that it is a depth of cloud and not a count of points. (Counted as points, as it was, no
             // depth of cloud ever took more than three quarters of the sun's light, and a heap's base was as bright as a third of
             // its sunlit side: soft, even and white all over. The walk goes as much further as the layer is deeper, so that a tower
             // shades its own far side.)
             const through: N = float(0).toVar();
-            for (let j = 1; j <= 4; j++) through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(deepen.mul(14 * j * j))), float(0)).mul(deepen.mul(14 * (2 * j - 1))));
+            for (let j = 1; j <= 4; j++) through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(deepen.mul(14 * j * j))), float(0), billow).mul(deepen.mul(14 * (2 * j - 1))));
             const h = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase));
             // Light that has come so far through cloud has been scattered, and scattered again, many times: some of it still comes
             // on, more softly the deeper it has come, which is the glow in a heap's shaded side and the grey of its base. (Three

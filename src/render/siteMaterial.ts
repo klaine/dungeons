@@ -677,7 +677,9 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // Dead grass lying in the turf, in drifts some metres across: thickest where it is dry and trodden,
   // along the edges of the track and between its ruts, and least where the ground is wet.
   const gThatch: N = (texture(thatch.map, at.mul(1.15)) as N).bias(blur).toVar();
-  const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.35).add(onFoot.mul(one(smoothstep(0.4, 1.6, footOff))).mul(0.3));
+  // (Less of it along a track than there was: it lay in a band of straw a stride broad down each side, flat and pale yellow, like
+  // a mat laid along the track, where the grass of a summer's track is olive and comes right up to the earth.)
+  const trodden = onTrack.mul(one(smoothstep(1.1, 2.4, off))).mul(0.14).add(onFoot.mul(one(smoothstep(0.4, 1.6, footOff))).mul(0.3));
   const dry: N = smoothstep(0.5, 0.72, wide.mul(0.7).add(mid.mul(0.45)).add(patch.sub(0.5).mul(0.35)).add(trodden).sub(wetV.mul(0.7)).sub(0.08).add(gThatch.a.sub(0.4).mul(0.3))).mul(one(leafy)).toVar();
   turfed = mix(turfed, gThatch.rgb.mul(vertexColor().rgb.mul(1.2).add(0.24)).mul(mix(0.8, 1.1, macro)), dry.mul(0.85));
   // Far off there is no grass standing on the ground: the tufts thin out and then stop, because nothing so small can be drawn so far
@@ -695,8 +697,16 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // Along the edge of bare ground, a fringe of short green that is neither one nor the other.
   ground = mix(ground, turfed.mul(1.25), bare.mul(one(bare)).mul(1.4));
   ground = mix(ground, earthy, bare);
-  // The floor of a rut is pressed hard and smooth, and darker; and in its low places water stands after rain.
-  ground = mix(ground, ground.mul(vec3(0.58, 0.54, 0.5)), rutFloor.mul(bare));
+  // The floor of a rut is pressed hard by the wheels. On a dry day it is the palest of the track: dust and grit, with small stones
+  // pressed into it, the shingle read small; wet, it is the darkest, and in its low places water stands. (It was always the
+  // darkest, and the ruts of a dry summer's track were two dark brown troughs, where a cart track's are two pale bands.)
+  const wetDay: N = max(uWet, smoothstep(0.2, 0.6, f.y)).toVar();
+  const gGrit: N = (texture(shingle.map, at.mul(3.6).add(0.53)) as N).bias(blur).toVar();
+  const dust: N = mix(earthy.mul(1.45), vec3(dot(earthy, vec3(0.3, 0.55, 0.15))).mul(1.5), 0.3).add(vec3(0.022, 0.02, 0.016));
+  const gritty: N = mix(dust, gGrit.rgb.mul(vec3(1.05, 1.0, 0.94)).mul((groundUniforms.uBare as N).xyz), smoothstep(0.55, 0.78, gGrit.a).mul(0.65));
+  ground = mix(ground, mix(gritty, ground.mul(vec3(0.58, 0.54, 0.5)), wetDay), rutFloor.mul(bare));
+  // (And the whole of a track's bare earth is a little paler and dustier on a dry day than earth elsewhere.)
+  ground = mix(ground, ground.mul(1.18), onTrack.mul(bare).mul(one(wetDay)).mul(one(rutFloor)));
   const lowSpot = lowSpotOf(at0);
   // (In rain more of the low places hold water, on bare ground too, not only in the ruts.)
   const pool: N = uWet.mul(0.09);
@@ -706,7 +716,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (Standing water in a rut after rain, or where the ground is wet; on a dry day only the mud of its low places, darker.)
   const puddle: N = smoothstep(float(0.535).sub(pool), float(0.6).sub(pool), pudSpot).mul(max(rutFloor.mul(mix(0.25, 1, max(uWet, smoothstep(0.2, 0.6, f.y)))), bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
   const wetRim: N = smoothstep(0.44, 0.555, pudSpot).mul(rutFloor).toVar();
-  ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
+  ground = mix(ground, ground.mul(0.6), wetRim.mul(mix(0.2, 0.6, wetDay)));
   // (Standing water in a rut is muddy, brown more than black, where the eye looks down into it.)
   ground = mix(ground, vec3(0.055, 0.045, 0.032), puddle.mul(0.85));
   // On a mountain, where all the ground is stones, a path shows as what feet and hooves have made of them: a band a couple of strides
