@@ -2,6 +2,7 @@ import { Rng, valueNoise2 } from '../core/rng';
 import { rimAt } from '../core/mountain';
 import { footprintOf } from '../core/building';
 import { boxValley, edgeAt } from '../core/valley';
+import { coastLine, inHarbour, nearLine, outlineOf, outsideBlock, outsideRect, riverAt, townBounds, townGround } from '../core/town';
 import { shoreOf, Site } from '../core/site';
 
 /**
@@ -25,7 +26,8 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   if (!g) return 0;
   const W = opts.pixels ?? 2000, u = W / 2000;
   const rng = new Rng(site.seed).fork('ink country'), seed = Math.floor(rng.next() * 1e6);
-  const isle = site.island, mtn = site.mountain, vale = !isle && !mtn ? site.valley ?? boxValley(g) : undefined;
+  const isle = site.island, mtn = site.mountain, town = site.town, vale = !isle && !mtn && !town ? site.valley ?? boxValley(g) : undefined;
+  const F = site.places.find((p) => p.role === 'approach')?.floor ?? 0, tb = town ? townBounds(town, 50) : undefined;
   const house = site.places.filter((p) => p.role !== 'approach' && !p.level);
   const T = site.wallThickness;
 
@@ -38,6 +40,10 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   } else if (mtn) {
     land.push(Array.from({ length: 480 }, (_, k): Pt => { const a = (k / 480) * Math.PI * 2, r = rimAt(mtn, a); return [mtn.x + Math.cos(a) * r, mtn.z + Math.sin(a) * r]; }));
     spurLine = (mtn.spur.crest ?? [[...mtn.spur.from, 0], [...mtn.spur.to, 0]]).map(([x, z]): Pt => [x, z]);
+  } else if (town) {
+    // A town: the land north of its coast, within the part of it drawn.
+    const coast = coastLine(town, F, tb!.x0, tb!.x1, tb!.z0, tb!.z1, 2);
+    land.push([...coast, [tb!.x1, tb!.z0], [tb!.x0, tb!.z0]]);
   } else if (vale) {
     const end = vale.mouth + 6, west: Pt[] = [], east: Pt[] = [];
     for (let z = g.z0 - 2; z <= end; z += 1.5) { west.push([edgeAt(vale, 'w', z), z]); east.push([edgeAt(vale, 'e', z), z]); }
@@ -49,7 +55,8 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   for (const poly of land) for (const [x, z] of poly) grow(x, z);
   for (const [x, z] of spurLine) grow(x, z);
   for (const p of house) { grow(p.x0 - T, p.z0 - T); grow(p.x1 + T, p.z1 + T); }
-  const margin = isle ? 30 : mtn ? 34 : 24;
+  if (tb) { grow(tb.x0, tb.z0); grow(tb.x1, tb.z1); }
+  const margin = isle ? 30 : mtn ? 34 : town ? 0 : 24;
   x0 -= margin; x1 += margin; z0 -= margin * (vale ? 0.6 : 1); z1 += margin * (vale ? 0.4 : 1);
 
   const head = 150 * u, foot = 130 * u, edge = 50 * u;
@@ -175,6 +182,18 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
       }
     }
   }
+  if (town) {
+    // The sea: lines following the coast, further apart the further out, broken here and there.
+    ctx.strokeStyle = WATER;
+    for (const [k, out] of [[0, 2.5], [1, 6], [2, 11], [3, 18]] as const) {
+      ctx.lineWidth = Math.max(1, (2.4 - k * 0.4) * u);
+      ctx.setLineDash([(60 - k * 8) * u, (6 + k * 7) * u]);
+      path(wob(land[0].slice(0, -2).map(([x, z]): Pt => [x, z + out]), 0.5 + k * 0.3, false, 2.5), false);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.strokeStyle = INK;
+  }
   /** Hachures down a fall from an edge: strokes running out from it, the longer the higher the fall, in a band round it. */
   const hachures = (poly: Pt[], closed: boolean, length: (k: number) => number, spacing: number) => {
     ctx.lineWidth = Math.max(1, 1.5 * u);
@@ -200,6 +219,11 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   if (isle) {
     const n = isle.coast.length;
     hachures(land[0], true, (k) => 1.2 + 3.2 * (1 - (isle.edge?.[Math.floor((k / land[0].length) * n)] ?? 0)), 9 * u / scale);
+  }
+  if (town) {
+    // Where the coast stands high, it is cliff: hachures down to the water, the longer the higher.
+    const coast = land[0].slice(0, -2);
+    hachures(coast, false, (k) => { const [x, z] = coast[k]; const h = townGround(town, F, x, z - 3) - town.sea; return h < 3 ? 0 : 1 + Math.min(5, h / 5); }, 7 * u / scale);
   }
   if (mtn) {
     // The precipices under the rim, and down either side of the ridge; then cloud below, in banks.
@@ -277,11 +301,16 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
     for (const k of [0.55, 0.8]) { ctx.beginPath(); ctx.arc(X(c.x), Z(c.z), c.r * k * scale, 0, Math.PI * 2); ctx.stroke(); }
     ctx.strokeStyle = INK;
   }
+  // (In a town: not on what the town has made, its blocks, streets, square, fields, harbour and river.)
+  const inPoly = (pts: [number, number][], x: number, z: number) => { let inside = false; for (let a = 0, c = pts.length - 1; a < pts.length; c = a++) { const [xa, za] = pts[a], [xc, zc] = pts[c]; if ((za > z) !== (zc > z) && x < ((xc - xa) * (z - za)) / (zc - za) + xa) inside = !inside; } return inside; };
+  const inTownWork = (x: number, z: number) => !!town && (town.blocks.some((b) => outsideBlock(b, x, z) < 3) || outsideRect(town.square, x, z) < 3 || outsideRect(town.level, x, z) < 3
+    || town.streets.some((s0) => nearLine(s0.line, x, z).off < s0.width / 2 + 2) || town.fields.some((f) => inPoly(f.corners, x, z)) || inHarbour(town, x, z) || (!!town.river && riverAt(town, x, z).off < riverAt(town, x, z).half + 3));
   // Rough ground on the land: a scatter of little ticks, as a hand marks grass.
   ctx.lineWidth = Math.max(1, 1.2 * u);
   for (let k = 0; k < 900; k++) {
     const x = rng.range(x0, x1), z = rng.range(z0, z1);
     if (outside(x, z) > 0 || house.some((p) => x > p.x0 - 3 && x < p.x1 + 3 && z > p.z0 - 3 && z < p.z1 + 3)) continue;
+    if (town && (inTownWork(x, z))) continue;
     const s = 5 * u;
     ctx.beginPath();
     ctx.moveTo(X(x) - s, Z(z)); ctx.lineTo(X(x) - s * 0.4, Z(z) - s * 1.2);
@@ -362,6 +391,171 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
     ctx.strokeStyle = INK; ctx.lineWidth = Math.max(2, isle.jetty.width * scale);
     ctx.beginPath(); ctx.moveTo(X(isle.jetty.from[0]), Z(isle.jetty.from[1])); ctx.lineTo(X(isle.jetty.to[0]), Z(isle.jetty.to[1])); ctx.stroke();
   }
+  if (town) {
+    const poly = (pts: [number, number][]) => { ctx.beginPath(); pts.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.closePath(); };
+    /** Parallel strokes across a shape, `gap` pixels apart, at an angle; dashed for rows of plants, if `dash` is given. */
+    const hatch = (pts: [number, number][], gap: number, angle: number, width: number, colour = INK, dash: number[] = []) => {
+      ctx.save(); poly(pts); ctx.clip();
+      const xs = pts.map((p0) => X(p0[0])), zs = pts.map((p0) => Z(p0[1])), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2, R = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...zs) - Math.min(...zs)) / 2 + 2;
+      const ax = Math.cos(angle), az = Math.sin(angle);
+      ctx.strokeStyle = colour; ctx.lineWidth = width; ctx.setLineDash(dash);
+      ctx.beginPath();
+      for (let o = -R; o <= R; o += gap) { ctx.moveTo(cx - az * o - ax * R, cz + ax * o - az * R); ctx.lineTo(cx - az * o + ax * R, cz + ax * o + az * R); }
+      ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+    };
+    const dots = (pts: [number, number][], gap: number, r: number, colour = INK) => {
+      ctx.save(); poly(pts); ctx.clip(); ctx.fillStyle = colour;
+      const xs = pts.map((p0) => p0[0]), zs = pts.map((p0) => p0[1]), step = gap / scale;
+      for (let z = Math.min(...zs); z <= Math.max(...zs); z += step) for (let x = Math.min(...xs) + ((Math.round(z / step) % 2) * step) / 2; x <= Math.max(...xs); x += step) { ctx.beginPath(); ctx.arc(X(x), Z(z), r, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    };
+    const band = (line: [number, number, number][] | [number, number][], half: number): [number, number][] => {
+      const left: [number, number][] = [], right: [number, number][] = [];
+      line.forEach(([x, z], k) => { const [ax, az] = line[Math.max(0, k - 1)], [bx, bz] = line[Math.min(line.length - 1, k + 1)], l = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / l, nz = (bx - ax) / l; left.push([x + nx * half, z + nz * half]); right.push([x - nx * half, z - nz * half]); });
+      return [...left, ...right.reverse()];
+    };
+    // (What is on the land is kept within the land's edge, and the map's: fields reach beyond the part of the country drawn.)
+    ctx.save(); path(land[0]); ctx.clip();
+    // Fields: each hatched as it is grown, along its length; grain in close lines, roots and vines in dashed rows, an orchard in dots,
+    // pasture and fallow left to the ticks of grass.
+    for (const f of town.fields) {
+      const c = f.corners, angle = Math.atan2(c[1][1] - c[0][1], c[1][0] - c[0][0]), ink = 'rgba(29,26,23,0.5)';
+      if (f.crop === 'wheat' || f.crop === 'barley' || f.crop === 'oats') hatch(c, 6 * u, angle, Math.max(0.8, 0.9 * u), ink);
+      else if (f.crop === 'roots') hatch(c, 10 * u, angle, Math.max(0.8, 1.1 * u), ink, [6 * u, 4 * u]);
+      else if (f.crop === 'vines') hatch(c, 9 * u, angle + Math.PI / 2, Math.max(0.8, 1 * u), ink, [2 * u, 3 * u]);
+      else if (f.crop === 'orchard') dots(c, 14 * u, 2.4 * u, ink);
+      ctx.strokeStyle = 'rgba(29,26,23,0.35)'; ctx.lineWidth = Math.max(0.8, 0.8 * u); poly(c); ctx.stroke();
+    }
+    ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.2 * u);
+    for (const w of town.walls) { path(w.line.map(([x, z]): Pt => [x, z]), false); ctx.stroke(); }
+    // The streets: paper between their edges, stippled as they are laid (setts in close dots, gravel finer, beaten earth sparse
+    // and faint; flags plain), their edges inked.
+    for (const s0 of town.streets) {
+      if (s0.kind === 'path') { ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.1 * u); ctx.setLineDash([5 * u, 4 * u]); path(s0.line.map(([x, z]): Pt => [x, z]), false); ctx.stroke(); ctx.setLineDash([]); continue; }
+      const shape = band(s0.line, s0.width / 2), surf = s0.surface ?? (s0.kind === 'track' ? 'dirt' : 'setts');
+      ctx.fillStyle = PAPER; poly(shape); ctx.fill();
+      if (surf === 'setts') dots(shape, 5 * u, 0.9 * u, 'rgba(29,26,23,0.45)');
+      else if (surf === 'gravel') dots(shape, 3.5 * u, 0.6 * u, 'rgba(29,26,23,0.35)');
+      else if (surf === 'dirt') dots(shape, 9 * u, 0.8 * u, 'rgba(90,60,30,0.4)');
+    }
+    for (const s0 of town.streets) {
+      if (s0.kind === 'path') continue;
+      for (const side of [-1, 1]) {
+        const line = s0.line.map(([x, z], k): Pt => {
+          const [ax, az] = s0.line[Math.max(0, k - 1)], [bx, bz] = s0.line[Math.min(s0.line.length - 1, k + 1)], l = Math.hypot(bx - ax, bz - az) || 1;
+          return [x - ((bz - az) / l) * side * s0.width / 2, z + ((bx - ax) / l) * side * s0.width / 2];
+        });
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, (s0.kind === 'track' ? 1.1 : 1.5) * u);
+        path(line, false); ctx.stroke();
+      }
+    }
+    // The square: flagged, a fine grid; its stalls, its fountain; the stair up to the house's terrace in steps.
+    {
+      const sq = town.square, c: [number, number][] = [[sq.x0, sq.z0], [sq.x1, sq.z0], [sq.x1, sq.z1], [sq.x0, sq.z1]];
+      ctx.fillStyle = PAPER; poly(c); ctx.fill();
+      hatch(c, 9 * u, 0, Math.max(0.6, 0.6 * u), 'rgba(29,26,23,0.25)'); hatch(c, 9 * u, Math.PI / 2, Math.max(0.6, 0.6 * u), 'rgba(29,26,23,0.25)');
+      ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.8 * u); poly(c); ctx.stroke();
+      ctx.fillStyle = INK;
+      for (const st of town.stalls) turned(st.x, st.z, st.turn + Math.PI / 2, st.w, st.d);
+      const s1 = town.stair;
+      ctx.lineWidth = Math.max(0.8, 1 * u);
+      for (let z = s1.z0; z <= s1.z1; z += 0.6) { ctx.beginPath(); ctx.moveTo(X(s1.x0), Z(z)); ctx.lineTo(X(s1.x1), Z(z)); ctx.stroke(); }
+      ctx.strokeRect(X(s1.x0), Z(s1.z0), (s1.x1 - s1.x0) * scale, (s1.z1 - s1.z0) * scale);
+    }
+    // The river: paper between its banks, with lines of its flow; walls in the town drawn heavy and double, banks of earth light; its
+    // bridges across it, stone with its parapets, timber with its rails.
+    if (town.river) {
+      const rv = town.river, line = rv.line.map(([x, z]): [number, number] => [x, z]);
+      // (Its two banks, each point at the river's own half breadth there.)
+      const L: [number, number][] = [], R: [number, number][] = [];
+      line.forEach(([x, z], k) => { const [ax, az] = line[Math.max(0, k - 1)], [bx, bz] = line[Math.min(line.length - 1, k + 1)], l = Math.hypot(bx - ax, bz - az) || 1, nx = -(bz - az) / l, nz = (bx - ax) / l, h = rv.width[k] / 2; L.push([x + nx * h, z + nz * h]); R.push([x - nx * h, z - nz * h]); });
+      ctx.fillStyle = PAPER; poly([...L, ...[...R].reverse()]); ctx.fill();
+      ctx.strokeStyle = WATER; ctx.lineWidth = Math.max(0.8, 1 * u);
+      for (const f of [-0.45, -0.15, 0.15, 0.45]) {
+        const flow = line.map(([x, z], k): Pt => { const [ax, az] = line[Math.max(0, k - 1)], [bx, bz] = line[Math.min(line.length - 1, k + 1)], l = Math.hypot(bx - ax, bz - az) || 1; return [x - ((bz - az) / l) * f * rv.width[k], z + ((bx - ax) / l) * f * rv.width[k]]; });
+        ctx.setLineDash([14 * u, 9 * u]); path(wob(flow, 0.3, false, 3), false); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      // (Each bank in stretches, walled or of earth, each stretch from one point to the next sharing its ends with the next stretch.)
+      for (const bank of [L, R]) for (let k = 0; k + 1 < line.length;) {
+        let e = k + 1;
+        while (e + 1 < line.length && rv.walled[e] === rv.walled[k]) e++;
+        const piece = bank.slice(k, e + 1) as Pt[];
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, (rv.walled[k] ? 2.4 : 1.4) * u);
+        path(rv.walled[k] ? piece : wob(piece, 0.4, false, 2), false); ctx.stroke();
+        k = e;
+      }
+      // Weirs: a line across where the water steps down.
+      ctx.lineWidth = Math.max(1, 1.6 * u);
+      for (let k = 0; k + 1 < line.length; k++) if (rv.line[k][2] - rv.line[k + 1][2] > 0.5) { ctx.beginPath(); ctx.moveTo(X(L[k + 1][0]), Z(L[k + 1][1])); ctx.lineTo(X(R[k + 1][0]), Z(R[k + 1][1])); ctx.stroke(); }
+      for (const b of rv.bridges) {
+        const dx = Math.cos(b.heading), dz = Math.sin(b.heading), nx = -dz, nz = dx, hs = b.span / 2 + 0.6, hw = b.width / 2;
+        const deck: [number, number][] = [[b.x - dx * hs + nx * hw, b.z - dz * hs + nz * hw], [b.x + dx * hs + nx * hw, b.z + dz * hs + nz * hw], [b.x + dx * hs - nx * hw, b.z + dz * hs - nz * hw], [b.x - dx * hs - nx * hw, b.z - dz * hs - nz * hw]];
+        ctx.fillStyle = PAPER; poly(deck); ctx.fill();
+        if (b.kind === 'timber') hatch(deck, 3 * u, b.heading + Math.PI / 2, Math.max(0.6, 0.7 * u), 'rgba(29,26,23,0.5)');
+        ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, (b.kind === 'stone' ? 3 : 1.4) * u);
+        for (const sd of [-1, 1]) { ctx.beginPath(); ctx.moveTo(X(b.x - dx * hs + nx * hw * sd), Z(b.z - dz * hs + nz * hw * sd)); ctx.lineTo(X(b.x + dx * hs + nx * hw * sd), Z(b.z + dz * hs + nz * hw * sd)); ctx.stroke(); }
+      }
+    }
+    ctx.restore();
+    // The harbour's water: short ripples in rows; and the boats in it, and drawn up on the shore.
+    if (town.harbour) {
+      ctx.save(); poly(town.harbour); ctx.clip();
+      ctx.strokeStyle = WATER; ctx.lineWidth = Math.max(0.8, 1 * u);
+      const xs = town.harbour.map((p0) => p0[0]), zs = town.harbour.map((p0) => p0[1]);
+      for (let z = Math.min(...zs) + 3; z < Math.max(...zs); z += 14 / scale * u) for (let x = Math.min(...xs) + (valueNoise2(z, 3, seed) * 20) / scale; x < Math.max(...xs); x += (34 * u) / scale) {
+        const l = (10 + 8 * valueNoise2(x * 0.2, z * 0.2, seed + 5)) * u;
+        ctx.beginPath(); ctx.moveTo(X(x), Z(z)); ctx.quadraticCurveTo(X(x) + l / 2, Z(z) - 3 * u, X(x) + l, Z(z)); ctx.stroke();
+      }
+      ctx.restore();
+    }
+    ctx.fillStyle = INK;
+    for (const bt of town.boats) {
+      const hx = Math.cos(bt.heading) * bt.length / 2, hz = Math.sin(bt.heading) * bt.length / 2, w = bt.length * (bt.masts ? 0.14 : 0.2);
+      ctx.beginPath(); ctx.moveTo(X(bt.x + hx), Z(bt.z + hz));
+      ctx.quadraticCurveTo(X(bt.x - hz * (w / (bt.length / 2))), Z(bt.z + hx * (w / (bt.length / 2))), X(bt.x - hx), Z(bt.z - hz));
+      ctx.quadraticCurveTo(X(bt.x + hz * (w / (bt.length / 2))), Z(bt.z - hx * (w / (bt.length / 2))), X(bt.x + hx), Z(bt.z + hz));
+      ctx.fill();
+    }
+    // The buildings: classical ones close-hatched, timber and wooden ones hatched the other way and more openly, each outlined; the
+    // storehouses and the shacks solid.
+    for (const b of town.buildings) for (const o of outlineOf(b)) {
+      ctx.fillStyle = PAPER; poly(o); ctx.fill();
+      if (b.style === 'imperial') hatch(o, 2.6 * u, Math.PI / 4, Math.max(0.7, 0.9 * u));
+      else hatch(o, 3.6 * u, -Math.PI / 4, Math.max(0.6, 0.8 * u));
+      ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.4 * u); poly(o); ctx.stroke();
+    }
+    ctx.fillStyle = INK;
+    for (const s0 of town.storehouses) turned(s0.x, s0.z, s0.turn, s0.w, s0.d);
+    for (const s0 of town.shacks) turned(s0.x, s0.z, s0.turn, s0.w, s0.d);
+    // The quay and the moles as broad ink; the light and the fountain as rings; the outlook; the hall's portal.
+    ctx.strokeStyle = INK; ctx.lineCap = 'butt';
+    ctx.lineWidth = Math.max(2, 1.4 * scale);
+    const mouth = town.river ? town.river.line[town.river.line.length - 1][0] : null, mh = town.river ? town.river.width[town.river.width.length - 1] / 2 : 0;
+    for (const [a0, a1] of mouth !== null ? [[town.quay.x0, mouth - mh], [mouth + mh, town.quay.x1]] : [[town.quay.x0, town.quay.x1]]) { ctx.beginPath(); ctx.moveTo(X(a0), Z(town.quay.z)); ctx.lineTo(X(a1), Z(town.quay.z)); ctx.stroke(); }
+    for (const w of town.wharves) { path(w.line.map(([x, z]): Pt => [x, z]), false); ctx.stroke(); }
+    for (const m of town.moles) { ctx.lineWidth = Math.max(2, m.width * scale); path(m.line.map(([x, z]): Pt => [x, z]), false); ctx.stroke(); }
+    if (town.light) { ctx.fillStyle = PAPER; ctx.beginPath(); ctx.arc(X(town.light.x), Z(town.light.z), town.light.r * scale, 0, Math.PI * 2); ctx.fill(); ctx.lineWidth = Math.max(1.5, 2 * u); ctx.stroke(); }
+    if (town.fountain) { ctx.fillStyle = PAPER; ctx.lineWidth = Math.max(1, 1.6 * u); ctx.beginPath(); ctx.arc(X(town.fountain.x), Z(town.fountain.z), town.fountain.r * scale, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+    if (town.outlook) { ctx.lineWidth = Math.max(1.5, 2 * u); ctx.beginPath(); ctx.arc(X(town.outlook.x), Z(town.outlook.z), 6 * scale, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(X(town.outlook.x), Z(town.outlook.z), 2.2 * scale, 0, Math.PI * 2); ctx.fill(); }
+    if (town.hall) { const [hx, hz] = town.hall.stair[0], r = 7 * u; ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(X(hx), Z(hz), r, Math.PI, 0); ctx.lineTo(X(hx) + r, Z(hz) + r * 0.6); ctx.lineTo(X(hx) - r, Z(hz) + r * 0.6); ctx.closePath(); ctx.fill(); }
+    // Names, in the hand of the title, small: the square, the harbour, the river, the outlook, the hall.
+    const label = (text: string, x: number, z: number, size = 22, angle = 0) => {
+      ctx.save(); ctx.translate(X(x), Z(z)); ctx.rotate(angle); ctx.font = `italic ${size * u}px Georgia, 'Times New Roman', serif`; ctx.textAlign = 'center';
+      ctx.lineWidth = 5 * u; ctx.strokeStyle = PAPER; ctx.strokeText(text, 0, 0); ctx.fillStyle = INK; ctx.fillText(text, 0, 0); ctx.restore();
+    };
+    label('Market Square', (town.square.x0 + town.square.x1) / 2, town.square.z1 - 4);
+    if (town.harbour) { const xs = town.harbour.map((p0) => p0[0]), zs = town.harbour.map((p0) => p0[1]); label('Harbour', (Math.min(...xs) + Math.max(...xs)) / 2, (town.quay.z + Math.max(...zs)) / 2, 28); }
+    if (town.river) {
+      // (Where it runs between the town's top and the map's.)
+      const top = Math.min(...town.blocks.map((b) => b.z0)), rl = town.river.line, mid = (top + z0) / 2 + 20;
+      const k = Math.min(rl.length - 3, Math.max(2, rl.reduce((m, p0, i) => (Math.abs(p0[1] - mid) < Math.abs(rl[m][1] - mid) ? i : m), 0))), [ax, az] = rl[k - 2], [bx, bz] = rl[k + 2];
+      let angle = Math.atan2(Z(bz) - Z(az), X(bx) - X(ax)); if (angle > Math.PI / 2) angle -= Math.PI; if (angle < -Math.PI / 2) angle += Math.PI;
+      label('the River', rl[k][0] + 14, rl[k][1], 22, angle);
+    }
+    if (town.outlook) label('Outlook', town.outlook.x, town.outlook.z - 12, 20);
+    if (town.hall) label('the Hall', town.hall.stair[0][0], town.hall.stair[0][1] - 10, 20);
+  }
   if (mtn) {
     // Summits as hachured rings; the cairn on the highest as a small triangle; the shelter solid.
     ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.3 * u);
@@ -400,7 +594,7 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.font = `italic ${44 * u}px Georgia, 'Times New Roman', serif`;
-  const name = isle ? 'The island' : mtn ? 'The mountain top' : 'The valley';
+  const name = isle ? 'The island' : mtn ? 'The mountain top' : town ? 'The town' : 'The valley';
   ctx.fillText(name, W / 2, 80 * u);
   ctx.font = `${24 * u}px Georgia, 'Times New Roman', serif`;
   ctx.fillText(site.title.replace(/\.$/, ''), W / 2, 118 * u, W - 2 * edge);

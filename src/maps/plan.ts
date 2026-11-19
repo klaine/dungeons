@@ -2,6 +2,7 @@ import { drawStorey } from './buildingPlan';
 import { rimAt } from '../core/mountain';
 import { footprintOf } from '../core/building';
 import { boxValley, edgeAt, hallOnward, joinLine } from '../core/valley';
+import { coastLine, fromBuilding, outlineOf, townBounds } from '../core/town';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
@@ -63,10 +64,12 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     x0 = Math.min(x0, p.x0 - T); x1 = Math.max(x1, p.x1 + T);
     z0 = Math.min(z0, p.z0 - T); z1 = Math.max(z1, p.z1 + T);
   }
-  const g = opts.valley ? site.grounds : undefined, isle = g ? site.island : undefined, mtn = g ? site.mountain : undefined, vale = g && !isle && !mtn ? site.valley ?? boxValley(g) : undefined;
+  const g = opts.valley ? site.grounds : undefined, isle = g ? site.island : undefined, mtn = g ? site.mountain : undefined, town = g ? site.town : undefined, vale = g && !isle && !mtn && !town ? site.valley ?? boxValley(g) : undefined;
+  const townBox = town ? townBounds(town, 30) : undefined, floor = site.places.find((p) => p.role === 'approach')?.floor ?? 0;
   // Where a side of the valley lies at any place down it.
   const sideAt = (side: 'w' | 'e', z: number) => edgeAt(vale!, side, z);
-  if (g) {
+  if (townBox) { x0 = Math.min(x0, townBox.x0); x1 = Math.max(x1, townBox.x1); z0 = Math.min(z0, townBox.z0); z1 = Math.max(z1, townBox.z1); }
+  else if (g) {
     x0 = Math.min(x0, g.x0 - 5); x1 = Math.max(x1, g.x1 + 5); z1 = Math.max(z1, g.z1 + 5);
     // (An island is seen whole, with a little of the sea all round.)
     if (isle) { z0 = Math.min(z0, g.z0 - 12); x0 -= 7; x1 += 7; z1 += 7; }
@@ -208,6 +211,36 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.fillStyle = INK;
       if (mtn.cairn) { const c = mtn.cairn, r = 2.6 * scale + 2 * ratio; ctx.beginPath(); ctx.moveTo(X(c.x), Z(c.z) - r); ctx.lineTo(X(c.x) + r * 0.9, Z(c.z) + r * 0.6); ctx.lineTo(X(c.x) - r * 0.9, Z(c.z) + r * 0.6); ctx.closePath(); ctx.fill(); }
       if (mtn.shelter) { const q = mtn.shelter; ctx.save(); ctx.translate(X(q.x), Z(q.z)); ctx.rotate(q.facing); ctx.fillRect(-1.5 * scale, -1.8 * scale, 3 * scale, 3.6 * scale); ctx.restore(); }
+    } else if (town && townBox) {
+      // A town: the sea, and the land north of its coast; the fields' walls; the streets and the square; the blocks' yards; every
+      // building, those that can be gone into with their rooms; the quay, the moles and the storehouses' wharves in ink.
+      const coast = coastLine(town, floor, townBox.x0, townBox.x1, townBox.z0, townBox.z1, 2);
+      ctx.fillStyle = '#9fb2b8'; ctx.globalAlpha = 0.5; rect(townBox.x0, townBox.z0, townBox.x1, townBox.z1); ctx.globalAlpha = 1;
+      ctx.fillStyle = COURT;
+      ctx.beginPath(); coast.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.lineTo(X(townBox.x1), Z(townBox.z0)); ctx.lineTo(X(townBox.x0), Z(townBox.z0)); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = INK; ctx.globalAlpha = 0.5; ctx.lineWidth = Math.max(0.6 * ratio, 0.18 * scale);
+      for (const w of town.walls) { ctx.beginPath(); w.line.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = FLOOR; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const st of town.streets) { if (st.kind === 'path') continue; ctx.lineWidth = st.width * scale; ctx.beginPath(); st.line.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); }
+      ctx.lineCap = 'butt';
+      ctx.fillStyle = FLOOR; rect(town.square.x0, town.square.z0, town.square.x1, town.square.z1); rect(town.quay.x0, town.quay.z - town.quay.apron, town.quay.x1, town.quay.z);
+      for (const b of town.buildings) {
+        if (b.plan && (b.style === 'imperial' || b.style === 'timber')) { drawStorey(ctx, b, 0, (u, v) => { const [x, z] = fromBuilding(b, u, v); return [X(x), Z(z)]; }, scale); continue; }
+        ctx.fillStyle = INK;
+        for (const o of outlineOf(b)) { ctx.beginPath(); o.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.closePath(); ctx.fill(); }
+      }
+      ctx.fillStyle = INK;
+      const turned = (x: number, z: number, turn: number, w: number, d: number) => { ctx.save(); ctx.translate(X(x), Z(z)); ctx.rotate(turn); ctx.fillRect((-d / 2) * scale, (-w / 2) * scale, d * scale, w * scale); ctx.restore(); };
+      for (const q of town.storehouses) turned(q.x, q.z, q.turn, q.w, q.d);
+      for (const q of town.shacks) turned(q.x, q.z, q.turn, q.w, q.d);
+      ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 0.9 * scale);
+      ctx.beginPath(); ctx.moveTo(X(town.quay.x0), Z(town.quay.z)); ctx.lineTo(X(town.quay.x1), Z(town.quay.z)); ctx.stroke();
+      for (const w of town.wharves) { ctx.beginPath(); w.line.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); }
+      for (const m of town.moles) { ctx.lineWidth = m.width * scale; ctx.beginPath(); m.line.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); }
+      if (town.light) { ctx.fillStyle = INK; ctx.beginPath(); ctx.arc(X(town.light.x), Z(town.light.z), town.light.r * scale, 0, Math.PI * 2); ctx.fill(); }
+      if (town.fountain) { ctx.lineWidth = Math.max(0.8 * ratio, 0.3 * scale); ctx.beginPath(); ctx.arc(X(town.fountain.x), Z(town.fountain.z), town.fountain.r * scale, 0, Math.PI * 2); ctx.stroke(); }
+      if (town.outlook) { ctx.lineWidth = Math.max(0.8 * ratio, 0.3 * scale); ctx.beginPath(); ctx.arc(X(town.outlook.x), Z(town.outlook.z), 6 * scale, 0, Math.PI * 2); ctx.stroke(); }
     } else {
     ctx.fillStyle = INK;
     ctx.globalAlpha = 0.55;
@@ -445,6 +478,17 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
         continue;
       }
       ctx.fillStyle = INK;
+      if (b.style === 'brick') {
+        // A building of brick is drawn by all its ground, a church's tower and choir with it; and its ridge, along it or across.
+        const turn = b.faces === 'w' ? 1 : -1, xs = (r: { v0: number; v1: number }) => [b.x - (turn * b.d) / 2 + turn * r.v0, b.x - (turn * b.d) / 2 + turn * r.v1];
+        for (const r of footprintOf(b)) { const x = xs(r), z = [b.z + turn * r.u0, b.z + turn * r.u1]; rect(Math.min(...x), Math.min(...z), Math.max(...x), Math.max(...z)); }
+        ctx.fillStyle = DARK;
+        for (const r of footprintOf(b)) { const x = xs(r), z = [b.z + turn * r.u0, b.z + turn * r.u1]; rect(Math.min(...x) + 0.35, Math.min(...z) + 0.35, Math.max(...x) - 0.35, Math.max(...z) - 0.35); }
+        ctx.fillStyle = INK;
+        if (b.brickwork?.kind === 'gabled' || b.brickwork?.kind === 'store') rect(b.x - b.d / 2, b.z - 0.12, b.x + b.d / 2, b.z + 0.12);
+        else rect(b.x - 0.12, b.z - b.w / 2, b.x + 0.12, b.z + b.w / 2);
+        continue;
+      }
       rect(b.x - b.d / 2, b.z - b.w / 2, b.x + b.d / 2, b.z + b.w / 2);
       ctx.fillStyle = DARK;
       rect(b.x - b.d / 2 + 0.35, b.z - b.w / 2 + 0.35, b.x + b.d / 2 - 0.35, b.z + b.w / 2 - 0.35);
