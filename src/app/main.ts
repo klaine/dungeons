@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, renderUniforms, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -241,6 +241,7 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
   edgeUniforms.uEdges.value = num('edges', 1);
+  renderUniforms.uChips.value = num('chips', 1);
   chamfering.on = num('edges', 1) > 0;
   // Each surface is painted in turn, with the page given a chance to draw between them.
   const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
@@ -294,7 +295,7 @@ async function start(): Promise<void> {
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
-    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8 }),
+    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8, render: num('chips', 1) > 0 }),
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
     ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3 }) } : {}),
     // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.

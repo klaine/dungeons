@@ -115,6 +115,8 @@ const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x
  * rounded arris turns. It fades out where the rounding would be smaller than a point of the picture. Gives the bent normal (from the
  * one given, in the eye's terms) and how near an edge the point is, 0 to 1, for wear.
  */
+/** How much of a rendered wall has come away (`render` in `makeSiteMaterial`): 1 as it is, 0 for none (`?chips=0`). */
+export const renderUniforms: { uChips: { value: number } } = { uChips: uniform(1) as N };
 export const edgeUniforms: { uEdges: { value: number } } = { uEdges: uniform(1) as N };
 const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
   const e: N = attribute('aEdge', 'vec4');
@@ -209,7 +211,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -236,6 +238,62 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // metre to a metre and a quarter, darker and a little greener, with a darker rim where the damp dries and leaves what it carried;
   // and below a hand or two the street's dirt the rain splashes up.
   const hasFoot: N = step(500, f.w), above: N = positionWorld.y.sub(f.w.sub(1000)).toVar(), along: N = positionWorld.x.add(positionWorld.z);
+  // Render that has come away. Where a wall is rendered (`render`, for plaster) and looks out of a house (where the wall says how high
+  // the ground at its foot is: see `placeHouse`), the lime has fallen away in places: a few patches here and there, more about the
+  // foot of the wall where the damp has worked at it, and more on some houses than others. In a hole the coarse brown coat the
+  // render was laid on shows, and where that has gone too, the brick of the wall, in courses; the broken edge of the render is pale,
+  // and the hole lies a centimetre and a half below the face, with its lip catching the light on one side and in shadow on the other.
+  // (Before, every rendered wall was as smooth and whole as if it had been finished that morning and painted.)
+  let chipNormal: N = null;
+  if (o.render) {
+    const P: N = positionWorld, nG: N = normalize(normalWorldGeometry);
+    // (Where on the wall: along it, level, and up it; so that the brick's courses are level whichever way the wall faces.)
+    const tH: N = normalize(vec2(nG.z.negate(), nG.x).add(vec2(1e-4, 0)));
+    const q: N = vec2(dot(P.xz, tH), P.y).toVar();
+    const worn: N = smoothstep(0.35, 0.8, farNoise(P.xz.div(17).add(5.3))).toVar();
+    const share: N = worn.mul(0.09).add(0.012).add(one(smoothstep(0.25, 1.4, above)).mul(0.12)).mul(renderUniforms.uChips as N).mul(hasFoot).toVar();
+    // (Blots a few hand-breadths across, ragged with smaller ones, their edges torn finer still.)
+    // (The finest tearing only where a point of the picture is small enough to show it: further off it speckled the edges.)
+    const nearW: N = one(smoothstep(0.004, 0.012, length(fwidth(q)))).toVar();
+    const n0: N = farNoise(rot(q.mul(1.7)).add(11.3)).mul(0.62).add(farNoise(rot(q.mul(-5.9)).add(3.7)).mul(0.27)).add(farNoise(rot(q.mul(23)).add(1.9)).sub(0.5).mul(0.11).mul(nearW)).add(0.055).toVar();
+    const t0: N = float(0.77).sub(share.mul(0.75)).toVar();
+    const dd: N = n0.sub(t0).toVar();
+    const soft: N = max(fwidth(n0).mul(0.8), 0.006).toVar();
+    const hole: N = smoothstep(soft.negate(), soft, dd).mul(step(0.004, share)).toVar();
+    // (The coat under it has held in most of a hole; the brick shows where the hole is deepest.)
+    const core: N = smoothstep(0.065, 0.1, dd.add(farNoise(rot(q.mul(9.1))).sub(0.5).mul(0.05))).mul(hole).toVar();
+    // Brick in courses: seven and a half centimetres to a course, a quarter of a metre to a brick, joints of a centimetre.
+    const row = cellsOf(q.y.div(0.076), float(3.1), 0.02), brickAt = cellsOf(q.x.div(0.25).add(row.k.mul(0.5)), row.k.add(7.7), 0.08);
+    const jx: N = min(brickAt.at, one(brickAt.at)).mul(0.25), jy: N = min(row.at, one(row.at)).mul(0.076);
+    const mortar: N = one(smoothstep(0.004, 0.007, min(jx, jy))).toVar();
+    const bTone: N = farHash(vec2(brickAt.k, row.k.add(2.2)));
+    const brick: N = mix(vec3(0.5, 0.25, 0.16), vec3(0.62, 0.36, 0.22), bTone).mul(mix(0.85, 1.1, stone.a)).mul(mix(1, 0.7, farHash(vec2(row.k, brickAt.k.add(9.3))).mul(0.6)));
+    const coat: N = mix(vec3(0.41, 0.35, 0.26), vec3(0.53, 0.46, 0.35), smoothstep(0.3, 0.7, farNoise(rot(q.mul(31))))).mul(mix(0.85, 1.12, stone.a));
+    const under: N = mix(coat, mix(brick, vec3(0.5, 0.48, 0.42), mortar), core);
+    // (The broken edge of the render, a few millimetres of it, pale and fresh; and the old paint about a hole a little dirtier.)
+    const lip: N = smoothstep(soft.negate(), soft, dd).mul(one(smoothstep(0.006, 0.016, dd))).mul(step(0.004, share)).mul(nearW);
+    colour = colour.mul(mix(1, 0.92, smoothstep(-0.05, 0, dd).mul(one(hole)).mul(step(0.004, share))));
+    colour = mix(colour, under.mul(mix(1, 0.6, wet)), hole);
+    colour = mix(colour, vec3(0.82, 0.8, 0.75).mul(mix(1, 0.6, wet)), lip.mul(0.75));
+    // Hairline cracks in the render where it is old: meandering lines, in some places and not others, gone within a few strides.
+    // (Jagged and broken short: the lines along which smooth noise crosses a level are long smooth loops, like a map's.)
+    const cv: N = farNoise(rot(q.mul(2.6)).add(17.7)).add(farNoise(rot(q.mul(-11)).add(4.4)).mul(0.22)).add(farNoise(rot(q.mul(41)).add(8.1)).mul(0.07)).toVar();
+    const cw: N = max(fwidth(cv).mul(0.9), 1e-4);
+    // (Faint, and only where the wall is old: drawn darker, and everywhere, they were the lines of a map drawn on the wall.)
+    const crack: N = one(smoothstep(cw.mul(0.6), cw.mul(1.6), abs(cv.sub(0.5)))).mul(smoothstep(0.6, 0.72, farNoise(rot(q.mul(3.3)).add(9.9)).mul(0.6).add(farNoise(rot(q.mul(0.7)).add(2.3)).mul(0.4)).add(worn.mul(0.1))))
+      .mul(one(smoothstep(4, 11, length(positionView)))).mul(one(hole)).mul(hasFoot).mul(renderUniforms.uChips as N);
+    colour = colour.mul(one(crack.mul(0.2)));
+    // The hole's depth, for its light: a centimetre and a half below the face, the brick a little deeper still; turned into the way
+    // the surface faces from how it changes across the picture (as `edgeOf` does for its rounding).
+    // (Only within some strides, and never tilting the surface more than half a right angle: further off, or with the hole's edge
+    // a single point of the picture wide, its light was a dotted black and white line round every hole.)
+    const H: N = hole.mul(-0.015).sub(core.mul(0.004)).sub(mortar.mul(core).mul(0.004)).mul(one(smoothstep(5, 12, length(positionView)))).toVar();
+    const Pv: N = positionView, sx: N = dFdx(Pv), sy: N = dFdy(Pv), nv: N = normalize(normalViewGeometry);
+    const r1: N = cross(sy, nv), r2: N = cross(nv, sx), det: N = dot(sx, r1);
+    const grad0: N = r1.mul(dFdx(H)).add(r2.mul(dFdy(H))).mul(select(det.greaterThanEqual(0), float(1), float(-1)));
+    const grad: N = grad0.mul(min(1, abs(det).div(max(length(grad0), 1e-12))));
+    chipNormal = (n: N): N => normalize(n.mul(max(abs(det), 1e-12)).sub(grad).div(max(abs(det), 1e-12)));
+  }
   const mark: N = farNoise(vec2(along.mul(0.9), 3.1)).mul(0.6).add(farNoise(vec2(along.mul(4.3), positionWorld.y.mul(0.7))).mul(0.2)).add(0.42).toVar();
   // (Its edge is taken through the wall's own texture as well, so that it is blotched as damp is, and not a drawn wave.)
   const edgeAt: N = above.sub(mark).add(stone.a.sub(0.5).mul(0.22)).toVar();
@@ -254,6 +312,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     colour = colour.mul(edge.wear.mul(0.12).add(1));
     m.normalNode = edge.bend(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   }
+  if (chipNormal) m.normalNode = chipNormal(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   m.colorNode = vec4(colour, 1);
   m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
