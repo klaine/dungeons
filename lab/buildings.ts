@@ -716,19 +716,20 @@ async function start(): Promise<void> {
     sync(); state.selected = null; select(it.id); commit();
   };
   /** A street front of brick, dealt as a town deals one: mostly merchants' houses, now and then a broad house or a warehouse, wall to wall. */
-  const street = () => {
+  const street = (of: 'brick' | 'canal') => {
     const at = viewCentre(), rng = Math.random().toString(36).slice(2, 6);
     let prev: Item | null = null;
-    for (let k = 0; k < 7; k++) {
-      const kind = (['gabled', 'gabled', 'gabled', 'gabled', 'eaves', 'eaves', 'store'] as Kind[])[Math.floor(Math.random() * 7)], seed = `${rng}${k}`;
+    for (let k = 0; k < (of === 'canal' ? 8 : 7); k++) {
+      const kind = of === 'canal' ? 'canal' : (['gabled', 'gabled', 'gabled', 'gabled', 'eaves', 'eaves', 'store'] as Kind[])[Math.floor(Math.random() * 7)], seed = `${rng}${k}`;
       const it: Item = { id: state.next++, kind, seed, x: at.x, z: at.z, turn: 0, scale: [1, 1, 1], shape: deal(kind, seed, state.stone) };
-      if (prev) besides(prev, it, Math.random() < 0.15 ? 3.5 : 0);
+      // (Canal houses stand wall against wall; now and then a street of brick has a lane between.)
+      if (prev) besides(prev, it, of === 'brick' && Math.random() < 0.15 ? 3.5 : 0);
       else { const span = 60; it.x = at.x - span / 2; }
       state.items.push(it);
       prev = it;
     }
     sync(); select(prev!.id); commit();
-    say('A street of seven houses, dealt as a town deals them', 'good');
+    say(of === 'canal' ? 'Eight canal houses, dealt as a town deals them' : 'A street of seven houses, dealt as a town deals them', 'good');
   };
   const demo = (): void => {
     state.items = [];
@@ -1195,7 +1196,9 @@ async function start(): Promise<void> {
   const layoutOf = (it: Item | undefined) => {
     if (!it) return '';
     const s = it.shape, bw = s.brickwork;
-    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
+    // (A canal house's panel has a control for its door in each bay, and others that come and go with its gable, front, shutters and shop front.)
+    const cw = s.canalwork, canal = cw ? [s.bays, cw.gable, cw.front, !!cw.shutters, !!cw.pui] : null;
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire, canal]);
   };
   let shownLayout = '', sliding = false;
   /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
@@ -1267,7 +1270,7 @@ async function start(): Promise<void> {
     ['Palace', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('palace', seed) }); }, 'A long classical front on a high base, its middle under columns and a pediment, pavilions at its ends, the ground falling along it'],
     ['Plain block', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('plain', seed) }); }, 'A classical block with nothing on it but its windows, its bands and its cornice'],
   ]);
-  buttons(panel, [['Brick street', street, 'Seven houses wall to wall, dealt as a town deals them']]);
+  buttons(panel, [['Brick street', () => street('brick'), 'Seven houses wall to wall, dealt as a town deals them'], ['Canal row', () => street('canal'), 'Eight canal houses wall to wall, dealt as a town deals them']]);
   el('h2', panel, 'Trees & stones');
   const TREE_NAMES: Record<(typeof TREES)[number], string> = { oak: 'Oak', ash: 'Ash', 'old oak': 'Old oak', spruce: 'Spruce', pine: 'Pine', 'coast pine': 'Coast pine', bush: 'Bush' };
   buttons(panel, [
@@ -1458,6 +1461,47 @@ async function start(): Promise<void> {
         num('Wing length', RW.wingLength, () => s().wings![0].length, (t, v) => { t.wings![0].length = v; }, undefined, 0.1);
       }
       wash();
+    } else if (it.kind === 'canal') {
+      const cw = () => s().canalwork!, RC = R.canal, gable = cw().gable;
+      /** A colour of what the house is made of or painted, by a picker. */
+      const tint = (label: string, get: () => Colour, set: (t: Shape, v: Colour) => void) => {
+        const row = el('div', selBox); row.className = 'row wide';
+        el('label', row, label);
+        const input = el('input', row); input.type = 'color';
+        input.addEventListener('input', () => change((t) => set(t, unhex(input.value))));
+        input.addEventListener('change', commit);
+        list.push(() => { input.value = hex(get()); }); input.value = hex(get());
+      };
+      pick('Kind', [['House', 'house'], ['Warehouse', 'warehouse']], () => cw().kind, (t, v) => { t.canalwork!.kind = v; }, 'A warehouse has lower storeys, loading doors under the hoist and shutters');
+      pick('Gable', [['Spout', 'spout'], ['Stepped', 'stepped'], ['Neck', 'neck'], ['Bell', 'bell'], ['Cornice', 'cornice'], ['Raised', 'raised']], () => cw().gable, (t, v) => { t.canalwork!.gable = v; if (v === 'stepped') t.canalwork!.tiers = Math.max(3, t.canalwork!.tiers); }, 'The outline over the eaves, oldest to latest');
+      if (gable === 'stepped' || gable === 'neck') ints(gable === 'stepped' ? 'Steps' : 'Tiers', () => cw().tiers, (t, v) => { t.canalwork!.tiers = v; }, 1, 'w', gable === 'stepped' ? 'Steps a side: two to five' : 'One neck, or a broader one under a narrower');
+      if (gable !== 'cornice') pick('Crown', [['Triangle', 'triangle'], ['Segment', 'segment'], ['Scroll', 'scroll'], ['Flat', 'flat']], () => cw().crown, (t, v) => { t.canalwork!.crown = v; }, 'On top of the gable');
+      pick('Ornament', [['Plain', 0], ['Bands', 1], ['Carved', 2], ['Rich', 3]], () => cw().ornament, (t, v) => { t.canalwork!.ornament = v as 0 | 1 | 2 | 3; }, 'Plain: flat arches. Bands: stone bands, keystones. Carved: garlands, crowned windows, vases. Rich: pilasters and a balustrade too.');
+      pick('Windows', [['Cross', 'cross'], ['Small panes', 'small'], ['Large panes', 'large']], () => cw().windows, (t, v) => { t.canalwork!.windows = v; });
+      pick('Front', [['Brick', 'brick'], ['Painted', 'painted']], () => cw().front, (t, v) => { t.canalwork!.front = v; });
+      if (cw().front === 'painted') wash();
+      else pick('Clay', [['Red', 'red'], ['Buff', 'buff']], () => cw().clay, (t, v) => { t.canalwork!.clay = v; });
+      num('Width', [RC.bays[0] * RC.pitch[0] + RC.margin, RC.bays[1] * RC.pitch[1] + RC.margin], () => s().w, (t, v) => { t.w = v; }, 'A broader front gets more bays', 0.05);
+      ints('Bays', () => s().bays, (t, v) => { t.bays = v; }, 1, 'bays', 'Windows across: one to seven');
+      num('Depth', RC.d, () => s().d, (t, v) => { t.d = v; });
+      ints('Storeys', () => s().storeys, (t, v) => { t.storeys = v; });
+      heights(RC.height, 'Ground floor');
+      num('Stoop', RC.stoop, () => cw().stoop, (t, v) => { t.canalwork!.stoop = v; }, 'Floor height over the street, up steps; a high one runs along the front', 0.05);
+      num('Lean', RC.lean, () => cw().lean, (t, v) => { t.canalwork!.lean = v; }, 'How far the front leans out per metre of height', 0.001);
+      pick('Door', Array.from({ length: s().bays }, (_, i): [string, number] => [`Bay ${i + 1}`, i]), () => cw().door, (t, v) => { t.canalwork!.door = v; });
+      num('Roof pitch', RC.roof, () => cw().pitch, (t, v) => { t.canalwork!.pitch = v; }, 'In degrees', 0.5);
+      pick('Roof', [['Red tiles', 'red'], ['Dark tiles', 'dark']], () => cw().roof, (t, v) => { t.canalwork!.roof = v; });
+      tick([
+        ['Basement', () => cw().basement, (t, v) => { t.canalwork!.basement = v; }, 'Low windows at the foot of the front'],
+        ['Hoist', () => cw().hoist, (t, v) => { t.canalwork!.hoist = v; }, 'A hoist beam over the top hatch'],
+        ['Shutters', () => !!cw().shutters, (t, v) => { t.canalwork!.shutters = v ? [0.1, 0.22, 0.14] : null; }],
+        ['Shop front', () => !!cw().pui, (t, v) => { t.canalwork!.pui = v ? [0.1, 0.2, 0.13] : null; }, 'A timber ground floor with great windows'],
+      ]);
+      tint('Frames', () => cw().frame, (t, v) => { t.canalwork!.frame = v; });
+      tint('Door paint', () => cw().paint, (t, v) => { t.canalwork!.paint = v; });
+      tint('Trim', () => cw().trim, (t, v) => { t.canalwork!.trim = v; });
+      if (cw().shutters) tint('Shutter paint', () => cw().shutters!, (t, v) => { t.canalwork!.shutters = v; });
+      if (cw().pui) tint('Shop paint', () => cw().pui!, (t, v) => { t.canalwork!.pui = v; });
     } else if (it.kind === 'tree') {
       const tr = () => s().tree!, R2 = TREE_RANGES[tr().kind];
       pick('Kind', TREES.map((k): [string, (typeof TREES)[number]] => [k[0].toUpperCase() + k.slice(1), k]), () => tr().kind, (t, v) => { t.tree = { ...dealTree(v, it.seed).tree!, leaf: t.tree!.leaf }; });

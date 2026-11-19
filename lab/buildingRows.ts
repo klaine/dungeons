@@ -3,12 +3,18 @@
 // `?style=imperial|timber`, `bays`, `storeys`, `heights=4.8,3.3,3.3`, `wings=0|1|2`, `towers=0|1|2|3`, `extra` (storeys of the towers),
 // `pediment=0`, `arch=-1|1` (a carriage way at that end), `entrances=3,9` (the bays of its doors), `brick=stucco|bare` (in the row, every
 // other building), and `seed`; (brick is drawn here in a plain brown, without the game's texture); with none, a row of classical buildings is dealt their variations as the town deals them. `turn` turns them all, in degrees.
+// `?style=canal` shows canal houses: a row along a canal, and a second row facing it across the water (`rows=1` for one), each house
+// dealt as a town deals them, or with any of its choices fixed from the address: `gable=spout|stepped|neck|bell|cornice|raised|all` (all:
+// a house of each in turn), `crown=triangle|segment|scroll|flat`, `tiers`, `bays`, `storeys`, `w`, `d`, `ornament=0..3`,
+// `windows=cross|small|large`, `front=brick|painted`, `kind=house|warehouse`, `stoop` (metres), `basement=0|1`, `lean` (per metre),
+// `pui=0|1`, `hoist=0|1`, `door` (its bay), `clay=red|buff`; `n` houses to a row.
 import { AmbientLight, BufferGeometry, Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Scene, SRGBColorSpace, WebGLRenderer } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildBuilding } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { classicalVariations, planClassical, planTimber } from '../src/core/building';
 import { Rng } from '../src/core/rng';
+import { CanalWant, dealCanalHouse } from '../src/core/canal';
 import type { Building } from '../src/core/site';
 
 const q = new URLSearchParams(location.search), num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
@@ -29,7 +35,7 @@ scene.add(sun);
 const ground = new Mesh(new PlaneGeometry(600, 600), new MeshStandardMaterial({ color: 0x8a8670, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-const looks: Record<string, { roughness: number; metalness?: number; color?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 }, brick: { roughness: 0.9, color: 0x6e4430 } };
+const looks: Record<string, { roughness: number; metalness?: number; color?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 }, brick: { roughness: 0.9, color: 0x6e4430 }, redBrick: { roughness: 0.9, color: 0x8a4434 }, buffBrick: { roughness: 0.9, color: 0xc49a62 } };
 /** Builds a building at the origin facing -x (its own way), and lays it in the scene turned to face `turn` at (`x`, `z`). */
 function show(b: Building, x: number, z: number, turn: number, rng: Rng) {
   const meshes = new Map<string, MeshBuilder>();
@@ -43,13 +49,50 @@ function show(b: Building, x: number, z: number, turn: number, rng: Rng) {
   }
 }
 
+/** Builds a building with the middle of its front at (`fx`, `fz`), facing `turn`. */
+function front(b: Building, fx: number, fz: number, turn: number, rng: Rng) {
+  show(b, fx - (b.d / 2) * Math.cos(turn), fz - (b.d / 2) * Math.sin(turn), turn, rng);
+}
 const style = q.get('style') ?? 'imperial', seed = q.get('seed') ?? 'lab', turn = (num('turn', 90) * Math.PI) / 180;
 const made: string[] = [];
 const classical = (r: Rng, bays: number, storeys: number): Building => {
   const heights = [3.8, 4.4, ...Array.from({ length: storeys - 2 }, () => 3.2)].slice(0, storeys);
   return { style: 'imperial', x: 0, z: 0, w: bays * 2.55 + 1.6, d: 10.6, faces: 'w', storeys, heights, bays, colour: r.pick([[0.9, 0.76, 0.42], [0.86, 0.62, 0.56], [0.62, 0.74, 0.62], [0.6, 0.68, 0.78]] as [number, number, number][]), portico: bays >= 7 || bays === 5 };
 };
-if (style === 'wooden') {
+if (style === 'canal') {
+  // Canal houses, wall against wall along a quay; across the water, another row facing them.
+  const want: CanalWant = {};
+  const word = <K extends keyof CanalWant>(key: K) => { if (q.has(key)) (want as Record<string, unknown>)[key] = q.get(key); };
+  const count = <K extends keyof CanalWant>(key: K) => { if (q.has(key)) (want as Record<string, unknown>)[key] = Number(q.get(key)); };
+  (['crown', 'windows', 'front', 'kind', 'clay'] as const).forEach(word);
+  (['tiers', 'bays', 'storeys', 'w', 'd', 'ornament', 'stoop', 'lean', 'door'] as const).forEach(count);
+  if (q.has('basement')) want.basement = q.get('basement') === '1';
+  if (q.has('hoist')) want.hoist = q.get('hoist') === '1';
+  if (q.get('pui') === '0') want.pui = null;
+  const gables = ['spout', 'stepped', 'neck', 'bell', 'cornice', 'raised'] as const, all = q.get('gable') === 'all';
+  if (q.has('gable') && !all) want.gable = q.get('gable') as CanalWant['gable'];
+  const n = num('n', all ? 6 : 10), canal = 16, quay = 5;
+  const water = new Mesh(new PlaneGeometry(240, canal), new MeshStandardMaterial({ color: 0x2c4248, roughness: 0.15, metalness: 0.2 }));
+  water.rotation.x = -Math.PI / 2; water.position.set(0, 0.03, quay + canal / 2); scene.add(water);
+  for (let row = 0; row < (num('rows', 2) === 1 ? 1 : 2); row++) {
+    const facing = row ? -Math.PI / 2 : Math.PI / 2, z = row ? 2 * quay + canal : 0, dir = row ? -1 : 1;
+    const houses: Building[] = [];
+    for (let k = 0; k < n; k++) {
+      const r = new Rng(`${seed}/${row}/${k}`), w: CanalWant = { ...want, ...(all ? { gable: gables[k % 6] } : {}) };
+      if (q.get('pui') === '1') w.pui = [0.1, 0.2, 0.13];
+      const deal = dealCanalHouse(r, { want: w });
+      if (deal) houses.push({ ...deal, x: 0, z: 0, faces: 'w' });
+    }
+    const length = houses.reduce((sum, b) => sum + b.w, 0);
+    let s = -length / 2;
+    for (const [k, b] of houses.entries()) {
+      front(b, dir * (s + b.w / 2), z, facing, new Rng(`${seed}/${row}/${k}/build`));
+      s += b.w;
+      const c = b.canalwork!;
+      if (!row) made.push(`${k}: ${c.kind === 'warehouse' ? 'warehouse, ' : ''}${c.gable}${c.gable === 'stepped' || c.gable === 'neck' ? ` ${c.tiers}` : ''} ${c.crown}, ${b.bays} bays ${b.w} m, ${b.storeys} storeys, ornament ${c.ornament}, ${c.windows}, ${c.front}${c.pui ? ', pui' : ''}, stoop ${c.stoop}${c.basement ? ' over a basement' : ''}, lean ${c.lean}`);
+    }
+  }
+} else if (style === 'wooden') {
   // Classical houses of wood: long and low on their basements, one storey or two; and an L, as at a street corner.
   const tints: [number, number, number][] = [[0.8, 0.55, 0.18], [0.55, 0.2, 0.12], [0.86, 0.72, 0.36], [0.62, 0.68, 0.58], [0.72, 0.74, 0.72], [0.85, 0.6, 0.52]];
   for (let k = 0; k < 4; k++) {
@@ -95,7 +138,7 @@ if (style === 'wooden') {
 }
 document.getElementById('note')!.textContent = made.join(' · ');
 const camera = new PerspectiveCamera(40, innerWidth / innerHeight, 0.5, 2000);
-const cam = (q.get('cam') ?? '-70,55,95,0,8,0').split(',').map(Number);
+const cam = (q.get('cam') ?? (style === 'canal' ? '-34,5,13,8,10,2' : '-70,55,95,0,8,0')).split(',').map(Number);
 camera.position.set(cam[0], cam[1], cam[2]);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(cam[3], cam[4], cam[5]); controls.update();

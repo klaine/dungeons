@@ -104,6 +104,16 @@ export class MeshBuilder {
     for (let i = from; i < this.vertexCount; i++) this.setOpen(i, value(this.pos.data[i * 3], this.pos.data[i * 3 + 1], this.pos.data[i * 3 + 2]));
   }
 
+  /** Moves every point laid from `from` on: `move` is given its place and may change it. (A front that leans out over the street is built upright and then leaned.) */
+  movePoints(move: (p: number[]) => void, from = 0): void {
+    const p = [0, 0, 0], d = this.pos.data;
+    for (let i = from; i < this.vertexCount; i++) {
+      p[0] = d[i * 3]; p[1] = d[i * 3 + 1]; p[2] = d[i * 3 + 2];
+      move(p);
+      d[i * 3] = p[0]; d[i * 3 + 1] = p[1]; d[i * 3 + 2] = p[2];
+    }
+  }
+
   /**
    * Light of its own, for what is neither baked nor under the sky: for every point already laid,
    * given where it is and which way it faces, the light that falls on it, as the bake would

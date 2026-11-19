@@ -150,6 +150,8 @@ export function natureKit(o: { stone: Stone; season: Season }) {
     const room = Math.min(4, most);
     lo.addScalar(-room); hi.addScalar(room);
     lo.y = Math.max(lo.y, -1);
+    // (Nothing of it above the ground: nothing to carve.)
+    if (hi.y <= lo.y + 0.1) return null;
     const size = hi.clone().sub(lo);
     const cell = Math.max(Math.max(0.08, Math.min(0.3, most / 5)), Math.cbrt((size.x * size.y * size.z) / 1.0e6));
     for (const k of ['x', 'y', 'z'] as const) lo[k] = Math.floor(lo[k] / cell) * cell;

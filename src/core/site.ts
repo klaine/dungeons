@@ -264,6 +264,10 @@ export interface Grotto {
  * Of the style `brick`: a building of the brick towns of the Baltic and the North Sea coasts, as
  * along the Trave in Lübeck or the harbours of Stralsund and Wismar; `brick` says which of that
  * family it is and how it is made (see `BrickWork`). `colour` is the wash on a rendered front.
+ *
+ * Of the style `canal`: a canal house, as along the canals of Amsterdam: narrow, tall and deep,
+ * its front to the water, its gable in one of the outlines the city built over two centuries;
+ * `canalwork` says how it is made (see `CanalWork`). `colour` is the paint on a painted front.
  */
 /**
  * How a building of brick is made. There are four kinds:
@@ -378,6 +382,69 @@ export interface ClassicalDress {
 }
 
 /**
+ * How a canal house is made: the measures of the house are the building's (`w`, `d`, `storeys`,
+ * `heights`, `bays`); this is the rest. Everything here is chosen independently, so that one house
+ * may be a narrow front of one window with a bell gable and the next a double house of seven
+ * under a raised cornice; but the dealer (`src/core/canal.ts`) keeps them to the combinations the
+ * city built.
+ */
+export interface CanalWork {
+  /** A dwelling, with a stoop and tall windows; or a warehouse, of lower storeys, with a column of loading doors under the hoist and shutters to its windows. */
+  kind: 'house' | 'warehouse';
+  /**
+   * The outline of the front over the eaves, from the oldest to the latest: `spout`, a narrow
+   * upright strip in the middle rising over the roof, the slopes either side boarded; `stepped`, in
+   * `tiers` steps a side; `neck`, a narrow upright neck over shoulders, with carved claw pieces filling
+   * the corners between (with `tiers` 2, a broader neck first and a narrower one on it); `bell`, the
+   * outline curving in from the shoulders to a narrow top as a bell does; `cornice`, a straight
+   * cornice across the whole front, the roof behind it; `raised`, such a cornice with a panel rising
+   * over its middle.
+   */
+  gable: 'spout' | 'stepped' | 'neck' | 'bell' | 'cornice' | 'raised';
+  /** Of a stepped gable, its steps a side (2 to 5); of a neck gable, its tiers (1 or 2). */
+  tiers: number;
+  /** What stands on the top of the gable or the raised panel: a triangular pediment, a segmental one, a curved crest with scrolls, or a flat cap with a ball. */
+  crown: 'triangle' | 'segment' | 'scroll' | 'flat';
+  /** The front is bare brick, or painted over in the building's `colour`. */
+  front: 'brick' | 'painted';
+  /** The clay of the brick, as for `BrickWork`; and its tone, by which its colour is multiplied. */
+  clay: 'red' | 'buff';
+  tone: [number, number, number];
+  /** The colour of what is dressed: sandstone, or paint. */
+  trim: [number, number, number];
+  /**
+   * How much is carved and moulded: 0, a plain front, the windows under flat arches of brick; 1,
+   * bands of stone at the floors, keystones, a moulded door case; 2, besides, garlands under the
+   * windows, crowned windows, vases and scrolls on the gable, an oval window under its crown; 3,
+   * besides, pilasters between the bays storey over storey and a balustrade or a crest at the top.
+   */
+  ornament: 0 | 1 | 2 | 3;
+  /** The windows: `cross`, a mullion and a transom with small panes above and shutters below; `small`, sashes of many small panes; `large`, sashes of one or two panes. */
+  windows: 'cross' | 'small' | 'large';
+  /** Paint: of the window frames; of the shutters, if there are any (a warehouse always has them); of the door. */
+  frame: [number, number, number];
+  shutters: [number, number, number] | null;
+  paint: [number, number, number];
+  /** A timber front to the ground storey, painted this colour, with great windows and the door in it; or none, the brick going down to the plinth. */
+  pui: [number, number, number] | null;
+  /**
+   * How high the floor of the ground storey stands over the street, up a stoop of steps and a landing; and whether under it there
+   * is a basement, half under the street, lit by low windows at the foot of the front.
+   */
+  stoop: number;
+  basement: boolean;
+  /** How far the front leans out over the street for each metre of its height, as the fronts on the canals do so that goods hoisted clear it. */
+  lean: number;
+  /** The bay the door is in, counted from 0 at the left as one stands before the front. */
+  door: number;
+  /** How steep the roof is, in degrees, and what it is covered with: red clay tiles or tiles glazed nearly black. */
+  pitch: number;
+  roof: 'red' | 'dark';
+  /** A hoist beam with its hook over the top hatch. */
+  hoist: boolean;
+}
+
+/**
  * The plan of a building's rooms: alike on every storey, except where a room or a door names the
  * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
  * measures: `u` across the front from its middle, to the right as seen from outside; `v` back
@@ -397,8 +464,8 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), or Hanseatic brick (`brick`). */
-  style: 'timber' | 'imperial' | 'wooden' | 'brick';
+  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
   x: number;
   z: number;
   w: number;
@@ -483,6 +550,8 @@ export interface Building {
   wings?: { side: -1 | 1; width: number; length: number }[];
   /** Of the style `brick`: which of the family it is, and how it is made. */
   brickwork?: BrickWork;
+  /** Of the style `canal`: how it is made. */
+  canalwork?: CanalWork;
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
 }

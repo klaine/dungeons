@@ -49,6 +49,14 @@ function shake(kind: Kind, s: Shape): Shape {
   if (kind === 'shack') t.shack = { roof: rng.pick(['boards', 'tin', 'turf'] as const), lean: rng.chance(0.5), stilts: push(0, 2.5) };
   if (kind === 'tree') t.tree = { kind: rng.pick([...TREES]), height: push(1, 20), girth: push(0.02, 0.7), wide: push(0.8, 3.6), leaf: Math.round(push(0, 3)) };
   if (kind === 'boulder') t.boulder = { size: push(0.3, 8) };
+  if (kind === 'canal') {
+    const c = t.canalwork!, col = () => [rng.range(0, 1), rng.range(0, 1), rng.range(0, 1)] as [number, number, number];
+    t.w = push(2, 19); t.d = push(7, 22); t.bays = Math.round(push(1, 7)); t.storeys = Math.round(push(2, 7));
+    t.canalwork = { ...c, kind: rng.pick(['house', 'warehouse'] as const), gable: rng.pick(['spout', 'stepped', 'neck', 'bell', 'cornice', 'raised'] as const), tiers: Math.round(push(1, 5)),
+      crown: rng.pick(['triangle', 'segment', 'scroll', 'flat'] as const), front: rng.pick(['brick', 'painted'] as const), ornament: Math.round(push(0, 3)) as 0 | 1 | 2 | 3,
+      windows: rng.pick(['cross', 'small', 'large'] as const), stoop: push(0, 1.6), basement: rng.chance(0.5), lean: push(0, 0.035), door: Math.round(push(0, 7)), pitch: push(35, 62),
+      roof: rng.pick(['red', 'dark'] as const), hoist: rng.chance(0.5), shutters: rng.chance(0.5) ? col() : null, pui: rng.chance(0.3) ? col() : null, frame: col(), paint: col(), trim: col() };
+  }
   const bw = t.brickwork;
   if (bw) {
     bw.gable = rng.pick(['stepped', 'piers', 'volute', 'plain'] as const);
