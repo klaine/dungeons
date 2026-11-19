@@ -581,6 +581,47 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   rough = .88;
 }`,
   },
+  // Brick in running bond, brown: nine bricks across the picture and twenty-six courses up it, which at the half a texture to the metre
+  // that building faces are laid at is a brick of twenty-two centimetres by seven and a half with its joint. The mortar is a little
+  // recessed and pale; the bricks are each their own brown, now and then one burnt darker or fired paler, mottled within, their arrises
+  // a little worn; and the whole is darkened in long streaks where rain runs down it. The colour is the brick's own: what a building's
+  // points carry tints it.
+  brick: {
+    normalStrength: 4.5,
+    height: /* glsl */ `
+vec4 brickAt(vec2 uv) {
+  float rows = 26., cols = 9.;
+  float row = floor(uv.y * rows), fy = fract(uv.y * rows);
+  float x = uv.x * cols + mod(row, 2.) * .5, col = mod(floor(x), cols), fx = fract(x);
+  // (How far in from the brick's edge, in metres: a course is 2/26 of a metre high, a brick 2/9 long.)
+  float d = min(min(fy, 1. - fy) * (2. / rows), min(fx, 1. - fx) * (2. / cols));
+  return vec4(col, row, d, hash21(vec2(col, row) + 1.7));
+}
+float heightFn(vec2 uv) {
+  vec4 b = brickAt(uv);
+  float wear = fbm(uv + b.w * 9.1, vec2(30., 80.), 3, .5) * .0018;
+  float face = smoothstep(.0045, .0085, b.z + wear);
+  float own = (b.w - .5) * .08 + fbm(uv + 3.3, vec2(36., 104.), 3, .5) * .06;
+  float mortar = .3 + fbm(uv + 7.7, vec2(72., 208.), 2, .5) * .05;
+  return clamp(mix(mortar, .72 + own, face), 0., 1.);
+}`,
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  vec4 b = brickAt(uv);
+  float r2 = hash21(vec2(b.x, b.y) + 8.4), r3 = hash21(vec2(b.x, b.y) + 13.1);
+  vec3 brick = mix(vec3(.27, .15, .095), vec3(.43, .25, .15), b.w);
+  brick = mix(brick, vec3(.17, .1, .075), step(.86, r2) * .85);
+  brick = mix(brick, vec3(.5, .34, .22), step(.93, r3) * .65);
+  brick *= .88 + .24 * smoothstep(-.3, .3, fbm(uv + b.w * 5.3, vec2(18., 52.), 3, .5));
+  vec3 mortar = vec3(.55, .52, .47) * (.9 + .16 * smoothstep(-.3, .3, fbm(uv + 2.2, vec2(40., 116.), 2, .5)));
+  float isBrick = smoothstep(.0045, .0075, b.z);
+  vec3 c = mix(mortar, brick, isBrick);
+  // (Rain runs down a wall in long streaks, darkening it.)
+  c *= .82 + .18 * smoothstep(-.35, .25, fbm(vec2(uv.x, uv.y * .15) + 4.4, vec2(14., 1.), 3, .5));
+  albedo = c * (1. - cavity * .35) * (.95 + .1 * hash21(floor(uv * 512.)));
+  rough = mix(.94, .86, isBrick);
+}`,
+  },
   // Clay roof tiles of the flat round-ended kind, hung in rows, each row lapping the one below
   // and set half a tile along from it. No two are quite the same red, and some have gone dark.
   tile: {
