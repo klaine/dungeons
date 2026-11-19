@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dungeons: world</title>
   <style>
-    html { background: #0b0a09; color: #e8e2d6; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-    body { margin: 0 auto; max-width: 1400px; padding: 20px 16px 60px; }
+    /* (On :root and on body, not html: a page that wraps this one may set a light scheme on :root, which outranks html.) */
+    :root { color-scheme: dark; background: #0b0a09; color: #e8e2d6; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { margin: 0 auto; max-width: 1400px; padding-block: 20px 60px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: #0b0a09; color: #e8e2d6; }
     h1 { margin: 0 0 4px; font: 600 17px/1.2 ui-serif, Georgia, serif; letter-spacing: .14em; text-transform: uppercase; }
     header p { margin: 0 0 14px; max-width: 72ch; opacity: .78; }
     a { color: inherit; }
@@ -16,6 +17,11 @@
     button { cursor: pointer; }
     button:hover, button[aria-pressed="true"] { background: rgba(224, 176, 112, .35); }
     #status { opacity: .7; }
+    #making { margin: 0 0 16px; max-width: 640px; }
+    #making .bar { height: 6px; border-radius: 3px; overflow: hidden; background: rgba(232, 226, 214, .14); }
+    #making .bar span { display: block; height: 100%; width: 0; background: #e0b070; }
+    #making p { margin: 6px 0 0; opacity: .8; font-variant-numeric: tabular-nums; }
+    canvas.dim { opacity: .3; }
     canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: #f1eadb; }
     #places { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px 12px; margin: 0 0 16px; }
     #places:empty { display: none; }
@@ -40,6 +46,10 @@
     <button id="save" type="button">Save picture</button>
     <span id="status"></span>
   </nav>
+  <div id="making" hidden>
+    <div class="bar" role="progressbar" aria-label="Making the world" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+    <p></p>
+  </div>
   <section id="places" aria-label="The places in this world"></section>
   <canvas id="map" width="2400" height="3060"></canvas>
   <script type="module" src="/src/worldmap/main.ts"></script>

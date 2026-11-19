@@ -60,26 +60,67 @@ function make(seed: string): void {
   history.replaceState(null, '', url);
   window.__worldReady = false;
   worker?.terminate();
-  const t0 = performance.now();
+  const t0 = performance.now(), progress = showProgress(t0);
   worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
   worker.onmessage = (e) => {
-    if (e.data.type === 'progress') { status.textContent = `${e.data.text}…`; return; }
+    if (e.data.type === 'progress') { progress.stage(e.data.text); return; }
     const d = e.data.data, field = new HeightField(d.field.x0, d.field.z0, d.field.cell, d.field.nx, d.field.nz);
     field.data.set(d.field.data);
     map = { ...d, field } as WorldMap;
     window.__world = map;
     const found = (k: string) => map!.places.filter((q) => q.kind === k).length;
-    status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads, ${found('mountain')} mountain tops and ${found('coast')} coastal towns found.`;
-    draw();
-    listPlaces(seed);
-    window.__worldReady = true;
     worker?.terminate(); worker = null;
+    // (The map is drawn here, on the page, which holds still while it is: the bar is let paint first.)
+    progress.stage('Drawing the map');
+    setTimeout(() => {
+      draw();
+      listPlaces(seed);
+      progress.done();
+      status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads, ${found('mountain')} mountain tops and ${found('coast')} coastal towns found.`;
+      window.__worldReady = true;
+    }, 60);
   };
-  worker.onerror = (e) => { status.textContent = `The world could not be made: ${e.message}`; };
+  worker.onerror = (e) => { progress.done(); status.textContent = `The world could not be made: ${e.message}`; };
   // (`?size=8x8` for a world of that many kilometres east and west by north and south; six by ten unless asked.)
   const sz = (params.get('size') ?? '').split('x').map(Number);
   worker.postMessage({ seed, size: sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined });
-  status.textContent = 'Starting…';
+  status.textContent = '';
+}
+
+/**
+ * The stages a world is made in, and about how many seconds each took (`tools/world.ts`, in a container of four cores; a desktop is
+ * quicker, but in about the same shares): so that the bar moves through them as they are reported, and creeps on within one,
+ * ever slower, rather than standing still through the ten seconds the land takes to lift.
+ */
+const STAGES: [string, number][] = [['Lifting', 9.5], ['Shaping', 1.3], ['Wearing', 11.7], ['Following', 1.4], ['Seeing', 0.8], ['Looking for islands', 1.1], ['Looking for valleys', 5.3], ['Looking for mountain', 0.2], ['Looking for coastal', 0.2], ['Settling', 0.1], ['Laying', 0.4], ['Drawing', 1.5]];
+const STAGES_TOTAL = STAGES.reduce((s, [, t]) => s + t, 0);
+
+/** The bar shown while a world is made: `stage` with each stage reported, `done` when the map is drawn. */
+function showProgress(t0: number): { stage: (text: string) => void; done: () => void } {
+  const box = document.getElementById('making')!, bar = box.querySelector<HTMLElement>('.bar')!, fill = bar.querySelector<HTMLElement>('span')!, line = box.querySelector('p')!;
+  const canvas = document.getElementById('map') as HTMLCanvasElement;
+  // (An empty map is a great blank sheet: hidden until there is something on it; an old one dimmed while the new is made.)
+  if (map) canvas.classList.add('dim'); else canvas.hidden = true;
+  box.hidden = false;
+  let at = -1, since = performance.now(), text = 'Starting', frame = 0;
+  const tick = () => {
+    const before = at < 0 ? 0 : STAGES.slice(0, at).reduce((s, [, t]) => s + t, 0), own = at < 0 ? 0.5 : STAGES[at][1];
+    const share = Math.min(0.995, (before + own * (1 - Math.exp(-(performance.now() - since) / 1000 / own))) / STAGES_TOTAL);
+    fill.style.width = `${(share * 100).toFixed(1)}%`;
+    bar.setAttribute('aria-valuenow', String(Math.round(share * 100)));
+    line.textContent = `${text}… ${((performance.now() - t0) / 1000).toFixed(0)} s`;
+    frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  return {
+    stage(t) {
+      text = t;
+      const k = STAGES.findIndex(([p]) => t.startsWith(p));
+      // (A stage reported again, as the search for valleys is at each tile, goes on where it was.)
+      if (k >= 0 && k !== at) { at = k; since = performance.now(); }
+    },
+    done() { cancelAnimationFrame(frame); box.hidden = true; canvas.hidden = false; canvas.classList.remove('dim'); },
+  };
 }
 
 document.getElementById('make')!.addEventListener('click', () => make(input.value.trim() || randomSeed()));
