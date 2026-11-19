@@ -1913,6 +1913,9 @@ async function start(): Promise<void> {
   let last = performance.now(), fps = 60, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5, told = 0;
   const drawn = { triangles: 0 };
   let wantPicture: ((url: string) => void) | null = null;
+  // (A script recording frame by frame can hold the drawing: the loop goes on building and easing the exposure, but draws only when
+  // asked, so that on a slow machine each frame of a film is drawn once and not five times while the script waits on the page.)
+  let still = false, wantDrawn: (() => void)[] = [];
   const step = (now: number) => {
     // (The first frames can be stamped a little before the loop began: no frame is shorter than nothing.)
     const raw = (now - last) / 1000, dt = Math.min(0.1, Math.max(0, raw));
@@ -1959,10 +1962,13 @@ async function start(): Promise<void> {
       staticAt = 0;
       atmosphere.updateStatic([...(ground && ground.visible ? [ground] : []), ...[...built.values()].flatMap((b) => b.meshes), ...(natureLayer.children as Mesh[])], sunDir, near.min, near.max);
     }
-    atmosphere.update();
-    pipeline.render();
-    { const info = renderer.info.render as unknown as { triangles: number }; drawn.triangles = info.triangles; }
-    if (wantPicture) { const give = wantPicture; wantPicture = null; give(canvas.toDataURL('image/png')); }
+    if (!still || wantDrawn.length || wantPicture) {
+      atmosphere.update();
+      pipeline.render();
+      { const info = renderer.info.render as unknown as { triangles: number }; drawn.triangles = info.triangles; }
+      if (wantPicture) { const give = wantPicture; wantPicture = null; give(canvas.toDataURL('image/png')); }
+      if (wantDrawn.length) { const told = wantDrawn; wantDrawn = []; for (const f of told) f(); }
+    }
     drawOver();
     const eyes = SKIES[state.hour].eyes ?? 1.7;
     if (tick % 6 === 0 && !metering) {
@@ -2020,6 +2026,9 @@ async function start(): Promise<void> {
     remove, clear: () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); },
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     pending: () => dirty.size,
+    // (`hold(true)` draws only when `draw()` asks, which is answered once the picture is drawn.)
+    hold: (on: boolean) => { still = on; },
+    draw: () => new Promise<void>((done) => { wantDrawn.push(done); }),
     ready: true,
   };
 }
