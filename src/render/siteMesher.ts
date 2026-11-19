@@ -2147,7 +2147,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (And beyond it, from half a mile or so, the ranges a drawn valley has: the land it was found in is an upland of low hills, and
     // with nothing behind them the valley stood in a plain to the horizon.)
     const ranges = farHeights(cxA, czA, p.floor + 30, s2);
-    const hills = vale?.terrain ? (x: number, z: number) => {
+    // (In a world, its hills are the world's out to the last ring: the world goes on, and has its own ranges.)
+    const hills = vale?.terrain?.world ? (x: number, z: number) => valleyLand(vale, p.floor, p, x, z) : vale?.terrain ? (x: number, z: number) => {
       const out = Math.hypot(x - cxA, z - czA), found = valleyLand(vale, p.floor, p, x, z, out), w = smooth((out - 480) / 650);
       return w <= 0 ? found : found + (Math.max(found, ranges(x, z)) - found) * w;
     } : ranges;

@@ -4,18 +4,26 @@
  * house, and how long the building took. Run it after any change to the rock or the ground.
  *
  *   npx tsx tools/land.ts [count] [prefix]
+ *
+ * `WORLD=w2` before it builds each house at a valley head of that world in turn (`?world=w2` in the
+ * browser): the world is made first, half a minute, and each valley's tiles of 5 metres about it.
  */
 import { generateSite } from '../src/core/generate';
 import { meshSite, VALLEY_GROUND } from '../src/render/siteMesher';
+import { worldLand } from '../src/core/worldLand';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'land';
 // (`SHEET=0.8` before the command lays the valley's walked ground in cells of that size instead of 1.2 metres, as `?sheet=` does.)
 if (process.env.SHEET) VALLEY_GROUND.sheet = Number(process.env.SHEET);
 let failed = 0, slowest = 0;
+const inWorld = process.env.WORLD, heads = inWorld ? worldLand(inWorld).places.filter((q) => q.kind === 'valley') : [];
+if (inWorld && !heads.length) { console.log(`world ${inWorld} has no valley heads`); process.exit(1); }
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
   // (`TERRAIN=eroded` before the command builds valleys found in worn land, as `?terrain=eroded` does in the browser.)
-  const site = generateSite(seed, 'valley', process.env.TERRAIN === 'eroded' ? { terrain: 'eroded' } : process.env.TERRAIN === 'plain' ? { terrain: 'plain' } : {});
+  const head = inWorld ? heads[k % heads.length] : undefined, t1 = performance.now();
+  const site = generateSite(seed, 'valley', head ? { world: { seed: inWorld!, n: head.n } } : process.env.TERRAIN === 'eroded' ? { terrain: 'eroded' } : process.env.TERRAIN === 'plain' ? { terrain: 'plain' } : {});
+  const made = performance.now() - t1;
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;
@@ -52,7 +60,7 @@ for (let k = 0; k < count; k++) {
     }
   }
   if (problems.length) failed++;
-  console.log(`${seed}: ${site.setting.stone}, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock, ${groundTriangles.toLocaleString()} of turf and scree${problems.length ? ' | ' + problems.join('; ') : ''}`);
+  console.log(`${seed}${head ? ` at ${head.name} (valley ${head.n} of ${inWorld}${site.valley?.terrain?.world ? '' : ', NOT FOUND THERE'})` : ''}: ${site.setting.stone}, laid out in ${made.toFixed(0)} ms, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock, ${groundTriangles.toLocaleString()} of turf and scree${problems.length ? ' | ' + problems.join('; ') : ''}`);
 }
 console.log(failed ? `${failed} of ${count} FAILED` : `all ${count} sound; slowest ${slowest.toFixed(0)} ms`);
 process.exit(failed ? 1 : 0);

@@ -384,8 +384,11 @@ export interface Valley {
    * `turn` so that the valley runs south, and the land's height there, `base`, is the meadow's floor. The line down its middle is
    * its stream's, and its sides lie where the land has risen four metres over that; its floor, its walls and the hills beyond are
    * that land. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, its
+   * land is read at its own height (not a share of it), and `seed` is not used.
    */
-  terrain?: { seed: number; u: number; v: number; turn: number; base: number };
+  terrain?: { seed: number; u: number; v: number; turn: number; base: number; world?: string };
 }
 
 /**
@@ -433,8 +436,11 @@ export interface Island {
    * frame. The island's own land is that
    * land made fine on a lattice `cell` metres fine and worn again; its coast is read off it, and the land across the water is
    * the rest of that sea. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, the
+   * sea stands at its level, nought, and the land across the water is the rest of the world; `seed` is then only for the detail.
    */
-  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number };
+  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number; world?: string };
   /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
   crown: { x: number; z: number; r: number; height: number };
   /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
@@ -538,7 +544,16 @@ export interface Mountain {
    * If present, the land is not the plain shape alone but that shape given fractal detail and worn by water and frost on a lattice
    * `cell` metres fine, from the stream `seed` (see `terrain.ts`). Recorded so that whoever builds the place makes the same land.
    */
-  terrain?: { seed: number; cell: number };
+  terrain?: {
+    seed: number; cell: number;
+    /**
+     * If present, the top stands on a summit of that world (`world.ts`): the middle of `level` lies over the world's point `u`, `v`,
+     * the site turned by `turn` so that the ridge it comes up runs south, and the world's land there is `base` high. The country
+     * round about is then the world's own, at its own height, unworn here (it is worn already), with no `range` drawn; the drawn top
+     * stands on it, its summit where the world's is.
+     */
+    world?: string; u?: number; v?: number; turn?: number; base?: number;
+  };
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;

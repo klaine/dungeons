@@ -1,6 +1,7 @@
 import { fbm2, Rng } from './rng';
 import { highlands, uplandHeight, valleyFrame, ValleySpot } from './highlands';
 import { Place, Valley } from './site';
+import { landAt, worldLand } from './worldLand';
 
 /**
  * The shape of the valley. It is not a box, and the house is not its end. The house is built into
@@ -62,16 +63,18 @@ const RELIEF = 0.3;
 /** The height of the land a valley was found in, at a point of the site, relative to the meadow's floor `floor`. */
 export function valleyLand(v: Valley, floor: number, meadow: { x0: number; x1: number; z0: number; z1: number }, x: number, z: number, out = 0): number {
   const t = v.terrain!, [u, w] = valleyFrame(t, (meadow.x0 + meadow.x1) / 2, (meadow.z0 + meadow.z1) / 2, x, z);
+  // (A world's land is at its own height: its glens were found at it, and the rest of the world must meet them.)
+  if (t.world) return landAt(worldLand(t.world), u, w) - t.base + floor;
   // (At under a third of its height over the valley: the upland's shape is the shape of a valley country, but at its own height
   // the hills stood two hundred metres sheer over the floor, a gorge, where the valley is to be a wooded one under crags.)
   return (uplandHeight(highlands(t.seed), u, w, out) - t.base) * RELIEF + floor;
 }
 
-export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot }): { valley: Valley; middle: (z: number) => number } {
+export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot; world?: string }): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
   // (A valley that was found: the line down its middle is its stream's, turned into the site's frame, and its breadth on either
   // hand is where the land has risen four metres over the stream. Both read once, at every second metre down its length.)
-  const terrain = found ? { seed: found.seed, u: found.spot.u, v: found.spot.v, turn: found.spot.turn, base: Math.round(found.spot.base * 100) / 100 } : undefined;
+  const terrain = found ? { seed: found.seed, u: found.spot.u, v: found.spot.v, turn: found.spot.turn, base: Math.round(found.spot.base * 100) / 100, ...(found.world ? { world: found.world } : {}) } : undefined;
   const mx = (meadow.x0 + meadow.x1) / 2, mz = (meadow.z0 + meadow.z1) / 2;
   let courseX: number[] = [], courseZ: number[] = [];
   if (found) {

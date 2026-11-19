@@ -229,7 +229,7 @@ what is left.
 Each step is a slice that can be judged on its own. Nothing a site already makes changes until a
 world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already seen.
 
-1. **The world, and its map.** *Done*: everything above. Nothing in the game reads a world yet.
+1. **The world, and its map.** *Done*: everything above. The game reads it since step 3.
 2. **Land streamed in at a metre, meshed by its detail.** *Done as a test, on a page of its own*
    (below, *The land at a metre*); the game does not use it yet. As planned: the world's land to a metre, made where it
    is wanted and not before: squares of 256 or 512 metres on a fixed grid (so a square is the same
@@ -247,6 +247,8 @@ world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already
    the site is made on the third island (valley head) of that world, its house still from its own seed,
    its land the streamed squares instead of a pooled frame and its own lattices; the island's sea at
    the world's level. Checks: `tools/island.ts` and `tools/land.ts` with a world, the browser scripts.
+   *Done, from the world's tiles of 5 metres rather than the squares at a metre* (below, *Places built in
+   the world*).
 4. **Mountain tops fitted to the world's summits.** The mountain top's rim, ridge and summits laid on
    the summit found, turned to its ridge, at this country's scale (its cloud forty to sixty metres under
    the top, the valleys three hundred metres under that, not seven hundred); its country the world's.
@@ -350,6 +352,45 @@ on to be what it will be drawn as, and are grown again when the box is changed.
 Not done: keeping squares once made (the browser's storage); the land beyond the squares is the world's
 lattice of 8 metres, which can lie some metres off the tiles' land where they meet, a step the skirts
 may not hide far off.
+
+## Places built in the world
+
+Asked: "make the locations adapt and the game work with this kind of world creation". The game builds
+its places on a world's when asked (`?world=w2&n=2`, with `place=island` for an island): the world made
+in a worker (the walk page's, `worldWorker.ts`) while the surfaces are painted, then the world's tiles of
+5 metres about the place, each a second or two (`src/app/worldPlace.ts`); then the site, as it is built
+anywhere, on that land.
+
+The seam was already there: a found valley read its land from an upland made by noise, a found island
+from a sea of islands, each through a frame (`terrain`: a point of the land under the house, a turn, the
+land's height there). A world is a third such land (`src/core/worldLand.ts`): its tiles where they are
+made, each weighed by how far inside its own lattice a point lies, as the squares at a metre weigh them;
+the world's lattice of 8 metres for the share of a tile not made, so that it passes from one to the other
+without a seam; and beyond the world's edge the world in a mirror laid along it. The frame's point and
+turn are the world's own coordinates and the place's turn as the world found it (a valley head turned to
+run south from the house; an island's house turned to face its landing), and the land is at its own
+height: an upland's glens were three tenths of theirs, since its hills stood two hundred metres sheer, but
+a world's are its own, and the rest of the world must meet them. A world valley's hills are the world's out
+to the far land's last ring, three kilometres off; an island's land across the water is the rest of the
+world, its mainland and its other islands.
+
+What the places had to give. An island's coast was read where the land stands three to sixteen metres
+over the sea, its core nine metres up: written for islands whose house stands twenty to thirty metres over
+the sea. A world's islands are lower (the first of `w2` puts its house eight metres up), and nothing on it
+stood high enough to be read as land. The heights are now in proportion to how high the house's ground
+stands, against twenty-four metres (`cliffScale` in `island.ts`): a low island has a low coast of rock a
+metre to five high, which is what low islands have. A house is still the site's own seed's, so its size is
+not the world's; a draft that will not go on the place (its cove will not fit, say) gives way to the next
+best draft of the same seed, and if none will, the place says why rather than quietly being made elsewhere.
+
+Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
+(`WORLD=w2 npx tsx tools/land.ts 4`) with nothing wrong, laid out in 0.1 to 6 seconds (the tiles about it
+made first) and built in 18 to 23, with 730,000 to 950,000 triangles of rock; its first island laid out in
+8 and built in 38, 513,000 of rock; its second found room for a cove on the third draft of its house. In the
+browser, drawing in software, the game built the house at Strath Cal from the world in some ten minutes, of
+which the world was about one. Not yet: mountain tops (step 4); the squares at a metre under a place (the
+site reads the tiles at 5 metres, as it read its upland at 5, and lays its own detail); a world's lakes and
+rivers in its places.
 
 ## Where next: the land, and places that fit it
 

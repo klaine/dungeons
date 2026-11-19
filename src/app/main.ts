@@ -40,6 +40,7 @@ import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
 import { meshSiteSteps, VALLEY_GROUND } from '../render/siteMesher';
 import { breathe, fail, finish as finishLoading, share, stage } from './loader';
+import { loadWorldPlace } from './worldPlace';
 
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
@@ -101,6 +102,10 @@ const seed = params.get('seed')!;
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
 const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : 'valley';
+// Or a place in a world (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds, its land
+// the world's; the house is still the seed's own.
+const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : null;
+const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
 
 const hud = {
   status: document.getElementById('status')!,
@@ -125,6 +130,8 @@ document.getElementById('again')!.addEventListener('click', newPlace);
     next.set('seed', randomSeed());
     next.set('place', then);
     next.delete('at');
+    // (In a world, the first of the other kind: it may not hold as many.)
+    next.delete('n');
     go(next);
   });
 }
@@ -148,6 +155,14 @@ let SKY = { zenith: [0.16, 0.3, 0.62], horizon: [0.62, 0.7, 0.8], ground: [0.09,
 const TORCH_INTENSITY = 3.2;
 
 async function start(): Promise<void> {
+  // The world, if a place in one is asked for: begun now, in a worker, so that it is made while the surfaces are painted.
+  let worldText = 'Lifting the land, and letting the rivers wear it', waitingForWorld = false;
+  const worldComing = worldSeed && params.get('scene') !== 'test' ? loadWorldPlace(worldSeed, place, worldN, (text) => {
+    worldText = text;
+    if (waitingForWorld) void stage('Making the world', 0.25, text);
+  }) : null;
+  // (Kept from being reported as unhandled while it is not yet waited for; it is waited for below, and fails there.)
+  worldComing?.catch(() => undefined);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
@@ -226,14 +241,23 @@ async function start(): Promise<void> {
   };
 
   // ------------------------------------------------------------------ geometry
-  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, `Seed “${seed}”: rooms, doors, locks and keys`);
+  let inWorld: Awaited<ReturnType<typeof loadWorldPlace>> | null = null;
+  if (worldComing) {
+    waitingForWorld = true;
+    await stage('Making the world', 0.25, worldText);
+    inWorld = await worldComing;
+    waitingForWorld = false;
+  }
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
   // (How finely a valley's ground is laid where it is walked: `?sheet=0.8` for a sheet of 80-centimetre cells instead of 1.2.)
   const sheet = Number(params.get('sheet'));
   if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
+  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN } } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
+  // (Its name, where the world gave it one.)
+  if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;

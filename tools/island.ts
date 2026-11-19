@@ -7,12 +7,18 @@
  */
 import { generateSite } from '../src/core/generate';
 import { meshSite } from '../src/render/siteMesher';
+import { worldLand } from '../src/core/worldLand';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'isle';
+// (`WORLD=w2` before the command builds each house on an island of that world in turn, as `?world=w2&place=island` does.)
+const inWorld = process.env.WORLD, isles = inWorld ? worldLand(inWorld).places.filter((q) => q.kind === 'island') : [];
+if (inWorld && !isles.length) { console.log(`world ${inWorld} has no islands`); process.exit(1); }
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
-  const site = generateSite(seed, 'island');
+  const isle = inWorld ? isles[k % isles.length] : undefined, t1 = performance.now();
+  const site = generateSite(seed, 'island', isle ? { world: { seed: inWorld!, n: isle.n } } : {});
+  if (isle) console.log(`${seed} at ${isle.name} (island ${isle.n} of ${inWorld}${site.island?.terrain?.world ? '' : ', NOT FOUND THERE'}): laid out in ${(performance.now() - t1).toFixed(0)} ms`);
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;
