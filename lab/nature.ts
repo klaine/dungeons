@@ -228,19 +228,20 @@ export function natureKit(o: { stone: Stone; season: Season }) {
   };
 
   /**
-   * The ground of the square as a sheet, with what the brush laid on it, for the game's ground material: fine (half a metre) within
-   * `FINE` metres of the middle, where it can be painted, and coarser out to the edge of the square. Each point is what the last dab
-   * over it laid: paving (flags, setts or gravel, drawn by the material as courses of stones), turf, bare earth, mud, a cart track or a
-   * footpath (each as far from the line its stroke drew as the point is). Where paving meets anything else, each point says how far it
-   * is from the paving's edge, so that the material draws the edge where it truly is and not where the sheet's points fall.
+   * What the brush laid on the ground of the square, as a sheet for the game's ground material, half a metre fine within `FINE`
+   * metres of the middle: only where something was laid, cut along the true edge of the strokes, so that everywhere else the square
+   * is its own paving as it was. Flags are the square itself: laying them takes away what was laid. Each point of the sheet is what
+   * the last dab over it laid: setts or gravel (drawn by the material as courses of stones), turf, bare earth, mud, a cart track or a
+   * footpath (each as far from the line its stroke drew as the point is). Where setts or gravel meet anything else, each point says
+   * how far it is from their edge, so that the material draws the edge where it truly is and not where the sheet's points fall.
    */
   const groundSheet = (dabs: number[][]): MeshBuilder => {
-    const line: number[] = [];
-    for (let v = -FINE; v <= FINE + 1e-6; v += CELL) line.push(v);
-    for (let step = 0.8, v = FINE + step; v < 420; step = Math.min(24, step * 1.35), v += step) { line.push(v); line.unshift(-v); }
-    const n = line.length, at = (i: number, j: number) => j * n + i, i0 = line.indexOf(-FINE), fineN = Math.round((2 * FINE) / CELL) + 1;
-    // What each point is: which paint (flags where nothing was laid), and for a track or a path how far it is from its line.
-    const paint = new Int8Array(n * n), off = new Float32Array(n * n);
+    const N = Math.round((2 * FINE) / CELL) + 1, at = (i: number, j: number) => j * N + i, X = (i: number) => -FINE + i * CELL;
+    const paint = new Int8Array(N * N), off = new Float32Array(N * N);
+    // How far each point is outside what was laid (less than nothing inside it), and outside the setts and gravel among it: laid dab
+    // by dab as shapes are, each disc added to or taken from them, so that their edges are round where the dabs are. (Only near a dab
+    // does it matter, so only there is it worked out; elsewhere it is far outside.)
+    const region = new Float32Array(N * N).fill(40), paving = new Float32Array(N * N).fill(40);
     const strokes = new Map<number, number[][]>();
     for (const d of dabs) { const s = strokes.get(d[4]) ?? []; s.push(d); strokes.set(d[4], s); }
     const toLine = (pts: number[][], x: number, z: number) => {
@@ -253,43 +254,24 @@ export function natureKit(o: { stone: Stone; season: Season }) {
       return best;
     };
     for (const d of dabs) {
-      const [x, z, r, p, stroke] = d, kind = GROUND_PAINTS[p] ?? 'flags', lined = kind === 'track' || kind === 'path';
-      const a = Math.max(0, Math.floor((x - r - -FINE) / CELL)), b = Math.min(fineN - 1, Math.ceil((x + r - -FINE) / CELL));
-      const c = Math.max(0, Math.floor((z - r - -FINE) / CELL)), e = Math.min(fineN - 1, Math.ceil((z + r - -FINE) / CELL));
+      const [x, z, r, p, stroke] = d, kind = GROUND_PAINTS[p] ?? 'flags', lined = kind === 'track' || kind === 'path', paved = kind === 'setts' || kind === 'gravel', reach = r + 2;
+      const a = Math.max(0, Math.floor((x - reach + FINE) / CELL)), b = Math.min(N - 1, Math.ceil((x + reach + FINE) / CELL));
+      const c = Math.max(0, Math.floor((z - reach + FINE) / CELL)), e = Math.min(N - 1, Math.ceil((z + reach + FINE) / CELL));
       for (let j = c; j <= e; j++) for (let i = a; i <= b; i++) {
-        const px = line[i0 + i], pz = line[i0 + j];
-        if (Math.hypot(px - x, pz - z) > r) continue;
-        const k = at(i0 + i, i0 + j);
+        const k = at(i, j), px = X(i), pz = X(j), out = Math.hypot(px - x, pz - z) - r;
+        if (kind === 'flags') { region[k] = Math.max(region[k], -out); continue; }
+        region[k] = Math.min(region[k], out);
+        paving[k] = paved ? Math.min(paving[k], out) : Math.max(paving[k], -out);
+        if (out > 0) continue;
         paint[k] = p;
         if (lined) off[k] = toLine(strokes.get(stroke)!, px, pz);
       }
     }
-    // How far each point of the fine part is from the edge of the paving: laid dab by dab as shapes are, each dab of something else
-    // taking its disc out of the paving and each of paving putting its disc back, so that the edge is round where the dabs are and
-    // falls between the sheet's points where it truly is. (More than the paving's side, inside; less than nothing, outside. Only near
-    // a dab's edge does it matter, so only there is it worked out.)
-    const paved = (p: number) => p <= 2;
-    const dist = new Float32Array(fineN * fineN).fill(40);
-    const fk = (i: number, j: number) => j * fineN + i;
-    for (const d of dabs) {
-      const [x, z, r, p] = d, reach = r + 2;
-      const a = Math.max(0, Math.floor((x - reach + FINE) / CELL)), b = Math.min(fineN - 1, Math.ceil((x + reach + FINE) / CELL));
-      const c = Math.max(0, Math.floor((z - reach + FINE) / CELL)), e = Math.min(fineN - 1, Math.ceil((z + reach + FINE) / CELL));
-      for (let j = c; j <= e; j++) for (let i = a; i <= b; i++) {
-        const k = fk(i, j), out = Math.hypot(line[i0 + i] - x, line[i0 + j] - z) - r;
-        dist[k] = paved(p) ? Math.max(dist[k], -out) : Math.min(dist[k], out);
-      }
-    }
-    const sheet = new MeshBuilder(), ids = new Int32Array(n * n);
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
-      const x = line[i], z = line[j], k = at(i, j), p = paint[k], kind = GROUND_PAINTS[p] ?? 'flags';
-      const fine = i - i0 >= 0 && i - i0 < fineN && j - i0 >= 0 && j - i0 < fineN, sd = fine ? Math.max(-40, Math.min(40, dist[fk(i - i0, j - i0)])) : 40, edge = Math.abs(sd);
-      const c = turfColour(x, z, s1);
-      // (The four numbers the ground material reads: the track's or the paving's, how wet, how bare, and under trees or what paving.)
+    // The four numbers the ground material reads at each point: the track's or the paving's, how wet, how bare, and what paving.
+    const fieldOf = (k: number, x: number, z: number) => {
+      const kind = GROUND_PAINTS[paint[k]] ?? 'turf', sd = Math.max(-40, Math.min(40, paving[k])), edge = Math.abs(sd), c = turfColour(x, z, s1);
       let f0 = 0, wet = 0.15, bare = 0, f3 = 0;
-      // (Which paving a point is: the last laid over it, or the flags of the square; and whether it is paving at all, from the edge.)
-      const pave = paved(p) ? kind : 'flags';
-      if (sd > 0) { f0 = -(300 + edge); f3 = pave === 'setts' ? 0.5 : pave === 'gravel' ? -2 : -1; }
+      if (sd < 0) { f0 = -(300 + edge); f3 = kind === 'gravel' ? -2 : 0.5; }
       else {
         // (Not paving, but near it: how far outside its edge, so that the edge falls between the points truly.)
         if (edge < 40) f0 = -(300 - edge);
@@ -298,12 +280,36 @@ export function natureKit(o: { stone: Stone; season: Season }) {
         else if (kind === 'track') f0 = 100 + off[k];
         else if (kind === 'path') f0 = 200 + off[k];
       }
-      ids[k] = sheet.addVertex(x, 0.004, z, 0, 1, 0, x * 2.3, z * 2.3, c[0], c[1], c[2], f0, wet, bare, f3);
-    }
-    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
-      const a = ids[at(i, j)], b = ids[at(i + 1, j)], c = ids[at(i, j + 1)], d = ids[at(i + 1, j + 1)];
-      sheet.addTriangle(a, c, b);
-      sheet.addTriangle(b, c, d);
+      return [x, 0.012, z, 0, 1, 0, x * 2.3, z * 2.3, c[0], c[1], c[2], f0, wet, bare, f3];
+    };
+    const sheet = new MeshBuilder(), ids = new Int32Array(N * N).fill(-1), cuts = new Map<string, number>();
+    const point = (k: number, i: number, j: number) => { if (ids[k] < 0) { const v = fieldOf(k, X(i), X(j)); ids[k] = sheet.addVertex(...(v as Parameters<MeshBuilder['addVertex']>)); } return ids[k]; };
+    // (Where the edge of what was laid crosses between two points, a point of its own on that line, shared by the triangles either side.)
+    const cut = (ka: number, ia: number, ja: number, kb: number, ib: number, jb: number) => {
+      const key = ka < kb ? `${ka},${kb}` : `${kb},${ka}`;
+      let id = cuts.get(key);
+      if (id === undefined) {
+        const t = region[ka] / (region[ka] - region[kb]), va = fieldOf(ka, X(ia), X(ja)), vb = fieldOf(kb, X(ib), X(jb));
+        // (Its fields are its nearer end's, so that a track's or the paving's numbers are not blended into others they are not.)
+        const v = va.map((q, n) => (n < 11 ? q + (vb[n] - q) * t : t < 0.5 ? q : vb[n]));
+        cuts.set(key, (id = sheet.addVertex(...(v as Parameters<MeshBuilder['addVertex']>))));
+      }
+      return id;
+    };
+    const tri = (p: [number, number][]) => {
+      const ks = p.map(([i, j]) => at(i, j)), inside = ks.map((k) => region[k] <= 0);
+      if (!inside.some(Boolean)) return;
+      const poly: number[] = [];
+      for (let n = 0; n < 3; n++) {
+        const m = (n + 1) % 3;
+        if (inside[n]) poly.push(point(ks[n], ...p[n]));
+        if (inside[n] !== inside[m]) poly.push(cut(ks[n], ...p[n], ks[m], ...p[m]));
+      }
+      for (let n = 1; n + 1 < poly.length; n++) sheet.addTriangle(poly[0], poly[n], poly[n + 1]);
+    };
+    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+      tri([[i, j], [i, j + 1], [i + 1, j]]);
+      tri([[i + 1, j], [i, j + 1], [i + 1, j + 1]]);
     }
     return sheet;
   };
