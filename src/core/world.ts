@@ -167,6 +167,19 @@ function drownAt(p: WorldPlan, zn: Zones): number {
   return 35 * smooth((0.15 * p.shelf - zn.d0) / (0.9 * p.shelf)) + 70 * smooth((-zn.d0 - p.shelf) / 700) + 30 * zn.bay;
 }
 
+/**
+ * Crests on the high ground, in metres: ridged noise at two sizes, nothing below 120 metres and all of it from some 470 up. Lifted and
+ * worn by its rivers alone the high ground came out in round ridges like worms, all alike, combed by the drops into gullies just as
+ * alike ("I would also prefer the landscape mountains to be a bit more rugged and sharp than round fell style"); crests and spurs
+ * of their own, sharp and irregular, as harder and softer rock would leave them, break that up, and the drops wear fewer gullies
+ * into them. (Tried on a crop of the mountains against making the rivers' valleys closer and the creep less, which only folded the
+ * mountains into an even maze, and against sharpening the land as it was, which did little.)
+ */
+function crestsAt(x: number, z: number, y: number, seed: number): number {
+  const w = smooth((y - 120) / 350);
+  return w <= 0 ? 0 : w * (100 * (ridgedFbm(x / 380 + 4.1, z / 380 - 2.3, 4, seed + 92) - 0.45) + 35 * (ridgedFbm(x / 150 - 1.7, z / 150 + 3.2, 3, seed + 93) - 0.45));
+}
+
 /** Detail finer than the lifted land holds, in metres: some where the ground is gentle and more where it is steep. */
 function detailAt(x: number, z: number, slope: number, scale: number, seed: number): number {
   // (Next to nothing on level ground: on a valley's floor, which the rivers leave graded and nearly level, more dammed it with sills
@@ -178,14 +191,20 @@ function detailAt(x: number, z: number, slope: number, scale: number, seed: numb
 export const WORLD_WEAR: Wear = {
   // (Building up no more than six metres anywhere, and putting down less: with eighteen, the rivers built fans where they came out
   // into the bay, all at that height, which drew as flat wedges fanning out from the bay's head.)
-  cut: 40, fill: 6,
-  water: { drops: 1.0, life: 90, inertia: 0.15, capacity: 0.5, erode: 0.15, deposit: 0.15, evaporate: 0.012, gravity: 4, radius: 2, most: 1.5 },
+  // (A third as many drops, wearing three points wide and following the ground more closely, and building up no more than a metre:
+  // a drop to every point, two wide, combed every slope of the fells and mountains into gullies all alike and close together, "too
+  // frequent and uniform"; fewer and broader, they gather into fewer gullies of different sizes. And where a drop ran up the far side
+  // of a valley's floor it put down all it carried at once, a line of it along every valley; built up no more than a metre, it is gone.)
+  cut: 40, fill: 1,
+  water: { drops: 0.35, life: 90, inertia: 0.05, capacity: 0.5, erode: 0.15, deposit: 0.04, evaporate: 0.012, gravity: 4, radius: 3, most: 1.5 },
   frost: { passes: 2, repose: 1.3, rate: 0.4 },
 };
-/** How a tile is worn: as an island's or a valley's own frame is. */
+/** How a tile is worn: lightly, over the world's own wear. */
 export const TILE_WEAR: Wear = {
-  cut: 35, fill: 14,
-  water: { drops: 1.0, life: 80, inertia: 0.1, capacity: 0.5, erode: 0.15, deposit: 0.25, evaporate: 0.012, gravity: 4, radius: 2, most: 1.5 },
+  // (Lightly: the world's lattice has been worn already, and a tile only adds what is finer. Worn as hard again, a drop to every point
+  // of five metres, it combed every slope a second time, closer still.)
+  cut: 8, fill: 1,
+  water: { drops: 0.12, life: 80, inertia: 0.05, capacity: 0.5, erode: 0.08, deposit: 0.04, evaporate: 0.012, gravity: 4, radius: 4, most: 1.5 },
   frost: { passes: 2, repose: 1.5, rate: 0.4 },
 };
 
@@ -481,7 +500,8 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   for (let j = 0; j < NZ; j++) for (let i = 0; i < NX; i++) {
     const x = f.x0 + i * CELL, z = f.z0 + j * CELL, k = j * NX + i;
     const slope = Math.hypot(g.smoothAt(x + 12, z) - g.smoothAt(x - 12, z), g.smoothAt(x, z + 12) - g.smoothAt(x, z - 12)) / 24;
-    f.data[k] = g.smoothAt(x, z) + detailAt(x, z, slope, 4, p.n + 90) - drownAt(p, zonesAt(p, x, z));
+    const y0 = g.smoothAt(x, z);
+    f.data[k] = y0 + detailAt(x, z, slope, 4, p.n + 90) + crestsAt(x, z, y0, p.n) - drownAt(p, zonesAt(p, x, z));
     // (The floor of the sea is spared the wear: what the water brought down would build it up into flats and false islands.)
     keep[k] = smooth(-f.data[k] / 15);
   }

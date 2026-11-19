@@ -213,7 +213,22 @@ Before, with the land drawn (zones of noise, drawn valley lines): 20 to 28 secon
 places, valley heads four each, islands 0 to 2 and mountain tops 0 to 3.
 
 What the time goes on, nine tenths of it: the drops of water that wear the land, a million on the
-world's lattice and some quarter of a million on each tile. What could be done about it: keep a world
+world's lattice and some quarter of a million on each tile. (Since fewer: a third as many on the world's
+lattice and an eighth on a tile. A drop to every point, wearing two points wide, combed every slope of the fells
+and mountains into gullies all alike, close together, and a tile combed them again, closer; asked: "the
+creases / ripples in the mountains or fells look a bit too frequent and uniform". Fewer and broader, following
+the ground more closely, they gather into fewer gullies of different sizes, and a tile only softens what the
+world wore; and nothing is built up more than a metre, where a drop running up the far side of a valley's floor
+had put down all it carried in a line along it. And then: "the gullies can be deep, but I'd prefer not so
+frequent", and "I would also prefer the landscape mountains to be a bit more rugged and sharp than round fell
+style". Lifted and worn by its rivers alone, the high ground comes out in round ridges like worms, all alike;
+the rivers' valleys made closer, or the creep less, only folded the mountains into an even maze, and sharpening
+the land as it was did little. So the high ground is given crests of its own as it is shaped (`crestsAt`):
+ridged noise at two sizes, 380 and 150 metres, a hundred and thirty-five metres at the most, nothing below 120
+metres and all of it from some 470 up; sharp crests and spurs at no even spacing, as harder and softer rock
+would leave them, into which the drops wear fewer gullies. Every world's places moved with the land: `w0`, `w1`
+and `w2` still have four valley heads, three or four mountain tops and four coastal towns each, and `w2` three
+islands.) What could be done about it: keep a world
 once made (in the browser's storage), so only the first visit pays; wear the tiles side by side, a
 worker to a core, since each is made alone; fewer drops; or the drops run on the graphics card.
 
@@ -329,8 +344,12 @@ grass, flowers, ferns and reeds grown about the walker out to 90 metres, in bloc
 is grown: thick in pasture, tall and pale in hay, short and brown or purple on heath, sparse in woods, none
 on rock, shingle or water); trees where the world has woods (one to a cell of seven metres there, a few in
 pasture and heath; oak and ash low down, spruce and pine higher, pine alone near the treeline; the same trees
-whoever asks, `treesIn`), grown whole out to 120 metres as the valley's are, and beyond as single painted
-cards out to 1.8 kilometres, as the valley's far hillsides have them. `?hour=`, `?season=`, `?haze=`, `?tex=`.
+whoever asks, `treesIn`), grown whole out to 120 metres as the valley's are, grown more simply out to 320 (a
+trunk and its main limbs, with a sixth as many leaf sprays, each larger; asked: "the trees change too near to
+very low detail fillers ... there needs to be something between"), and beyond as single painted cards out to
+1.8 kilometres, as the valley's far hillsides have them. A block of 32 metres stands whole or simply, never
+both, and the painted cards leave out every tree in a block that stands either way, painted again when one of
+their blocks changes. `?hour=`, `?season=`, `?haze=`, `?tex=`.
 Not yet: water but the sea (lakes and rivers are not drawn), snow, tracks and roads on the ground, the
 places' houses.
 

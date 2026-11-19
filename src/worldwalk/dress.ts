@@ -231,18 +231,21 @@ export function treesIn(x0: number, z0: number, size: number, coverAt: (x: numbe
 /**
  * Trees grown whole, as a valley's are, for those near the walker: their wood in the game's meshes by
  * its bark, their leaves and needles as cards. (A little less finely than a valley's own: there are
- * hundreds of them about.)
+ * hundreds of them about.) `light` for those further off, out to some three hundred metres: the same
+ * trees grown more simply, a trunk and its main limbs with a few hundred larger sprays, between the
+ * whole trees near by and the single painted cards beyond, which were too plain to come so near.
  */
-export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season): { wood: Map<string, MeshBuilder>; sets: CardSet[] } {
+export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season, light = false): { wood: Map<string, MeshBuilder>; sets: CardSet[] } {
+  const detail = light ? 0.25 : 0.75, cards = light ? 170 : 900, cardSize = light ? 1.9 : 0.8;
   const planting = new Planting(), wood = new Map<string, MeshBuilder>(), greens = greensOf(season);
   const mesh = (name: string) => { let m = wood.get(name); if (!m) wood.set(name, (m = new MeshBuilder())); return m; };
   const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
   for (const t of trees) {
     const y = heightAt(t.x, t.z), rng = new Rng(`tree/${t.x.toFixed(1)},${t.z.toFixed(1)}`), green = greens[Math.floor(t.own * greens.length) % greens.length];
-    if (t.kind === 'oak') growTree(planting, mesh('bark'), t.x, y, t.z, t.tall, t.girth, { kind: 'oak', detail: 0.75, cards: 900, cardSize: 0.8, leaf: leafOf(green), bark: [0.66, 0.58, 0.5], shaded: true, soft: mesh('bark') }, rng);
-    else if (t.kind === 'ash') growTree(planting, mesh('barkAsh'), t.x, y, t.z, t.tall, t.girth, { kind: 'ash', detail: 0.75, cards: 900, cardSize: 0.8, leaf: leafOf(green), bark: [0.86, 0.84, 0.8], shaded: true, soft: mesh('barkAsh') }, rng);
-    else if (t.kind === 'spruce') growConifer(planting, mesh('barkFir'), t.x, y, t.z, t.tall, 2.1 + 0.6 * t.own, t.girth, { kind: 'spruce', detail: 0.75, needle: leafOf([0.045, 0.13, 0.04]), bark: [0.62, 0.5, 0.42], shaded: true, soft: mesh('barkFir') }, rng);
-    else growConifer(planting, mesh('barkPine'), t.x, y, t.z, t.tall, 2.6 + 0.4 * t.own, t.girth, { kind: 'pine', detail: 0.75, needle: leafOf([0.07, 0.15, 0.07]), bark: [0.98, 0.6, 0.42], shaded: true, soft: mesh('barkPine') }, rng);
+    if (t.kind === 'oak') growTree(planting, mesh('bark'), t.x, y, t.z, t.tall, t.girth, { kind: 'oak', detail, cards, cardSize, leaf: leafOf(green), bark: [0.66, 0.58, 0.5], shaded: true, soft: mesh('bark') }, rng);
+    else if (t.kind === 'ash') growTree(planting, mesh('barkAsh'), t.x, y, t.z, t.tall, t.girth, { kind: 'ash', detail, cards, cardSize, leaf: leafOf(green), bark: [0.86, 0.84, 0.8], shaded: true, soft: mesh('barkAsh') }, rng);
+    else if (t.kind === 'spruce') growConifer(planting, mesh('barkFir'), t.x, y, t.z, t.tall, 2.1 + 0.6 * t.own, t.girth, { kind: 'spruce', detail, needle: leafOf([0.045, 0.13, 0.04]), bark: [0.62, 0.5, 0.42], shaded: true, soft: mesh('barkFir') }, rng);
+    else growConifer(planting, mesh('barkPine'), t.x, y, t.z, t.tall, 2.6 + 0.4 * t.own, t.girth, { kind: 'pine', detail, needle: leafOf([0.07, 0.15, 0.07]), bark: [0.98, 0.6, 0.42], shaded: true, soft: mesh('barkPine') }, rng);
   }
   return { wood, sets: planting.sets };
 }

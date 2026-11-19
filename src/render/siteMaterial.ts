@@ -433,7 +433,10 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     // (Three sizes: the long swells of drift; ridges a stride or two apart, sharp on their lee side, as the wind cuts old snow; and
     // ripples a hand apart, near the eye. With the two larger alone, and faint, a snowfield in the sun was flat white paint.)
     const drifted: N = rip(0.9, 0.08).mul(0.16).add(rip(0.16, 0.05).mul(0.35)).add(rip(2.7, 0.03).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))).toVar();
-    const gG: N = (texture(shingle.normalMap, gravelAt) as N).bias(blur).xyz.mul(2).sub(1).mul(vec3(0.6, 0.6, 1));
+    // (The gravel's relief from the heights the shingle's own picture carries, read a step either way, and not from its normal map: one
+    // more texture took this material to seventeen, past the sixteen a stage may sample under WebGPU, which then drew none of the ground.)
+    const ge = 0.003, gh: N = (texture(shingle.map, gravelAt) as N).bias(blur).a;
+    const gG: N = vec3(gh.sub((texture(shingle.map, gravelAt.add(vec2(ge, 0))) as N).bias(blur).a).mul(4), gh.sub((texture(shingle.map, gravelAt.add(vec2(0, ge))) as N).bias(blur).a).mul(4), 1);
     const laid: N = mix(vec3(n.xy.mul(steep), n.z), mix(paveNormal, gG, gravelled), paved);
     m.normalNode = normalMap(vec3(laid.xy.mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), laid.z).mul(0.5).add(0.5));
   }
