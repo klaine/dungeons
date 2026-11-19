@@ -52,6 +52,7 @@ const TEXTURE_NAMES: Record<string, string> = {
   barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
 };
 import { Torch, TorchLights, gatherTorches } from '../render/torch';
+import { SunShadow } from '../render/sunShadow';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Game } from './game';
 import { Player } from './player';
@@ -208,7 +209,17 @@ async function start(): Promise<void> {
   worldComing?.catch(() => undefined);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
-  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
+  // (A program may read sixteen textures at once unless more are asked for. The ground's material reads sixteen already, with the
+  // sun's shadow, the torches' and the sky's picture; the sun's shadow in a large place needs one more (`SunShadow`). Most graphics
+  // cards allow far more, if asked when the device is made.)
+  const textureRoom = await (async () => {
+    if (params.has('webgl')) return 16;
+    try { return (await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' }))?.limits.maxSampledTexturesPerShaderStage ?? 16; } catch { return 16; }
+  })();
+  const renderer = new WebGPURenderer({
+    canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl'),
+    ...(textureRoom > 16 ? { requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(textureRoom, 32) } } : {}),
+  });
   await stage('Starting the renderer', 0.01, params.has('webgl') ? 'WebGL 2' : 'WebGPU, or WebGL 2 where there is none');
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
@@ -727,6 +738,7 @@ async function start(): Promise<void> {
   sun.shadow.needsUpdate = true;
   scene.add(sun, sun.target);
 
+
   const cloudSteps = Math.round(num('clouds', quality.clouds));
   const makeSky = (disc: boolean) => {
     const sky = new SkyMesh();
@@ -895,13 +907,23 @@ async function start(): Promise<void> {
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
+  // The sun's map of its shadow is drawn finely about the eye, wherever the eye goes, and beyond that the shadow is read from the
+  // air's picture from the sun (`SunShadow`): a town's whole map was a quarter of a metre to a point, and outside the place's box,
+  // where the climb up a mountain top lies, there was none. (Only with WebGPU, and where the graphics card lets the ground read one
+  // more texture; `?nearshadow=0` leaves it out, and the one map over the box is used as before.)
+  const gpu = (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend === true;
+  const sunShadow = gpu && textureRoom > 17 && num('nearshadow', 1) > 0
+    ? new SunShadow(sun, camera, { reach: 64, size: 2048, radius, far: { ...atmosphere.sunMap, deep: 2 * radius + 0.5, point: (2 * radius) / (atmosphere.sunMap.depth.image.width ?? 2048), gpu } })
+    : null;
+  if (sunShadow) (sun.shadow as unknown as { shadowNode: unknown }).shadowNode = sunShadow;
   // (And into the sun's map alone, what else throws a shadow: the land, its rock, what is built on it and what grows, the crowns
   // drawn with their own materials so that the sun comes through their gaps. Not water, nor glass, nor the sprigs, which are drawn
   // only near the eye.)
-  atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max, {
+  const drawAirMaps = () => atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max, {
     sun: scenic.filter((m) => m.castShadow && !(m as InstancedMesh).isInstancedMesh && m.name !== 'water' && m !== sea?.mesh),
     own: cardMeshes.filter((m) => m.castShadow),
   });
+  drawAirMaps();
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
 
   // ------------------------------------------------------------------ player
@@ -1299,6 +1321,9 @@ async function start(): Promise<void> {
     // shadow. At an evening hour that was the hills' long shadow over a whole town. So it is drawn again every thirty frames over
     // the first six hundred, by when all of it is ready.)
     if (++drawn <= 600 && drawn % 30 === 2) sun.shadow.needsUpdate = true;
+    // (The air's pictures likewise, a few times: they are the far sun's shadow in a large place, and whatever was not ready the first
+    // time, the crowns drawn with their own materials above all, was missing from them.)
+    if (drawn === 40 || drawn === 200 || drawn === 600) drawAirMaps();
     if (now - fpsAt > 500) {
       document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
       frames = 0;
@@ -1330,7 +1355,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, water, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

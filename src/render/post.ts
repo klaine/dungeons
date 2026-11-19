@@ -652,6 +652,11 @@ export class Atmosphere {
     this.meterQuad = new QuadMesh(meter);
   }
 
+  /** The picture of the place from the sun (`updateStatic`): its depths, and from a point of the world to where it is in it. */
+  get sunMap(): { depth: DepthTexture; vp: N } {
+    return { depth: this.sunDepth.depthTexture!, vp: this.uniforms.uSunVP };
+  }
+
   /** To be called before each picture is drawn: where the eye is. */
   update(): void {
     const u = this.uniforms;
