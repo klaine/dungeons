@@ -231,6 +231,19 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   let colour: N = stone.rgb.mul(o.paint ? vec3(...o.paint) : vertexColor().rgb).mul(mix(1, 0.5, wet));
   colour = mix(colour, mossTex.rgb, mossy);
   colour = mix(colour, vec3(0.012), f.z.mul(0.9));
+  // Damp risen in the foot of an outer wall from the ground it stands in, where the wall says how high that ground is (the fourth
+  // number of its field, the height plus a thousand; a town's houses say it, see `buildTurned`): up to a ragged line from half a
+  // metre to a metre and a quarter, darker and a little greener, with a darker rim where the damp dries and leaves what it carried;
+  // and below a hand or two the street's dirt the rain splashes up.
+  const hasFoot: N = step(500, f.w), above: N = positionWorld.y.sub(f.w.sub(1000)).toVar(), along: N = positionWorld.x.add(positionWorld.z);
+  const mark: N = farNoise(vec2(along.mul(0.9), 3.1)).mul(0.6).add(farNoise(vec2(along.mul(4.3), positionWorld.y.mul(0.7))).mul(0.2)).add(0.42).toVar();
+  // (Its edge is taken through the wall's own texture as well, so that it is blotched as damp is, and not a drawn wave.)
+  const edgeAt: N = above.sub(mark).add(stone.a.sub(0.5).mul(0.22)).toVar();
+  const risen: N = one(smoothstep(-0.12, 0.06, edgeAt)).mul(hasFoot).toVar();
+  const rim: N = one(smoothstep(0, 0.07, abs(edgeAt.add(0.03)))).mul(hasFoot);
+  const splash: N = one(smoothstep(0.04, 0.38, above.add(farNoise(vec2(along.mul(11), positionWorld.y.mul(11))).sub(0.5).mul(0.14)))).mul(hasFoot);
+  colour = colour.mul(mix(vec3(1, 1, 1), vec3(0.74, 0.77, 0.72), risen)).mul(one(rim.mul(0.1)));
+  colour = mix(colour, colour.mul(vec3(0.5, 0.46, 0.4)), splash.mul(0.55));
   // Snow on what is built, out of doors: on roofs, copings, sills and the floors of open courts. What is out of doors is known only
   // from the bake, which says how much sky each point sees; until it arrives, nothing built has snow on it.
   const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y.add(one(stone.a).mul(0.1))).mul(smoothstep(0.3, 0.55, bk.x)).mul(uBake).toVar();

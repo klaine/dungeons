@@ -1149,6 +1149,15 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
   }
 
+  // (The ground's height at the foot of a wall, read at the points of the lattice of a metre about it, each once, and between them:
+  // every point of every outer wall asks for it.)
+  const footAt = new Float32Array(znx * znz).fill(NaN);
+  const footOf = (x: number, z: number): number => {
+    const fx = Math.min(znx - 1.001, Math.max(0, (x - zx0) / ZC)), fz = Math.min(znz - 1.001, Math.max(0, (z - zz0) / ZC)), i = Math.floor(fx), j = Math.floor(fz);
+    const at = (a: number, b: number) => { const k = b * znx + a; if (Number.isNaN(footAt[k])) footAt[k] = ground(zx0 + a * ZC, zz0 + b * ZC); return footAt[k]; };
+    const a = fx - i, b = fz - j;
+    return (at(i, j) * (1 - a) + at(i + 1, j) * a) * (1 - b) + (at(i, j + 1) * (1 - a) + at(i + 1, j + 1) * a) * b;
+  };
   // ---- the buildings: each made in its own measures by the valley's builder, then turned to its street and set on its ground;
   // with a footing of stone under it, so that where the street falls away along its front no gap shows under its wall
   const chimneys: { x: number; y: number; z: number }[][] = [];
@@ -1158,11 +1167,31 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     buildBuilding({ ...bd, x: 0, z: 0, faces: 'w', turn: undefined }, y, (m) => { if (!local.has(m)) local.set(m, new MeshBuilder()); return local.get(m)!; }, rng.fork(`building${n}`), [0.86 * tint[0], 0.77 * tint[1], 0.63 * tint[2]], n % 9 === 0 && bd.style === 'timber', tops);
     // (Built facing west, as the builder makes them; turned so that its front faces its bearing: by that bearing less a half turn.)
     const turn = (bd.turn ?? Math.PI) - Math.PI, c = Math.cos(turn), s = Math.sin(turn);
-    for (const [m, src] of local) mesh(m).append(src, (v) => {
-      const x = v.p[0], z = v.p[2], nx = v.n[0], nz = v.n[2];
-      v.p[0] = bd.x + x * c - z * s; v.p[2] = bd.z + x * s + z * c;
-      v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
-    });
+    // Damp rises in the foot of a wall from the ground it stands in, and the rain splashes the lowest of it with the street's dirt.
+    // (Nothing had marked where a town's walls meet its ground, and every house stood clean to the setts, as if set down that
+    // morning.) It is drawn by the material, which needs to know how high the ground at the wall's foot is: a wall of plaster is
+    // one face from its footing to its beam, and damp marked at its corners was smeared over the whole of it with no line to it.
+    // So each point of a wall that looks out of the house carries the height of the ground at its foot, plus a thousand, in the
+    // fourth number of its field (see `makeSiteMaterial`). A face looks out if stepping a little way along the way it faces leaves
+    // the house.
+    const fp = footprintOf(bd), fa = bd.turn ?? Math.PI, fax = Math.cos(fa), faz = Math.sin(fa);
+    const outOf = (x: number, z: number) => {
+      const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
+      let best = Infinity;
+      for (const r of fp) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - w, 0, w - r.v1)));
+      return best;
+    };
+    for (const [m, src] of local) {
+      const weathers = m === 'plaster' || m === 'stone' || m === 'brick';
+      mesh(m).append(src, (v) => {
+        const x = v.p[0], z = v.p[2], nx = v.n[0], nz = v.n[2];
+        v.p[0] = bd.x + x * c - z * s; v.p[2] = bd.z + x * s + z * c;
+        v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
+        if (!weathers || Math.abs(v.n[1]) > 0.5 || v.p[1] > y + 30) return;
+        if (outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
+        v.field[3] = 1000 + footOf(v.p[0] + v.n[0] * 0.3, v.p[2] + v.n[2] * 0.3);
+      });
+    }
     chimneys[n] = tops.map((p) => ({ x: bd.x + p.x * c - p.z * s, y: p.y, z: bd.z + p.x * s + p.z * c }));
     // The footing: down from its floor a couple of metres, under its main block and its wings.
     for (const r of footprintOf(bd)) {

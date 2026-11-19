@@ -572,6 +572,30 @@ export class Atmosphere {
         const rd: N = wp.sub(u.uCamPos).div(dist).toVar();
         const open: N = depth.greaterThan(0.999999).toVar();
         const dither: N = ign(screenCoordinate.xy).toVar();
+        // Where what stands against the sky meets it, a point of the picture is part sky and part what stands there in its colour, but
+        // has one depth, the near thing's or the sky's; and the cloud is drawn only where the depth says sky. So the sky's share of the
+        // one was left without its cloud, and the near thing's share of the other had cloud put over it: every roof and branch against
+        // white cloud had a rim of blue sky about it, or of cloud across its edge. At such an edge, then, the share that is sky is
+        // reckoned from the colours either side of it, the sky's on one side and the near thing's on the other (`edgeSky`, -1 where
+        // there is no edge), and the cloud is put over that share alone.
+        const edgeSky: N = float(-1).toVar(), edgeCol: N = vec3(0).toVar();
+        If(u.uCloudOn.greaterThan(0.5), () => {
+          const step2: N = vec2(1).div(screenSize).toVar();
+          const at = (dx: number, dy: number): N => screenUV.add(step2.mul(vec2(dx, dy)));
+          const openAt = (dx: number, dy: number): N => step(0.999999, depthOf.sample(at(dx, dy)).x);
+          const oL: N = openAt(-1, 0).toVar(), oR: N = openAt(1, 0).toVar(), oU: N = openAt(0, -1).toVar(), oD: N = openAt(0, 1).toVar();
+          const across: N = abs(oL.sub(oR)).greaterThan(0.5), upDown: N = abs(oU.sub(oD)).greaterThan(0.5);
+          If(across.or(upDown), () => {
+            const skyUV: N = select(across, select(oL.greaterThan(0.5), at(-1, 0), at(1, 0)), select(oU.greaterThan(0.5), at(0, -1), at(0, 1)));
+            const nearUV: N = select(across, select(oL.greaterThan(0.5), at(1, 0), at(-1, 0)), select(oU.greaterThan(0.5), at(0, 1), at(0, -1)));
+            const S: N = min(colourOf.sample(skyUV).rgb, vec3(6)).toVar(), O: N = min(colourOf.sample(nearUV).rgb, vec3(6));
+            const so: N = S.sub(O).toVar();
+            edgeSky.assign(clamp(dot(col.sub(O), so).div(max(dot(so, so), 1e-4)), 0, 1));
+            edgeCol.assign(S);
+          });
+        });
+        // (What the sky's colour `S` becomes with the high cloud and the heaps over it, less what it was.)
+        const cloudOverSky = (S: N, ci: N, cloud: N): N => S.mul(one(ci.a)).add(ci.rgb).mul(cloud.a).add(cloud.rgb).sub(S);
         // The hollows of what is seen (`occlusionAt`), before any air is put in front of them: less in the sun's light.
         if (occlusion) {
           If(open.not().and(u.uAo.greaterThan(0)), () => {
@@ -592,9 +616,9 @@ export class Atmosphere {
           });
           If(u.uCloudOn.greaterThan(0.5), () => {
             const ci: N = sky.cirrus(u.uCamPos, rd).toVar();
-            col.assign(col.mul(one(ci.a)).add(ci.rgb));
             const cloud: N = sky.cloudMarch(u.uCamPos, rd, dither, float(1e9)).toVar();
-            col.assign(col.mul(cloud.a).add(cloud.rgb));
+            // (At an edge, over the sky's share alone.)
+            col.addAssign(select(edgeSky.lessThan(0), cloudOverSky(col, ci, cloud), cloudOverSky(edgeCol, ci, cloud).mul(edgeSky)));
           });
         }).ElseIf(u.uCloudOn.greaterThan(0.5).and(u.uShade.greaterThan(0)), () => {
           // Land: the shadow of whatever cloud stands between it and the sun, where the sun would
@@ -602,6 +626,12 @@ export class Atmosphere {
           const at: N = wp.sub(rd.mul(0.08)).toVar();
           const sun = seen(this.sunDepth.depthTexture!, u.uSunVP, at, 0.0025), open2 = seen(this.skyDepth.depthTexture!, u.uSkyVP, at, 0.0025);
           col.mulAssign(one(u.uShade.mul(sky.cloudShade(wp)).mul(mix(0.35, 1, sun)).mul(open2)));
+        });
+        // And on the near thing's side of an edge, the cloud over the sky's share of it.
+        If(open.not().and(edgeSky.greaterThan(0.02)), () => {
+          const ci: N = sky.cirrus(u.uCamPos, rd).toVar();
+          const cloud: N = sky.cloudMarch(u.uCamPos, rd, dither, float(1e9)).toVar();
+          col.addAssign(cloudOverSky(edgeCol, ci, cloud).mul(edgeSky));
         });
         const tMax: N = min(dist, 45).toVar();
         const dt: N = tMax.div(STEPS).toVar();
