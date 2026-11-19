@@ -23,6 +23,7 @@ import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './pl
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
 import { buildMountain } from './mountain';
+import { buildTown } from './town';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -3605,6 +3606,30 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     hallTorches.push(...made.torches);
     scenery.cards.push(...planting.sets);
   };
+  // A town in place of a valley: the same, with the town's own builder (see `town.ts`), which gives what the island's does.
+  const buildTownApproach = (p: Place) => {
+    kit.group = `p${p.id}`;
+    kit.field = outdoorFieldAt(p.floor, 1.2);
+    const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
+    buildFront(p, fx0, fx1);
+    wild.field = outdoorFieldAt(p.floor, 1.5);
+    const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    smokes.push(...made.smokes);
+    arrival.spawn = made.spawn;
+    arrival.track = made.track;
+    farCover = made.far;
+    islandSea = made.sea;
+    spawnYaw = made.yaw;
+    censuses.push(made.planted);
+    unders.push(...made.unders);
+    birdSpots = made.birds;
+    flockSpots = made.flocks;
+    beacon = made.lamp;
+    flows.push(...made.streams);
+    falls.push(...made.falls);
+    hallTorches.push(...made.torches);
+    scenery.cards.push(...planting.sets);
+  };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
   let cloudDeck: SceneDescription['deck'], rockSharp: number | undefined;
   const buildMountainApproach = (p: Place) => {
@@ -3634,11 +3659,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
   for (const p of places) {
     yield {
-      label: p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
+      label: p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.town ? 'Laying out the town, its harbour, streets and buildings' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
         : p.roof === 'cave' ? `Carving cave chamber ${p.id + 1} of ${places.length}` : `Laying stone: place ${p.id + 1} of ${places.length}`,
       at: 0.1 + 0.8 * (places.indexOf(p) / places.length),
     };
-    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
+    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.town) buildTownApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -4384,6 +4409,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   }
   if (site.grounds) {
     min.x = Math.min(min.x, site.grounds.x0 - 2); max.x = Math.max(max.x, site.grounds.x1 + 2); max.z = Math.max(max.z, site.grounds.z1 + 2);
+    // (A town's country runs on north of the house, behind it: its fields and woods are under the sky as the rest is.)
+    if (site.town) min.z = Math.min(min.z, site.grounds.z0 - 2);
   }
   // (And, across the ground, the spaces under the land: the sun's shadow and the two maps of what lies under the sky are drawn over
   // this box, and whatever lay outside it was taken to be in the open. A great hall under a mountain top reaches out to its windows
