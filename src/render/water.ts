@@ -1,6 +1,7 @@
 import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DoubleSide, Matrix4, Mesh, MeshStandardMaterial, Object3D, PlaneGeometry, RepeatWrapping, Texture, Vector2, Vector3, Vector4 } from 'three';
 import { NodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Atmosphere, skyParts } from './post';
 import { Rng } from '../core/rng';
 
@@ -320,18 +321,28 @@ export class Water {
       const drift = texture(this.ripples, vec2(P.x.add(P.z), P.y).mul(0.06).add(vec2(0.02, -0.07).mul(t))).x.add(texture(this.ripples, vec2(P.x.sub(P.z), P.y).mul(0.13).add(vec2(-0.03, -0.12).mul(t))).y);
       return vec4(this.look.foam.mul(0.9), body.mul(smoothstep(0.35, 1.7, drift)).mul(0.42));
     })();
+    const sheets: BufferGeometry[] = [];
     for (const f of falls) {
       const wide = f.width * 1.6 + 2.2, tall = Math.min(4.5, 1.6 + f.height * 0.3);
-      for (let k = 0; k < 3; k++) {
-        const sheet = new Mesh(new PlaneGeometry(wide, tall), spray);
-        sheet.position.set(f.x, f.y + tall / 2 - 0.15, f.z);
-        sheet.rotation.y = (k * Math.PI) / 3 + 0.4;
-        sheet.renderOrder = 3;
-        sheet.name = 'water';
-        sheet.layers.set(1);
-        this.meshes.push(sheet);
-      }
+      for (let k = 0; k < 3; k++) sheets.push(new PlaneGeometry(wide, tall).rotateY((k * Math.PI) / 3 + 0.4).translate(f.x, f.y + tall / 2 - 0.15, f.z));
     }
+    this.sheets(sheets, spray);
+  }
+
+  /**
+   * Upright sheets of spray or smoke, all of them one mesh: they stand still, and the material draws them from where each point
+   * is and from the sheet's own corners. (Each sheet was a mesh of its own: in a town with smoke over its chimneys, ninety calls to
+   * draw for smoke alone.) The order they are drawn in among themselves is fixed, as it was for the three sheets of one smoke.
+   */
+  private sheets(sheets: BufferGeometry[], material: NodeMaterial): void {
+    const merged = mergeGeometries(sheets);
+    for (const g of sheets) g.dispose();
+    if (!merged) return;
+    const mesh = new Mesh(merged, material);
+    mesh.renderOrder = 3;
+    mesh.name = 'water';
+    mesh.layers.set(1);
+    this.meshes.push(mesh);
   }
 
   /**
@@ -356,15 +367,9 @@ export class Water {
       const grey: N = dot(this.look.foam, vec3(0.33, 0.34, 0.33)).mul(0.5);
       return vec4(mix(vec3(grey), this.look.foam.mul(0.5), 0.2), body.mul(smoothstep(0.25, 1.5, drift)).mul(mix(0.42, 0.16, at.y)));
     })();
-    for (const s of smokes) for (let k = 0; k < 3; k++) {
-      const sheet = new Mesh(new PlaneGeometry(s.height * 0.55, s.height), material);
-      sheet.position.set(s.x, s.y + s.height / 2 - 0.1, s.z);
-      sheet.rotation.y = (k * Math.PI) / 3 + 0.2;
-      sheet.renderOrder = 3;
-      sheet.name = 'water';
-      sheet.layers.set(1);
-      this.meshes.push(sheet);
-    }
+    const sheets: BufferGeometry[] = [];
+    for (const s of smokes) for (let k = 0; k < 3; k++) sheets.push(new PlaneGeometry(s.height * 0.55, s.height).rotateY((k * Math.PI) / 3 + 0.2).translate(s.x, s.y + s.height / 2 - 0.1, s.z));
+    this.sheets(sheets, material);
   }
 
   /**

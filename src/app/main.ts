@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, AgXToneMapping, NeutralToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
   Material, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, Matrix4, Quaternion,
@@ -51,7 +51,7 @@ const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
   barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
 };
-import { Torch, TorchLights } from '../render/torch';
+import { Torch, TorchLights, gatherTorches } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Game } from './game';
 import { Player } from './player';
@@ -214,7 +214,10 @@ async function start(): Promise<void> {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = SRGBColorSpace;
-  renderer.toneMapping = ACESFilmicToneMapping;
+  // How the light of the scene is brought into what a screen can show: the film-like curve by default; `?tone=agx` for one that
+  // keeps bright colours from running to yellow and lets them pale towards white, as film does, and `?tone=neutral` for one that
+  // keeps colours as they are. (Offered to be compared by eye; the default is unchanged.)
+  renderer.toneMapping = params.get('tone') === 'agx' ? AgXToneMapping : params.get('tone') === 'neutral' ? NeutralToneMapping : ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFShadowMap;
 
@@ -752,7 +755,8 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ torches
   const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire, t.flames));
-  for (const t of torches) scene.add(t.group);
+  // (All of them drawn as three things: their brands, their iron and their flames.)
+  scene.add(gatherTorches(torches));
   // Four real lights serve however many torches there are; see TorchLights.
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);
   for (const l of torchLights.lights) scene.add(l);
@@ -891,7 +895,13 @@ async function start(): Promise<void> {
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
-  atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
+  // (And into the sun's map alone, what else throws a shadow: the land, its rock, what is built on it and what grows, the crowns
+  // drawn with their own materials so that the sun comes through their gaps. Not water, nor glass, nor the sprigs, which are drawn
+  // only near the eye.)
+  atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max, {
+    sun: scenic.filter((m) => m.castShadow && !(m as InstancedMesh).isInstancedMesh && m.name !== 'water' && m !== sea?.mesh),
+    own: cardMeshes.filter((m) => m.castShadow),
+  });
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
 
   // ------------------------------------------------------------------ player

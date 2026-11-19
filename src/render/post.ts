@@ -686,24 +686,39 @@ export class Atmosphere {
     return Math.pow(2, (sum / wsum) * 16 - 12);
   }
 
-  /** Draws the two static depth maps. Call again if the site or the sun changes. */
-  updateStatic(statics: Object3D[], sunDir: Vector3, min: Vector3, max: Vector3): void {
+  /**
+   * Draws the two static depth maps. Call again if the site or the sun changes.
+   *
+   * `statics` are drawn into both: the house and the solids behind its skin. What else throws a shadow out of doors goes into the
+   * sun's alone (`more.sun`: the land, its rock, what is built on it, trunks and boughs; and `more.own`, drawn with their own
+   * materials so that what is cut out of a card is cut out of its shadow too: the crowns of trees). Without them the air was lit by
+   * the sun in the shadow of every cliff, building and tree, and mist in the morning lay as bright under a wood as over a meadow;
+   * with them it is dark there, and where the sun comes in between trunks and through gaps in the crowns the mist is lit in shafts.
+   * (Nor did the shadow of a cloud know where the land was already in shade, and darkened it twice.) The map of what is under open
+   * sky is left as it was: from above, a crown is not a roof, and mist lies under trees as it does in the open.
+   */
+  updateStatic(statics: Object3D[], sunDir: Vector3, min: Vector3, max: Vector3, more: { sun?: Object3D[]; own?: Object3D[] } = {}): void {
     const renderer = this.renderer;
     const centre = min.clone().add(max).multiplyScalar(0.5);
     const radius = max.clone().sub(min).length() / 2;
     const override = new MeshBasicMaterial({ side: DoubleSide });
+    const sun = more.sun ?? [], own = more.own ?? [];
+    const keep = new Set<Object3D>([...statics, ...sun, ...own]);
     const hidden: Object3D[] = [];
     this.scene.traverse((o) => {
-      if (o !== this.scene && o.visible && !o.children.length && !statics.includes(o)) {
+      if (o !== this.scene && o.visible && !o.children.length && !keep.has(o)) {
         o.visible = false;
         hidden.push(o);
       }
     });
+    // (Each set shown only while it is being drawn, and left as it was found.)
+    const was = new Map<Object3D, boolean>([...keep].map((o) => [o, o.visible]));
+    const show = (list: Object3D[], on: boolean) => { for (const o of list) o.visible = on && was.get(o)!; };
     const prevBg = this.scene.background;
     this.scene.background = null;
     this.scene.overrideMaterial = override;
 
-    const shoot = (target: RenderTarget, dir: Vector3, up: Vector3, vp: Matrix4) => {
+    const shoot = (target: RenderTarget, dir: Vector3, up: Vector3, vp: Matrix4, then?: (cam: OrthographicCamera) => void) => {
       const cam = new OrthographicCamera(-radius, radius, radius, -radius, 0.5, radius * 2 + 1);
       cam.position.copy(centre).addScaledVector(dir, radius + 0.5);
       cam.up.copy(up);
@@ -713,12 +728,24 @@ export class Atmosphere {
       renderer.setRenderTarget(target);
       renderer.clear();
       renderer.render(this.scene, cam);
+      then?.(cam);
       // (Taken after the drawing: the renderer sets the camera to its own graphics interface's way of reckoning depth.)
       vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     };
-    const shadowsWere = renderer.shadowMap.enabled;
+    const shadowsWere = renderer.shadowMap.enabled, clearWas = renderer.autoClear;
     renderer.shadowMap.enabled = false;
-    shoot(this.sunDepth, sunDir, new Vector3(0, 1, 0), this.uniforms.uSunVP.value);
+    show(own, false);
+    shoot(this.sunDepth, sunDir, new Vector3(0, 1, 0), this.uniforms.uSunVP.value, own.length ? (cam) => {
+      // The crowns, each with its own material, over what is already drawn.
+      show(statics, false); show(sun, false); show(own, true);
+      this.scene.overrideMaterial = null;
+      renderer.autoClear = false;
+      renderer.render(this.scene, cam);
+      renderer.autoClear = clearWas;
+      this.scene.overrideMaterial = override;
+      show(own, false); show(statics, true);
+    } : undefined);
+    show(sun, false);
     shoot(this.skyDepth, new Vector3(0, 1, 0), new Vector3(0, 0, -1), this.uniforms.uSkyVP.value);
     renderer.shadowMap.enabled = shadowsWere;
     renderer.setRenderTarget(null);
@@ -726,6 +753,7 @@ export class Atmosphere {
     this.scene.overrideMaterial = null;
     this.scene.background = prevBg;
     for (const o of hidden) o.visible = true;
+    show(statics, true); show(sun, true); show(own, true);
     override.dispose();
     this.uniforms.uSunDir.value.copy(sunDir);
   }
