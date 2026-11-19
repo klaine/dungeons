@@ -135,14 +135,18 @@ place asks for it.
     from the summit, its front turned down the ridge, where it fits best and stands some fifty metres or
     more under the summit (the flattest ground is on the summit's own dome, a few metres under it, and a
     hospice there had hardly a summit to climb to; taken still where nothing lower will do).
-  - *Coastal towns* (asked: "Include the coastal towns also"): on the world's own lattice, where water
-    comes down to the mainland's shore (the land joined over dry ground to the world's northern edge, so
-    not an island's), the larger streams first, four hundred metres in from the world's edges and nine
-    hundred apart; up the stream from there a hundred and ten to two hundred and thirty metres, the house's
-    ground where it fits best, no more than sixty metres over the sea, turned to face down to it; a shore
-    in a bay, with land on more hands than sea, counts for it. Recorded as a valley head is, its course from
-    the house down the stream to the shore and sixty metres on out to sea. Named as harbours are. Every
-    world tried has four: in `w2` three on the shores of the bay and one on the open coast.
+  - *Coastal towns* (asked: "Include the coastal towns also"; then "That doesnt seem to be the proper
+    coastal town format we developed in another session earlier"): where on the mainland's shore (the land
+    joined over dry ground to the world's northern edge, so not an island's) the harbour town (`town.ts`)
+    would stand, judged by the town's own search (`findTowns` in `coastland.ts`) on the world's lattice of
+    eight metres, for a house of middling size: open water before the quay, a quay's line neither high nor
+    drowned, low ground behind rising gently for the square and its streets, the house's ground a few metres
+    over the square, country rising behind; better with a headland beside it and land on either hand, so
+    that the harbour lies in a bay. Seven hundred metres in from the world's edges and nine hundred apart;
+    recorded as the town's search found it (`WorldPlace.town`), `x` and `z` the middle of its quay. Named as
+    harbours are. Every world tried has four. (They were first sought where a stream came down to the
+    shore, and built as a valley whose foot was the shore, since the harbour town, made at the same time on
+    another branch, was not yet in this one.)
 - **Grounds fitted to the land** (`fit.ts`; asked: "locations need to be adaptable, best found location
   can be then slightly flattened or smoothed in places for a town or other needs if must, but terraced
   adaptations are good also"). A house's ground, 46 metres across by 62 deep, is made level where the
@@ -416,20 +420,18 @@ the game lays it, under where the player arrives at the ridge's foot. Beyond the
 about is the world's (`countryShape` in `mountain.ts`), not worn again, with the drawn top standing on it
 where it is the higher; no far range is drawn, since the world has its own, and its sea is the water.
 
-A coastal town (`place=coast`; only a world has them, and without one named it is `w2`'s) is built as a valley
-is, on the course the world found from the house down to the sea: the house at the head, the valley's
-village along the track, which a coastal town always has, and the valley's foot, the gap between two crags
-where the player arrives, at the shore, where the land down the line of its stream comes to a metre over
-the sea. The sea is drawn there at the world's level (`valley.sea`), over the world's land below it, out to
-the horizon; the fence across the gap stands at the water's edge, and nothing grows below the shore, of
-the far land's woods or the valley's own trees, bushes, grass and flowers. Its harbour (`layHarbour` in
-`generate.ts`): a quay of stone from the shore at the gap out over the water, along whichever bearing within
-thirty degrees of straight down the valley reaches two metres of water soonest, twelve to thirty-four metres
-long; two to four boats riding beside it where there is half a metre of water under them, and one or two drawn
-up on the shore clear of the track and of what is built. The quay and the boats are the island's own, lifted
-out of its builder to serve both (`layJetty`, `layBoat` in `coast.ts`; an island comes out of them the same to
-the last vertex). The player comes in by boat to the quay's end, facing the town; the fence across the gap
-opens where the quay leaves the shore, and runs along its sides until the quay's own begin.
+A coastal town (`?world=w2&place=town&n=2`; `place=coast`, as the first links said, is the same) is the
+harbour town (`town.ts`), laid on the world's land instead of a coast country of its own: the house on its
+terrace at the head of the market square, the harbour with its quay, moles and light, where the player
+arrives, the streets and blocks, shacks and storehouses, fields, woods and the outlook, all as a town is
+anywhere. Its tiles of five metres are made about the world's spot, and the town's search is run again on
+them, within three hundred metres of it, for this house's own square and ground; the best spot there nearest
+the world's is taken, or failing any, the world's own (`inWorldSpot` in `town.ts`). Its land is the world's
+(`frameAt`: the world's sea is at nought, as the coast country's is), made fine and worn again by the town as
+its own country is, and the country seen from it is the world's. Four houses built on `w2`'s four coastal
+towns without a browser (`WORLD=w2 npx tsx tools/town.ts 4`) were sound, each laid out in 9 to 18 seconds and
+built in 20 to 34, with 44 to 150 timber-framed houses, 4 to 28 classical, and their quays 20 to 230 metres
+from the world's spots.
 
 **The world's lakes about a place.** A world records each lake as a body of water: a point in it, the level
 of its surface, and its shore as a ring of points where rays from that point first leave it (`World.lakes`).

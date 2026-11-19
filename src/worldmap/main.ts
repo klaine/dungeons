@@ -46,7 +46,7 @@ function listPlaces(seed: string): void {
     const link = (text: string, href: string) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
     // (After a `#`, which a page shown inside another keeps where it may not keep a `?`; both pages read it. Where the game and the walk
     // are, a page may say in its head, as the published copy does, where they are not the usual files.)
-    const game = new URLSearchParams({ world: seed, place: q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
+    const game = new URLSearchParams({ world: seed, place: q.kind === 'coast' ? 'town' : q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
     card.append(name, kind, document.createElement('br'), link('Build a house here', `${pageOf('game', './index.html')}#${game}`), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
     placesEl.append(card);
   }

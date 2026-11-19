@@ -4,6 +4,7 @@ import { IslandSpot } from './archipelago';
 import { findValleys, ValleySpot } from './highlands';
 import { Namer } from './names';
 import { fitGround, Ground } from './fit';
+import { findTowns, TownNeed, TownSpot } from './coastland';
 
 /**
  * A world: one stretch of country, six kilometres by ten unless asked otherwise (`WORLD_SIZE`), in
@@ -202,8 +203,10 @@ export interface WorldPlace {
   score: number;
   /** For an island: as found in its tile, in the world's coordinates. */
   island?: IslandSpot;
-  /** For a valley head: as found, its course in the world's coordinates. For a coastal town: the same, the course from the house down to the sea and out into it. */
+  /** For a valley head: as found, its course in the world's coordinates. */
   valley?: ValleySpot;
+  /** For a coastal town: as the town's search found it (`findTowns`), in the world's coordinates; `x` and `z` are the middle of its quay. */
+  town?: TownSpot;
   /** For a mountain top: which way its ridge runs down (an angle from east towards south), and where its foot is. */
   ridge?: { angle: number; foot: [number, number]; footY: number };
   /** The house's ground, fitted to the land found: levelled, or terraced (`fit.ts`). */
@@ -577,7 +580,7 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   const summits = findSummits(w, why.mountain);
   lap('summits');
   yield 'Looking for coastal towns';
-  const coasts = findCoastalTowns(w, why.coast);
+  const coasts = findCoastalTowns(w, why.coast, rng.fork('coast'));
   lap('coast');
   const number = (list: WorldPlace[]) => list.slice(0, SEARCH.keep).map((q, k) => ({ ...q, n: k + 1 }));
   w.places = [...number(keptIsles), ...number(valleys.sort((a, b) => b.score - a.score)), ...number(summits), ...number(coasts)];
@@ -855,16 +858,16 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
 }
 
 /**
- * Coastal towns: where a stream comes down to the mainland's shore, with ground behind for a town and,
- * up the stream, for a house above it, facing down to the sea. Looked for on the world's own lattice,
- * the larger streams first, four hundred metres in from the world's edges and nine hundred apart. Each
- * is recorded as a valley head is (`ValleySpot`), its course from the house down the stream to the
- * shore and on out into the sea, which a place built on it reads as a valley whose foot is the shore.
+ * Coastal towns: where on the mainland's shore a harbour town would stand as the town is laid out (`town.ts`), judged by the town's
+ * own search (`findTowns` in `coastland.ts`): open water before the quay, low ground behind it rising gently for a square and its
+ * streets, the house's ground a few metres over the square, country rising behind; better with a headland beside it and land on
+ * either hand, so that the harbour lies in a bay. Judged here on the world's lattice of eight metres, for a house of middling size;
+ * the town built on it looks again close by, at five metres, for its own house (`layOutTown`).
+ * (They were first sought where a stream came down to the shore, and built as a valley whose foot was the shore; but a harbour town
+ * had been made meanwhile, in its own country, and that is what a coastal town is.)
  */
-function findCoastalTowns(w: World, why: Record<string, number>): WorldPlace[] {
-  const no = (k: string) => { why[k] = (why[k] ?? 0) + 1; };
-  const f = w.field, h = f.data, nx = f.nx, nz = f.nz, cell = f.cell, n = nx * nz, p = w.plan, out: WorldPlace[] = [];
-  const xOf = (k: number) => f.x0 + (k % nx) * cell, zOf = (k: number) => f.z0 + Math.floor(k / nx) * cell;
+function findCoastalTowns(w: World, why: Record<string, number>, rng: Rng): WorldPlace[] {
+  const f = w.field, nx = f.nx, n = nx * f.nz, p = w.plan;
   // The mainland: what is joined over dry land to the world's northern edge (the islands are not).
   const main = new Uint8Array(n), queue: number[] = [];
   for (let i = 0; i < nx; i++) if (!w.sea[i]) { main[i] = 1; queue.push(i); }
@@ -872,62 +875,20 @@ function findCoastalTowns(w: World, why: Record<string, number>): WorldPlace[] {
     const k = queue[c], i = k % nx;
     for (const m of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, k - nx, k + nx]) if (m >= 0 && m < n && !main[m] && !w.sea[m]) { main[m] = 1; queue.push(m); }
   }
-  // Where water comes down to the shore: the mainland's last points before the sea, the larger streams first.
-  const shore: number[] = [];
-  for (let k = 0; k < n; k++) {
-    if (!main[k] || h[k] < 0.3 || w.acc[k] < 1.5e4) continue;
-    const d = w.down[k];
-    if (d >= 0 && w.sea[d]) shore.push(k);
-  }
-  shore.sort((a, b) => w.acc[b] - w.acc[a]);
-  for (const s of shore) {
-    const sx = xOf(s), sz = zOf(s);
-    if (Math.abs(sx) > p.hx - 400 || Math.abs(sz) > p.hz - 400) { no('near the world\'s edge'); continue; }
-    if (out.some((q) => Math.hypot(q.x - sx, q.z - sz) < 900)) continue;
-    // Up the stream from the shore: at each step to the point upstream that gathers the most water.
-    const path = [s];
-    let cur = s, gone = 0;
-    while (gone < 240) {
-      let up = -1;
-      const i = cur % nx, j = (cur - i) / nx;
-      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-        const ii = i + di, jj = j + dj, q = jj * nx + ii;
-        if ((!di && !dj) || ii < 0 || jj < 0 || ii >= nx || jj >= nz || w.down[q] !== cur) continue;
-        if (up < 0 || w.acc[q] > w.acc[up]) up = q;
-      }
-      if (up < 0) break;
-      gone += Math.hypot(xOf(up) - xOf(cur), zOf(up) - zOf(cur));
-      cur = up; path.push(cur);
-    }
-    // The house: somewhere a hundred and ten to two hundred and thirty metres up it, where its ground fits best, its front to the sea.
-    let best: { k: number; g: Ground; turn: number; cost: number } | null = null;
-    let along = 0;
-    for (let a = 1; a < path.length; a++) {
-      along += Math.hypot(xOf(path[a]) - xOf(path[a - 1]), zOf(path[a]) - zOf(path[a - 1]));
-      if (along < 110 || along > 230) continue;
-      const k = path[a], toward = path[Math.max(0, a - 4)], head = Math.atan2(zOf(toward) - zOf(k), xOf(toward) - xOf(k)), turn = head - Math.PI / 2;
-      const g = fitGround((px, pz) => f.at(px, pz), xOf(k), zOf(k), turn, HOUSE.w, HOUSE.d);
-      const level = g.terraces.reduce((t, q) => t + q.y, 0) / g.terraces.length;
-      if (g.work > 3 || level < 3 || level > 60) continue;
-      const cost = g.work + 0.4 * (g.terraces.length - 1) + Math.abs(along - 160) / 120 + Math.max(0, level - 35) / 25;
-      if (!best || cost < best.cost) best = { k, g, turn, cost };
-    }
-    if (!best) { no(path.length < 15 ? 'no stream to come down' : 'no ground for a house above the shore'); continue; }
-    // Its course: from the house down the stream to the shore, and on out to sea the way it was going.
-    const at = path.indexOf(best.k), course: [number, number][] = [];
-    for (let a = at; a >= 0; a--) course.push([xOf(path[a]), zOf(path[a])]);
-    const [lx, lz] = course[course.length - 1], [qx, qz] = course[Math.max(0, course.length - 4)], out0 = Math.atan2(lz - qz, lx - qx);
-    for (let d = 8; d <= 64; d += 8) course.push([lx + Math.cos(out0) * d, lz + Math.sin(out0) * d]);
-    const hx0 = xOf(best.k), hz0 = zOf(best.k), level = best.g.terraces.reduce((t, q) => t + q.y, 0) / best.g.terraces.length;
-    // (Sheltered is better: a shore in a bay, with land on more hands than the sea.)
-    let land = 0, all = 0;
-    for (let r = 200; r <= 600; r += 200) for (let a = 0; a < 16; a++) { all++; if (f.at(sx + Math.cos((a / 16) * TAU) * r, sz + Math.sin((a / 16) * TAU) * r) > 0) land++; }
-    const score = Math.log(w.acc[s]) - best.cost + 2 * (land / all);
-    const spot: ValleySpot = { u: hx0, v: hz0, turn: best.turn, base: level, course };
-    out.push({ kind: 'coast', n: 0, name: '', x: hx0, z: hz0, y: level, score, valley: spot, ground: best.g });
+  // (Near the mainland: the shore's own point may be a hair under the sea's edge as the lattice has it.)
+  const nearMain = (k: number) => { const i = k % nx; for (let dj = -2; dj <= 2; dj++) for (let di = -2; di <= 2; di++) { const m = k + dj * nx + di; if (i + di >= 0 && i + di < nx && m >= 0 && m < n && main[m]) return true; } return false; };
+  const spots = findTowns({ inner: f }, TOWN_NEED, rng, why, { margin: Math.ceil(600 / f.cell), where: nearMain });
+  const out: WorldPlace[] = [];
+  for (const sp of spots) {
+    if (Math.abs(sp.u) > p.hx - 700 || Math.abs(sp.v) > p.hz - 700) { why['near the world\'s edge'] = (why['near the world\'s edge'] ?? 0) + 1; continue; }
+    if (out.some((q) => Math.hypot(q.x - sp.u, q.z - sp.v) < 900)) continue;
+    out.push({ kind: 'coast', n: 0, name: '', x: sp.u, z: sp.v, y: Math.round(f.at(sp.u, sp.v) * 100) / 100, score: sp.score, town: sp });
   }
   return out.sort((a, b) => b.score - a.score);
 }
+
+/** What a town of middling size asks of the coast, in its own measures about its quay's middle (`TownNeed`): for the world's search. */
+const TOWN_NEED: TownNeed = { square: { x0: -30, x1: 30, z0: -57, z1: -11 }, house: { x0: -26, x1: 26, z0: -100, z1: -57 }, half: 190, deep: 230 };
 
 /**
  * Towns, as placeholders for what the low country will one day hold: a harbour where a river comes

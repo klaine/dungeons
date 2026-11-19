@@ -15,7 +15,7 @@ happened. They need Playwright with Chromium (`npm install --no-save playwright`
 | `node tools/browser/jetty.cjs <seed> …` | Walks out along the landing stage and reports the player's height at each step, to show they stayed on the deck. |
 | `node tools/browser/stage.cjs <job.json \| folder>` | Pictures of buildings of brick on a stage of their own, in a plain setting (the valley put out of sight, the game's sky, sun and materials kept): rows of houses dealt as a town deals them, each row of one country's clay, from the poses given. Given a folder, it loads a valley once and photographs every job put into it. See the head of the script for the job's form; it wants a development server with hot reloading off, on port 5174. |
 
-`play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`. `play.cjs` builds on a world's places with `WORLD=w2` (`PLACE=coast` for its coastal towns), each seed given as `seed:n` for the `n`th place of the kind (`WORLD=w2 node tools/browser/play.cjs land0:1 land1:2`); a world takes some minutes more in software.
+`play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`. `play.cjs` builds on a world's places with `WORLD=w2` (`PLACE=town` for its coastal towns), each seed given as `seed:n` for the `n`th place of the kind (`WORLD=w2 node tools/browser/play.cjs land0:1 land1:2`); a world takes some minutes more in software.
 
 They launch Chromium with a software renderer, so they work without a graphics card, slowly: a
 site takes one to three minutes. On a machine with a graphics card, set `REAL_GPU=1` to open a

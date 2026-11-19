@@ -102,11 +102,11 @@ const seed = params.get('seed')!;
 // What kind of place: a valley, unless an island, a mountain top or a harbour town is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
-const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' ? 'town' : asked === 'coast' ? 'coast' : 'valley';
+// (`place=coast`, as links to a world's coastal towns once said, is the town.)
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' || asked === 'coast' ? 'town' : 'valley';
 // Or a place in a world (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds, its land
 // the world's; the house is still the seed's own.
-// (A coastal town is only ever one a world found: without a world named, the second world's.)
-const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : place === 'coast' ? 'w2' : null;
+const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : null;
 const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
 
 const hud = {
@@ -133,9 +133,9 @@ document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a town, from a town a valley; a new one, since the same seed is the same house.
 {
-  // (In a world, on to its coastal towns too, which only a world has.)
-  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'town', town: worldSeed ? 'coast' : 'valley', coast: 'valley' } as const)[place];
-  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town', coast: 'A coastal town' }[then];
+  // (In a world, a town is built on one of its coastal towns.)
+  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'town', town: 'valley' } as const)[place];
+  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[then];
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
     next.set('seed', randomSeed());
@@ -268,7 +268,7 @@ async function start(): Promise<void> {
     inWorld = await worldComing;
     waitingForWorld = false;
   }
-  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'coast' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'town' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
@@ -495,8 +495,8 @@ async function start(): Promise<void> {
   // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
   // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
   const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
-  // (An island's boats, a harbour town's, or those in a coastal town's harbour.)
-  const riding = site?.island ? { boats: site.island.boats, sea: site.island.sea } : site?.town ? { boats: site.town.boats, sea: site.town.sea } : site?.valley?.harbour && site.valley.sea !== undefined ? { boats: site.valley.harbour.boats, sea: site.valley.sea } : null;
+  // (An island's boats, or a harbour town's.)
+  const riding = site?.island ? { boats: site.island.boats, sea: site.island.sea } : site?.town ? { boats: site.town.boats, sea: site.town.sea } : null;
   if (sea && riding) {
     scene.traverse((m) => {
       const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? riding.boats[Number(n[1])] : undefined;

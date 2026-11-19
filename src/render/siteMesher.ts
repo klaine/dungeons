@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
-import { anyAngle, layBoat, layJetty } from './coast';
+import { anyAngle } from './coast';
 import { Building, Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
@@ -1817,12 +1817,6 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       bare = Math.max(bare, Math.min(0.95, heapAt(x, z) * 3));
       // in the street of a town, trodden earth and stones, greener at its edges and here and there;
       if (lots.length) bare = Math.max(bare, street(x, z) * (0.72 + 0.22 * fbm2(x * 0.4 + s1, z * 0.4 - s2, 2)));
-      // and at a coastal town on the shore, from under the sea to a metre over it, which is shingle and sand, wet below the tide.
-      // (Under the water the ground showed through the shallows as the valley's turf.)
-      if (vale?.sea !== undefined) {
-        const y = ground(x, z);
-        if (y < vale.sea + 1.6) { bare = Math.max(bare, 0.9 * (1 - smooth((y - vale.sea - 0.4) / 1.1))); wet = Math.max(wet, 1 - smooth((y - vale.sea + 0.1) / 0.5)); }
-      }
       lay.bare = bare;
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.
@@ -1895,8 +1889,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // begins above the grotto's roof.)
     // (The fence follows each side a little behind it, in short lengths, as far as a few strides beyond the gap; and one crosses the track there,
     // where the valley ends for whoever is walking it, though the track and the land go on.)
-    // (At a coastal town the gap is the shore, and the fence across it stands at the water's edge.)
-    const fenceEnd = vale ? vale.mouth + (vale.sea !== undefined ? 3 : 8) : g.z1 + 3;
+    const fenceEnd = vale ? vale.mouth + 8 : g.z1 + 3;
     // (Whether the valley runs on past the house on either side of the ridge.)
     const armW = !!vale?.ridge && sideAt('w', p.z0 - 6) < vale.ridge.x0 - 3, armE = !!vale?.ridge && sideAt('e', p.z0 - 6) > vale.ridge.x1 + 3;
     for (const sideOf of ['w', 'e'] as const) {
@@ -1912,18 +1905,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         fences.push({ min: V(Math.min(near, far), cave ? cave.y0 + 4.6 : Math.max(over ? cv!.floor + cv!.height + 1.5 : -Infinity, under, p.floor - 6), z), max: V(Math.max(near, far), p.floor + 80, z + 1.5) });
       }
     }
-    // (At a coastal town it is open where the quay leaves the shore, the quay's own fences keeping whoever walks it on it.)
-    const quay = vale?.harbour?.quay;
-    if (quay) {
-      const [qx, qz] = quay.from, dir = Math.atan2(quay.to[1] - qz, quay.to[0] - qx), cx = Math.cos(dir), cz = Math.sin(dir);
-      const f = Math.abs(cz) > 0.2 ? (fenceEnd - 0.9 - qz) / cz : 0, x = qx + cx * f, open = quay.width / 2 + 0.4;
-      fences.push({ min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(x - open, p.floor + 80, fenceEnd) }, { min: V(x + open, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) });
-      // (Along both sides of the quay, from that opening to where the quay's own begin.)
-      for (let g2 = Math.min(0, f) - 1; g2 <= 5.5; g2 += 0.45) for (const side of [-1, 1]) {
-        const a = side * (quay.width / 2 + 0.32), px = qx + cx * g2 - cz * a, pz = qz + cz * g2 + cx * a;
-        fences.push({ min: V(px - 0.3, p.floor - 30, pz - 0.3), max: V(px + 0.3, p.floor + 40, pz + 0.3) });
-      }
-    } else fences.push({ min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) });
+    fences.push({ min: V(sideAt('w', fenceEnd) - 3, p.floor - 6, fenceEnd - 1.8), max: V(sideAt('e', fenceEnd) + 3, p.floor + 80, fenceEnd) });
     // (Across the house front either side of the house, unless the house stands free and can be walked round.)
     if (!free) fences.push(
       { min: V(armW ? vale!.ridge!.x0 + 1.2 : g.x0 - 3, p.floor - 6, p.z0 - 2.6), max: V(p.x0 - 0.2, p.floor + 80, p.z0 - 1.2) },
@@ -2225,19 +2207,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
     });
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
-      // (Nothing grows in the sea, nor on the shore it washes.)
-      if (vale?.sea !== undefined && y < vale.sea + 2) return;
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
     }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
-    // At a coastal town, the sea: over the world's land below its level, from the gap at the valley's foot out to the horizon.
-    if (vale?.sea !== undefined) {
-      const mx = (edgeAt(vale, 'w', vale.mouth) + edgeAt(vale, 'e', vale.mouth)) / 2, cell = 6, half = 720, nb = Math.round((2 * half) / cell) + 1;
-      const bed = { x0: mx - half, z0: vale.mouth - half, cell, nx: nb, nz: nb, data: new Float32Array(nb * nb) };
-      for (let j = 0; j < nb; j++) for (let i = 0; i < nb; i++) bed.data[j * nb + i] = hills(bed.x0 + i * cell, bed.z0 + j * cell);
-      islandSea = { level: vale.sea, x: mx, z: vale.mouth, bed };
-    }
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
@@ -2491,8 +2464,6 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.98, 0.6, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number, pick?: { oak: boolean; roll: number; old?: boolean }) => {
-      // (At a coastal town nothing grows below the shore: woods were planted on the sea's floor, and the quay ran out into a crown.)
-      if (vale?.sea !== undefined && y < vale.sea + 1.2) return;
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
@@ -2852,7 +2823,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         continue;
       }
       // Thicket: bushes where wood meets open ground, which is where the light and the shelter both are.
-      if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.035) && !(vale?.sea !== undefined && y < vale.sea + 1.2)) {
+      if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.035)) {
         const size = plant.range(0.7, 1.35);
         // A bush: several stems from the ground, branching, with its leaves on its twigs.
         const green = leafOf(plant.pick(greens));
@@ -3511,30 +3482,6 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       arrival.spawn = V(pathAt(z), ground(pathAt(z), z) + 1.75, z);
       for (let w = z - 6; w > p.z1 - 2; w -= 6) arrival.track.push([pathAt(w), w]);
       arrival.track.push([pathAt(p.z1 - 4), p.z1 - 4]);
-    }
-    // At a coastal town, its harbour: the quay and the boats, as an island's cove has them; and the player comes in by boat, at the
-    // quay's end, facing the town.
-    if (vale?.harbour && vale.sea !== undefined) {
-      const hb = vale.harbour, { solid } = anyAngle((m) => wild.mesh(m)), hr = rng.fork('harbour');
-      const deck = layJetty({ jetty: hb.quay, landing: 'beach', sea: vale.sea, ground, stoneTint, fences, rng: hr }, solid);
-      hb.boats.forEach((bt, n) => layBoat(wild, (m) => wild.mesh(m), bt, n, vale.sea!, ground, hr.fork(`boat${n}`)));
-      const [fx, fz] = hb.quay.from, [tx, tz] = hb.quay.to, len = Math.hypot(tx - fx, tz - fz), ux = (tx - fx) / len, uz = (tz - fz) / len;
-      const ex = tx - ux * 1.6, ez = tz - uz * 1.6;
-      arrival.spawn = V(ex, deck + 1.75, ez);
-      spawnYaw = Math.atan2(ux, uz);
-      arrival.track = [[fx + ux * 2, fz + uz * 2], ...arrival.track];
-    }
-    // (And no grass, flowers, ferns or reeds under the sea, whichever of the planting loops put them there.)
-    if (vale?.sea !== undefined) {
-      const shore = vale.sea + 0.6;
-      for (const set of planting.sets) {
-        const keep: number[] = [];
-        for (let k = 0; k < set.matrices.length / 16; k++) if (set.matrices[k * 16 + 13] > shore) keep.push(k);
-        if (keep.length === set.matrices.length / 16) continue;
-        set.matrices = keep.flatMap((k) => set.matrices.slice(k * 16, k * 16 + 16));
-        set.colours = keep.flatMap((k) => set.colours.slice(k * 3, k * 3 + 3));
-        set.centres = keep.flatMap((k) => set.centres.slice(k * 3, k * 3 + 3));
-      }
     }
     scenery.cards.push(...planting.sets);
   };

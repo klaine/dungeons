@@ -37,7 +37,8 @@ export async function loadWorldPlace(seed: string, kind: WorldPlace['kind'], n: 
     const place = land.places.find((q) => q.kind === kind && q.n === n);
     if (!place) {
       const has = land.places.filter((q) => q.kind === kind).length;
-      throw new Error(`World “${seed}” has ${has ? `only ${has} ${kind === 'valley' ? 'valley heads' : kind === 'island' ? 'islands' : 'mountain tops'}` : `no ${kind === 'valley' ? 'valley heads' : kind === 'island' ? 'islands' : 'mountain tops'}`}, not a number ${n}.`);
+      const many = { valley: 'valley heads', island: 'islands', mountain: 'mountain tops', coast: 'coastal towns' }[kind];
+      throw new Error(`World “${seed}” has ${has ? `only ${has} ${many}` : `no ${many}`}, not a number ${n}.`);
     }
     // (About an island, its tiles as far as its far shore and beyond, since the site reads all of its coast.)
     const [cx, cz, r] = place.island ? [place.island.cu, place.island.cv, WORLD_REACH + place.island.reach] : [place.x, place.z, WORLD_REACH];

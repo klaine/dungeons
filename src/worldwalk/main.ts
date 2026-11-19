@@ -245,7 +245,7 @@ async function start(): Promise<void> {
     const playAt = (spec: string) => {
       const m = spec.match(/^(valley|island|mountain|coast)(\d)$/);
       if (play) play.hidden = !m;
-      if (play && m) play.href = `${game}#${new URLSearchParams({ world: seed, place: m[1], n: m[2] })}`;
+      if (play && m) play.href = `${game}#${new URLSearchParams({ world: seed, place: m[1] === 'coast' ? 'town' : m[1], n: m[2] })}`;
     };
     if (where) {
       const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top', coast: 'coastal town' };

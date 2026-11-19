@@ -440,7 +440,7 @@ export interface Town {
    * Where the land was found: the frame's seed, the point of the frame under the middle of the quay's edge, how far the frame is
    * turned, and the height in the frame of the house's ground; and the lattice, in metres, that the town's own land is made on.
    */
-  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number };
+  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number; world?: string };
   /** The sea's level. */
   sea: number;
   /** The box the town's own land is made over: beyond it the country is the frame's, seen and not walked. */
@@ -587,17 +587,6 @@ export interface Valley {
    * land is read at its own height (not a share of it), and `seed` is not used.
    */
   terrain?: { seed: number; u: number; v: number; turn: number; base: number; world?: string };
-  /**
-   * If present, the valley's foot is a shore, at a coastal town a world found (`?world=<seed>&place=coast`): the level of the
-   * sea, which comes up to the gap at its foot, where the player arrives. The town is the valley's village, along the track.
-   */
-  sea?: number;
-  /**
-   * At a coastal town, its harbour: a quay of stone from the shore at the valley's foot out into water deep enough for boats, from
-   * `from` to `to`, `width` across, at whose end the player comes in by boat; and the boats, riding beside it (`afloat`) or drawn up
-   * on the shore, as an island's are (`Island.boats`).
-   */
-  harbour?: { quay: { from: [number, number]; to: [number, number]; width: number }; boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[] };
 }
 
 /**
