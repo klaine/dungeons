@@ -389,6 +389,11 @@ export interface Valley {
    * land is read at its own height (not a share of it), and `seed` is not used.
    */
   terrain?: { seed: number; u: number; v: number; turn: number; base: number; world?: string };
+  /**
+   * If present, the valley's foot is a shore, at a coastal town a world found (`?world=<seed>&place=coast`): the level of the
+   * sea, which comes up to the gap at its foot, where the player arrives. The town is the valley's village, along the track.
+   */
+  sea?: number;
 }
 
 /**

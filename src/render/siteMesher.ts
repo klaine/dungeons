@@ -1839,7 +1839,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // begins above the grotto's roof.)
     // (The fence follows each side a little behind it, in short lengths, as far as a few strides beyond the gap; and one crosses the track there,
     // where the valley ends for whoever is walking it, though the track and the land go on.)
-    const fenceEnd = vale ? vale.mouth + 8 : g.z1 + 3;
+    // (At a coastal town the gap is the shore, and the fence across it stands at the water's edge.)
+    const fenceEnd = vale ? vale.mouth + (vale.sea !== undefined ? 3 : 8) : g.z1 + 3;
     // (Whether the valley runs on past the house on either side of the ridge.)
     const armW = !!vale?.ridge && sideAt('w', p.z0 - 6) < vale.ridge.x0 - 3, armE = !!vale?.ridge && sideAt('e', p.z0 - 6) > vale.ridge.x1 + 3;
     for (const sideOf of ['w', 'e'] as const) {
@@ -2157,10 +2158,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
     });
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
+      // (Nothing grows in the sea, nor on the shore it washes.)
+      if (vale?.sea !== undefined && y < vale.sea + 2) return;
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
     }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
+    // At a coastal town, the sea: over the world's land below its level, from the gap at the valley's foot out to the horizon.
+    if (vale?.sea !== undefined) {
+      const mx = (edgeAt(vale, 'w', vale.mouth) + edgeAt(vale, 'e', vale.mouth)) / 2, cell = 6, half = 720, nb = Math.round((2 * half) / cell) + 1;
+      const bed = { x0: mx - half, z0: vale.mouth - half, cell, nx: nb, nz: nb, data: new Float32Array(nb * nb) };
+      for (let j = 0; j < nb; j++) for (let i = 0; i < nb; i++) bed.data[j * nb + i] = hills(bed.x0 + i * cell, bed.z0 + j * cell);
+      islandSea = { level: vale.sea, x: mx, z: vale.mouth, bed };
+    }
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are

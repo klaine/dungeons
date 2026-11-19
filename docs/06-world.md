@@ -135,6 +135,14 @@ place asks for it.
     from the summit, its front turned down the ridge, where it fits best and stands some fifty metres or
     more under the summit (the flattest ground is on the summit's own dome, a few metres under it, and a
     hospice there had hardly a summit to climb to; taken still where nothing lower will do).
+  - *Coastal towns* (asked: "Include the coastal towns also"): on the world's own lattice, where water
+    comes down to the mainland's shore (the land joined over dry ground to the world's northern edge, so
+    not an island's), the larger streams first, four hundred metres in from the world's edges and nine
+    hundred apart; up the stream from there a hundred and ten to two hundred and thirty metres, the house's
+    ground where it fits best, no more than sixty metres over the sea, turned to face down to it; a shore
+    in a bay, with land on more hands than sea, counts for it. Recorded as a valley head is, its course from
+    the house down the stream to the shore and sixty metres on out to sea. Named as harbours are. Every
+    world tried has four: in `w2` three on the shores of the bay and one on the open coast.
 - **Grounds fitted to the land** (`fit.ts`; asked: "locations need to be adaptable, best found location
   can be then slightly flattened or smoothed in places for a town or other needs if must, but terraced
   adaptations are good also"). A house's ground, 46 metres across by 62 deep, is made level where the
@@ -267,7 +275,7 @@ world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already
 5. **One far land, from the world.** From a place, the rest of the world and the land beyond its edge
    (the shape continued, unworn), in place of the three kinds of far sheet each place has now.
 6. **The map leads to the places**, and **more kinds of place** where the world has room (the low
-   country, the coast).
+   country, the coast). *Done, the map's links and coastal towns* (above).
 
 ## The land at a metre
 
@@ -407,6 +415,15 @@ the house to the summit, as broad as a top drawn alone, so that the summit stand
 the game lays it, under where the player arrives at the ridge's foot. Beyond the top the country round
 about is the world's (`countryShape` in `mountain.ts`), not worn again, with the drawn top standing on it
 where it is the higher; no far range is drawn, since the world has its own, and its sea is the water.
+
+A coastal town (`place=coast`; only a world has them, and without one named it is `w2`'s) is built as a valley
+is, on the course the world found from the house down to the sea: the house at the head, the valley's
+village along the track, which a coastal town always has, and the valley's foot, the gap between two crags
+where the player arrives, at the shore, where the land down the line of its stream comes to a metre over
+the sea. The sea is drawn there at the world's level (`valley.sea`), over the world's land below it, out to
+the horizon; the fence across the gap stands at the water's edge, and nothing of the far land's woods
+grows below the shore. Its floor is read again from the tiles once they are made, since it was found on
+the coarser lattice.
 
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
 (`WORLD=w2 npx tsx tools/land.ts 4`) with nothing wrong, laid out in 0.1 to 6 seconds (the tiles about it

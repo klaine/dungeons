@@ -192,7 +192,7 @@ export const TILE_WEAR: Wear = {
 export const COVER = { sea: 0, lake: 1, shore: 2, marsh: 3, fields: 4, pasture: 5, forest: 6, moor: 7, rock: 8, snow: 9 } as const;
 
 export interface WorldPlace {
-  kind: 'island' | 'valley' | 'mountain';
+  kind: 'island' | 'valley' | 'mountain' | 'coast';
   /** Its number among places of its kind, from 1, best first; and its name. */
   n: number;
   name: string;
@@ -202,7 +202,7 @@ export interface WorldPlace {
   score: number;
   /** For an island: as found in its tile, in the world's coordinates. */
   island?: IslandSpot;
-  /** For a valley head: as found, its course in the world's coordinates. */
+  /** For a valley head: as found, its course in the world's coordinates. For a coastal town: the same, the course from the house down to the sea and out into it. */
   valley?: ValleySpot;
   /** For a mountain top: which way its ridge runs down (an angle from east towards south), and where its foot is. */
   ridge?: { angle: number; foot: [number, number]; footY: number };
@@ -416,7 +416,7 @@ export function world(seed: string, size: { x: number; z: number } = WORLD_SIZE)
 export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD_SIZE): Generator<string, World> {
   const key = `${seed}@${size.x}x${size.z}`, had = WORLDS.get(key);
   if (had) return had;
-  const p = planWorld(seed, size), rng = new Rng(`world/${seed}`), timing: Record<string, number> = {}, why: Record<string, Record<string, number>> = { island: {}, valley: {}, mountain: {} };
+  const p = planWorld(seed, size), rng = new Rng(`world/${seed}`), timing: Record<string, number> = {}, why: Record<string, Record<string, number>> = { island: {}, valley: {}, mountain: {}, coast: {} };
   let t0 = performance.now();
   const lap = (k: string) => { const t = performance.now(); timing[k] = Math.round(t - t0); t0 = t; };
   yield 'Lifting the land, and letting the rivers wear it';
@@ -554,8 +554,11 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   yield 'Looking for mountain tops';
   const summits = findSummits(w, why.mountain);
   lap('summits');
+  yield 'Looking for coastal towns';
+  const coasts = findCoastalTowns(w, why.coast);
+  lap('coast');
   const number = (list: WorldPlace[]) => list.slice(0, SEARCH.keep).map((q, k) => ({ ...q, n: k + 1 }));
-  w.places = [...number(keptIsles), ...number(valleys.sort((a, b) => b.score - a.score)), ...number(summits)];
+  w.places = [...number(keptIsles), ...number(valleys.sort((a, b) => b.score - a.score)), ...number(summits), ...number(coasts)];
 
   // ---- towns and the ways between them
   yield 'Settling the low country';
@@ -573,7 +576,8 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   const at = (x: number, z: number) => `${Math.round(x / 50)},${Math.round(z / 50)}`;
   w.peakNames = w.peaks.map((q) => namer.name('peak', `peak ${at(q.x, q.z)}`));
   for (const t of w.towns) t.name = namer.name(t.kind, `${t.kind} ${at(t.x, t.z)}`);
-  for (const q of w.places) q.name = namer.name(q.kind, `${q.kind} ${at(q.x, q.z)}`);
+  // (A coastal town is named as a harbour is.)
+  for (const q of w.places) q.name = namer.name(q.kind === 'coast' ? 'harbour' : q.kind, `${q.kind} ${at(q.x, q.z)}`);
   WORLDS.set(key, w);
   return w;
 }
@@ -826,6 +830,81 @@ function findSummits(w: World, why: Record<string, number>): WorldPlace[] {
   const kept: WorldPlace[] = [];
   for (const q of out) if (!kept.some((o) => Math.hypot(o.x - q.x, o.z - q.z) < 900)) kept.push(q);
   return kept;
+}
+
+/**
+ * Coastal towns: where a stream comes down to the mainland's shore, with ground behind for a town and,
+ * up the stream, for a house above it, facing down to the sea. Looked for on the world's own lattice,
+ * the larger streams first, four hundred metres in from the world's edges and nine hundred apart. Each
+ * is recorded as a valley head is (`ValleySpot`), its course from the house down the stream to the
+ * shore and on out into the sea, which a place built on it reads as a valley whose foot is the shore.
+ */
+function findCoastalTowns(w: World, why: Record<string, number>): WorldPlace[] {
+  const no = (k: string) => { why[k] = (why[k] ?? 0) + 1; };
+  const f = w.field, h = f.data, nx = f.nx, nz = f.nz, cell = f.cell, n = nx * nz, p = w.plan, out: WorldPlace[] = [];
+  const xOf = (k: number) => f.x0 + (k % nx) * cell, zOf = (k: number) => f.z0 + Math.floor(k / nx) * cell;
+  // The mainland: what is joined over dry land to the world's northern edge (the islands are not).
+  const main = new Uint8Array(n), queue: number[] = [];
+  for (let i = 0; i < nx; i++) if (!w.sea[i]) { main[i] = 1; queue.push(i); }
+  for (let c = 0; c < queue.length; c++) {
+    const k = queue[c], i = k % nx;
+    for (const m of [i > 0 ? k - 1 : -1, i < nx - 1 ? k + 1 : -1, k - nx, k + nx]) if (m >= 0 && m < n && !main[m] && !w.sea[m]) { main[m] = 1; queue.push(m); }
+  }
+  // Where water comes down to the shore: the mainland's last points before the sea, the larger streams first.
+  const shore: number[] = [];
+  for (let k = 0; k < n; k++) {
+    if (!main[k] || h[k] < 0.3 || w.acc[k] < 1.5e4) continue;
+    const d = w.down[k];
+    if (d >= 0 && w.sea[d]) shore.push(k);
+  }
+  shore.sort((a, b) => w.acc[b] - w.acc[a]);
+  for (const s of shore) {
+    const sx = xOf(s), sz = zOf(s);
+    if (Math.abs(sx) > p.hx - 400 || Math.abs(sz) > p.hz - 400) { no('near the world\'s edge'); continue; }
+    if (out.some((q) => Math.hypot(q.x - sx, q.z - sz) < 900)) continue;
+    // Up the stream from the shore: at each step to the point upstream that gathers the most water.
+    const path = [s];
+    let cur = s, gone = 0;
+    while (gone < 240) {
+      let up = -1;
+      const i = cur % nx, j = (cur - i) / nx;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = i + di, jj = j + dj, q = jj * nx + ii;
+        if ((!di && !dj) || ii < 0 || jj < 0 || ii >= nx || jj >= nz || w.down[q] !== cur) continue;
+        if (up < 0 || w.acc[q] > w.acc[up]) up = q;
+      }
+      if (up < 0) break;
+      gone += Math.hypot(xOf(up) - xOf(cur), zOf(up) - zOf(cur));
+      cur = up; path.push(cur);
+    }
+    // The house: somewhere a hundred and ten to two hundred and thirty metres up it, where its ground fits best, its front to the sea.
+    let best: { k: number; g: Ground; turn: number; cost: number } | null = null;
+    let along = 0;
+    for (let a = 1; a < path.length; a++) {
+      along += Math.hypot(xOf(path[a]) - xOf(path[a - 1]), zOf(path[a]) - zOf(path[a - 1]));
+      if (along < 110 || along > 230) continue;
+      const k = path[a], toward = path[Math.max(0, a - 4)], head = Math.atan2(zOf(toward) - zOf(k), xOf(toward) - xOf(k)), turn = head - Math.PI / 2;
+      const g = fitGround((px, pz) => f.at(px, pz), xOf(k), zOf(k), turn, HOUSE.w, HOUSE.d);
+      const level = g.terraces.reduce((t, q) => t + q.y, 0) / g.terraces.length;
+      if (g.work > 3 || level < 3 || level > 60) continue;
+      const cost = g.work + 0.4 * (g.terraces.length - 1) + Math.abs(along - 160) / 120 + Math.max(0, level - 35) / 25;
+      if (!best || cost < best.cost) best = { k, g, turn, cost };
+    }
+    if (!best) { no(path.length < 15 ? 'no stream to come down' : 'no ground for a house above the shore'); continue; }
+    // Its course: from the house down the stream to the shore, and on out to sea the way it was going.
+    const at = path.indexOf(best.k), course: [number, number][] = [];
+    for (let a = at; a >= 0; a--) course.push([xOf(path[a]), zOf(path[a])]);
+    const [lx, lz] = course[course.length - 1], [qx, qz] = course[Math.max(0, course.length - 4)], out0 = Math.atan2(lz - qz, lx - qx);
+    for (let d = 8; d <= 64; d += 8) course.push([lx + Math.cos(out0) * d, lz + Math.sin(out0) * d]);
+    const hx0 = xOf(best.k), hz0 = zOf(best.k), level = best.g.terraces.reduce((t, q) => t + q.y, 0) / best.g.terraces.length;
+    // (Sheltered is better: a shore in a bay, with land on more hands than the sea.)
+    let land = 0, all = 0;
+    for (let r = 200; r <= 600; r += 200) for (let a = 0; a < 16; a++) { all++; if (f.at(sx + Math.cos((a / 16) * TAU) * r, sz + Math.sin((a / 16) * TAU) * r) > 0) land++; }
+    const score = Math.log(w.acc[s]) - best.cost + 2 * (land / all);
+    const spot: ValleySpot = { u: hx0, v: hz0, turn: best.turn, base: level, course };
+    out.push({ kind: 'coast', n: 0, name: '', x: hx0, z: hz0, y: level, score, valley: spot, ground: best.g });
+  }
+  return out.sort((a, b) => b.score - a.score);
 }
 
 /**

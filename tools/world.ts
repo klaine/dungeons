@@ -81,12 +81,14 @@ function draw(w: World): Buffer {
   for (const way of w.ways) line(way.points, WAY[way.kind].c, WAY[way.kind].r, WAY[way.kind].gap);
   for (const t of w.towns) dot(t.x, t.z, [10, 10, 10], t.kind === 'harbour' ? 6 : t.kind === 'town' ? 4 : 2);
   for (const q of w.places) {
-    const ci = (q.x + hx) / px, cj = (q.z + hz) / px, c: [number, number, number] = q.kind === 'island' ? [230, 40, 40] : q.kind === 'valley' ? [250, 150, 20] : [170, 60, 230];
+    const ci = (q.x + hx) / px, cj = (q.z + hz) / px, c: [number, number, number] = q.kind === 'island' ? [230, 40, 40] : q.kind === 'valley' ? [250, 150, 20] : q.kind === 'coast' ? [20, 170, 200] : [170, 60, 230];
     for (let a = 0; a < 64; a++) {
       const t = (a / 64) * Math.PI * 2;
       if (q.kind === 'island') for (const r of [7, 8]) dot((ci + Math.cos(t) * r) * px - hx, (cj + Math.sin(t) * r) * px - hz, c);
     }
     if (q.kind === 'valley') for (let d = -6; d <= 6; d++) for (const e of [-6, 6]) { dot(q.x + d * px, q.z + e * px, c, 1); dot(q.x + e * px, q.z + d * px, c, 1); }
+    // (A coastal town: a diamond.)
+    if (q.kind === 'coast') for (let d = -6; d <= 6; d++) { const e = 6 - Math.abs(d); for (const sgn of [-1, 1]) dot(q.x + d * px, q.z + sgn * e * px, c, 1); }
     if (q.kind === 'mountain') for (let d = 0; d <= 10; d++) { dot(q.x + (d - 10) * 0.6 * px, q.z + (d - 5) * px, c, 1); dot(q.x - (d - 10) * 0.6 * px, q.z + (d - 5) * px, c, 1); dot(q.x + (d - 5) * 1.2 * px, q.z + 5 * px, c, 1); }
   }
   return png(W, WH, rgb);
@@ -110,8 +112,8 @@ for (const seed of seeds) {
   console.log(`${seed}: built in ${((t1 - t0) / 1000).toFixed(1)} s (${stages}; ${tiles.length} tiles ${(tileTime / 1000).toFixed(1)} s)`);
   console.log(`  ${2 * w.plan.hx / 1000} by ${2 * w.plan.hz / 1000} km; land ${lo.toFixed(0)} to ${hi.toFixed(0)} m; inland ${((w.plan.inland * 180) / Math.PI).toFixed(0)}°, plains ${(w.plan.plains / 1000).toFixed(1)} km, upland ${(w.plan.upland / 1000).toFixed(1)} km, great peaks ${w.peaks.map((q) => Math.round(q.y)).join(", ")} m`);
   console.log(`  ${covers}`);
-  console.log(`  found: ${count('island')} islands, ${count('valley')} valley heads, ${count('mountain')} mountain tops; ${w.towns.length} towns (${w.towns.filter((t) => t.kind !== 'village').length} not villages); ${w.rivers.length} rivers; ways ${['road', 'track', 'path', 'ferry'].map((k) => `${w.ways.filter((q) => q.kind === k).length} ${k}`).join(', ')}`);
+  console.log(`  found: ${count('island')} islands, ${count('valley')} valley heads, ${count('mountain')} mountain tops, ${count('coast')} coastal towns; ${w.towns.length} towns (${w.towns.filter((t) => t.kind !== 'village').length} not villages); ${w.rivers.length} rivers; ways ${['road', 'track', 'path', 'ferry'].map((k) => `${w.ways.filter((q) => q.kind === k).length} ${k}`).join(', ')}`);
   for (const [k, why] of Object.entries(w.why)) console.log(`  ${k} turned down: ${Object.entries(why).map(([a, b]) => `${a} ${b}`).join(', ') || 'none'}`);
-  for (const q of w.places) console.log(`    ${q.kind} ${q.n}: ${q.x.toFixed(0)}, ${q.z.toFixed(0)} at ${q.y.toFixed(0)} m${q.island ? `, island reaching ${q.island.reach.toFixed(0)} m` : ''}${q.ridge ? `, ridge to ${((q.ridge.angle * 180) / Math.PI).toFixed(0)}°, foot at ${q.ridge.footY.toFixed(0)} m` : ''}`);
+  for (const q of w.places) console.log(`    ${q.kind} ${q.n}: ${q.x.toFixed(0)}, ${q.z.toFixed(0)} at ${q.y.toFixed(0)} m${q.island ? `, island reaching ${q.island.reach.toFixed(0)} m` : ''}${q.ridge ? `, ridge to ${((q.ridge.angle * 180) / Math.PI).toFixed(0)}°, foot at ${q.ridge.footY.toFixed(0)} m` : ''}${q.kind === 'coast' && q.valley ? `, ${q.name}, the shore ${Math.round(q.valley.course.length * 8 - 64)} m down, work ${q.ground?.work.toFixed(1)}` : ''}`);
   writeFileSync(`${out}/${seed}.png`, draw(w));
 }

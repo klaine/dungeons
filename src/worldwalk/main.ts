@@ -224,7 +224,7 @@ async function start(): Promise<void> {
 
   // ---- where one stands, and walking
   const place = (spec: string): Vector3 => {
-    const m = spec.match(/^(valley|island|mountain)(\d)$/), q = m ? W.places.find((p) => p.kind === m[1] && p.n === Number(m[2])) : undefined;
+    const m = spec.match(/^(valley|island|mountain|coast)(\d)$/), q = m ? W.places.find((p) => p.kind === m[1] && p.n === Number(m[2])) : undefined;
     if (q) return new Vector3(q.x, 0, q.z);
     const xz = spec.split(',').map(Number);
     return xz.length === 2 && xz.every(Number.isFinite) ? new Vector3(xz[0], 0, xz[1]) : new Vector3(W.places[0]?.x ?? 0, 0, W.places[0]?.z ?? 0);
@@ -243,12 +243,12 @@ async function start(): Promise<void> {
     const play = document.getElementById('play') as HTMLAnchorElement | null;
     const game = document.querySelector<HTMLMetaElement>('meta[name="dungeons-game"]')?.content || './index.html';
     const playAt = (spec: string) => {
-      const m = spec.match(/^(valley|island|mountain)(\d)$/);
+      const m = spec.match(/^(valley|island|mountain|coast)(\d)$/);
       if (play) play.hidden = !m;
       if (play && m) play.href = `${game}#${new URLSearchParams({ world: seed, place: m[1], n: m[2] })}`;
     };
     if (where) {
-      const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top' };
+      const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top', coast: 'coastal town' };
       where.innerHTML = W.places.map((q) => `<option value="${q.kind}${q.n}">${q.name}, ${KIND[q.kind]}</option>`).join('');
       const start = params.get('at') ?? '';
       if (W.places.some((q) => `${q.kind}${q.n}` === start)) where.value = start;

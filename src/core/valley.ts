@@ -70,7 +70,7 @@ export function valleyLand(v: Valley, floor: number, meadow: { x0: number; x1: n
   return (uplandHeight(highlands(t.seed), u, w, out) - t.base) * RELIEF + floor;
 }
 
-export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot; world?: string }): { valley: Valley; middle: (z: number) => number } {
+export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot; world?: string; sea?: number }): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
   // (A valley that was found: the line down its middle is its stream's, turned into the site's frame, and its breadth on either
   // hand is where the land has risen four metres over the stream. Both read once, at every second metre down its length.)
@@ -96,7 +96,14 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     return 70;
   };
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
-  const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(95, 150), mouth = Math.round((front + length) / step) * step;
+  const step = 2, front = meadow.z0;
+  let length = meadow.z1 - meadow.z0 + rng.range(95, 150);
+  // (At a coastal town its foot is the shore: the gap where the land, down the line of its stream, comes down to a metre over the sea.)
+  const sea = found?.sea !== undefined ? Math.round((meadow.floor + found.sea - found.spot.base) * 10) / 10 : undefined;
+  if (sea !== undefined) {
+    for (let z = meadow.z1 + 40; z <= meadow.z1 + 320; z += step) if (landAtV(courseAt(z), z) < sea + 1.2) { length = Math.max(meadow.z1 - meadow.z0 + 40, z - 4 - front); break; }
+  }
+  const mouth = Math.round((front + length) / step) * step;
   const mid = (meadow.x0 + meadow.x1) / 2, head = (meadow.x1 - meadow.x0) / 2 + rng.range(5.5, 10);
   const s = rng.range(0, 500), gate = rng.range(7.4, 9.2);
   // It bends: once or twice in its length, and less the nearer the house, which it must stay square to.
@@ -156,7 +163,7 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     w = gate + (w - gate) * smooth((mouth - z) / side.close);
     return z < meadow.z1 + 2 ? Math.max(w, head, start) : w;
   };
-  const valley: Valley = { z0, step, west: [], east: [], mouth, ...(round_ ? {} : { ridge }), ...(terrain ? { terrain } : {}) };
+  const valley: Valley = { z0, step, west: [], east: [], mouth, ...(round_ ? {} : { ridge }), ...(terrain ? { terrain } : {}), ...(sea !== undefined ? { sea } : {}) };
   for (let i = 0, n = Math.round((mouth - z0) / step) + 1 + 22; i < n; i++) {
     const z = z0 + i * step, c = z < front ? mid : middle(Math.min(z, mouth + 30));
     valley.west.push(round(c - half(sides[0], z, 0)));

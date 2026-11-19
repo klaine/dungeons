@@ -289,12 +289,14 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
     else { ctx.lineWidth = 1.4 * u; ctx.strokeStyle = INK; ctx.beginPath(); ctx.arc(x, y, spread + 4 * u, 0, Math.PI * 2); ctx.stroke(); }
     mark(x, y, spread + 4 * u);
   }
-  // The places of adventure, in red: an island's house a ring with a dot, a valley's a square with a cross, a mountain top's a triangle.
+  // The places of adventure, in red: an island's house a ring with a dot, a valley's a square with a cross, a mountain top's a triangle,
+  // a coastal town's a diamond with a dot.
   const placeMark = (q: WorldPlace, x: number, y: number, r: number) => {
     ctx.strokeStyle = RED; ctx.fillStyle = RED; ctx.lineWidth = 2.2 * u;
     ctx.beginPath();
     if (q.kind === 'island') { ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, r * 0.3, 0, Math.PI * 2); ctx.fill(); }
     else if (q.kind === 'valley') { ctx.rect(x - r, y - r, 2 * r, 2 * r); ctx.moveTo(x, y - r * 0.6); ctx.lineTo(x, y + r * 0.6); ctx.moveTo(x - r * 0.6, y); ctx.lineTo(x + r * 0.6, y); ctx.stroke(); }
+    else if (q.kind === 'coast') { ctx.moveTo(x, y - r * 1.2); ctx.lineTo(x + r * 1.2, y); ctx.lineTo(x, y + r * 1.2); ctx.lineTo(x - r * 1.2, y); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y, r * 0.3, 0, Math.PI * 2); ctx.fill(); }
     else { ctx.moveTo(x, y - r * 1.15); ctx.lineTo(x + r, y + r * 0.7); ctx.lineTo(x - r, y + r * 0.7); ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.arc(x, y + r * 0.1, r * 0.25, 0, Math.PI * 2); ctx.fill(); }
   };
   // Each place's ground, as it is fitted to the land: its outline, a line at each step between terraces; and for an island, its
@@ -443,14 +445,16 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       ['island', 'Houses on islands', (q) => `${q.name}, ${Math.round(q.y)} m over the sea${fitted(q)}`],
       ['valley', 'Houses at the heads of glens', (q) => `${q.name}, ${Math.round(q.y)} m${fitted(q)}`],
       ['mountain', 'Hospices on mountain tops', (q) => `${q.name}, ${Math.round(q.y)} m${q.ground ? `, the hospice at ${Math.round(q.ground.terraces[q.ground.terraces.length - 1].y)} m` : ''}${fitted(q)}`],
+      ['coast', 'Houses above harbour towns', (q) => `${q.name}, ${Math.round(q.y)} m over the sea${fitted(q)}`],
     ];
+    // (Two by two beside the key: three abreast ran off the paper's edge with four kinds.)
     kinds.forEach(([kind, title, text], c) => {
-      const x = edge + 700 * u + c * 560 * u;
-      placeMark({ kind } as WorldPlace, x + 8 * u, top - 8 * u, 7 * u);
+      const x = edge + 700 * u + (c % 2) * 820 * u, y0 = top + Math.floor(c / 2) * 200 * u;
+      placeMark({ kind } as WorldPlace, x + 8 * u, y0 - 8 * u, 7 * u);
       ctx.fillStyle = INK; ctx.font = `italic ${22 * u}px ${SERIF}`; ctx.textAlign = 'left';
-      ctx.fillText(title, x + 26 * u, top);
+      ctx.fillText(title, x + 26 * u, y0);
       ctx.font = `${15 * u}px ${SERIF}`;
-      w.places.filter((q) => q.kind === kind).forEach((q, i) => { ctx.fillStyle = INK; ctx.fillText(`${q.n}. ${text(q)}`, x, top + 34 * u + i * lh * 1.1, 540 * u); });
+      w.places.filter((q) => q.kind === kind).forEach((q, i) => { ctx.fillStyle = INK; ctx.fillText(`${q.n}. ${text(q)}`, x, y0 + 34 * u + i * lh * 1.1, 780 * u); });
     });
   }
   return H;
@@ -484,7 +488,7 @@ export function drawWorldRelief(canvas: HTMLCanvasElement, w: WorldMap, pixels =
   ctx.setLineDash([]);
   for (const t of w.towns) { ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(X(t.x), Z(t.z), t.kind === 'village' ? 3 : 6, 0, Math.PI * 2); ctx.fill(); }
   for (const q of w.places) {
-    ctx.strokeStyle = q.kind === 'island' ? 'rgb(230,40,40)' : q.kind === 'valley' ? 'rgb(250,150,20)' : 'rgb(170,60,230)'; ctx.lineWidth = 3;
+    ctx.strokeStyle = q.kind === 'island' ? 'rgb(230,40,40)' : q.kind === 'valley' ? 'rgb(250,150,20)' : q.kind === 'coast' ? 'rgb(20,170,200)' : 'rgb(170,60,230)'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(X(q.x), Z(q.z), 9, 0, Math.PI * 2); ctx.stroke();
   }
 }

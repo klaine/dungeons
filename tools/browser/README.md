@@ -14,7 +14,7 @@ happened. They need Playwright with Chromium (`npm install --no-save playwright`
 | `node tools/browser/worldmap.cjs <folder> <seed> …` | Makes each world on the world page (`world.html`) and saves its ink map and its relief as PNG files. Needs no graphics: the maps are drawn in two dimensions. |
 | `node tools/browser/jetty.cjs <seed> …` | Walks out along the landing stage and reports the player's height at each step, to show they stayed on the deck. |
 
-`play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`. `play.cjs` builds on a world's places with `WORLD=w2`, each seed given as `seed:n` for the `n`th place of the kind (`WORLD=w2 node tools/browser/play.cjs land0:1 land1:2`); a world takes some minutes more in software.
+`play.cjs` and `roam.cjs` play islands with `PLACE=island`, and take another port with `PORT`. `play.cjs` builds on a world's places with `WORLD=w2` (`PLACE=coast` for its coastal towns), each seed given as `seed:n` for the `n`th place of the kind (`WORLD=w2 node tools/browser/play.cjs land0:1 land1:2`); a world takes some minutes more in software.
 
 They launch Chromium with a software renderer, so they work without a graphics card, slowly: a
 site takes one to three minutes. On a machine with a graphics card, set `REAL_GPU=1` to open a

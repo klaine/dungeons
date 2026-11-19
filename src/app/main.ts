@@ -101,10 +101,11 @@ const seed = params.get('seed')!;
 // What kind of place: a valley, unless an island or a mountain top is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
-const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : 'valley';
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'coast' ? 'coast' : 'valley';
 // Or a place in a world (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds, its land
 // the world's; the house is still the seed's own.
-const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : null;
+// (A coastal town is only ever one a world found: without a world named, the second world's.)
+const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : place === 'coast' ? 'w2' : null;
 const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
 
 const hud = {
@@ -131,8 +132,9 @@ document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.
 {
-  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'valley' } as const)[place];
-  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain' }[then];
+  // (In a world, on to its coastal towns too, which only a world has.)
+  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: worldSeed ? 'coast' : 'valley', coast: 'valley' } as const)[place];
+  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', coast: 'A coastal town' }[then];
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
     next.set('seed', randomSeed());
@@ -256,7 +258,7 @@ async function start(): Promise<void> {
     inWorld = await worldComing;
     waitingForWorld = false;
   }
-  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'coast' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.

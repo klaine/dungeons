@@ -37,7 +37,7 @@ const pageOf = (name: string, usual: string) => document.querySelector<HTMLMetaE
 function listPlaces(seed: string): void {
   if (!placesEl || !map) return;
   placesEl.replaceChildren();
-  const KIND = { island: 'Island', valley: 'Valley head', mountain: 'Mountain top' } as const;
+  const KIND = { island: 'Island', valley: 'Valley head', mountain: 'Mountain top', coast: 'Coastal town' } as const;
   for (const q of map.places) {
     const card = document.createElement('div'), name = document.createElement('b'), kind = document.createElement('span');
     card.className = 'place'; kind.className = 'kind';
@@ -69,7 +69,7 @@ function make(seed: string): void {
     map = { ...d, field } as WorldMap;
     window.__world = map;
     const found = (k: string) => map!.places.filter((q) => q.kind === k).length;
-    status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads and ${found('mountain')} mountain tops found.`;
+    status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads, ${found('mountain')} mountain tops and ${found('coast')} coastal towns found.`;
     draw();
     listPlaces(seed);
     window.__worldReady = true;
