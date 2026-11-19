@@ -764,7 +764,9 @@ function findIslandGrounds(w: World, why: Record<string, number>): WorldPlace[] 
       }
     }
     if (touches) { no('mainland, or at the world\'s edge'); continue; }
-    if (cells.length * cell * cell < 3e4) { no('small'); continue; }
+    // (Six hectares at the least: one of three or four, a hundred metres from its middle to its furthest shore, had no room for the house
+    // and a cove, whatever the house.)
+    if (cells.length * cell * cell < 6e4) { no('small'); continue; }
     let cu = 0, cv = 0, reach = 0;
     for (const k of cells) { cu += f.x0 + (k % nx) * cell; cv += f.z0 + Math.floor(k / nx) * cell; }
     cu /= cells.length; cv /= cells.length;

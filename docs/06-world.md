@@ -116,7 +116,7 @@ place asks for it.
   (`fit.ts`, below):
   - *Islands*: every island the land made (land standing out of the sea, apart from the mainland and
     the world's edge, on the world's own lattice, so none is lost where it crosses a tile's edge) of
-    three hectares or more and no more than twenty-five, whatever its shape; on each, the house where its ground fits best,
+    six hectares or more and no more than twenty-five, whatever its shape (three was the least, until one of three or four, a hundred metres from its middle to its furthest shore, had no room for any house and a cove); on each, the house where its ground fits best,
     well in from the cliffs, a little up from the sea, facing its landing; the landing the nearest shore
     gentle enough to come ashore and walk up (rising no more than four in ten), or the gentlest if none
     is. One house to an island. (Before, an island had to be of a size, near round, with a shoulder at a
