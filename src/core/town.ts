@@ -571,6 +571,10 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
         z += shoreFollow * shoreDz(side * u);
         const reach = side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, still = i === 0 || (j === 0 && u < reach + 5) || straight;
         if (!still) { const amount = i <= 1 && j <= 1 ? 0.2 : 1; x += jq.range(-jitter, jitter) * amount; z += jq.range(-jitter, jitter) * amount; }
+        // (The first row's crossing just beyond the quay's end, whose neighbour towards the square is held on the waterfront's back:
+        // no further out to sea than that back. The block between them has its front straight from one to the other, and where this
+        // one followed the shore out, or was jostled out, that front slanted out across the waterfront and a house stood in it.)
+        if (j === 0 && i > 0 && uL[side][i - 1] < reach + 5) z = Math.min(z, qz - v);
         nodes[side][i].push([x, z]);
       }
     }

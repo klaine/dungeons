@@ -148,7 +148,13 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // bumps; held to one in seven, the garden was refused on single points and came out a pair of beds in a great lawn.)
     const gentle = (x: number, z: number) => Math.hypot(ground(x + 1, z) - ground(x - 1, z), ground(x, z + 1) - ground(x, z - 1)) < 0.5;
     const plain = (x: number, z: number) => zoneAt(x, z) === Z.wild && gentle(x, z);
-    const houseOff = (x: number, z: number) => Math.min(...b.outerRects.map((r) => outsideRect({ x0: r.x0 - clearOfHouse, x1: r.x1 + clearOfHouse, z0: r.z0 - clearOfHouse, z1: r.z1 + clearOfHouse }, x, z)));
+    // How far a point is from the house with its margin, and less than nothing within that: `outsideRect` alone is never less
+    // than nothing, so a test of it below nothing kept nothing off the house, and beds, their hedges and their yews were laid
+    // through its rooms and across its doorways.
+    const houseOff = (x: number, z: number) => Math.min(...b.outerRects.map((r) => {
+      const g = { x0: r.x0 - clearOfHouse, x1: r.x1 + clearOfHouse, z0: r.z0 - clearOfHouse, z1: r.z1 + clearOfHouse }, d = outsideRect(g, x, z);
+      return d > 0 ? d : -Math.min(x - g.x0, g.x1 - x, z - g.z0, g.z1 - z);
+    }));
     const lineOff = (v: number, o: number) => { const m = (((v - o) % S) + S) % S; return Math.min(m, S - m); };
     // The beds first, so that the walks are laid only where they lead between beds or round them.
     const ci0 = Math.floor((R.x0 - hx) / S) - 1, ci1 = Math.ceil((R.x1 - hx) / S) + 1, cj0 = Math.floor((R.z0 - zRef) / S) - 1, cj1 = Math.ceil((R.z1 - zRef) / S) + 1;

@@ -1,7 +1,8 @@
 /**
  * Builds the town, its land, rock and buildings, for a number of seeds, without a browser, and reports anything
  * wrong with what was carved: numbers that are not numbers, rock standing in the doorway of the
- * house, and how long the building took. Run it after any change to the rock or the ground.
+ * house, anything solid the town makes standing in any doorway of the house, inside it or out, and
+ * how long the building took. Run it after any change to the rock or the ground.
  *
  *   npx tsx tools/town.ts [count] [prefix]
  */
@@ -45,6 +46,41 @@ for (let k = 0; k < count; k++) {
       if (key.endsWith('rock') || key.endsWith('rockSheet')) rockTriangles += mesh.triangleCount;
       if (bad) problems.push(`${where} ${key}: ${bad} vertices that are not numbers`);
       if (blocking) problems.push(`${where} ${key}: ${blocking} triangles across the doorway`);
+    }
+  }
+  // Every doorway of the house, inside it as well as the front door: the width of the way, from just over the highest step a
+  // walker takes on its lower side to head height on its higher, from a pace inside the wall to a pace beyond it (further where
+  // a cleft climbs between chambers on different levels). Nothing solid the town makes may stand in that box: what the
+  // forecourt's builder lays, and everything about the house but what stops nobody. The house's own stone is not asked about, since a raised sill or a cleft's rising floor belongs
+  // there. (The garden behind the house was once laid through its rooms, and its hedges stood across the doorways.)
+  const solids: [string, Float32Array, ArrayLike<number>][] = [];
+  for (const [set, where] of [[scene.meshes, 'site'], [scene.scenery?.meshes ?? new Map(), 'scenery']] as const) {
+    for (const [key, mesh] of set) {
+      if (where === 'site' ? !key.startsWith(`p${approach.id}|`) : key.startsWith('soft|')) continue;
+      const g = mesh.build();
+      solids.push([`${where} ${key}`, g.getAttribute('position').array as Float32Array, g.getIndex()!.array]);
+    }
+  }
+  for (const w of site.ways) {
+    if (w.kind === 'window' || w.kind === 'stair') continue;
+    const a = site.places[w.a], b = site.places[w.b], alongX = w.side === 'n' || w.side === 's', out = w.side === 'n' || w.side === 'w' ? -1 : 1;
+    const wall = w.side === 'n' ? a.z0 : w.side === 's' ? a.z1 : w.side === 'e' ? a.x1 : a.x0;
+    const climb = w.natural && Math.abs(a.floor - b.floor) > 0.6 ? Math.min(3.4, 1.4 + Math.abs(a.floor - b.floor) * 0.9) : 0;
+    const t0 = wall - out * (1 + (a.floor > b.floor ? climb : 0)), t1 = wall + out * (site.wallThickness + 1 + (b.floor > a.floor ? climb : 0));
+    const across = [w.at - w.halfWidth * 0.8, w.at + w.halfWidth * 0.8], through = [Math.min(t0, t1), Math.max(t0, t1)];
+    const [x0, x1] = alongX ? across : through, [z0, z1] = alongX ? through : across;
+    const y0 = Math.min(a.floor, b.floor) + 0.4, y1 = Math.max(a.floor, b.floor) + 1.7;
+    for (const [name, pos, index] of solids) {
+      let blocking = 0;
+      for (let t = 0; t < index.length; t += 3) {
+        let lx = Infinity, hx = -Infinity, ly = Infinity, hy = -Infinity, lz = Infinity, hz = -Infinity;
+        for (let v = 0; v < 3; v++) {
+          const o = index[t + v] * 3;
+          lx = Math.min(lx, pos[o]); hx = Math.max(hx, pos[o]); ly = Math.min(ly, pos[o + 1]); hy = Math.max(hy, pos[o + 1]); lz = Math.min(lz, pos[o + 2]); hz = Math.max(hz, pos[o + 2]);
+        }
+        if (hx > x0 && lx < x1 && hy > y0 && ly < y1 && hz > z0 && lz < z1) blocking++;
+      }
+      if (blocking) problems.push(`${name}: ${blocking} triangles across the ${w.kind} from the ${a.name} to the ${b.name}`);
     }
   }
   // Nothing left to be found may stand inside the fences that keep the player in the country about the town.
