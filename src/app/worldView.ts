@@ -20,6 +20,11 @@ export class WorldView {
   private readonly ink2: ReturnType<typeof inkFrame>;
   /** How the world was last laid over the view: its middle, metres to a pixel, the pixels to one of the page's. */
   private last: { cu: number; cv: number; metres: number; dpr: number } | null = null;
+  /**
+   * How far out the view is, 1 as it opens: out to the whole world by the wheel or `+` and `-` (`zoomBy`). (A world's places lie one
+   * to three kilometres apart, and in the view as it opens there was seldom another to go to.)
+   */
+  private zoom = 1;
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly map: WorldMap, site: Site, kept: KeptSite[], private readonly here: { kind: string; n: number }) {
     this.frame = siteFrame(site)!;
@@ -41,6 +46,11 @@ export class WorldView {
     return placeNear(others, this.others, x, z, 22 * dpr * metres);
   }
 
+  /** Out (more than 1) or in (less), as far as the whole world and back to where it opened. */
+  zoomBy(f: number): void {
+    this.zoom = Math.min(Math.max(this.map.plan.hx, this.map.plan.hz) * 1.1 / 900, Math.max(1, this.zoom * f));
+  }
+
   /** Whether the map has been drawn yet: the first drawing holds the page still for a second or two. */
   get ready(): boolean { return !!this.ink; }
 
@@ -54,6 +64,7 @@ export class WorldView {
     const [pu, pv] = toWorld(this.frame, this.frame.hx, this.frame.hz), hx = this.map.plan.hx, hz = this.map.plan.hz;
     let reach = 900;
     for (const [x, z] of this.own?.ground ?? []) reach = Math.max(reach, Math.hypot(x - pu, z - pv) * 1.35);
+    reach = Math.min(Math.max(hx, hz) * 1.1, reach * this.zoom);
     const metres = (2 * reach) / Math.min(W, H), halfU = (W / 2) * metres, halfV = (H / 2) * metres;
     const cu = halfU < hx ? Math.min(hx - halfU, Math.max(-hx + halfU, pu)) : 0, cv = halfV < hz ? Math.min(hz - halfV, Math.max(-hz + halfV, pv)) : 0;
     const at = (x: number, z: number): [number, number] => [W / 2 + (x - cu) / metres, H / 2 + (z - cv) / metres];

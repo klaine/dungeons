@@ -434,6 +434,14 @@ async function start(): Promise<void> {
     next.delete('seed'); next.delete('at');
     go(next);
   });
+  // (Out to the whole world and back: the wheel, or `+` and `-` while it is shown.)
+  const zoomWorld = (f: number) => { if (!worldView?.ready) return; worldView.zoomBy(f); worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw }); };
+  worldCanvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomWorld(e.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
+  window.addEventListener('keydown', (e) => {
+    if (!worldShown) return;
+    if (e.code === 'Equal' || e.code === 'NumpadAdd') zoomWorld(0.8);
+    if (e.code === 'Minus' || e.code === 'NumpadSubtract') zoomWorld(1.25);
+  });
   worldCanvas.addEventListener('mousemove', (e) => {
     const q = worldView?.placeAt(e.clientX, e.clientY);
     worldCanvas.style.cursor = q ? 'pointer' : ''; worldCanvas.title = q ? `${q.name}: go there` : 'The world about this place. Click, or M, for the plan.';
