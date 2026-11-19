@@ -57,19 +57,19 @@ const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
 
 /** One tree grown at `x`, `y`, `z` into `pl` and the bark meshes (`bark`, `barkAsh`, `barkPine`, `barkFir`), as the valley grows it. Returns how far it reaches. */
-function growAt(pl: Planting, to: (name: string) => MeshBuilder, t: TreeWork, season: Season, x: number, y: number, z: number, q: Rng): number {
+function growAt(pl: Planting, to: (name: string) => MeshBuilder, t: TreeWork, season: Season, x: number, y: number, z: number, q: Rng, keepOut?: (p: Vector3) => boolean): number {
   const greens = greensOf(season), leaf = leafOf(greens[Math.abs(Math.round(t.leaf)) % greens.length]);
-  if (t.kind === 'oak' || t.kind === 'old oak') return growTree(pl, to('bark'), x, y, z, t.height, t.girth, { kind: 'oak', detail: 1, cards: t.kind === 'old oak' ? 2500 : 1500, cardSize: t.kind === 'old oak' ? 0.8 : 0.74, wide: t.wide, leaf, bark: OAK_BARK, shaded: true, soft: to('bark') }, q);
-  if (t.kind === 'ash') return growTree(pl, to('barkAsh'), x, y, z, t.height, t.girth, { kind: 'ash', detail: 1, cards: 1500, cardSize: 0.74, wide: t.wide, leaf, bark: ASH_BARK, shaded: true, soft: to('barkAsh') }, q);
-  if (t.kind === 'spruce') return growConifer(pl, to('barkFir'), x, y, z, t.height, t.wide, t.girth, { kind: 'spruce', detail: 1, needle: leafOf([0.045, 0.13, 0.04]), bark: FIR_BARK, shaded: true, soft: to('barkFir') }, q);
-  if (t.kind === 'pine' || t.kind === 'coast pine') return growConifer(pl, to('barkPine'), x, y, z, t.height, t.wide, t.girth, { kind: 'pine', coastal: t.kind === 'coast pine', detail: 1, needle: leafOf(t.kind === 'pine' ? [0.07, 0.15, 0.07] : [0.08, 0.16, 0.06]), bark: t.kind === 'pine' ? PINE_BARK : [0.8, 0.62, 0.5], shaded: true, soft: to('barkPine') }, q);
-  return growTree(pl, to('bark'), x, y - 0.05, z, t.height, t.girth, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, wide: t.wide, leaf, bark: OAK_BARK, shaded: true }, q);
+  if (t.kind === 'oak' || t.kind === 'old oak') return growTree(pl, to('bark'), x, y, z, t.height, t.girth, { kind: 'oak', detail: 1, cards: t.kind === 'old oak' ? 2500 : 1500, cardSize: t.kind === 'old oak' ? 0.8 : 0.74, wide: t.wide, leaf, bark: OAK_BARK, shaded: true, soft: to('bark'), keepOut }, q);
+  if (t.kind === 'ash') return growTree(pl, to('barkAsh'), x, y, z, t.height, t.girth, { kind: 'ash', detail: 1, cards: 1500, cardSize: 0.74, wide: t.wide, leaf, bark: ASH_BARK, shaded: true, soft: to('barkAsh'), keepOut }, q);
+  if (t.kind === 'spruce') return growConifer(pl, to('barkFir'), x, y, z, t.height, t.wide, t.girth, { kind: 'spruce', detail: 1, needle: leafOf([0.045, 0.13, 0.04]), bark: FIR_BARK, shaded: true, soft: to('barkFir'), keepOut }, q);
+  if (t.kind === 'pine' || t.kind === 'coast pine') return growConifer(pl, to('barkPine'), x, y, z, t.height, t.wide, t.girth, { kind: 'pine', coastal: t.kind === 'coast pine', detail: 1, needle: leafOf(t.kind === 'pine' ? [0.07, 0.15, 0.07] : [0.08, 0.16, 0.06]), bark: t.kind === 'pine' ? PINE_BARK : [0.8, 0.62, 0.5], shaded: true, soft: to('barkPine'), keepOut }, q);
+  return growTree(pl, to('bark'), x, y - 0.05, z, t.height, t.girth, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, wide: t.wide, leaf, bark: OAK_BARK, shaded: true, keepOut }, q);
 }
 
-/** One tree, standing at the origin: its bark into the meshes by name, its leaves as cards. */
-export function growOne(t: TreeWork, season: Season, rng: Rng, mesh: (material: string) => MeshBuilder): { cards: CardSet[]; reach: number } {
+/** One tree, standing at the origin: its bark into the meshes by name, its leaves as cards. Its boughs keep out of `keepOut`. */
+export function growOne(t: TreeWork, season: Season, rng: Rng, mesh: (material: string) => MeshBuilder, keepOut?: (p: Vector3) => boolean): { cards: CardSet[]; reach: number } {
   const pl = new Planting();
-  const reach = growAt(pl, mesh, t, season, 0, 0, 0, rng);
+  const reach = growAt(pl, mesh, t, season, 0, 0, 0, rng, keepOut);
   return { cards: pl.sets, reach };
 }
 
@@ -184,7 +184,7 @@ export function natureKit(o: { stone: Stone; season: Season }) {
    * `heightAt` says how high the ground stands at a spot (on the square, or on rock), or null where nothing can grow. Trees keep their
    * distance from trees already standing.
    */
-  const growPainted = (dabs: number[][], heightAt: (x: number, z: number) => number | null) => {
+  const growPainted = (dabs: number[][], heightAt: (x: number, z: number) => number | null, keepOut?: (p: Vector3) => boolean) => {
     const grown = new Map<string, MeshBuilder>();
     const to = (name: string): MeshBuilder => { let m = grown.get(name); if (!m) grown.set(name, (m = new MeshBuilder())); return m; };
     const pl = new Planting();
@@ -207,7 +207,7 @@ export function natureKit(o: { stone: Stone; season: Season }) {
         if (y === null) continue;
         if (what === 'oak' || what === 'ash' || what === 'spruce' || what === 'pine' || what === 'bush') {
           const deal = TREE_DEALT[what];
-          growAt(pl, to, { kind: what, height: own.range(...deal.height), girth: own.range(...deal.girth), wide: own.range(...deal.wide), leaf: own.int(0, 3) }, o.season, x, y, z, own);
+          growAt(pl, to, { kind: what, height: own.range(...deal.height), girth: own.range(...deal.girth), wide: own.range(...deal.wide), leaf: own.int(0, 3) }, o.season, x, y, z, own, keepOut);
         } else if (what === 'grass') {
           const c = turfColour(x, z, s1), t = own.range(0.75, 1.2), tall = (0.75 + 0.8 * own.next()) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2)), dry = Math.min(1, parched + (own.chance(0.08) ? 0.8 : 0));
           pl.tuft(pl.grass, x, y - 0.05, z, own.range(0.4, 0.7) * (0.75 + 0.35 * tall), own.range(0.2, 0.34) * (0.35 + 1.25 * tall), own.range(0, Math.PI), [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t]);

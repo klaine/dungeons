@@ -30,7 +30,7 @@ import { CardSet } from '../src/render/scene';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { GROUND_PAINTS, natureKit, Painted, PLANT_PAINTS, Season, SEASONS, TREES } from './nature';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
+import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
 import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
@@ -488,7 +488,11 @@ async function start(): Promise<void> {
   // (What stands close about a building is part of what it is built from: a window that would look into another building is left out,
   // and comes back when that one is moved away.)
   const nearItem = (it: Item) => nearOf(it, state.items);
-  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null, it.kind === 'tree' ? state.season : '']);
+  /** How high a thing rises over the square: what was built of it, or near enough until it is built. (To half a metre, so that its own small changes do not grow the trees about it again.) */
+  const topOf = (q: Item) => { const b = built.get(q.id); const top = b && !b.box.isEmpty() ? b.box.max.y * q.scale[1] : eavesOf(q) * q.scale[1] + 4; return Math.ceil((top + liftOf(q)) * 2) / 2; };
+  // (And a tree's room: what stands about it, which its boughs keep out of, so that one moved up to a wall grows again against it.)
+  const roomItem = (it: Item) => (it.kind === 'tree' ? roomOf(it, state.items, topOf, state.paint.rock) : undefined);
+  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null, it.kind === 'tree' ? [state.season, roomItem(it)] : '']);
   /** Puts what is built of an item where the item says it stands, turned and scaled. (Built facing `w`, its front towards -x: a quarter turn more faces it to +z.) */
   const placeItem = (it: Item) => {
     const b = built.get(it.id);
@@ -507,7 +511,7 @@ async function start(): Promise<void> {
     try {
       const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
       if (isNature(it.kind)) natureSurfaces();
-      made = buildItem(it, state.stone, into, nearItem(it), state.season);
+      made = buildItem(it, state.stone, into, nearItem(it), state.season, roomItem(it));
       const c = stoneColour(state.stone);
       buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     } catch (e) {
@@ -760,6 +764,8 @@ async function start(): Promise<void> {
   let at = -1;
   const snapshot = () => JSON.stringify({ items: state.items, next: state.next, selected: state.selected, paint: state.paint });
   function commit() {
+    // (What was painted grows again where what stands about it has changed: a wood beside a building just moved.)
+    if (state.paint.plants.length) paintLayers();
     const s = snapshot();
     if (history[at] !== s) {
       history.splice(at + 1);
@@ -817,7 +823,9 @@ async function start(): Promise<void> {
     layers.plants = []; layers.cards = [];
     if (!state.paint.plants.length) return;
     natureSurfaces();
-    const made = kitOf().growPainted(state.paint.plants, heightAt);
+    // (Their boughs keep out of the buildings and the boulders, as a tree set out does; the rock they grow on, they stand on.)
+    const solid = state.items.filter((it) => it.kind !== 'tree');
+    const made = kitOf().growPainted(state.paint.plants, heightAt, (p) => p.y > -1 && solid.some((it) => p.y < topOf(it) + 0.3 && standsIn(it, p.x, p.z, 0.35)));
     for (const [name, builder] of made.meshes) if (builder.vertexCount) { const m = meshOf(name, builder); natureLayer.add(m); layers.plants.push(m); }
     layers.cards = makeCardMeshes(made.cards);
   };
@@ -825,7 +833,8 @@ async function start(): Promise<void> {
   /** Lays again whatever of what was painted has changed since it was last laid. Returns how long that took, in milliseconds. */
   const paintLayers = (): number => {
     const t0 = performance.now(), P = state.paint;
-    const sig = { ground: JSON.stringify([P.ground, state.stone]), rock: JSON.stringify([P.rock, state.stone]), plants: JSON.stringify([P.plants, P.rock, state.season, state.stone]) };
+    const standing = state.items.filter((it) => it.kind !== 'tree').map((it) => [it.kind, it.x, it.z, it.turn, it.scale, it.shape.w, it.shape.d, topOf(it)]);
+    const sig = { ground: JSON.stringify([P.ground, state.stone]), rock: JSON.stringify([P.rock, state.stone]), plants: JSON.stringify([P.plants, P.rock, state.season, state.stone, P.plants.length ? standing : 0]) };
     if (sig.ground !== paintedSig.ground) layGround();
     if (sig.rock !== paintedSig.rock) carveRocks();
     if (sig.plants !== paintedSig.plants) growPlants();
@@ -984,6 +993,8 @@ async function start(): Promise<void> {
       const t = s.tree!, wideOf = (q: Item) => crownOfTree(q);
       out.push({ id: 'height', label: `${t.height.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.4, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.height = st.shape.tree!.height + by; }) });
       out.push({ id: 'spread', label: 'spread', colour: AMBER, at: worldAt(it, wideOf(it), Math.min(top * 0.6, 8), D / 2), axis: 'u', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.wide = st.shape.tree!.wide * (1 + by / Math.max(1, wideOf(st))); }) });
+      // (The trunk, by a knob at its side at the height of a hand: dragged out, it grows thicker.)
+      out.push({ id: 'trunk', label: 'trunk', colour: AMBER, at: worldAt(it, t.girth + 0.25, Math.min(1.3, top * 0.3), D / 2), axis: 'u', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.girth = st.shape.tree!.girth + by * 0.25; }) });
       return out;
     }
     if (it.kind === 'boulder') {
