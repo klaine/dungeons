@@ -314,7 +314,8 @@ async function start(): Promise<void> {
   scene.add(grid);
 
   // ------------------------------------------------------------------ buildings
-  interface Built { holder: Group; meshes: Mesh[]; box: Box3; rects: { u0: number; u1: number; v0: number; v1: number }[]; sig: string; ms: number; triangles: number }
+  /** What is built of an item: its meshes, the box they fill, the ground it stands on, what it was built from, when and how long it took. */
+  interface Built { holder: Group; meshes: Mesh[]; box: Box3; rects: { u0: number; u1: number; v0: number; v1: number }[]; sig: string; ms: number; at: number; triangles: number }
   const built = new Map<number, Built>();
   const dirty = new Set<number>();
   const world = new Group();
@@ -342,7 +343,7 @@ async function start(): Promise<void> {
       return false;
     }
     let b = built.get(it.id);
-    if (!b) { b = { holder: new Group(), meshes: [], box: new Box3(), rects: [], sig: '', ms: 0, triangles: 0 }; world.add(b.holder); built.set(it.id, b); }
+    if (!b) { b = { holder: new Group(), meshes: [], box: new Box3(), rects: [], sig: '', ms: 0, at: 0, triangles: 0 }; world.add(b.holder); built.set(it.id, b); }
     for (const m of b.meshes) { b.holder.remove(m); m.geometry.dispose(); }
     b.meshes = []; b.box.makeEmpty(); b.triangles = 0;
     for (const [name, builder] of builders) {
@@ -353,7 +354,7 @@ async function start(): Promise<void> {
       b.triangles += (m.geometry.index?.count ?? 0) / 3;
     }
     b.rects = footprintOf({ ...it.shape, x: 0, z: 0, faces: 'w' } as Building);
-    b.sig = sigOf(it); b.ms = performance.now() - t0;
+    b.sig = sigOf(it); b.ms = performance.now() - t0; b.at = performance.now();
     placeItem(it);
     changed(true);
     return true;
@@ -867,18 +868,34 @@ async function start(): Promise<void> {
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, parent: HTMLElement, text?: string): HTMLElementTagNameMap[K] => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; parent.appendChild(e); return e; };
   const sceneRefreshers: (() => void)[] = [];
   let selRefreshers: (() => void)[] = [];
-  /** Shows on the panel what everything now is. */
-  function reflect() { for (const r of selRefreshers) r(); }
-  const reflectScene = () => { for (const r of sceneRefreshers) r(); };
-  const fmt = (v: number, step: number) => (step >= 1 ? v.toFixed(0) : step >= 0.1 ? v.toFixed(1) : v.toFixed(2));
+  /**
+   * Which controls the panel shows for a building: those of its kind, one height to a storey, wings only on a broad front, a
+   * tower's side only where there is one tower, and so on. When a change alters this (a storey dragged away by its arrow,
+   * wings gone with bays), the panel is laid out again; while a slider on it is held, once it is let go.
+   */
+  const layoutOf = (it: Item | undefined) => {
+    if (!it) return '';
+    const s = it.shape, bw = s.brickwork;
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.wings?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
+  };
+  let shownLayout = '', sliding = false;
+  /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
+  function reflect() {
+    if (!sliding && layoutOf(selectedItem()) !== shownLayout) { renderSelected(); return; }
+    for (const r of selRefreshers) try { r(); } catch (e) { console.warn(e); }
+  }
+  const reflectScene = () => { for (const r of sceneRefreshers) try { r(); } catch (e) { console.warn(e); } };
+  const fmt = (v: number, step: number) => (!Number.isFinite(v) ? '–' : step >= 1 ? v.toFixed(0) : step >= 0.1 ? v.toFixed(1) : v.toFixed(2));
+  const read = (get: () => number) => { try { return Number(get()); } catch { return NaN; } };
   const slider = (parent: HTMLElement, list: (() => void)[], label: string, min: number, max: number, step: number, get: () => number, set: (v: number) => void, o: { title?: string; done?: () => void } = {}) => {
     const row = el('div', parent); row.className = 'row';
     const l = el('label', row, label); if (o.title) l.title = row.title = o.title;
     const input = el('input', row); input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step);
     const out = el('output', row);
-    const show = () => { const v = get(); input.value = String(v); out.textContent = fmt(v, step); };
-    input.addEventListener('input', () => { set(Number(input.value)); reflect(); show(); });
-    input.addEventListener('change', () => { o.done?.(); input.blur(); });
+    // (A slider whose measure the building no longer has is shown empty until the panel is laid out again.)
+    const show = () => { const v = read(get), ok = Number.isFinite(v); input.disabled = !ok; if (ok) input.value = String(v); out.textContent = fmt(v, step); };
+    input.addEventListener('input', () => { sliding = true; if (Number.isFinite(read(get))) set(Number(input.value)); reflect(); show(); });
+    input.addEventListener('change', () => { sliding = false; o.done?.(); input.blur(); reflect(); });
     list.push(show); show();
   };
   const stepper = (parent: HTMLElement, list: (() => void)[], label: string, get: () => number, set: (v: number) => void, by = 1, title?: string) => {
@@ -886,9 +903,9 @@ async function start(): Promise<void> {
     const l = el('label', row, label); if (title) l.title = row.title = title;
     const box = el('div', row); box.className = 'step';
     const less = el('button', box, '−'), out = el('output', box), more = el('button', box, '+');
-    less.addEventListener('click', () => { set(get() - by); });
-    more.addEventListener('click', () => { set(get() + by); });
-    const show = () => { out.textContent = String(get()); };
+    less.addEventListener('click', () => { const v = read(get); if (Number.isFinite(v)) set(v - by); });
+    more.addEventListener('click', () => { const v = read(get); if (Number.isFinite(v)) set(v + by); });
+    const show = () => { const v = read(get); out.textContent = Number.isFinite(v) ? String(v) : '–'; };
     list.push(show); show();
   };
   const choice = <T extends string | number>(parent: HTMLElement, list: (() => void)[], label: string, options: [string, T][], get: () => T, set: (v: T) => void, title?: string) => {
@@ -936,6 +953,8 @@ async function start(): Promise<void> {
     selBox.innerHTML = '';
     selRefreshers = [];
     const it = selectedItem();
+    shownLayout = layoutOf(it);
+    sliding = false;
     if (!it) { el('p', selBox, 'Nothing is selected. Tap a building, or add one.').className = 'note'; return; }
     const R = RANGES, list = selRefreshers;
     el('h3', selBox, KINDS[it.kind].name);
@@ -1036,7 +1055,7 @@ async function start(): Promise<void> {
       num('Length', [R.church.bays[0] * R.church.pitch[0], R.church.bays[1] * R.church.pitch[1]], () => s().w, (t, v) => { t.w = v; }, 'The nave from end to end', 0.1);
       num('Breadth', R.church.d, () => s().d, (t, v) => { t.d = v; });
       num('Walls', R.church.wall, () => s().heights[0], (t, v) => { t.heights = [v]; }, 'How high the nave walls stand');
-      ints('Towers', () => c().towers, (t, v) => { t.brickwork!.church!.towers = v === 2 ? 2 : 1; }, 1, 'w', 'Two need a nave fifteen metres broad');
+      ints('Towers', () => c().towers, (t, v) => { t.brickwork!.church!.towers = v >= 2 ? 2 : 1; }, 1, 'w', 'Two need a nave fifteen metres broad');
       if (c().towers === 1) num('Tower side', R.church.side, () => c().side, (t, v) => { t.brickwork!.church!.side = v; });
       num('Tower height', [s().heights[0] + R.church.tower[0], s().heights[0] + R.church.tower[1]], () => c().height, (t, v) => { t.brickwork!.church!.height = v; }, 'The tower’s walls, to the foot of the spire', 0.1);
       pick('Spire', [['Needle', 'needle'], ['Corner spirelets', 'corners'], ['Saddle roof', 'saddle']], () => c().spire, (t, v) => { t.brickwork!.church!.spire = v; });
@@ -1291,6 +1310,11 @@ async function start(): Promise<void> {
       const begun = performance.now(), order = [...dirty].sort((a, b) => (b === state.selected ? 1 : 0) - (a === state.selected ? 1 : 0));
       for (const id of order) {
         if (performance.now() - begun > 30) break;
+        // (A building is built again no sooner than half as long again as it took to build, after it was last built: a large one dragged
+        // through its measures is built a few times a second, not every frame, so that its old geometry can be let go of before the next
+        // is made. The largest, a classical front of fifteen bays and six storeys, is some 70 MB a time, and an iPad's memory is short.)
+        const b = built.get(id);
+        if (b && performance.now() - b.at < Math.max(60, b.ms * 1.5)) continue;
         dirty.delete(id);
         const it = itemOf(id);
         if (it) rebuild(it);
