@@ -869,6 +869,25 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     };
     const wobbleAt = (x: number, z: number) => (fbm2(x * 0.3 + s2 + 20, z * 0.3 + s1, 3) - 0.5) * 3.2;
     const keepShelf = site.grounds ? (site.terraces ?? []).find((t) => t.keep) : undefined;
+    // (In a valley that was found, the track graded: the land under its middle, cut and made up so that it nowhere climbs more steeply
+    // than three in ten, as an island's way is. Where the found land has a step, above the gap where its walls draw in, the track
+    // went up a bank of forty-five degrees and more, which nobody could walk up.)
+    // (And the sides of a cutting, or of the bank the track is made up on, lie back by its depth: over six metres where it is shallow,
+    // and over nearly twice its depth where it is deep, which is a slope a walker can climb; at six metres a cutting seven deep
+    // had sides of fifty degrees.)
+    const grade = vale?.terrain ? (() => {
+      const z0 = Math.floor(p.z1 - 2), n = Math.ceil(vale.mouth + 30) - z0 + 1, g = new Float32Array(n), land = new Float32Array(n);
+      for (let i = 0; i < n; i++) g[i] = land[i] = valleyLand(vale, p.floor, p, pathAt(z0 + i), z0 + i);
+      const most = new Float32Array(n);
+      for (let i = 0; i + 1 < n; i++) most[i] = 0.3 * Math.hypot(1, pathAt(z0 + i + 1) - pathAt(z0 + i));
+      for (let pass = 0; pass < 6; pass++) {
+        for (let i = 1; i < n; i++) g[i] = Math.min(g[i - 1] + most[i - 1], Math.max(g[i - 1] - most[i - 1], g[i]));
+        for (let i = n - 2; i >= 0; i--) g[i] = Math.min(g[i + 1] + most[i], Math.max(g[i + 1] - most[i], g[i]));
+      }
+      const read = (a: Float32Array, z: number) => { const f = Math.min(n - 1.001, Math.max(0, z - z0)), i = Math.floor(f), t = f - i; return a[i] * (1 - t) + a[i + 1] * t; };
+      return { at: (z: number) => read(g, z), fade: (z: number) => Math.max(6, 1.8 * Math.abs(read(g, z) - read(land, z))) };
+    })() : null;
+    const graded = grade?.at;
     const swells = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       // (Level on the promontory a keep stands on, as a castle's court would be; swelling elsewhere as it always did.)
@@ -877,7 +896,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (A valley that was found: its floor is the land, held at the meadow's level about the house and following the land further
       // down; not tilted across the track, which keeps the level the land has under its middle.)
       if (vale?.terrain) {
-        const land = valleyLand(vale, p.floor, p, x, z), mid = valleyLand(vale, p.floor, p, pathAt(z), z), floor = land + (mid - land) * (1 - Math.min(1, fromPath / 6));
+        const land = valleyLand(vale, p.floor, p, x, z), mid = graded ? graded(z) : valleyLand(vale, p.floor, p, pathAt(z), z), floor = land + (mid - land) * (1 - Math.min(1, fromPath / (grade ? grade.fade(z) : 6)));
         return p.floor - 0.03 + (floor - p.floor) * smooth((z - p.z1 - 2) / 30) * level;
       }
       return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
@@ -1284,7 +1303,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       for (const t of towers) {
         const d = Math.max(Math.abs(x - t.x), Math.abs(z - t.z));
         if (d > t.half + 5) continue;
-        const k = 1 - smooth((d - t.half - 1.9) / 2.8);
+        // (Giving way to the track's own ground beside it: a tower is set back from the track, but the corners of its levelled ground
+        // reach further than its sides, and where the track was cut deep into the land the corner of a tower's ground, at the land's
+        // height, stood as a bank across it.)
+        const k = (1 - smooth((d - t.half - 1.9) / 2.8)) * smooth((fromPath - 0.3) / 2.5);
         y += (t.base - t.lift - y) * k;
         even = Math.min(even, 1 - k);
       }
@@ -1774,6 +1796,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       // on the spoil of a mine, which is broken stone;
       bare = Math.max(bare, Math.min(0.95, heapAt(x, z) * 3));
+      // and at a coastal town on the shore, from under the sea to a metre over it, which is shingle and sand, wet below the tide.
+      // (Under the water the ground showed through the shallows as the valley's turf.)
+      if (vale?.sea !== undefined) {
+        const y = ground(x, z);
+        if (y < vale.sea + 1.6) { bare = Math.max(bare, 0.9 * (1 - smooth((y - vale.sea - 0.4) / 1.1))); wet = Math.max(wet, 1 - smooth((y - vale.sea + 0.1) / 0.5)); }
+      }
       lay.bare = bare;
       lay.wet = wet;
       // And where the track is: how far to one side of its middle, plus a hundred; nothing if it is nowhere near.

@@ -1362,6 +1362,13 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
       const at = Math.min(z, v.mouth + 2), w = edgeAt(v, 'w', at), e = edgeAt(v, 'e', at), mid = (w + e) / 2;
       return [round(mid + on * Math.max(3.2, (e - w) / 2 - 4.4) + (z > v.mouth + 2 ? on * Math.sin(z * 0.11) * 1.5 : 0)), round(z)];
     };
+    // (Not where the land rises to the gap, as a valley found in the land may: water cannot run uphill, and its bed, which may never
+    // rise, was cut a gully twelve metres deep through the gap, where the track ends and whoever comes in arrives. It goes to ground.)
+    if (v.terrain) {
+      const at = (q: [number, number]) => valleyLand(v, meadow.floor, meadow, q[0], q[1]);
+      const lowest = Math.min(...st.course.map((q) => at(q as [number, number])));
+      if (Math.max(at(beside(v.mouth - 6)), at(beside(v.mouth + 2))) > lowest + 1.5) continue;
+    }
     st.course.push(beside(v.mouth - 6), beside(v.mouth + 2), beside(v.mouth + 14), beside(v.mouth + 30), beside(v.mouth + 52));
     st.to = 'out';
   }
