@@ -5,6 +5,7 @@ import { Building } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBrick } from './brick';
+import { buildCanal } from './canal';
 
 /**
  * Buildings that stand by themselves and are seen from outside. The site document says what a
@@ -1165,8 +1166,9 @@ export function solids(mesh: (material: string) => MeshBuilder) {
 /** Builds one building where the site document says it stands, on ground at the height `base`. `stone` is the tint of the country's stone. */
 /** Builds a building; `tops`, if given, is told where the top of each of its chimneys is, for smoke to rise from. */
 export function buildBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour, first: boolean, tops?: Vector3[]): void {
-  // (Brick buildings are shut, and seen only from outside: nothing in them is indoors.)
+  // (Brick buildings and canal houses are shut, and seen only from outside: nothing in them is indoors.)
   if (b.style === 'brick') { buildBrick(b, base, mesh, rng, stone); return; }
+  if (b.style === 'canal') { buildCanal(b, base, mesh, rng, stone, tops); return; }
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
   const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };

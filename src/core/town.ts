@@ -3,6 +3,8 @@ import { Building, Place, Site, Town } from './site';
 import { coastHeight, coastland, findTowns, townFrame, TownNeed, TownSpot } from './coastland';
 import { HeightField, landDetail, leastPath, smoothLine, wornLattice } from './terrain';
 import { classicalArch, classicalVariations, footprintOf, freeAtEnds, planClassical, planTimber } from './building';
+import { brickCountry } from './brick';
+import { dealCanalHouse } from './canal';
 
 /**
  * A harbour town, laid out on a coast that was found (`coastland.ts`). The land comes first: a
@@ -760,6 +762,14 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const blocksBySquare = (r: Rect) => (Math.abs(r.x0 - t.square.x1 - (riverSide > 0 ? corridor : 0)) < 0.2 || Math.abs(r.x1 - t.square.x0 + (riverSide < 0 ? corridor : 0)) < 0.2) && r.z1 > t.square.z0 && r.z0 < t.square.z1;
   // ---- the buildings of the blocks: along every side of a block that fronts a street or the square, close together, their
   // fronts on the block's edge. The long sides first, corner to corner; the short sides between them.
+  // Along the river's quays they are canal houses, as on the canals of Amsterdam: narrow, tall and deep, wall against wall, whatever
+  // the quarter behind them. And two towns in five are Dutch, as the harbours of the Zuiderzee are: canal houses along the waterfront,
+  // and on every side of the blocks of the classical quarter but the one that faces the square, which keeps its classical front.
+  const dutch = rng.fork('canal houses').chance(0.4), country = brickCountry(site.setting.stone);
+  /** Whether a side of a block, the middle of its edge at (`x`, `z`) and facing `turn`, fronts the river's quay or (in a Dutch town) the waterfront. */
+  const canalSide = (x: number, z: number, turn: number) =>
+    (corridor > 0 && Math.abs(x - riverX) < corridor / 2 + 1.5 && Math.cos(turn) * (riverX - x) > 0 && z > Math.min(level.z0 - 14, t.square.z0 - 20)) ||
+    (dutch && Math.sin(turn) > 0.9 && z > qz - apron - 1.5);
   {
     const b0 = rng.fork('buildings');
     let n = 0;
@@ -768,12 +778,17 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       const deep = classic ? q.range(9.6, 11.8) : q.range(6.4, 8.6);
       const wash = (r: Rng) => (classic ? r.pick(STUCCO) : r.pick(WASHES));
       // Along a front from `a` to `c` (in the front's own run), facing `turn`, its edge given: buildings side by side.
-      const front = (edge: (s: number) => [number, number], a: number, c: number, turn: number, depth: number) => {
+      const front = (edge: (s: number) => [number, number], a: number, c: number, turn: number, depth: number, canal = false) => {
         let s = a;
-        while (c - s > (classic ? 9.3 : 5.6)) {
+        while (c - s > (canal ? 2.4 : classic ? 9.3 : 5.6)) {
           const r = q.fork(`b${t.buildings.length}`);
           let spec: Omit<Building, 'x' | 'z' | 'faces'>;
-          if (classic) {
+          if (canal) {
+            // (As much of the front as is left, if a house of one window is all that fits; otherwise any breadth that fits.)
+            const deal = dealCanalHouse(r.fork('canal'), { deep: depth, room: c - s, country });
+            if (!deal) break;
+            spec = { ...deal, d: depth };
+          } else if (classic) {
             let bays = Math.floor((c - s - 1.6) / 2.55);
             if (bays > 13) bays = r.pick([5, 7, 7, 9, 9, 11]);
             if (bays % 2 === 0) bays--;
@@ -806,7 +821,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
           }
           else if (b.style === 'timber') { b.door = r.pick([0.24, 0.76]); b.plan = planTimber(b); }
           t.buildings.push(b);
-          s += spec.w + (classic ? r.range(0, 0.4) : spec.endDoor! > 0 ? 3 : r.chance(0.15) ? r.range(1.4, 2.6) : r.range(0, 0.25));
+          s += spec.w + (canal ? 0.02 : classic ? r.range(0, 0.4) : spec.endDoor! > 0 ? 3 : r.chance(0.15) ? r.range(1.4, 2.6) : r.range(0, 0.25));
         }
       };
       // The block's four fronts: each the line of its edge, the run along it, and the bearing it faces. Two opposite fronts run the
@@ -840,7 +855,9 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
         return full(k) ? [a + trimFull(cosA), c - trimFull(cosB)] : [a + trimEnd(cosA), c - trimEnd(cosB)];
       };
       const winged = new Set<Side>();
-      if (classic && square && q.fork('u').chance(0.5)) {
+      const bySquare = classic && blocksBySquare(blk);
+      const isCanal = (k: Side) => { const S0 = sides[k], [mx, mz] = S0.edge(S0.len / 2); return canalSide(mx, mz, S0.turn) || (dutch && classic && !(bySquare && k === chief)); };
+      if (classic && square && !isCanal(chief) && q.fork('u').chance(0.5)) {
         const r = q.fork('chief'), [a, c] = span(chief);
         let bays = Math.min(15, Math.floor((c - a - 0.6 - 1.6) / 2.55));
         if (bays % 2 === 0) bays--;
@@ -881,7 +898,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       for (const k of [chief, across, ...ends]) {
         if (winged.has(k) || (k === chief && t.buildings.some((b) => b.wings && b.style === 'imperial' && outsideBlock(blk, b.x, b.z) === 0))) continue;
         const [a0, c0] = span(k), [ta, tc] = trim[k] ?? [0, 0];
-        front(sides[k].edge, a0 + ta, c0 - tc, sides[k].turn, full(k) ? deep : Math.min(deep, Math.min(sides[chief].len, sides[across].len) / 2 - 1));
+        front(sides[k].edge, a0 + ta, c0 - tc, sides[k].turn, full(k) ? deep : Math.min(deep, Math.min(sides[chief].len, sides[across].len) / 2 - 1), isCanal(k));
       }
       // A closed block of classical buildings is entered from the street: through a carriage way under an arch in one of them, at least,
       // into the yard within. (If none was given one, the broadest that can take one is.)

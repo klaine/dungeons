@@ -24,13 +24,13 @@ import { MeshBuilder } from './geom/meshBuilder';
  */
 
 type Colour = [number, number, number];
-type Pt = [number, number];
+export type Pt = [number, number];
 type Tools = ReturnType<typeof buildingTools>;
-interface Face { L: number; P: (s: number, y: number, t: number) => Vector3 }
+export interface Face { L: number; P: (s: number, y: number, t: number) => Vector3 }
 /** The head of an opening or a niche: square, a shallow arc, a half circle, or pointed. */
-type Head = 'flat' | 'segment' | 'round' | 'pointed';
+export type Head = 'flat' | 'segment' | 'round' | 'pointed';
 /** An opening or a niche: its sides, its sill or foot, the top of its head, and the head's shape. */
-interface Hole { s0: number; s1: number; y0: number; y1: number; head: Head }
+export interface Hole { s0: number; s1: number; y0: number; y1: number; head: Head }
 
 const WHITE: Colour = [0.9, 0.89, 0.85], FRAME: Colour = [0.88, 0.87, 0.82], PANE: Colour = [0.04, 0.055, 0.075], IRON: Colour = [0.05, 0.05, 0.055];
 const OAK: Colour = [0.2, 0.13, 0.085];
@@ -50,7 +50,7 @@ const DOORS: Colour[] = [[0.08, 0.17, 0.12], [0.3, 0.07, 0.06], [0.2, 0.12, 0.07
 // Plane figures.
 
 /** How high the head of an opening `w` broad rises above its springing. */
-function riseOf(w: number, head: Head): number {
+export function riseOf(w: number, head: Head): number {
   if (head === 'flat') return 0;
   if (head === 'segment') return Math.min(0.3, w * 0.16);
   if (head === 'round') return w / 2;
@@ -60,7 +60,7 @@ function riseOf(w: number, head: Head): number {
 }
 
 /** The points of a head from its right springing over to its left, both left out, at height `spring`. */
-function headPoints(s0: number, s1: number, spring: number, head: Head, n = 8): Pt[] {
+export function headPoints(s0: number, s1: number, spring: number, head: Head, n = 8): Pt[] {
   const w = s1 - s0, mid = (s0 + s1) / 2, out: Pt[] = [];
   if (head === 'flat') return out;
   if (head === 'round') {
@@ -81,7 +81,7 @@ function headPoints(s0: number, s1: number, spring: number, head: Head, n = 8): 
 }
 
 /** The outline of an opening, anticlockwise from its lower left corner. */
-function shapeOf(g: Hole): Pt[] {
+export function shapeOf(g: Hole): Pt[] {
   const spring = g.y1 - riseOf(g.s1 - g.s0, g.head);
   return [[g.s0, g.y0], [g.s1, g.y0], [g.s1, spring], ...headPoints(g.s0, g.s1, spring, g.head), [g.s0, spring]];
 }
@@ -90,7 +90,7 @@ function shapeOf(g: Hole): Pt[] {
 const areaOf = (ring: Pt[]) => ring.reduce((sum, p, i) => { const q = ring[(i + 1) % ring.length]; return sum + p[0] * q[1] - q[0] * p[1]; }, 0) / 2;
 
 /** What of a figure lies on one side of an upright line: `keep` -1 for the left of `s`, 1 for the right. */
-function clipAt(ring: Pt[], s: number, keep: -1 | 1): Pt[] {
+export function clipAt(ring: Pt[], s: number, keep: -1 | 1): Pt[] {
   const inside = (p: Pt) => (p[0] - s) * keep >= 0, out: Pt[] = [];
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i], b = ring[(i + 1) % ring.length];
@@ -107,7 +107,7 @@ const within = (g: Hole, n: Hole) => g.s0 > n.s0 - 1e-3 && g.s1 < n.s1 + 1e-3 &&
 // Solids from figures.
 
 /** The tools for the brick buildings: the common ones, and solids cut from figures. */
-function brickTools(b: Building, base: number, mesh: (material: string) => MeshBuilder) {
+export function brickTools(b: Building, base: number, mesh: (material: string) => MeshBuilder) {
   const k = buildingTools(b, base, mesh);
   const D = new Vector3();
   /**
@@ -169,14 +169,14 @@ function brickTools(b: Building, base: number, mesh: (material: string) => MeshB
   };
   return { ...k, prism, pyramid, shaft, disc, faceFrom };
 }
-type BrickKit = ReturnType<typeof brickTools>;
+export type BrickKit = ReturnType<typeof brickTools>;
 
 /**
  * Glass in an opening of any head: what `glazed` does for a square one, with the head filled
  * with a pane of its own shape and a bar round its curve. `across` and `down` are the panes of
  * the square part. The light in it, after dark, is the room's, as `glazed` reckons it.
  */
-function glaze(k: BrickKit, f: Face, g: Hole, across: number, down: number, frame: Colour, deep: number) {
+export function glaze(k: BrickKit, f: Face, g: Hole, across: number, down: number, frame: Colour, deep: number) {
   const spring = g.y1 - riseOf(g.s1 - g.s0, g.head);
   k.glazed(f, { s0: g.s0, s1: g.s1, y0: g.y0, y1: spring }, across, down, frame, deep);
   if (g.head === 'flat') return;
@@ -614,7 +614,8 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
       const c = W * ((j + 0.5) / n), w = 0.9;
       gaps.push({ s0: c - w / 2, s1: c + w / 2, y0: floor(s) + (s ? 0.85 : PL + 1.0), y1: floor(s + 1) - 0.5 });
     }
-    k.pierced(back, 'brick', 0, W, -0.45, E, 0, S, brick, gaps);
+    // (A figure with its windows cut through it: `pierced` takes one row of openings, and these are a row to a storey.)
+    k.prism(back, [[0, -0.45], [W, -0.45], [W, E], [0, E]], gaps.map((g) => shapeOf({ ...g, head: 'flat' })), 0, S, 'brick', brick);
     for (const gp of gaps) { k.glazed(back, gp, 2, 2, FRAME, 0.18); k.on(back, 'brick', gp.s0 - 0.04, gp.s1 + 0.04, gp.y0 - 0.08, gp.y0, -0.06, 0.2, shade(brick, 0.85)); }
     const into = back.P(0, 0, S).sub(back.P(0, 0, 0));
     // (Its sloping edges lie just inside the roof's thickness, so that the roof covers them.)
@@ -727,7 +728,7 @@ function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   {
     const back0: { s0: number; s1: number; y0: number; y1: number }[] = [];
     for (let s = 0; s < N; s++) for (let j = 0; j < b.bays; j++) if ((j + s) % 2 === 0 || b.bays <= 4) back0.push({ s0: W - centre(j) - 0.45, s1: W - centre(j) + 0.45, y0: floor(s) + (s ? 0.8 : PL + 1.0), y1: floor(s + 1) - 0.55 });
-    k.pierced(back, 'brick', 0, W, -0.45, E, 0, S, brick, back0);
+    k.prism(back, [[0, -0.45], [W, -0.45], [W, E], [0, E]], back0.map((g) => shapeOf({ ...g, head: 'flat' })), 0, S, 'brick', brick);
     for (const gp of back0) k.glazed(back, gp, 2, 2, FRAME, 0.18);
   }
   // The dormer's side walls, back as far as the great roof rises above them.
