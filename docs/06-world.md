@@ -116,11 +116,14 @@ place asks for it.
   (`fit.ts`, below):
   - *Islands*: every island the land made (land standing out of the sea, apart from the mainland and
     the world's edge, on the world's own lattice, so none is lost where it crosses a tile's edge) of
-    three hectares or more, whatever its shape and size; on each, the house where its ground fits best,
+    three hectares or more and no more than twenty-five, whatever its shape; on each, the house where its ground fits best,
     well in from the cliffs, a little up from the sea, facing its landing; the landing the nearest shore
     gentle enough to come ashore and walk up (rising no more than four in ten), or the gentlest if none
     is. One house to an island. (Before, an island had to be of a size, near round, with a shoulder at a
-    set height, level within twelve metres; few were.)
+    set height, level within twelve metres; few were.) (Twenty-five hectares at most since the game
+    builds on them: it builds an island whole, its cliffs all round and what grows over all of it, and
+    the cost grows faster than the land; one of 55 hectares made six and a half million triangles of
+    rock and took eight minutes. Of six worlds, `w2` now holds two islands, `w4` one, the rest none.)
   - *Valley heads*: in the tiles of the upland, by the valleys' own search (`findValleys`) on the
     tile's drainage, their ground fitted there; turned down if more than three metres of earth would
     have to move on average. No two within seven hundred metres.

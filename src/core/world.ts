@@ -395,6 +395,12 @@ export function worldTile(w: World, i: number, j: number): Tile {
 
 /** The ground a house's spot is looked for with: about the size of an island's or a valley's level ground. */
 const HOUSE = { w: 46, d: 62 }, VALLEY_LENGTH = 260;
+/**
+ * The most land an island may have, in square metres, to be built whole as a place: 25 hectares. (Built whole, its cost grows faster
+ * than its land: 7 hectares built in 41 seconds with half a million triangles of rock, 14 in 71 with nine hundred thousand, 55 in
+ * eight minutes with six and a half million. An island drawn by the game itself, some 20 hectares, has 1.6 million.)
+ */
+const ISLAND_MOST = 25e4;
 /** How many places of each kind are kept; and how many tiles of each kind are searched at most for them (the richest first, stopping when there are enough). */
 const SEARCH = { isleTiles: 8, uplandTiles: 8, keep: 4 };
 
@@ -689,6 +695,10 @@ function findIslandGrounds(w: World, why: Record<string, number>): WorldPlace[] 
     for (const k of cells) { cu += f.x0 + (k % nx) * cell; cv += f.z0 + Math.floor(k / nx) * cell; }
     cu /= cells.length; cv /= cells.length;
     for (const k of cells) reach = Math.max(reach, Math.hypot(f.x0 + (k % nx) * cell - cu, f.z0 + Math.floor(k / nx) * cell - cv));
+    // (An island is built whole as a place, its cliffs all round and what grows over all of it: one of 55 hectares made six and a
+    // half million triangles of rock and took eight minutes to build. Such a one is country, not a place: `ISLAND_MOST`.)
+    if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_ISLES) console.log('  island: reach', Math.round(reach), 'area', Math.round((cells.length * cell * cell) / 1e4), 'ha');
+    if (cells.length * cell * cell > ISLAND_MOST) { no('too large to build whole'); continue; }
     // The shore: where it is gentle enough to land and walk up (rising no more than six metres in the first fifteen), the landings.
     const shore: { x: number; z: number; slope: number }[] = [];
     for (const k of cells) {
