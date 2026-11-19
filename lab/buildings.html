@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Building lab</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0a09; color: #e8e2d6;
+      font: 12px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-user-select: none; user-select: none; }
+    #view { display: block; touch-action: none; }
+    /* What is drawn over the picture: outlines, the ring to turn by, and the knobs to drag. Only the knobs take the pointer. */
+    #over { position: fixed; left: 0; top: 0; pointer-events: none; overflow: visible; }
+    #over .knob { pointer-events: auto; cursor: grab; touch-action: none; }
+    #over .knob:active { cursor: grabbing; }
+    #over text { font: 600 11px ui-sans-serif, system-ui, sans-serif; paint-order: stroke; stroke: rgba(0, 0, 0, .8); stroke-width: 3px; fill: #fff; }
+    #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 280px; box-sizing: border-box; overflow-y: auto; padding: 10px 12px 18px;
+      background: rgba(11, 10, 9, .86); border-left: 1px solid rgba(232, 226, 214, .18); scrollbar-width: thin; -webkit-user-select: auto; user-select: auto; }
+    body.bare #panel { display: none; }
+    #panel h2 { margin: 14px 0 5px; font: 600 11px/1.2 ui-serif, Georgia, serif; letter-spacing: .14em; text-transform: uppercase; color: #e0b070; }
+    #panel h2:first-child { margin-top: 0; }
+    #panel h3 { margin: 10px 0 3px; font: 600 12px/1.2 ui-sans-serif, system-ui, sans-serif; color: #f2ead9; }
+    .row { display: grid; grid-template-columns: 86px 1fr 40px; gap: 2px 6px; align-items: center; min-height: 22px; }
+    .row.wide { grid-template-columns: 86px 1fr; }
+    .row label { opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row output { opacity: .65; text-align: right; font-variant-numeric: tabular-nums; }
+    .row .step { display: flex; gap: 4px; align-items: center; }
+    .row .step output { min-width: 22px; text-align: center; }
+    input[type=range] { width: 100%; margin: 0; accent-color: #e0b070; }
+    input[type=color] { width: 100%; height: 20px; padding: 0; border: 1px solid rgba(232, 226, 214, .4); border-radius: 3px; background: none; }
+    select, button { font: inherit; color: inherit; background: rgba(11, 10, 9, .6); border: 1px solid rgba(232, 226, 214, .4); border-radius: 3px; padding: 2px 7px; }
+    button { cursor: pointer; }
+    button:hover, button.on { background: rgba(224, 176, 112, .35); }
+    button:disabled { opacity: .4; cursor: default; background: rgba(11, 10, 9, .6); }
+    .buttons { display: flex; flex-wrap: wrap; gap: 4px; margin: 3px 0; }
+    .buttons button { flex: 1 1 auto; }
+    .checks { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 2px 0; }
+    .checks label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+    .checks input { margin: 0; accent-color: #e0b070; }
+    .note { opacity: .58; margin: 4px 0 0; }
+    #tools { position: fixed; left: calc(10px + env(safe-area-inset-left)); top: calc(10px + env(safe-area-inset-top)); display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(100% - 20px); }
+    #tools button { background: rgba(11, 10, 9, .72); padding: 5px 10px; }
+    #tools button.on { background: #e0b070; border-color: #e0b070; color: #1a1408; }
+    #tools .gap { width: 8px; }
+    #foot { position: fixed; left: 12px; bottom: 10px; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+      font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+    #foot .dim { opacity: .62; }
+    #foot .bad { color: #ff9a80; }
+    #foot .good { color: #b9d99a; }
+    /* On a narrow screen the panel is a sheet along the foot of the picture. */
+    @media (max-width: 720px) {
+      #panel { top: auto; left: 0; width: auto; height: 44vh; border-left: 0; border-top: 1px solid rgba(232, 226, 214, .18); padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
+      #tools button { padding: 6px 9px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <svg id="over" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="tools"></div>
+  <div id="foot"></div>
+  <div id="panel"></div>
+  <input id="file" type="file" accept=".json,application/json" hidden />
+  <script type="module" src="./buildings.ts"></script>
+</body>
+</html>

@@ -337,6 +337,10 @@ All have north up. `<seed>-plan.png` is a clean plan with numbered rooms and a k
 
 `<seed>-battlemap.jpg` is a picture of the 3D world, not a drawing. Everything above head height is cut away indoors; courts and open ground are shown whole, in daylight. It has no labels, and the hidden chamber is blacked out as solid wall, so it can be put in front of players. The grid is 1.5 metres (five feet) to a square at 72 pixels a square, fewer if the site is too large for a 4,096-pixel image, and the image's edges fall on grid lines, so it can be dropped into a virtual tabletop and its grid matched by setting the square size alone.
 
+## The building lab's file
+
+The building lab (`lab/buildings.html`; see the README) saves what is set out on its square as `buildings.json`: `lab` (`"dungeons building lab"`), `version` (1), the `stone` and `hour` it was seen in, and `items`, one to a building. Each item is the lab's own record, `kind` (`classical`, `timber`, `gabled`, `eaves`, `store` or `church`), `seed` (what the builder's own choices are made from), `x` and `z` (where the middle of its main block stands, in metres), `turn` (which way its front looks, in degrees: 0 towards +z, turning anticlockwise seen from above), `scale` (stretched along its breadth, its height and its depth, apart from its measures) and `inn` (a timber house's sign); its `shape`, the measures the lab lets be changed; and `building`, a `Building` of the site document as the game builds it, at the origin facing `w`, with its rooms planned. A building of the game can stand only facing `e` or `w`; one turned otherwise in the lab is built as the document says and turned as a whole. Opening a file reads `shape`, or `building` where there is no `shape`, and brings each measure within what its kind can be.
+
 ## Versions
 
 `version` goes up whenever a change would make an older reader misread a file: a field removed, renamed or given a different meaning. New optional fields do not change it, so a reader should ignore fields it does not know.
