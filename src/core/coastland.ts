@@ -128,16 +128,18 @@ export interface TownNeed {
  * better still, a headland with cliffs beside it, and land standing out on either hand so that
  * the harbour lies in a bay.
  */
-export function findTowns(c: Coastland, need: TownNeed, rng: Rng, why?: Record<string, number>): TownSpot[] {
+export function findTowns(c: { inner: HeightField }, need: TownNeed, rng: Rng, why?: Record<string, number>, o: { margin?: number; where?: (k: number) => boolean } = {}): TownSpot[] {
   const no = (k: string) => { if (why) why[k] = (why[k] ?? 0) + 1; };
   const f = c.inner, nx = f.nx, cell = f.cell;
   const H = (u: number, v: number) => f.at(u, v);
   const found: TownSpot[] = [];
-  // (The middle of the lattice only, so that all the town and what it is judged by lies within it.)
-  const M = 120;
+  // (The middle of the lattice only, so that all the town and what it is judged by lies within it: six hundred metres in.)
+  // (A world's lattice, of eight metres, asks for the same margin in metres; and only its mainland's shore, `where`.)
+  const M = o.margin ?? 120;
   for (let j = M; j < f.nz - M; j += 2) for (let i = M; i < nx - M; i += 2) {
     const k = j * nx + i, h = f.data[k];
     if (h < 0.2 || h > 2.8) continue;
+    if (o.where && !o.where(k)) continue;
     // A shore: the sea within a few strides.
     const u = f.x0 + i * cell, v = f.z0 + j * cell;
     let wet = false;

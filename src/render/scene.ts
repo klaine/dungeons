@@ -123,7 +123,7 @@ export interface SceneDescription {
    * Still water: a level surface over a hollow in the ground. `outline` is its edge as x and z in
    * turn, going round; without one it is a disc of radius `r`.
    */
-  water?: { x: number; z: number; r: number; level: number; outline?: number[] }[];
+  water?: { x: number; z: number; r: number; level: number; outline?: number[]; far?: boolean }[];
   /** Running water: the middle of its surface as x, y and z in turn, from where it rises to where it ends, and its breadth. Optionally how far it reaches to the left and right of each point and how much of it shows there (0 to 1). */
   streams?: { line: number[]; width: number; banks?: number[]; fade?: number[] }[];
   /** Where water comes down over the rim: the pool at its foot, how far it falls, and how broad the stream is. */

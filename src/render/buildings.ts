@@ -1,9 +1,10 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
-import { buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, entranceBays, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
-import { Building } from '../core/site';
+import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, groundOf, plinthOf, stepsUp, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { Building, ClassicalDress } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
+import { turner } from './geom/turned';
 import { buildBrick } from './brick';
 import { buildCanal } from './canal';
 
@@ -95,19 +96,27 @@ export function buildingTools(b: Building, base: number, mesh: (material: string
     { L: w, P: (s, y, t) => at(w / 2 - s, y, d - t) },
     { L: d - front, P: (s, y, t) => at(-w / 2 + t, y, d - s) },
   ];
-  /** A stretch of wall with openings in it: what is left of the wall, as blocks. `bands` cuts it into courses with a dark joint between, as rusticated work is. */
-  const pierced = (f: Face, material: string, s0: number, s1: number, y0: number, y1: number, t0: number, t1: number, colour: Colour, gaps: Gap[], bands = 0) => {
-    const piece = (a: number, c: number, lo: number, hi: number) => {
-      if (c - a < 0.01 || hi - lo < 0.01) return;
-      if (!bands) { on(f, material, a, c, lo, hi, t0, t1, colour); return; }
-      on(f, material, a, c, lo, hi, t0 + 0.045, t1, shade(colour, 0.5));
-      // (Courses are counted from the foot of the whole wall, so that they run level across every piece of it.)
+  /**
+   * A stretch of wall with openings in it: what is left of the wall, as blocks. `bands` cuts it into courses with a dark joint between,
+   * as rusticated work is; `ends` then says how far the courses (`c`) and the work behind them (`k`) run at the wall's two ends, where
+   * they turn a corner: the courses of one wall run on past the other's work behind, and meet its courses as a mitre would.
+   */
+  const pierced = (f: Face, material: string, s0: number, s1: number, y0: number, y1: number, t0: number, t1: number, colour: Colour, gaps: Gap[], bands = 0, ends?: { c: [number, number]; k: [number, number] }) => {
+    const piece = (a0: number, a1: number, lo: number, hi: number) => {
+      if (a1 - a0 < 0.01 || hi - lo < 0.01) return;
+      if (!bands) { on(f, material, a0, a1, lo, hi, t0, t1, colour); return; }
+      const [c0, c1] = [a0 === s0 && ends ? ends.c[0] : a0, a1 === s1 && ends ? ends.c[1] : a1], [k0, k1] = [a0 === s0 && ends ? ends.k[0] : a0, a1 === s1 && ends ? ends.k[1] : a1];
+      if (k1 - k0 > 0.01) on(f, material, k0, k1, lo, hi, t0 + 0.045, t1, shade(colour, 0.5));
+      // (Courses are counted from the foot of the whole wall, so that they run level across every piece of it. Each stops where the
+      // joint behind it begins: run on into it, their ends lay in one plane with the joint's at every corner and reveal, and flickered.)
       for (let y = y0; y < hi - 0.01; y += bands) {
         const from = Math.max(lo, y), to = Math.min(hi, y + bands - 0.055);
-        if (to - from > 0.03) on(f, material, a, c, from, to, t0, t0 + 0.06, colour);
+        if (to - from > 0.03) on(f, material, c0, c1, from, to, t0, t0 + 0.045, colour);
       }
     };
-    const sorted = gaps.filter((g) => g.s1 > s0 && g.s0 < s1).sort((a, c) => a.s0 - c.s0);
+    // (Only the openings within its height: each cuts the stretch it stands in into what is beside it, under it and over it, so two
+    // standing one over the other, as on two storeys, would each be covered by the other's wall over or under it.)
+    const sorted = gaps.filter((g) => g.s1 > s0 && g.s0 < s1 && g.y1 > y0 && g.y0 < y1).sort((a, c) => a.s0 - c.s0);
     let s = s0;
     for (const g of sorted) {
       piece(s, g.s0, y0, y1);
@@ -258,7 +267,9 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
       // flicker against each other: posts and beams in front, rails and studs behind them, the braces behind those, the plaster at the back.)
       pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, PANEL, T, b.colour, gaps);
       // Sill beam and head beam, posts, and the rail under the windows.
-      on(f, 'wood', 0, f.L, y0 - 0.14, y0 + 0.2, 0, 0.2, OAK, true);
+      // (The sill beam stands a centimetre and a half proud: it reaches down over the top of the wall below, the stone ground storey's on
+      // the sides and the back, and the head beam of the storey under it, and in one plane with them its face flickered against theirs.)
+      on(f, 'wood', 0, f.L, y0 - 0.14, y0 + 0.2, -0.015, 0.2, OAK, true);
       on(f, 'wood', 0, f.L, y1 - 0.2, y1, 0, 0.2, OAK, true);
       for (let n = 0; n <= bays; n++) {
         const half = n === 0 || n === bays ? 0.11 : 0.085, s = Math.min(f.L - half, Math.max(half, n * pitch));
@@ -549,13 +560,25 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   };
   const k = buildingTools(b, base, mesh, dress), { at, box, on, stick, pierced, glazed, wedge, poly, block } = k;
   // (Over brick with stucco dressings the ground storey is stucco the colour of stone, rusticated, as a basement storey is.)
-  const groundWash: Colour = b.brick === 'stucco' ? [0.8, 0.77, 0.7] : b.colour, rustic = b.brick === 'bare' ? 0 : 0.44;
+  // How it is dressed (see `ClassicalDress`): as the first of them were, where its document does not say.
+  const dr = dressOf(b), COL = b.portico && dr.order === 'columns' ? CLASSICAL.columns : 0;
+  // (How richly it is dressed: `rich` are the two styles with heads over the windows, blocks under their sills and under the cornice.)
+  const style = dr.style, rich = style === 'empire' || style === 'quoins', bare = style === 'bare';
+  const groundWash: Colour = b.brick === 'stucco' ? [0.8, 0.77, 0.7] : b.colour, rustic = b.brick === 'bare' || !dr.rusticated ? 0 : 0.44;
   // (`T` is the rendered skin of an outer wall, which carries its windows; the rest of its thickness is the linings of the rooms inside.)
-  const W = b.w, D = b.d, T = CLASSICAL.skin, FULL = CLASSICAL.outer, PLINTH = CLASSICAL.plinth, N = b.storeys, H0 = b.heights[0], wash = b.colour, granite = shade(stone, 0.62);
+  const W = b.w, D = b.d, T = CLASSICAL.skin, FULL = CLASSICAL.outer, PLINTH = plinthOf(b), N = b.storeys, H0 = b.heights[0], wash = b.colour, granite = shade(stone, 0.62);
   const floorY = (storey: number) => floorOf(b, storey);
   const y1 = floorY(1), top = floorY(N);
   const frame: Colour = [0.86, 0.85, 0.8], leaf: Colour = rng.pick([[0.1, 0.17, 0.13], [0.2, 0.12, 0.07], [0.12, 0.13, 0.2]] as Colour[]);
-  const roofTone: Colour = rng.pick([[0.36, 0.45, 0.4], [0.4, 0.2, 0.16], [0.3, 0.31, 0.33]] as Colour[]);
+  const dealtTone: Colour = rng.pick([[0.36, 0.45, 0.4], [0.4, 0.2, 0.16], [0.3, 0.31, 0.33]] as Colour[]);
+  // What the roof is covered with: sheet metal laid in seams, of the tone dealt or of one the dress names; copper gone green; or clay
+  // tiles, red or dark, which want no seams drawn on them.
+  const ROOFS: Record<Exclude<ClassicalDress['roof'], 'dealt'>, [string, Colour]> = {
+    grey: ['metal', [0.3, 0.31, 0.33]], green: ['metal', [0.36, 0.45, 0.4]], red: ['metal', [0.4, 0.2, 0.16]], black: ['metal', [0.11, 0.11, 0.12]],
+    copper: ['copper', [0.22, 0.44, 0.36]], tiles: ['tile', [0.8, 0.64, 0.58]], dark: ['tile', [0.34, 0.32, 0.34]],
+  };
+  const [roofMat, roofTone] = dressOf(b).roof === 'dealt' ? ['metal', dealtTone] as [string, Colour] : ROOFS[dressOf(b).roof as Exclude<ClassicalDress['roof'], 'dealt'>];
+  const seams = roofMat !== 'tile';
   /** Every opening in the outer walls, as the rooms inside need to know them: which wall (front, right, back, left), where along it in the building's measures, and how high. */
   // (`axis` says whether the wall is a line of constant `v` or of constant `u`; `lo` and `hi` are where its skin lies across its thickness, on that axis.)
   const holes: { axis: 'u' | 'v'; lo: number; hi: number; c: number; half: number; y0: number; y1: number; storey: number }[] = [];
@@ -565,7 +588,36 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   // `centres` places the windows, along the wall from its left end, where they must line up with others; `back` is where a back door stands, if this wall has one.
   // `arch` is the carriage way's arch, if it comes through this wall: where its middle is along the wall, and whether its gates hang here.
   const arched = classicalArch(b);
-  const wall = (f: Face, bays: number, side: number, o: { door?: number; doors?: number[]; plain?: boolean; margin?: number; centres?: number[]; back?: number; through?: number[]; arch?: { s: number; gates: boolean } } = {}) => {
+  /** How high the ground stands under a point of a wall's foot, over the ground before the door. */
+  const groundUnder = (f: Face, s: number) => { const p = k.local(f.P(s, 0, 0)); return groundOf(b, p.v, p.u); };
+  /**
+   * A round head over an opening: the corners of its head filled through the wall's skin (`t0` to `t1`) above a half circle, an
+   * archivolt about it standing proud, and a keystone.
+   */
+  const roundHead = (f: Face, g: Gap, t0: number, t1: number, colour: Colour, band = 0.16) => {
+    const mid = (g.s0 + g.s1) / 2, r = (g.s1 - g.s0) / 2, spring = g.y1 - r, n = 12, arc = (s: number) => spring + Math.sqrt(Math.max(0, r * r - (s - mid) ** 2));
+    for (let i = 0; i < n; i++) {
+      const a = g.s0 + ((g.s1 - g.s0) * i) / n, e = g.s0 + ((g.s1 - g.s0) * (i + 1)) / n, ya = arc(a), ye = arc(e);
+      on(f, 'plaster', a, e, arc((a + e) / 2), g.y1 + 0.005, t0, t1, colour);
+      on(f, 'plaster', a, e, Math.min(ya, ye) - 0.02, Math.max(ya, ye) + band, -0.05, 0.02, WHITE);
+    }
+    on(f, 'plaster', mid - 0.12, mid + 0.12, g.y1 - 0.1, g.y1 + band + 0.12, -0.08, 0.03, WHITE);
+    return spring;
+  };
+  const wall = (f: Face, bays: number, side: number, o: { door?: number; doors?: number[]; plain?: boolean; margin?: number; centres?: number[]; back?: number; through?: number[]; arch?: { s: number; gates: boolean }; heads?: ClassicalDress['heads']; steps?: number; between?: boolean; corners?: [boolean, boolean]; fore?: [number, number]; abut?: [boolean, boolean] } = {}) => {
+    // (`between`: a wall that stands between two others at its ends, as an end wall does between the front and the back, is built only
+    // between their skins. Built to its ends, its corners lay in one plane with theirs, and the two flickered against each other.)
+    const s0 = o.between ? T : 0, s1 = o.between ? f.L - T : f.L, k0 = o.between ? T : -0.07, k1 = o.between ? f.L - T : f.L + 0.07;
+    // (At a corner the rusticated courses and the bands over them turn it: those of the wall between run on to the face of the work
+    // behind the other's courses, and `fore` further where what they meet stands forward; the other's work behind stops short of its
+    // end, so that its courses close the corner and no dark joint shows down it.)
+    const [f0, f1] = o.fore ?? [0, 0], corner = o.corners ?? [false, false];
+    const ends = o.between ? { c: [0.045 - f0, f.L - 0.045 + f1] as [number, number], k: [s0, s1] as [number, number] } : { c: [s0, s1] as [number, number], k: [corner[0] ? 0.045 : s0, corner[1] ? f.L - 0.045 : s1] as [number, number] };
+    // (`abut`: an end that meets a wall whose bands run on across it, as a wing's long walls meet the back; there this wall's begin
+    // past that wall's.)
+    const band = (reach: number): [number, number] => (o.between ? [0.05 - f0, f.L - 0.05 + f1] : [o.abut?.[0] ? reach : -reach, o.abut?.[1] ? f.L - reach : f.L + reach]);
+    // (Round heads on the storeys the dress says; the steps before a door stand out from `steps` before the wall, where something stands before it.)
+    const roundOn = (storey: number) => storey < dr.arches, lead = o.steps ?? 0, heads = o.plain ? 'plain' : o.heads ?? 'alternate';
     const margin = o.margin ?? 0.8, pitch = (f.L - margin * 2) / bays, centre = (n: number) => o.centres?.[n] ?? margin + (n + 0.5) * pitch;
     // (Windows are as tall as their storeys allow: the room each lights is as high as the document says. None is cut where the ground stands against the wall.)
     // (`through` are doors on every storey into a wing behind this wall: plain openings, with no window in them.)
@@ -577,7 +629,9 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
         : { s0: c - 0.6, s1: c + 0.6, y0: fy + (storey === 1 ? 0.62 : 0.6), y1: fy + h - 1.05, kind: 'window' };
       // (No window in the ground storey where the carriage way's arch is.)
       if (storey === 0 && o.arch && arched && Math.abs(c - o.arch.s) < arched.w / 2 + 0.7) return null;
-      return g.kind === 'window' && buried(b, k.local(f.P(c, 0, 0)).v, g.y0) ? null : g;
+      // (Nor where something stands close before it: it would look into a wall.)
+      const p = k.local(f.P(c, 0, 0)), q = k.local(f.P(c, 0, -1));
+      return g.kind === 'window' && (buried(b, p.v, g.y0, p.u) || blinded(b, p.u, p.v, q.u - p.u, q.v - p.v, g.y0, (g.s1 - g.s0) / 2)) ? null : g;
     }), ...(o.through ?? []).map((c): Opening => ({ s0: c - 0.55, s1: c + 0.55, y0: floorY(storey) - 0.01, y1: floorY(storey) + Math.min(2.35, b.heights[storey] - 0.75), kind: 'through' })),
     ...(storey === 0 && o.arch && arched ? [{ s0: o.arch.s - arched.w / 2, s1: o.arch.s + arched.w / 2, y0: -0.02, y1: arched.crown, kind: 'arch' } as Opening] : [])].filter((g): g is Opening => g !== null));
     rows.forEach((row, storey) => row.forEach((g) => {
@@ -585,16 +639,31 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       const q = k.local(f.P((g.s0 + g.s1) / 2, 0, T)), axis = Math.abs(q.u - p.u) > Math.abs(q.v - p.v) ? 'u' : 'v';
       holes.push({ axis, lo: Math.min(p[axis], q[axis]), hi: Math.max(p[axis], q[axis]), c: axis === 'u' ? p.v : p.u, half: (g.s1 - g.s0) / 2, y0: g.y0, y1: g.y1, storey });
     }));
-    pierced(f, 'stone', -0.07, f.L + 0.07, 0, PLINTH, -0.07, T, granite, rows[0].filter((g) => g.kind === 'arch'));
+    // The base of granite, down to the lowest ground along the wall; and where the floor stands a metre or more over the ground, a
+    // basement's small windows in it, barred, under the ground storey's (none where the ground stands too high for one).
+    const g0 = Math.min(0, groundUnder(f, 0), groundUnder(f, f.L));
+    const cellar: Gap[] = PLINTH < 1 ? [] : rows[0].filter((g) => g.kind === 'window').flatMap((g) => {
+      const c = (g.s0 + g.s1) / 2, y0 = Math.max(groundUnder(f, c) + 0.2, PLINTH - 0.95), y1 = PLINTH - 0.25;
+      return y1 - y0 >= 0.3 ? [{ s0: c - 0.45, s1: c + 0.45, y0, y1 }] : [];
+    });
+    pierced(f, 'stone', k0, k1, g0, PLINTH, -0.07, T, granite, [...rows[0].filter((g) => g.kind === 'arch'), ...cellar]);
+    for (const g of cellar) {
+      on(f, 'glass', g.s0, g.s1, g.y0, g.y1, 0.2, 0.23, PANE);
+      for (let i = 1; i < 4; i++) on(f, 'metal', g.s0 + (i * (g.s1 - g.s0)) / 4 - 0.015, g.s0 + (i * (g.s1 - g.s0)) / 4 + 0.015, g.y0, g.y1, 0.1, 0.13, [0.05, 0.05, 0.055]);
+    }
     // (A building of one storey is all principal storey: smooth, not rusticated, and its windows dressed as the principal storey's are.)
-    pierced(f, 'plaster', 0, f.L, PLINTH, y1, 0, T, groundWash, rows[0], N > 1 ? rustic : 0);
-    for (let storey = 1; storey < N; storey++) pierced(f, 'plaster', 0, f.L, floorY(storey), floorY(storey + 1), 0.02, T, wash, rows[storey]);
+    pierced(f, 'plaster', s0, s1, PLINTH, y1, 0, T, groundWash, rows[0], N > 1 ? rustic : 0, ends);
+    for (let storey = 1; storey < N; storey++) pierced(f, 'plaster', s0, s1, floorY(storey), floorY(storey + 1), 0.02, T, wash, rows[storey]);
     if (N > 1) {
       // The band between the ground storey and the one above, and a thin one under its windows; broken where a door goes through them.
       const doors = (rows[1] ?? []).filter((g) => g.kind === 'back' || g.kind === 'through');
-      pierced(f, 'plaster', -0.1, f.L + 0.1, y1 - 0.05, y1 + 0.2, -0.1, 0.05, WHITE, doors);
-      pierced(f, 'plaster', -0.06, f.L + 0.06, y1 + 0.2, y1 + 0.27, -0.06, 0.05, WHITE, doors);
-      pierced(f, 'plaster', -0.04, f.L + 0.04, y1 + 0.52, y1 + 0.62, -0.035, 0.05, WHITE, doors);
+      // (The end walls' run only from the face of the front's and back's work behind, which is where those stop: run past, their faces
+      // lay in one plane at the corner and flickered.)
+      pierced(f, 'plaster', ...band(0.1), y1 - 0.05, y1 + 0.2, -0.1, 0.05, WHITE, doors);
+      if (rich) {
+        pierced(f, 'plaster', ...band(0.06), y1 + 0.2, y1 + 0.27, -0.06, 0.05, WHITE, doors);
+        pierced(f, 'plaster', ...band(0.04), y1 + 0.52, y1 + 0.62, -0.035, 0.05, WHITE, doors);
+      }
     }
     // A door at the back, onto the ground there: plainer than the front, its leaves standing open into the room.
     for (const g of rows[1] ?? []) if (g.kind === 'back') {
@@ -603,6 +672,12 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       for (const [a, e] of [[g.s0 - 0.18, g.s0], [g.s1, g.s1 + 0.18]]) on(f, 'plaster', a, e, g.y0 - 0.2, g.y1 + 0.18, -0.06, 0.05, WHITE);
       on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.18, g.y1 + 0.3, -0.16, 0.05, WHITE);
       on(f, 'stone', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.25, g.y0, -0.5, FULL + 0.02, shade(stone, 0.8));
+    }
+    // Doors close together share one flight of steps.
+    const flights: Gap[][] = [];
+    for (const g of rows[0].filter((q) => q.kind === 'door').sort((p, q) => p.s0 - q.s0)) {
+      const last = flights[flights.length - 1];
+      if (last && g.s0 - last[last.length - 1].s1 < 1.6) last.push(g); else flights.push([g]);
     }
     rows[0].forEach((g) => {
       if (g.kind === 'through') return;
@@ -628,39 +703,66 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
         return;
       }
       if (g.kind === 'door') {
-        // The door: two leaves standing open into the hall, under a light of its own.
-        const lintel = g.y1 - 0.62;
+        // The door: two leaves standing open into the hall, under a light of its own (under a round head, a fanlight in it).
+        const round = roundOn(0), lintel = round ? g.y1 - (g.s1 - g.s0) / 2 : g.y1 - 0.62;
         for (const [a, e] of [[g.s0 + 0.03, g.s0 + 0.09], [g.s1 - 0.09, g.s1 - 0.03]]) on(f, 'wood', a, e, g.y0 + 0.03, lintel, FULL - 0.02, FULL + 0.8, leaf, true);
         on(f, 'wood', g.s0, g.s1, lintel, lintel + 0.09, 0.08, 0.18, frame, true);
         glazed(f, { s0: g.s0 + 0.02, s1: g.s1 - 0.02, y0: lintel + 0.09, y1: g.y1 - 0.02 }, 4, 1, frame);
-        for (const [a, e] of [[g.s0 - 0.2, g.s0], [g.s1, g.s1 + 0.2]]) on(f, 'plaster', a, e, PLINTH, g.y1 + 0.02, -0.07, 0.05, WHITE);
-        on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.02, g.y1 + 0.3, -0.1, 0.05, WHITE);
-        on(f, 'plaster', g.s0 - 0.4, g.s1 + 0.4, g.y1 + 0.3, g.y1 + 0.42, -0.24, 0.05, WHITE);
-        // The threshold, and steps of stone, each broader than the one above it.
+        if (round) {
+          for (const [a, e] of [[g.s0 - 0.2, g.s0], [g.s1, g.s1 + 0.2]]) on(f, 'plaster', a, e, PLINTH, lintel, -0.07, 0.05, WHITE);
+          roundHead(f, g, 0, T, N > 1 ? groundWash : wash, 0.22);
+        } else {
+          for (const [a, e] of [[g.s0 - 0.2, g.s0], [g.s1, g.s1 + 0.2]]) on(f, 'plaster', a, e, PLINTH, g.y1 + 0.02, -0.07, 0.05, WHITE);
+          on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.02, g.y1 + 0.3, -0.1, 0.05, WHITE);
+          on(f, 'plaster', g.s0 - 0.4, g.s1 + 0.4, g.y1 + 0.3, g.y1 + 0.42, -0.24, 0.05, WHITE);
+        }
+        // The threshold, and steps of stone, each broader than the one above it: one flight before doors side by side, from the
+        // ground before them up to the floor, as many as that needs; and where it climbs high, a parapet of granite either side.
         on(f, 'stone', g.s0, g.s1, PLINTH - 0.25, PLINTH, -0.02, FULL + 0.02, shade(stone, 0.85));
-        // (Four low ones: the ground before a door is never quite the height it was levelled to, and a step and a bit stops a walker dead.)
-        for (let step = 0; step < 4; step++) on(f, 'stone', g.s0 - 0.5 - step * 0.3, g.s1 + 0.5 + step * 0.3, -0.3, PLINTH - step * (PLINTH / 4), -0.4 - step * 0.32, 0.01, shade(stone, 0.78));
+        const flight = flights.find((q) => q[0] === g);
+        if (flight) {
+          const s0 = flight[0].s0, s1 = flight[flight.length - 1].s1, gr = groundUnder(f, (s0 + s1) / 2), up = stepsUp(PLINTH - gr);
+          for (let step = 0; step < up.steps; step++) on(f, 'stone', s0 - 0.5 - step * up.spread, s1 + 0.5 + step * up.spread, gr - 0.3, PLINTH - step * up.rise, -0.4 - step * up.tread + lead, 0.01 + lead, shade(stone, 0.78));
+          if (PLINTH - gr > 0.9) for (let step = 0; step < up.steps; step++) for (const [a, e] of [[s0 - 0.95 - step * up.spread, s0 - 0.5 - step * up.spread], [s1 + 0.5 + step * up.spread, s1 + 0.95 + step * up.spread]]) {
+            on(f, 'stone', a, e, gr - 0.3, PLINTH - step * up.rise + 0.5, -0.4 - step * up.tread + lead, (step ? -0.4 - (step - 1) * up.tread : 0.01) + lead, granite);
+          }
+        }
       } else if (N > 1) {
         glazed(f, g, 2, 3, frame, 0.14);
-        // Over a window of the ground storey, the stones of a flat arch with its key standing proud.
-        on(f, 'plaster', g.s0 - 0.16, g.s1 + 0.16, g.y1, g.y1 + 0.3, -0.03, 0.05, WHITE);
-        on(f, 'plaster', (g.s0 + g.s1) / 2 - 0.12, (g.s0 + g.s1) / 2 + 0.12, g.y1 - 0.02, g.y1 + 0.38, -0.07, 0.05, WHITE);
-        on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.12, g.y0, -0.16, 0.16, granite);
+        if (roundOn(0)) roundHead(f, g, 0, T, groundWash);
+        else if (!bare) {
+          // Over a window of the ground storey, the stones of a flat arch, with its key standing proud where the style is rich.
+          on(f, 'plaster', g.s0 - 0.16, g.s1 + 0.16, g.y1, g.y1 + 0.3, -0.03, 0.05, WHITE);
+          if (rich) on(f, 'plaster', (g.s0 + g.s1) / 2 - 0.12, (g.s0 + g.s1) / 2 + 0.12, g.y1 - 0.02, g.y1 + 0.38, -0.07, 0.05, WHITE);
+        }
+        // (Every sill stands a centimetre over the foot of its opening: level with it, its top lay in one plane with the wall's under the window.)
+        on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.12, g.y0 + 0.01, -0.16, 0.16, granite);
       }
     });
     (N > 1 ? rows[1] ?? [] : rows[0].filter((g) => g.kind === 'window')).forEach((g, n) => {
       if (g.kind === 'back' || g.kind === 'through') return;
       glazed(f, g, 2, 4, frame);
-      // The surround; the sill on its two blocks; and over it a frieze and a cornice on brackets, with a pediment in every other bay.
-      for (const [a, e] of [[g.s0 - 0.17, g.s0], [g.s1, g.s1 + 0.17]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.17, -0.045, 0.06, WHITE);
-      on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.17, -0.045, 0.06, WHITE);
-      on(f, 'plaster', g.s0 - 0.24, g.s1 + 0.24, g.y0 - 0.1, g.y0, -0.2, 0.08, WHITE);
-      for (const s of [g.s0 - 0.17, g.s1 + 0.05]) on(f, 'plaster', s, s + 0.12, g.y0 - 0.3, g.y0 - 0.1, -0.09, 0.03, WHITE);
-      if (o.plain) return;
+      // The surround (under a round head, up to where the head springs, and an archivolt about it); the sill on its two blocks; and
+      // over it, as the dress says, nothing more, or a frieze and a cornice on brackets, with a pediment in every other bay or in all.
+      // (Bare: the opening and its sill alone. Quoins: the surround eared, standing out a hand further either side at its top.
+      // Lesenes: the surround, and nothing over it.)
+      const round = roundOn(N > 1 ? 1 : 0), spring = round ? g.y1 - (g.s1 - g.s0) / 2 : g.y1 + 0.17;
+      if (bare) {
+        if (round) roundHead(f, g, 0.02, T, wash);
+        on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE);
+        return;
+      }
+      for (const [a, e] of [[g.s0 - 0.17, g.s0], [g.s1, g.s1 + 0.17]]) on(f, 'plaster', a, e, g.y0, spring, -0.045, 0.06, WHITE);
+      if (style === 'quoins' && !round) for (const [a, e] of [[g.s0 - 0.29, g.s0 - 0.17], [g.s1 + 0.17, g.s1 + 0.29]]) on(f, 'plaster', a, e, g.y1 - 0.14, g.y1 + 0.17, -0.045, 0.06, WHITE);
+      if (round) roundHead(f, g, 0.02, T, wash);
+      else on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.17, -0.045, 0.06, WHITE);
+      on(f, 'plaster', g.s0 - 0.24, g.s1 + 0.24, g.y0 - 0.1, g.y0 + 0.01, -0.2, 0.08, WHITE);
+      if (rich) for (const s of [g.s0 - 0.17, g.s1 + 0.05]) on(f, 'plaster', s, s + 0.12, g.y0 - 0.3, g.y0 - 0.1, -0.09, 0.03, WHITE);
+      if (heads === 'plain' || !rich) return;
       on(f, 'plaster', g.s0 - 0.17, g.s1 + 0.17, g.y1 + 0.17, g.y1 + 0.37, -0.03, 0.03, WHITE);
       for (const s of [g.s0 - 0.2, g.s1 + 0.07]) on(f, 'plaster', s, s + 0.13, g.y1 + 0.12, g.y1 + 0.4, -0.12, 0.03, WHITE);
       on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.37, g.y1 + 0.47, -0.2, 0.03, WHITE);
-      if ((n + (bays >> 1)) % 2 === 0) {
+      if (heads === 'pediments' || (heads === 'alternate' && (n + (bays >> 1)) % 2 === 0)) {
         const into = f.P(0, 0, 0.2).sub(f.P(0, 0, 0));
         wedge(f.P(g.s0 - 0.3, g.y1 + 0.47, -0.17), f.P(g.s1 + 0.3, g.y1 + 0.47, -0.17), f.P((g.s0 + g.s1) / 2, g.y1 + 0.82, -0.17), into, ['plaster', WHITE], ['plaster', WHITE]);
       }
@@ -668,14 +770,38 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     for (const row of rows.slice(2)) for (const g of row) {
       if (g.kind === 'through') continue;
       glazed(f, g, 2, 2, frame);
+      if (bare) { on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE); continue; }
       for (const [a, e] of [[g.s0 - 0.15, g.s0], [g.s1, g.s1 + 0.15]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.15, -0.04, 0.06, WHITE);
       on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.15, -0.04, 0.06, WHITE);
-      on(f, 'plaster', g.s0 - 0.2, g.s1 + 0.2, g.y0 - 0.09, g.y0, -0.17, 0.08, WHITE);
+      on(f, 'plaster', g.s0 - 0.2, g.s1 + 0.2, g.y0 - 0.09, g.y0 + 0.01, -0.17, 0.08, WHITE);
     }
-    return { pitch, centre };
+    return { pitch, centre, rows };
+  };
+  /** A balustrade along a wall from `s0` to `s1`, standing on `y`, `t` into the wall from its face: a plinth, balusters, and a rail. */
+  const balustrade = (f: Face, s0: number, s1: number, y: number, t: number) => {
+    if (s1 - s0 < 0.4) return;
+    on(f, 'plaster', s0, s1, y, y + 0.12, t, t + 0.3, WHITE);
+    const n = Math.max(1, Math.round((s1 - s0) / 0.28));
+    for (let i = 0; i < n; i++) {
+      const c = s0 + ((i + 0.5) * (s1 - s0)) / n;
+      on(f, 'plaster', c - 0.05, c + 0.05, y + 0.12, y + 0.78, t + 0.1, t + 0.2, WHITE);
+      on(f, 'plaster', c - 0.08, c + 0.08, y + 0.3, y + 0.56, t + 0.07, t + 0.23, WHITE);
+    }
+    on(f, 'plaster', s0 - 0.03, s1 + 0.03, y + 0.78, y + 0.9, t - 0.02, t + 0.32, WHITE);
+  };
+  /** A round disc standing across the front, its middle at `u` and `y`, from `v0` to `v1` deep: laid in level slices. */
+  const disc = (u: number, y: number, r: number, v0: number, v1: number, colour: Colour) => {
+    const n = 10;
+    for (let i = 0; i < n; i++) {
+      const a = y - r + (2 * r * i) / n, e = y - r + (2 * r * (i + 1)) / n, m = (a + e) / 2 - y, half = Math.sqrt(Math.max(0, r * r - m * m));
+      box('plaster', u - half, u + half, a, e, v0, v1, colour);
+    }
   };
   // A pilaster: a foot, a shaft that narrows a little upward, and a head.
+  // (As the style says: a flat strip with no foot and no head for lesenes, and nothing where the walls are bare.)
   const pilaster = (f: Face, s: number, y0: number, y3: number, out: number) => {
+    if (bare) return;
+    if (style === 'lesenes') { on(f, 'plaster', s - 0.28, s + 0.28, y0, y3, -Math.min(out, 0.07), 0.03, WHITE); return; }
     on(f, 'plaster', s - 0.34, s + 0.34, y0, y0 + 0.18, -out - 0.07, 0.03, WHITE);
     on(f, 'plaster', s - 0.3, s + 0.3, y0 + 0.18, y0 + 0.3, -out - 0.04, 0.03, WHITE);
     on(f, 'plaster', s - 0.26, s + 0.26, y0 + 0.3, y3 - 0.42, -out, 0.03, WHITE);
@@ -687,33 +813,82 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   const [front, right, back, left] = k.walls(0);
   // (An even number of windows to each end, so that the wall between the front rooms and the back meets the end walls between two of them.)
   const sideBays = classicalEnds(b).length, middle = b.bays >> 1, order = N > 1 ? y1 + 0.27 : PLINTH;
-  let centreLeft = 0, centreRight = 0;
-  const out = 0.4;
-  if (b.portico) {
-    // The front in three: two wings, and between them the three middle bays standing forward.
-    const margin = 0.8, pitch = (W - margin * 2) / b.bays, a = margin + (middle - 1) * pitch - 0.3, c = margin + (middle + 2) * pitch + 0.3;
-    centreLeft = a - W / 2; centreRight = c - W / 2;
-    const wing = (from: number, to: number): Face => ({ L: to - from, P: (s, y, t) => front.P(from + s, y, t) });
-    const stand: Face = { L: c - a, P: (s, y, t) => front.P(a + s, y, t - out) };
-    const archAt = (from: number, to: number) => (arched && arched.u + W / 2 > from && arched.u + W / 2 < to ? { s: arched.u + W / 2 - from, gates: true } : undefined);
-    // (The doors: in the middle that stands forward, and, where the building has more than one, in the stretches either side of it.)
-    const doors = entranceBays(b);
-    wall(wing(0, a), middle - 1, 0, { margin: 0.5, arch: archAt(0, a), doors: doors.filter((d) => d < middle - 1) });
-    wall(wing(c, W), middle - 1, 0, { margin: 0.5, arch: archAt(c, W), doors: doors.filter((d) => d > middle + 1).map((d) => d - middle - 2) });
-    const { centre } = wall(stand, 3, 0, { doors: doors.includes(middle) ? [1] : [], margin: 0.3 });
+  const fr = classicalFront(b), out = CLASSICAL.out, PAV = CLASSICAL.pavilion;
+  const centreLeft = fr.standL, centreRight = fr.standR;
+  // The front, in stretches: a pavilion at each end where there are pavilions, the stretches either side of the middle, and the
+  // middle, where it stands forward; each stretch's windows where the plan has them, and its doors and the carriage way's arch.
+  const archAt = (from: number, to: number) => (arched && arched.u + W / 2 > from && arched.u + W / 2 < to ? { s: arched.u + W / 2 - from, gates: true } : undefined);
+  // (The doors: in the middle, and where the building has more than one entrance, along the front; three into one hall where the dress says.)
+  const doorBays = [...entranceBays(b)];
+  if (dr.doors === 3 && (b.portico || b.bays >= 7) && !(b.entrances && b.entrances.length > 1)) doorBays.push(middle - 1, middle + 1);
+  const cuts = [-W / 2, ...(fr.pavilions ? [fr.pavL] : []), ...(b.portico ? [centreLeft, centreRight] : []), ...(fr.pavilions ? [fr.pavR] : []), W / 2];
+  const stretches = cuts.slice(1).map((u1, i) => {
+    const u0 = cuts[i], mid = (u0 + u1) / 2, centre = b.portico && mid > centreLeft && mid < centreRight, pav = !centre && (mid < fr.pavL || mid > fr.pavR);
+    return { u0, u1, centre, pav, out: centre ? out : pav ? PAV : 0, bays: fr.windows.map((u, n) => (u > u0 && u < u1 ? n : -1)).filter((n) => n >= 0) };
+  });
+  let stand: Face | null = null, standRows: Opening[][] = [], standCentre = (n: number) => n;
+  // (The middle last, as it always was.)
+  for (const st of [...stretches.filter((q) => !q.centre), ...stretches.filter((q) => q.centre)]) {
+    const from = st.u0 + W / 2, face: Face = { L: st.u1 - st.u0, P: (s, y, t) => front.P(from + s, y, t - st.out) };
+    const made = wall(face, st.bays.length, 0, {
+      corners: [st.u0 === -W / 2, st.u1 === W / 2],
+      centres: st.bays.map((n) => fr.windows[n] - st.u0), arch: archAt(from, from + face.L), heads: dr.heads, steps: st.centre ? -COL : 0,
+      doors: st.bays.map((n, i) => (doorBays.includes(n) ? i : -1)).filter((i) => i >= 0),
+    });
+    if (st.centre) { stand = face; standRows = made.rows; standCentre = made.centre; }
+    if (st.pav) {
+      // A pavilion: the corner between its skin and the end wall filled, and pilasters at its corners and between its windows, over
+      // the ground storey. (Its own wall closes its sides.)
+      const end = st.u0 < 0 ? st.u0 : st.u1, inward = st.u0 < 0 ? 1 : -1, ua = Math.min(end, end + inward * T), ub = Math.max(end, end + inward * T);
+      // (Over the rusticated ground storey, the fill stands back as the work behind the courses does, and dark as it is: the end
+      // wall's courses run on forward over it to the pavilion's face.)
+      const sunk = N > 1 && rustic ? 0.045 : 0;
+      if (sunk) box('plaster', ua + (inward > 0 ? sunk : 0), ub - (inward < 0 ? sunk : 0), PLINTH, y1, -PAV + T, T, shade(groundWash, 0.5));
+      box('plaster', ua, ub, sunk ? y1 : PLINTH, top, -PAV + T, T, wash);
+      box('stone', ua - (inward > 0 ? 0.07 : 0), ub + (inward < 0 ? 0.07 : 0), Math.min(0, groundUnder(face, 0), groundUnder(face, face.L)), PLINTH, -PAV + T, T, granite);
+      const at0 = st.bays.map((n) => fr.windows[n] - st.u0), spots = [0.36, ...at0.slice(1).map((s, i) => (s + at0[i]) / 2), face.L - 0.36];
+      for (const s of spots) pilaster(face, s, order, top, 0.13);
+    }
+  }
+  if (b.portico && stand) {
+    const sf: Face = stand;
     // (And the sides of what stands forward.)
-    box('plaster', centreLeft, centreLeft + 0.3, PLINTH, top, -out, 0.02, wash);
-    box('plaster', centreRight - 0.3, centreRight, PLINTH, top, -out, 0.02, wash);
-    for (const s of [0.36, (centre(0) + centre(1)) / 2, (centre(1) + centre(2)) / 2, stand.L - 0.36]) pilaster(stand, s, order, top, 0.13);
-  } else wall(front, b.bays, 0, { doors: entranceBays(b), arch: arched ? { s: arched.u + W / 2, gates: true } : undefined });
+    // (From the back of its skin to the front's: its own wall closes its sides in front of that, and two faces in one plane flicker.)
+    box('plaster', centreLeft, centreLeft + 0.3, PLINTH, top, -out + T, 0.02, wash);
+    box('plaster', centreRight - 0.3, centreRight, PLINTH, top, -out + T, 0.02, wash);
+    const spots = [0.36, ...Array.from({ length: fr.centre - 1 }, (_, n) => (standCentre(n) + standCentre(n + 1)) / 2), sf.L - 0.36];
+    for (const s of spots) pilaster(sf, s, order, top, 0.13);
+    if (COL) {
+      // Columns standing clear of the middle, through the storeys over the ground storey, on the ground storey brought forward to
+      // carry them: a block as high as the band over the ground storey, rusticated as it is, its doors and windows cut deep through
+      // it, a balustrade along its top between the columns. Each column turned: a base, a shaft that narrows a little upward, and a
+      // capital under a square abacus, the entablature over them the cornice brought forward.
+      const podium: Face = { L: sf.L, P: (s, y, t) => sf.P(s, y, t - COL) }, ledge = order, openings = standRows[0] ?? [];
+      const g0 = Math.min(0, groundUnder(podium, 0), groundUnder(podium, podium.L));
+      pierced(podium, 'stone', -0.07, podium.L + 0.07, g0, PLINTH, -0.07, COL, granite, []);
+      pierced(podium, 'plaster', 0, podium.L, PLINTH, ledge, 0, COL, groundWash, openings, N > 1 ? rustic : 0);
+      for (const g of openings) if (dr.arches > 0) roundHead(podium, g, 0, COL, groundWash, 0.22);
+      else { on(podium, 'plaster', g.s0 - 0.16, g.s1 + 0.16, g.y1, g.y1 + 0.3, -0.03, 0.05, WHITE); on(podium, 'plaster', (g.s0 + g.s1) / 2 - 0.12, (g.s0 + g.s1) / 2 + 0.12, g.y1 - 0.02, g.y1 + 0.38, -0.07, 0.05, WHITE); }
+      // (The ledge stops short of the bands on the wall behind: run on to the wall, its top lay in one plane with theirs.)
+      on(podium, 'plaster', -0.1, podium.L + 0.1, ledge - 0.12, ledge, -0.12, COL - 0.1, WHITE);
+      const turn = turner(mesh, () => 0), shaft = top - ledge;
+      for (const s of spots) {
+        const p = podium.P(s, ledge, 0.5);
+        turn('plaster', p.x, ledge + base, p.z, [[0, 0], [0.42, 0], [0.42, 0.12], [0.37, 0.17], [0.37, 0.26], [0.33, 0.32], [0.31, shaft * 0.45], [0.28, shaft - 0.62], [0.3, shaft - 0.55], [0.35, shaft - 0.3], [0.43, shaft - 0.14], [0.43, shaft - 0.1], [0, shaft - 0.1]], { colour: () => WHITE, segments: 16 });
+        on(podium, 'plaster', s - 0.48, s + 0.48, top - 0.1, top, 0.02, 0.98, WHITE);
+      }
+      for (let i = 0; i + 1 < spots.length; i++) balustrade(podium, spots[i] + 0.45, spots[i + 1] - 0.45, ledge, 0.12);
+    }
+  }
   // (The back's windows stand behind the front's, and the ends' are placed as the plan expects them.)
   const ends = classicalEnds(b), fronts = classicalFront(b).windows;
-  wall(right, sideBays, 1, { plain: true, centres: ends });
+  const pavFore = fr.pavilions ? PAV : 0;
+  wall(right, sideBays, 1, { plain: true, centres: ends, between: true, fore: [pavFore, 0] });
   // (Where a wing stands against the back wall there are no windows in it, but a door into the wing on every storey.)
   const behind = (u: number) => (b.wings ?? []).some((g) => g.side * u > W / 2 - g.width - 0.3);
   const backs = fronts.filter((u) => !behind(u)), into = b.plan!.doors.filter((q) => q.through).map((q) => W / 2 - q.c);
-  wall(back, backs.length, 2, { plain: true, centres: backs.map((u) => W / 2 - u).sort((p, q) => p - q), back: b.backDoor === undefined ? undefined : W / 2 - b.backDoor, through: into, arch: arched ? { s: W / 2 - arched.u, gates: false } : undefined });
-  wall(left, sideBays, 3, { plain: true, centres: ends.map((v) => D - v).sort((p, q) => p - q) });
+  wall(back, backs.length, 2, { plain: true, corners: [true, true], centres: backs.map((u) => W / 2 - u).sort((p, q) => p - q), back: b.backDoor === undefined ? undefined : W / 2 - b.backDoor, through: into, arch: arched ? { s: W / 2 - arched.u, gates: false } : undefined });
+  wall(left, sideBays, 3, { plain: true, centres: ends.map((v) => D - v).sort((p, q) => p - q), between: true, fore: [0, pavFore] });
   // Strips at the corners, the height of the upper storeys.
   // The wings: three walls each, laid out as the main block's are; the main block's end wall runs straight on into the wing's outer wall.
   const wingFaces = (b.wings ?? []).map((g) => {
@@ -721,31 +896,72 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const outer: Face = { L, P: (a, y, t) => at(s * (W / 2 - t), y, s > 0 ? D + a : D + L - a) };
     const inner: Face = { L, P: (a, y, t) => at(s * (W / 2 - g.width + t), y, s > 0 ? D + L - a : D + a) };
     const end: Face = { L: g.width, P: (a, y, t) => at(s * (W / 2 - a), y, D + L - t) };
-    wall(outer, along.length, s > 0 ? 1 : 3, { plain: true, centres: along.map((v) => (s > 0 ? v - D : D + L - v)).sort((p, q) => p - q) });
-    wall(inner, along.length, s > 0 ? 3 : 1, { plain: true, centres: along.map((v) => (s > 0 ? D + L - v : v - D)).sort((p, q) => p - q) });
-    wall(end, across.length, 2, { plain: true, centres: across.map((u) => W / 2 - s * u).sort((p, q) => p - q) });
+    // (The wing's end stands between its two long walls, as the main block's ends do.)
+    wall(outer, along.length, s > 0 ? 1 : 3, { plain: true, corners: s > 0 ? [false, true] : [true, false], abut: s > 0 ? [true, false] : [false, true], centres: along.map((v) => (s > 0 ? v - D : D + L - v)).sort((p, q) => p - q) });
+    wall(inner, along.length, s > 0 ? 3 : 1, { plain: true, corners: s > 0 ? [true, false] : [false, true], abut: s > 0 ? [false, true] : [true, false], centres: along.map((v) => (s > 0 ? D + L - v : v - D)).sort((p, q) => p - q) });
+    wall(end, across.length, 2, { plain: true, between: true, centres: across.map((u) => W / 2 - s * u).sort((p, q) => p - q) });
     return [outer, inner, end];
   });
-  for (const f of [front, right, back, left, ...wingFaces.flat()]) for (const s of [0.3, f.L - 0.3]) on(f, 'plaster', s - 0.3, s + 0.3, order, top, -0.05, 0.03, WHITE);
+  // The corners, as the style says: strips the height of the upper storeys; quoins, stones laid long and short, from over the
+  // rusticated work or the plinth; lesenes, flat strips from the same; or nothing. (On the walls that stand between others, they
+  // begin at the back of the others' and those run out past the corner, so that they close it and no two faces lie in one plane.)
+  const cornerFaces: [Face, boolean][] = [[front, false], [right, true], [back, false], [left, true], ...wingFaces.flatMap(([outer, inner, end]): [Face, boolean][] => [[outer, false], [inner, false], [end, true]])];
+  const foot = N > 1 && rustic ? order : PLINTH;
+  for (const [f, between] of cornerFaces) for (const [s, dir] of [[0, 1], [f.L, -1]] as [number, number][]) {
+    const a = s + dir * (between ? 0.03 : -0.05);
+    if (style === 'empire') on(f, 'plaster', Math.min(a, s + dir * 0.6), Math.max(a, s + dir * 0.6), order, top, -0.05, 0.03, WHITE);
+    else if (style === 'lesenes') on(f, 'plaster', Math.min(a, s + dir * 0.55), Math.max(a, s + dir * 0.55), foot, top, -0.05, 0.03, WHITE);
+    else if (style === 'quoins') for (let y = foot, n = between ? 1 : 0; y < top - 0.15; y += 0.44, n++) {
+      const e = s + dir * (n % 2 ? 0.5 : 0.85);
+      on(f, 'plaster', Math.min(a, e), Math.max(a, e), y, Math.min(top, y + 0.4), -0.06, 0.03, shade(WHITE, 0.94));
+    }
+  }
 
   // The cornice, all round: a frieze, three mouldings each standing further out than the one under it, and blocks along the front.
   const round = (y0: number, y3: number, reach: number, colour: Colour) => {
-    for (const f of [front, right, back, left]) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, colour);
-    if (b.portico) box('plaster', centreLeft - reach, centreRight + reach, y0, y3, -out - reach, 0, colour);
+    // (The ends' run only between the front's and the back's, and what stands forward only up to the front's face: laid over one
+    // another, their tops lay in one plane and flickered.)
+    for (const f of [front, back]) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, colour);
+    for (const f of [right, left]) on(f, 'plaster', 0.5, f.L - 0.5, y0, y3, -reach, 0.5, colour);
+    if (b.portico) box('plaster', centreLeft - reach, centreRight + reach, y0, y3, -out - COL - reach, -reach, colour);
+    if (fr.pavilions) { box('plaster', -W / 2 - reach, fr.pavL + reach, y0, y3, -PAV - reach, -reach, colour); box('plaster', fr.pavR - reach, W / 2 + reach, y0, y3, -PAV - reach, -reach, colour); }
   };
   // (And round the wings, which are finished as the main block is.)
   const roundWings = (y0: number, y3: number, reach: number) => { for (const f of wingFaces.flat()) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, WHITE); };
-  roundWings(top, top + 0.42, 0.04); roundWings(top + 0.42, top + 0.52, 0.14); roundWings(top + 0.52, top + 0.62, 0.26); roundWings(top + 0.62, top + 0.78, 0.4);
-  round(top, top + 0.42, 0.04, WHITE);
-  round(top + 0.42, top + 0.52, 0.14, WHITE);
-  round(top + 0.52, top + 0.62, 0.26, WHITE);
-  round(top + 0.62, top + 0.78, 0.4, WHITE);
-  for (let u = -W / 2 + 0.1; u < W / 2 - 0.05; u += 0.27) {
-    const forward = b.portico && u > centreLeft && u < centreRight - 0.1 ? out : 0;
+  // (Each style's mouldings, from the frieze up, with how far each stands out: all of them up to the low wall over the cornice.)
+  const mouldings: [number, number, number][] = rich ? [[0, 0.42, 0.04], [0.42, 0.52, 0.14], [0.52, 0.62, 0.26], [0.62, 0.78, 0.4]]
+    : style === 'lesenes' ? [[0, 0.42, 0.04], [0.42, 0.6, 0.16], [0.6, 0.78, 0.3]] : [[0, 0.5, 0.02], [0.5, 0.64, 0.1], [0.64, 0.78, 0.2]];
+  for (const [y0, y3, reach] of mouldings) roundWings(top + y0, top + y3, reach);
+  for (const [y0, y3, reach] of mouldings) round(top + y0, top + y3, reach, WHITE);
+  if (rich) for (let u = -W / 2 + 0.1; u < W / 2 - 0.05; u += 0.27) {
+    const forward = b.portico && u > centreLeft && u < centreRight - 0.1 ? out + COL : fr.pavilions && (u + 0.12 < fr.pavL || u > fr.pavR) ? PAV : 0;
     box('plaster', u, u + 0.12, top + 0.3, top + 0.42, -forward - 0.13, -forward, WHITE);
+  }
+  // Wreaths along the frieze, one over each window of the front, where the dress has them.
+  if (dr.frieze && !bare) for (const st of stretches) for (const n of st.bays) {
+    const u = fr.windows[n], v = -st.out - (st.centre ? COL : 0) - 0.07, y = top + 0.21, r = 0.13;
+    for (let i = 0; i < 10; i++) {
+      const a0 = (i / 10) * Math.PI * 2, a1 = ((i + 1) / 10) * Math.PI * 2;
+      stick(at(u + Math.cos(a0) * r, y + Math.sin(a0) * r, v), at(u + Math.cos(a1) * r, y + Math.sin(a1) * r, v), 0.05, 0.045, WHITE, 'plaster');
+    }
+    for (const side of [-1, 1]) stick(at(u + side * r * 0.7, y - r * 0.7, v), at(u + side * (r + 0.22), y - r - 0.06, v), 0.03, 0.04, WHITE, 'plaster');
   }
   // The low wall over the cornice, which is what the roof stands behind.
   const attic = top + 0.78;
+  // A balustrade along the top of the cornice, before the roof, where the dress has one: along each stretch of the front at its own
+  // line (not over a pediment, nor where a tower stands), and along the two ends of the main block.
+  if (dr.balustrade) {
+    const towerAt = (u: number) => (b.towers ?? []).some((tw) => tw.corner === 'front' && tw.side * u > W / 2 - tw.size - 0.4);
+    for (const st of stretches) {
+      if (st.centre && b.pediment !== false) continue;
+      const face: Face = { L: st.u1 - st.u0, P: (s, y, t) => front.P(st.u0 + W / 2 + s, y, t - st.out - (st.centre ? COL : 0)) };
+      let s0 = 0.05, s1 = face.L - 0.05;
+      while (s0 < s1 && towerAt(st.u0 + s0)) s0 += 0.25;
+      while (s1 > s0 && towerAt(st.u0 + s1)) s1 -= 0.25;
+      balustrade(face, s0, s1, attic, -0.36);
+    }
+    if (!(b.towers ?? []).some((tw) => tw.corner !== 'wing')) for (const f of [right, left]) balustrade(f, 0.05, f.L - 0.05, attic, -0.36);
+  }
   box('plaster', -W / 2, W / 2, attic, attic + 0.5, 0, D, wash);
   box('plaster', -W / 2 - 0.05, W / 2 + 0.05, attic + 0.5, attic + 0.58, -0.05, D + 0.05, WHITE);
   for (const g of b.wings ?? []) {
@@ -756,23 +972,33 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const y = attic + 0.58, e = 0.06, slope = Math.tan((21 * Math.PI) / 180), half = g.width / 2 + e, rise = half * slope, mid = (ua + ub) / 2;
     const near = D - rise / slope, far = D + g.length + e, up = new Vector3(0, 1, 0), dirOf = (du: number, dv: number) => at(du, 0, dv).sub(at(0, 0, 0)).add(up);
     const p = (u: number, yy: number, v: number) => at(u, yy, v);
-    poly('metal', [p(ua - e, y, near), p(ua - e, y, far), p(mid, y + rise, far - half), p(mid, y + rise, near)], roofTone, dirOf(-1, 0));
-    poly('metal', [p(ub + e, y, near), p(ub + e, y, far), p(mid, y + rise, far - half), p(mid, y + rise, near)], roofTone, dirOf(1, 0));
-    poly('metal', [p(ua - e, y, far), p(ub + e, y, far), p(mid, y + rise, far - half)], roofTone, dirOf(0, 1));
-    poly('metal', [p(ua - e, y, near), p(ub + e, y, near), p(mid, y + rise, near)], roofTone, dirOf(0, -1));
-    poly('metal', [p(ua - e, y, near), p(ub + e, y, near), p(ub + e, y, far), p(ua - e, y, far)], shade(roofTone, 0.6), new Vector3(0, -1, 0));
+    poly(roofMat, [p(ua - e, y, near), p(ua - e, y, far), p(mid, y + rise, far - half), p(mid, y + rise, near)], roofTone, dirOf(-1, 0));
+    poly(roofMat, [p(ub + e, y, near), p(ub + e, y, far), p(mid, y + rise, far - half), p(mid, y + rise, near)], roofTone, dirOf(1, 0));
+    poly(roofMat, [p(ua - e, y, far), p(ub + e, y, far), p(mid, y + rise, far - half)], roofTone, dirOf(0, 1));
+    poly(roofMat, [p(ua - e, y, near), p(ub + e, y, near), p(mid, y + rise, near)], roofTone, dirOf(0, -1));
+    poly(roofMat, [p(ua - e, y, near), p(ub + e, y, near), p(ub + e, y, far), p(ua - e, y, far)], shade(roofTone, 0.6), new Vector3(0, -1, 0));
     for (let v = D + 0.3; v < far - 0.2; v += 0.68) {
       const reach = Math.min(half, far - v);
-      for (const side of [-1, 1]) stick(p(side < 0 ? ua - e : ub + e, y + 0.02, v), p(side < 0 ? ua - e + reach : ub + e - reach, y + reach * slope + 0.02, v), 0.035, 0.05, shade(roofTone, 0.85), 'metal');
+      if (seams) for (const side of [-1, 1]) stick(p(side < 0 ? ua - e : ub + e, y + 0.02, v), p(side < 0 ? ua - e + reach : ub + e - reach, y + reach * slope + 0.02, v), 0.035, 0.05, shade(roofTone, 0.85), roofMat);
     }
   }
   if (b.portico && b.pediment !== false) {
     // The pediment over the middle: its face set back within mouldings that follow its slopes.
     // (Unless it has none: then the middle that stands forward ends at the cornice, which runs straight across it.)
-    const half = (centreRight - centreLeft) / 2 + 0.4, mid = (centreLeft + centreRight) / 2, rise = half * 0.42, v = -out - 0.4;
-    wedge(at(mid - half, attic, v + 0.22), at(mid + half, attic, v + 0.22), at(mid, attic + rise, v + 0.22), at(0, 0, 2.2 + out).sub(at(0, 0, 0)), ['metal', roofTone], ['plaster', wash], ['plaster', WHITE]);
+    const half = (centreRight - centreLeft) / 2 + 0.4, mid = (centreLeft + centreRight) / 2, rise = half * 0.42, v = -out - COL - 0.4;
+    wedge(at(mid - half, attic, v + 0.22), at(mid + half, attic, v + 0.22), at(mid, attic + rise, v + 0.22), at(0, 0, 2.2 + out + COL).sub(at(0, 0, 0)), [roofMat, roofTone], ['plaster', wash], ['plaster', WHITE]);
     for (const side of [-1, 1]) stick(at(mid + side * half, attic + 0.06, v + 0.1), at(mid, attic + rise + 0.06, v + 0.1), 0.26, 0.16, WHITE, 'plaster');
-    box('plaster', mid - 0.3, mid + 0.3, attic + rise * 0.3, attic + rise * 0.3 + 0.36, v + 0.18, v + 0.24, PANE);
+    // In the tympanum: a small window; a round one; a clock with its hands at ten past ten; or nothing.
+    const cy = attic + rise * 0.42, R = Math.min(0.6, rise * 0.3);
+    if (dr.tympanum === 'window') box('plaster', mid - 0.3, mid + 0.3, attic + rise * 0.3, attic + rise * 0.3 + 0.36, v + 0.18, v + 0.24, PANE);
+    else if (dr.tympanum !== 'plain') {
+      disc(mid, cy, R + 0.1, v + 0.17, v + 0.22, dr.tympanum === 'clock' ? [0.08, 0.08, 0.09] : WHITE);
+      disc(mid, cy, R, v + 0.15, v + 0.2, dr.tympanum === 'clock' ? [0.88, 0.86, 0.8] : PANE);
+      if (dr.tympanum === 'clock') {
+        for (let h = 0; h < 12; h++) { const a = (h / 12) * Math.PI * 2; stick(at(mid + Math.sin(a) * R * 0.78, cy + Math.cos(a) * R * 0.78, v + 0.14), at(mid + Math.sin(a) * R * 0.92, cy + Math.cos(a) * R * 0.92, v + 0.14), 0.03, 0.04, [0.08, 0.08, 0.09], 'metal'); }
+        for (const [a, len] of [[(-60 * Math.PI) / 180, 0.55], [(60 * Math.PI) / 180, 0.8]]) stick(at(mid, cy, v + 0.12), at(mid + Math.sin(a) * R * len, cy + Math.cos(a) * R * len, v + 0.12), 0.03, 0.05, [0.08, 0.08, 0.09], 'metal');
+      } else for (const a of [0, Math.PI / 2]) stick(at(mid - Math.cos(a) * R, cy - Math.sin(a) * R, v + 0.13), at(mid + Math.cos(a) * R, cy + Math.sin(a) * R, v + 0.13), 0.04, 0.05, WHITE, 'plaster');
+    }
   }
   // The roof: low, hipped, of sheet metal laid in seams up the slope.
   {
@@ -780,14 +1006,14 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const a = at(-W / 2 - e, y, -e), c = at(W / 2 + e, y, -e), g = at(W / 2 + e, y, D + e), h = at(-W / 2 - e, y, D + e);
     const r0 = at(-W / 2 - e + half, y + rise, D / 2), r1 = at(W / 2 + e - half, y + rise, D / 2), up = new Vector3(0, 1, 0);
     const outward = (n: Vector3) => n.add(up);
-    poly('metal', [a, c, r1, r0], roofTone, outward(at(0, 0, -1).sub(at(0, 0, 0))));
-    poly('metal', [g, h, r0, r1], roofTone, outward(at(0, 0, 1).sub(at(0, 0, 0))));
-    poly('metal', [c, g, r1], roofTone, outward(at(1, 0, 0).sub(at(0, 0, 0))));
-    poly('metal', [h, a, r0], roofTone, outward(at(-1, 0, 0).sub(at(0, 0, 0))));
-    poly('metal', [a, c, g, h], shade(roofTone, 0.6), new Vector3(0, -1, 0));
+    poly(roofMat, [a, c, r1, r0], roofTone, outward(at(0, 0, -1).sub(at(0, 0, 0))));
+    poly(roofMat, [g, h, r0, r1], roofTone, outward(at(0, 0, 1).sub(at(0, 0, 0))));
+    poly(roofMat, [c, g, r1], roofTone, outward(at(1, 0, 0).sub(at(0, 0, 0))));
+    poly(roofMat, [h, a, r0], roofTone, outward(at(-1, 0, 0).sub(at(0, 0, 0))));
+    poly(roofMat, [a, c, g, h], shade(roofTone, 0.6), new Vector3(0, -1, 0));
     for (let u = -W / 2 + 0.4; u < W / 2 - 0.2; u += 0.68) {
       const reach = Math.min(half, u + W / 2 + e, W / 2 + e - u);
-      for (const side of [-1, 1]) stick(at(u, y + 0.02, side < 0 ? -e : D + e), at(u, y + reach * slope + 0.02, side < 0 ? -e + reach : D + e - reach), 0.035, 0.05, shade(roofTone, 0.85), 'metal');
+      if (seams) for (const side of [-1, 1]) stick(at(u, y + 0.02, side < 0 ? -e : D + e), at(u, y + reach * slope + 0.02, side < 0 ? -e + reach : D + e - reach), 0.035, 0.05, shade(roofTone, 0.85), roofMat);
     }
     // Chimneys, plastered, each with a white cap.
     const stacks = b.bays >= 7 ? 4 : 2;
@@ -796,6 +1022,11 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       box('plaster', u - 0.45, u + 0.45, y + rise * 0.4, y + rise + 0.95, v - 0.3, v + 0.3, b.brick ? wash : shade(wash, 0.92));
       box('plaster', u - 0.52, u + 0.52, y + rise + 0.95, y + rise + 1.07, v - 0.37, v + 0.37, WHITE);
       tops?.push(at(u, y + rise + 1.07, v));
+    }
+    // A flagpole on the ridge over the middle, where the dress has one.
+    if (dr.flag) {
+      stick(at(0, y + rise - 0.3, D / 2), at(0, y + rise + 9, D / 2), 0.09, 0.09, [0.86, 0.86, 0.84], 'metal');
+      box('metal', -0.11, 0.11, y + rise + 9, y + rise + 9.22, D / 2 - 0.11, D / 2 + 0.11, [0.7, 0.6, 0.3]);
     }
   }
   // Towers at the corners, rising storeys of their own over the cornice: walls standing a hand proud of the front below so that the
@@ -839,16 +1070,16 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     const ey = y + 0.6, e = 0.32, mu = (u0 + u1) / 2, mv = (a0 + a1) / 2, rise = (S / 2 + e) * Math.tan((36 * Math.PI) / 180);
     const c0 = at(u0 - e, ey, a0 - e), c1 = at(u1 + e, ey, a0 - e), c2 = at(u1 + e, ey, a1 + e), c3 = at(u0 - e, ey, a1 + e), apex = at(mu, ey + rise, mv), up = new Vector3(0, 1, 0);
     const outOf = (du: number, dv: number) => at(du, 0, dv).sub(at(0, 0, 0)).add(up);
-    poly('metal', [c0, c1, apex], roofTone, outOf(0, -1));
-    poly('metal', [c1, c2, apex], roofTone, outOf(1, 0));
-    poly('metal', [c2, c3, apex], roofTone, outOf(0, 1));
-    poly('metal', [c3, c0, apex], roofTone, outOf(-1, 0));
-    poly('metal', [c0, c1, c2, c3], shade(roofTone, 0.6), new Vector3(0, -1, 0));
+    poly(roofMat, [c0, c1, apex], roofTone, outOf(0, -1));
+    poly(roofMat, [c1, c2, apex], roofTone, outOf(1, 0));
+    poly(roofMat, [c2, c3, apex], roofTone, outOf(0, 1));
+    poly(roofMat, [c3, c0, apex], roofTone, outOf(-1, 0));
+    poly(roofMat, [c0, c1, c2, c3], shade(roofTone, 0.6), new Vector3(0, -1, 0));
     // (Seams down each face of the roof, from the eaves to the hips.)
     for (let d = -S / 2 + 0.3; d < S / 2 - 0.1; d += 0.6) for (const [du, dv] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
       const along = (q: number) => (du === 0 ? mu + q : mu + du * (S / 2 + e)), across = (q: number) => (dv === 0 ? mv + q : mv + dv * (S / 2 + e));
       const reach = S / 2 + e - Math.abs(d), foot = at(along(d), ey + 0.02, across(d)), head = at(along(d) - du * reach, ey + reach * Math.tan((36 * Math.PI) / 180) + 0.02, across(d) - dv * reach);
-      stick(foot, head, 0.03, 0.045, shade(roofTone, 0.85), 'metal');
+      if (seams) stick(foot, head, 0.03, 0.045, shade(roofTone, 0.85), roofMat);
     }
     stick(at(mu, ey + rise - 0.05, mv), at(mu, ey + rise + 1.1, mv), 0.07, 0.07, [0.08, 0.08, 0.085], 'metal');
     box('metal', mu - 0.11, mu + 0.11, ey + rise + 0.55, ey + rise + 0.77, mv - 0.11, mv + 0.11, [0.62, 0.5, 0.2]);
@@ -1043,10 +1274,12 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
     const openings: Gap[][] = Array.from({ length: N }, () => []), cellar: Gap[] = [];
     let doorGap: Gap | null = null;
     if (door !== undefined) doorGap = { s0: door - 0.62, s1: door + 0.62, y0: Bm - 0.01, y1: Bm + 2.35 };
+    // (None where something stands close before the wall, under its top: it would look into a wall.)
+    const shut = (c: number, y: number) => { const p = k.local(f.P(c, 0, 0)), q = k.local(f.P(c, 0, -1)); return blinded(b, p.u, p.v, q.u - p.u, q.v - p.v, y, 0.55); };
     for (const c of centres) {
       if (doorGap && Math.abs(c - door!) < 1.5) continue;
-      for (let st = 0; st < N; st++) { const fy = floorY(st), h = b.heights[st]; openings[st].push({ s0: c - 0.55, s1: c + 0.55, y0: fy + (st ? 0.62 : 0.72), y1: fy + h - (st ? 0.62 : 0.55) }); }
-      cellar.push({ s0: c - 0.36, s1: c + 0.36, y0: Bm - 0.62, y1: Bm - 0.18 });
+      for (let st = 0; st < N; st++) { const fy = floorY(st), h = b.heights[st], y0 = fy + (st ? 0.62 : 0.72); if (!shut(c, y0)) openings[st].push({ s0: c - 0.55, s1: c + 0.55, y0, y1: fy + h - (st ? 0.62 : 0.55) }); }
+      if (!shut(c, Bm - 0.62)) cellar.push({ s0: c - 0.36, s1: c + 0.36, y0: Bm - 0.62, y1: Bm - 0.18 });
     }
     if (doorGap) openings[0].push(doorGap);
     const all = openings.flat();
@@ -1064,7 +1297,8 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
     for (const g of cellar) { glazed(f, g, 2, 1, [0.25, 0.22, 0.2], 0.1); on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.08, g.y0, -0.12, 0.1, granite(0.6)); }
     // The water table over it, then the wall: a dark backing, and over it the weatherboards, each laid a little proud of the joint over it.
     on(f, 'wood', -0.1, f.L + 0.1, Bm - 0.06, Bm + 0.12, -0.11, 0.04, white, true);
-    pierced(f, 'wood', 0, f.L, Bm + 0.12, top, 0, T, backing, all);
+    // (The backing storey by storey: two storeys' windows stand one over the other, and one stretch of wall cut for both covered both.)
+    for (let st = 0; st < N; st++) pierced(f, 'wood', 0, f.L, st ? floorY(st) : Bm + 0.12, st === N - 1 ? top : floorY(st + 1), 0, T, backing, openings[st]);
     for (let y = Bm + 0.12; y < top - 0.42; y += 0.155) pierced(f, 'wood', 0.2, f.L - 0.2, y, Math.min(top - 0.42, y + 0.142), -0.03, 0, shade(paint, 0.93 + 0.12 * Math.sin(y * 37.7 + f.L)), all);
     // Corner boards with their caps; a band at each floor; the frieze under the eaves.
     for (const [a, e] of [[-0.06, 0.32], [f.L - 0.32, f.L + 0.06]]) { on(f, 'wood', a, e, Bm + 0.1, top - 0.4, -0.07, 0.02, white, true); on(f, 'wood', a - 0.04, e + 0.04, top - 0.55, top - 0.4, -0.1, 0.02, white); }
@@ -1198,7 +1432,7 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
   }
   imperialHouse(b, base, noting, rng, stone, tops);
   // Indoors, only a share of the sky is seen, through the windows: so a room is dimmer than the street, and the sun lies on its floor where it comes in.
-  const turn = b.faces === 'w' ? 1 : -1, height = 0.5 + b.heights.reduce((sum, h) => sum + h, 0), rects = footprintOf(b).map((r, i) => (i ? { ...r, v0: r.v0 - 0.5 } : r));
+  const turn = b.faces === 'w' ? 1 : -1, height = plinthOf(b) + b.heights.reduce((sum, h) => sum + h, 0), rects = footprintOf(b).map((r, i) => (i ? { ...r, v0: r.v0 - 0.5 } : r));
   for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
     const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
     return rects.some((r) => u > r.u0 + 0.24 && u < r.u1 - 0.24 && v > r.v0 + 0.24 && v < r.v1 - 0.24) && y > base + 0.3 && y < base + height - 0.02 ? 0.32 : 1;

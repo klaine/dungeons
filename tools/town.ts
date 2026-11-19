@@ -4,15 +4,22 @@
  * house, and how long the building took. Run it after any change to the rock or the ground.
  *
  *   npx tsx tools/town.ts [count] [prefix]
+ *
+ * `WORLD=w2` before it builds each house at a coastal town of that world in turn (`?world=w2&place=town` in the browser): the
+ * world is made first, half a minute, and each town's tiles of 5 metres about it.
  */
 import { generateSite } from '../src/core/generate';
 import { meshSite } from '../src/render/siteMesher';
+import { worldLand } from '../src/core/worldLand';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'town';
+const inWorld = process.env.WORLD, coasts = inWorld ? worldLand(inWorld).places.filter((q) => q.kind === 'coast') : [];
+if (inWorld && !coasts.length) { console.log(`world ${inWorld} has no coastal towns`); process.exit(1); }
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
-  const seed = `${prefix}${k}`;
-  const site = generateSite(seed, 'town');
+  const seed = `${prefix}${k}`, at = inWorld ? coasts[k % coasts.length] : undefined, t1 = performance.now();
+  const site = generateSite(seed, 'town', at ? { world: { seed: inWorld!, n: at.n } } : {});
+  if (at) console.log(`${seed} at ${at.name} (coastal town ${at.n} of ${inWorld}${site.town?.terrain.world ? '' : ', NOT FOUND THERE'}), laid out in ${(performance.now() - t1).toFixed(0)} ms; the quay ${Math.hypot(site.town!.terrain.u - at.x, site.town!.terrain.v - at.z).toFixed(0)} m from the world's spot`);
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;

@@ -1,10 +1,11 @@
 import { fbm2, Rng } from './rng';
 import { Building, Place, Site, Town } from './site';
 import { coastHeight, coastland, findTowns, townFrame, TownNeed, TownSpot } from './coastland';
+import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
 import { HeightField, landDetail, leastPath, smoothLine, wornLattice } from './terrain';
-import { classicalArch, classicalVariations, footprintOf, freeAtEnds, planClassical, planTimber } from './building';
+import { classicalArch, classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry } from './brick';
-import { dealCanalHouse, planCanal } from './canal';
+import { canalEaves, dealCanalHouse, planCanal } from './canal';
 
 /**
  * A harbour town, laid out on a coast that was found (`coastland.ts`). The land comes first: a
@@ -82,7 +83,28 @@ export function fromBuilding(b: Building, u: number, v: number): [number, number
 /** The height of the frame's land at a point of the site, before anything is done to it here. */
 export function frameAt(t: Town, floor: number, x: number, z: number, out = 0): number {
   const r = t.terrain, [u, v] = townFrame(r, (t.quay.x0 + t.quay.x1) / 2, t.quay.z, x, z);
+  // (In a world, the world's land, whose sea is at nought as the frame's is: its tiles of five metres near, its lattice beyond.)
+  if (r.world) return worldLandAt(worldLand(r.world), u, v) - r.base + floor;
   return coastHeight(coastland(r.seed), u, v, out) - r.base + floor;
+}
+
+/**
+ * Where a town stands in a world (`?world=w2&place=town&n=2`): at the world's `n`th coastal town, found there on the world's lattice
+ * of eight metres for a house of middling size (`findCoastalTowns` in `world.ts`). Its tiles of five metres made first, if this is
+ * where the world was made; then looked for again on them, within a few hundred metres, for this house; the best spot there nearest
+ * the world's is taken, or failing any, the world's own.
+ */
+function inWorldSpot(inWorld: { seed: string; n: number }, need: TownNeed, rng: Rng): { seed: number; spot: TownSpot; world: string } {
+  const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'coast' && o.n === inWorld.n);
+  if (!q?.town) throw new Error(`world ${inWorld.seed} has no coastal town ${inWorld.n}`);
+  for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
+  // (A lattice of five metres about it, as far as the search reaches round a spot it judges, and three hundred metres more each way.)
+  const cell = 5, M = 120, half = M * cell + 300, n = Math.round((2 * half) / cell) + 1;
+  const f = new HeightField(q.x - half, q.z - half, cell, n, n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = worldLandAt(land, f.x0 + i * cell, f.z0 + j * cell);
+  const spots = findTowns({ inner: f }, need, rng, undefined, { margin: M });
+  const near = spots.filter((s) => Math.hypot(s.u - q.x, s.v - q.z) < 300).sort((a, b) => Math.hypot(a.u - q.x, a.v - q.z) - Math.hypot(b.u - q.x, b.v - q.z) || b.score - a.score);
+  return { seed: 0, spot: near[0] ?? q.town, world: inWorld.seed };
 }
 
 /** How the town's own land is made fine and worn again. */
@@ -246,7 +268,8 @@ function makeLand(t: Town, floor: number, house: Rect): HeightField {
   // The ground under each building, made level, with a margin; and under each shack that does not stand on posts.
   for (const b of t.buildings) {
     const y = b.y ?? floor, pad = Math.max(b.w, b.d + Math.max(0, ...(b.wings ?? []).map((g) => g.length)));
-    each({ x0: b.x - pad, x1: b.x + pad, z0: b.z - pad, z1: b.z + pad }, 2, (k, x, z) => ease(k, y, 1 - smooth((outsideBuilt(b, x, z) - 0.4) / 1.6)));
+    // (Falling along its front as its dress says, where a classical building stands on a street that falls.)
+    each({ x0: b.x - pad, x1: b.x + pad, z0: b.z - pad, z1: b.z + pad }, 2, (k, x, z) => { const p = b.dress?.fall ? inBuilding(b, x, z) : null; ease(k, y + (p ? groundOf(b, p.v, p.u) : 0), 1 - smooth((outsideBuilt(b, x, z) - 0.4) / 1.6)); });
     // (Behind a carriage way the yard comes up or down to its floor over a few strides.)
     const arch = b.arch ? classicalArch(b) : null;
     if (arch) each({ x0: b.x - pad - 8, x1: b.x + pad + 8, z0: b.z - pad - 8, z1: b.z + pad + 8 }, 0, (k, x, z) => {
@@ -334,7 +357,7 @@ const STUCCO: [number, number, number][] = [[0.9, 0.76, 0.42], [0.86, 0.62, 0.56
  * site's `town`, `grounds`, `track` and `paths`. A town is always laid on land that was found: when only the house is being judged
  * (`worn` false), nothing is laid but the box the town would have.
  */
-export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
+export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }): void {
   const T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   site.stands = 'free';
@@ -352,8 +375,9 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const need: TownNeed = { square: { x0: -Wsq / 2, x1: Wsq / 2, z0: -(Dsq + apron), z1: -apron }, house: { x0: level.x0 - qx, x1: level.x1 - qx, z0: level.z0 - qz, z1: level.z1 - qz }, half: 190, deep: 230 };
   // (The coasts are drawn from a pool, as islands' seas are, so that one made serves many sites.)
   const COASTS = 13, tr = rng.fork('terrain'), first = tr.int(0, COASTS - 1), stride = 1 + tr.int(0, 5);
-  let found: { seed: number; spot: TownSpot } | null = null;
-  for (let tries = 0; tries < 9 && !found; tries++) {
+  let found: { seed: number; spot: TownSpot; world?: string } | null = null;
+  if (inWorld) found = inWorldSpot(inWorld, need, tr.fork('world'));
+  else for (let tries = 0; tries < 9 && !found; tries++) {
     const seed = 9001 + ((first + tries * stride) % COASTS) * 131, spots = findTowns(coastland(seed), need, tr.fork(`spot${tries}`));
     if (spots.length) found = { seed, spot: spots[Math.min(spots.length - 1, tr.int(0, 2))] };
   }
@@ -361,7 +385,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const sp = found.spot, sea = round(F - sp.base);
   const quayY = round(sea + dims.range(1.7, 2.1));
   const t: Town = {
-    terrain: { seed: found.seed, u: sp.u, v: sp.v, turn: sp.turn, base: sp.base, cell: 1.5 },
+    terrain: { seed: found.seed, u: sp.u, v: sp.v, turn: sp.turn, base: sp.base, cell: 1.5, ...(found.world ? { world: found.world } : {}) },
     sea, land: box, level,
     quay: { x0: qx - 60, x1: qx + 60, z: qz, y: quayY, apron },
     square: { x0: round(qx - Wsq / 2), x1: round(qx + Wsq / 2), z0: meadow.z1, z1: round(meadow.z1 + Dsq), yN: F - 1, yS: quayY + 0.3 },
@@ -757,6 +781,15 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
 
   /** Whether a classical building can have a carriage way through its end: two bays free of the middle, and no wing behind them. */
   const archable = (b: Building) => b.style === 'imperial' && !b.wings?.length && freeAtEnds(b) >= 2;
+  /**
+   * How much lower the street stands before the right end of a building's front than before its left (as one stands before it), to
+   * a tenth of a metre, and nothing where that is under a quarter: a classical building stands level on a base that shows the more
+   * as the street falls away along it.
+   */
+  const fallAlong = (b: Building) => {
+    const [lx, lz] = fromBuilding(b, -b.w / 2, -1.5), [rx, rz] = fromBuilding(b, b.w / 2, -1.5), f = townY(lx, lz) - townY(rx, rz);
+    return Math.abs(f) < 0.25 ? 0 : Math.round(f * 10) / 10;
+  };
   /** Whether a block stands beside the square, fronting it. */
   // (Across the river from it, where there is one: such a block fronts the river and the square beyond it.)
   const blocksBySquare = (r: Rect) => (Math.abs(r.x0 - t.square.x1 - (riverSide > 0 ? corridor : 0)) < 0.2 || Math.abs(r.x1 - t.square.x0 + (riverSide < 0 ? corridor : 0)) < 0.2) && r.z1 > t.square.z0 && r.z0 < t.square.z1;
@@ -817,6 +850,9 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
             classicalVariations(b, r.fork('variations'));
             // (Now and then a carriage way through it into the block's yard: see below for the one every closed block has.)
             if (archable(b) && r.fork('arch').chance(0.25)) b.arch = { side: r.fork('arch side').chance(0.5) ? -1 : 1 };
+            // (Dressed from a stream of its own: nothing standing forward of the street's line, its plinth raised over the fall of the
+            // street along it, a basement under it where that is a metre or more.)
+            dealDress(b, r.fork('dress'), { raise: 1.3, fall: fallAlong(b), forward: false, fit: true });
             b.plan = planClassical(b, r.fork('plan'));
           }
           else if (b.style === 'timber') { b.door = r.pick([0.24, 0.76]); b.plan = planTimber(b); }
@@ -876,6 +912,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
           }
           b.y = round(townY(ex + Math.cos(turn) * 1.5, ez + Math.sin(turn) * 1.5) * 100) / 100;
           classicalVariations(b, r.fork('variations'));
+          // (The chief building of the block on the square may be grander: columns, pavilions, a higher base.)
+          dealDress(b, r.fork('dress'), { raise: 1.8, fall: fallAlong(b), columns: true, fit: true });
           b.plan = planClassical(b, r.fork('plan'));
           t.buildings.push(b);
         }
@@ -906,9 +944,31 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       // into the yard within. (If none was given one, the broadest that can take one is.)
       const mine = t.buildings.slice(from).filter((b) => b.style === 'imperial');
       if (classic && !mine.some((b) => b.arch)) {
-        const pick = mine.filter(archable).sort((p, o) => o.w - p.w)[0];
+        const pick = mine.filter((b) => archable(b) && !b.dress?.pavilions).sort((p, o) => o.w - p.w)[0];
         if (pick) { const r = q.fork('arch'); pick.arch = { side: r.chance(0.5) ? -1 : 1 }; pick.plan = planClassical(pick, r.fork('plan')); }
       }
+    }
+  }
+
+  // ---- what stands close about each building: its neighbours' ground, in its own measures, and how high their walls rise over its
+  // ground, so that no window is made that would look into a wall a stride or two off (`near`, `blinded`)
+  {
+    const reach = (b: Building) => Math.hypot(b.w / 2, b.d + Math.max(0, ...(b.wings ?? []).map((g) => g.length)));
+    const wallTop = (b: Building) => (b.y ?? 0) + (b.style === 'imperial' ? floorOf(b, b.storeys) : b.style === 'timber' ? timberFloor(b, b.storeys) : b.style === 'canal' ? canalEaves(b) : (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0));
+    const tenth = (x: number) => Math.round(x * 10) / 10;
+    for (const b of t.buildings) {
+      const own = footprintOf(b), m = CLOSE + 0.8;
+      const u0 = Math.min(...own.map((r) => r.u0)) - m, u1 = Math.max(...own.map((r) => r.u1)) + m, v0 = Math.min(...own.map((r) => r.v0)) - m, v1 = Math.max(...own.map((r) => r.v1)) + m;
+      const near: NonNullable<Building['near']> = [];
+      for (const o of t.buildings) {
+        if (o === b || Math.hypot(o.x - b.x, o.z - b.z) > reach(o) + reach(b) + m) continue;
+        for (const r of footprintOf(o)) {
+          const at = ([[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]] as [number, number][]).map(([u, v]): [number, number] => { const [x, z] = fromBuilding(o, u, v), p = inBuilding(b, x, z); return [tenth(p.u), tenth(p.v)]; });
+          if (at.every(([u]) => u < u0) || at.every(([u]) => u > u1) || at.every(([, v]) => v < v0) || at.every(([, v]) => v > v1)) continue;
+          near.push({ at, top: tenth(wallTop(o) - (b.y ?? 0)) });
+        }
+      }
+      if (near.length) b.near = near;
     }
   }
 

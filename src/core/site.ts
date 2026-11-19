@@ -328,6 +328,60 @@ export interface BrickWork {
 }
 
 /**
+ * How a classical building (style `imperial`) is dressed, from a plain block to a palace on a sloping square: what stands forward
+ * and what carries it, the heads of its windows, its ornament, and how it meets the ground. A building without it is dressed as the
+ * first of them were: the middle three bays standing forward under pilasters where there is a portico, a rusticated ground storey
+ * with flat arches over its windows, a cornice over every window of the principal storey and a pediment over every other, a small
+ * window in the pediment, one door, and a plinth of half a metre on level ground.
+ */
+export interface ClassicalDress {
+  /** How many bays of the middle stand forward, where there is a portico: three, five, seven or nine. */
+  centre: number;
+  /**
+   * What carries the middle's pediment: pilasters against its wall, or columns standing clear of it through the storeys over the
+   * ground storey, on the ground storey of the middle brought forward as their base, its doors and windows deep in it.
+   */
+  order: 'pilasters' | 'columns';
+  /** How many bays at each end stand forward as pavilions, under pilasters of their own: none, or one to three. */
+  pavilions: number;
+  /** Which storeys have windows with round heads: none, the ground storey, or it and the one over it. */
+  arches: 0 | 1 | 2;
+  /** Over the windows of the principal storey: the surround alone; a cornice; a cornice, and a pediment over every other; or a pediment over every one. */
+  heads: 'plain' | 'cornice' | 'alternate' | 'pediments';
+  /** The render of the ground storey cut in courses. */
+  rusticated: boolean;
+  /** Wreaths along the frieze under the cornice, one over each window. */
+  frieze: boolean;
+  /** A balustrade along the top of the cornice, before the roof. */
+  balustrade: boolean;
+  /** In the pediment: a small window, a round one, a clock, or nothing. */
+  tympanum: 'window' | 'oculus' | 'clock' | 'plain';
+  /** A flagpole over the middle. */
+  flag: boolean;
+  /** What the roof is covered with: sheet metal of the tone dealt, or grey, green, red-brown or black; copper gone green; red clay tiles, or dark ones. */
+  roof: 'dealt' | 'grey' | 'green' | 'red' | 'black' | 'copper' | 'tiles' | 'dark';
+  /**
+   * How richly its walls are dressed. `empire`: strips at the corners over the ground storey, surrounds to the windows with sills on
+   * blocks and heads as `heads` says, three bands over the ground storey, a deep cornice on blocks. `quoins`: as the Renaissance did,
+   * stones laid long and short up the corners in place of the strips, and the surrounds eared at their tops. `lesenes`: plainer, as
+   * Nordic classicism was: flat strips up the corners from the plinth, plain frames to the windows with no heads, one band, a lighter
+   * cornice with no blocks, and the order of the middle flat strips too. `bare`: nothing but the openings, their sills, one band and a
+   * slim cornice.
+   */
+  style: 'empire' | 'quoins' | 'lesenes' | 'bare';
+  /** Doors in the middle: one, or three side by side into the one hall (where the middle is three bays broad or more). */
+  doors: 1 | 3;
+  /** How high the floor of the ground storey stands over the ground before the door: half a metre of plinth, or more, a basement with small windows of its own. */
+  plinth: number;
+  /**
+   * How much lower the ground stands at the right end of the front than at the left, as one stands before it (less than nothing
+   * where the left is lower). The building stands level, and the granite of its base shows the more the further the ground falls
+   * away. Never more than the plinth allows: the ground at the upper end stays under the floor.
+   */
+  fall: number;
+}
+
+/**
  * How a canal house is made: the measures of the house are the building's (`w`, `d`, `storeys`,
  * `heights`, `bays`); this is the rest. Everything here is chosen independently, so that one house
  * may be a narrow front of one window with a bell gable and the next a double house of seven
@@ -467,6 +521,14 @@ export interface Building {
   dormers?: number;
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
+  /** Of a classical building: how it is dressed, from a plain block to a palace on a sloping square (see `ClassicalDress`). Without it, as the first of them were. */
+  dress?: ClassicalDress;
+  /**
+   * What stands close about the building, in its own measures (across its front, and back from it): the outline of each such thing,
+   * and how high its walls rise over the ground before this one's door. A window that would look into one from nearer than a few
+   * metres, and under its top, is left out and the wall is blank there, as it is where houses stand against one another.
+   */
+  near?: { at: [number, number][]; top: number }[];
   /**
    * Of a classical building: walls of bare brown brick instead of a wash. `stucco`: its dressings (cornices, bands, surrounds,
    * pilasters, corner strips) stay stuccoed white, and its ground storey is stucco the colour of stone, rusticated; `bare`: all of it
@@ -516,7 +578,7 @@ export interface Town {
    * Where the land was found: the frame's seed, the point of the frame under the middle of the quay's edge, how far the frame is
    * turned, and the height in the frame of the house's ground; and the lattice, in metres, that the town's own land is made on.
    */
-  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number };
+  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number; world?: string };
   /** The sea's level. */
   sea: number;
   /** The box the town's own land is made over: beyond it the country is the frame's, seen and not walked. */
@@ -658,8 +720,11 @@ export interface Valley {
    * `turn` so that the valley runs south, and the land's height there, `base`, is the meadow's floor. The line down its middle is
    * its stream's, and its sides lie where the land has risen four metres over that; its floor, its walls and the hills beyond are
    * that land. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, its
+   * land is read at its own height (not a share of it), and `seed` is not used.
    */
-  terrain?: { seed: number; u: number; v: number; turn: number; base: number };
+  terrain?: { seed: number; u: number; v: number; turn: number; base: number; world?: string };
 }
 
 /**
@@ -707,8 +772,11 @@ export interface Island {
    * frame. The island's own land is that
    * land made fine on a lattice `cell` metres fine and worn again; its coast is read off it, and the land across the water is
    * the rest of that sea. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, the
+   * sea stands at its level, nought, and the land across the water is the rest of the world; `seed` is then only for the detail.
    */
-  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number };
+  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number; world?: string };
   /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
   crown: { x: number; z: number; r: number; height: number };
   /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
@@ -813,7 +881,16 @@ export interface Mountain {
    * If present, the land is not the plain shape alone but that shape given fractal detail and worn by water and frost on a lattice
    * `cell` metres fine, from the stream `seed` (see `terrain.ts`). Recorded so that whoever builds the place makes the same land.
    */
-  terrain?: { seed: number; cell: number };
+  terrain?: {
+    seed: number; cell: number;
+    /**
+     * If present, the top stands on a summit of that world (`world.ts`): the middle of `level` lies over the world's point `u`, `v`,
+     * the site turned by `turn` so that the ridge it comes up runs south, and the world's land there is `base` high. The country
+     * round about is then the world's own, at its own height, unworn here (it is worn already), with no `range` drawn; the drawn top
+     * stands on it, its summit where the world's is.
+     */
+    world?: string; u?: number; v?: number; turn?: number; base?: number;
+  };
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;

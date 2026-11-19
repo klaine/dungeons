@@ -4,8 +4,9 @@ import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { layOutTown as layOutHarbourTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
-import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
-import { classicalFront, classicalVariations, floorOf, footprintOf, planClassical, planTimber } from './building';
+import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
+import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
+import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -164,7 +165,10 @@ function shuffle<V>(list: V[], rng: Rng): V[] {
  * Generates the site for a seed. Several are drafted and the one with the richest structure is
  * kept: early layers are cheap, so it pays to make many and choose.
  */
-/** What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, a hospice on a mountain top above the cloud, or a house at the head of a harbour town's square. */
+/**
+ * What kind of place to make: a house at the head of a valley (the default), a house on an island in the sea, a hospice on a
+ * mountain top above the cloud, or a house at the head of a harbour town's square (in a world, on one of its coastal towns).
+ */
 export type PlaceKind = 'valley' | 'island' | 'mountain' | 'town';
 
 /** Choices that are not part of the seed: trials of other ways of making a place, to be compared with the usual way. */
@@ -175,6 +179,12 @@ export interface MakeOptions {
    * places were first made.
    */
   terrain?: 'eroded' | 'plain';
+  /**
+   * The place to build it on in a world (`world.ts`): the `n`th of the place's kind found in the world of seed `seed`. Its land is
+   * the world's (`worldLand.ts`), the house's ground where the world found ground for it; the house is still the site's own seed's.
+   * (Only for land that is made, not `plain`.)
+   */
+  world?: { seed: string; n: number };
   /** What settlement a valley is to have, whatever the seed would give it (`none` for none); if there is no room for it, what there is room for. */
   settlement?: NonNullable<Site['settlement']> | 'none';
 }
@@ -243,6 +253,15 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
       // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
       if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
+      // (But a place in a world is that place or nothing: the next best drafts are tried on it, and if none will go, it is said why.)
+      if (opts.world) {
+        let why = (e as Error).message;
+        for (let attempt = 0; attempt < CANDIDATES; attempt++) {
+          if (attempt === bestAttempt) continue;
+          try { return draftSite(seed, setting, base.fork(`site/${attempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e2) { why = (e2 as Error).message; }
+        }
+        throw new Error(`no house of seed ${seed} could be built at ${kind} ${opts.world.n} of world ${opts.world.seed}: ${why}`);
+      }
     }
   }
   return best;
@@ -252,7 +271,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
  * What is out in the valley: the track from the door to where the player arrives, and a few
  * things set back from it, near enough to be seen in passing and far enough to be a walk.
  */
-function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, asked?: MakeOptions['settlement']): void {
+function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }, asked?: MakeOptions['settlement']): void {
   const round = (v: number) => Math.round(v * 10) / 10;
   // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
   const others = site.places.filter((q) => q !== meadow), house = { x0: Math.min(...others.map((q) => q.x0)) - site.wallThickness, x1: Math.max(...others.map((q) => q.x1)) + site.wallThickness };
@@ -263,8 +282,14 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   const back = Math.min(...others.map((q) => q.z0)) - site.wallThickness;
   // If the land comes first, the valley is found now: the head of a glen in an upland made by noise and worn (`highlands.ts`), with
   // ground for the meadow at its head. (The uplands are drawn from a pool, as islands' seas are, so that one made serves many sites.)
-  let found: { seed: number; spot: ValleySpot } | undefined;
-  if (worn) {
+  let found: { seed: number; spot: ValleySpot; world?: string } | undefined;
+  if (worn && inWorld) {
+    // (Or in a world, where it was found already: its tiles about it made first, if this is where the world was made.)
+    const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'valley' && o.n === inWorld.n);
+    if (!q?.valley) throw new Error(`world ${inWorld.seed} has no valley head ${inWorld.n}`);
+    for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
+    found = { seed: 0, spot: q.valley, world: inWorld.seed };
+  } else if (worn) {
     const q = rng.fork('terrain'), LANDS = 16, first = q.int(0, LANDS - 1), stride = 1 + 2 * q.int(0, 4);
     for (let tries = 0; tries < 6 && !found; tries++) {
       const seed = 7001 + ((first + tries * stride) % LANDS) * 131, spots = findValleys(highlands(seed), meadow.x1 - meadow.x0, meadow.z1 - meadow.z0, meadow.z1 - meadow.z0 + 200, q.fork(`spot${tries}`));
@@ -287,6 +312,9 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
       // Towards the gap it draws in to the middle of it.
       const near = Math.min(1, Math.max(0, (z - (v.mouth - 30)) / 24));
       x += (middle(v.mouth) - x) * near * near;
+      // (And nowhere nearer either side than eight metres, measured square to the side: the sides draw in to the gap on a slant,
+      // and measured straight across, as above, a track thirteen metres off was four from the side, in the rock carved along it.)
+      for (let k = 0; k < 24 && insideOf(v, x, z) < 8; k++) x += ((edgeAt(v, 'w', z) + edgeAt(v, 'e', z)) / 2 - x) * 0.2;
     }
     track.push([round(x), round(z)]);
   }
@@ -902,6 +930,10 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       // (Its variations: storeys of other heights, a middle without its pediment, towers at the corners of an L or a U. From a
       // stream of their own, and before anything that reads its storeys' heights.)
       classicalVariations(b, rng.fork('variations'));
+      // How it is dressed, from a stream of its own (`dealDress`): on level ground, at its plinth. Columns and pavilions that would
+      // stand where the track or anything else is are left off, and if even then it would not fit, it is dressed as before.
+      dealDress(b, rng.fork('dress'), { columns: true });
+      if (b.dress && !clearAll(b)) { b.dress.order = 'pilasters'; if (!clearAll(b)) b.dress.pavilions = 0; if (!clearAll(b)) delete b.dress; }
       // About two in five of the taller ones are set into rising ground: the lowest storey open to the front and buried at the back.
       const cut = rng.fork('sunk');
       if (b.storeys >= 3 && cut.chance(0.45)) {
@@ -1368,6 +1400,13 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
       const at = Math.min(z, v.mouth + 2), w = edgeAt(v, 'w', at), e = edgeAt(v, 'e', at), mid = (w + e) / 2;
       return [round(mid + on * Math.max(3.2, (e - w) / 2 - 4.4) + (z > v.mouth + 2 ? on * Math.sin(z * 0.11) * 1.5 : 0)), round(z)];
     };
+    // (Not where the land rises to the gap, as a valley found in the land may: water cannot run uphill, and its bed, which may never
+    // rise, was cut a gully twelve metres deep through the gap, where the track ends and whoever comes in arrives. It goes to ground.)
+    if (v.terrain) {
+      const at = (q: [number, number]) => valleyLand(v, meadow.floor, meadow, q[0], q[1]);
+      const lowest = Math.min(...st.course.map((q) => at(q as [number, number])));
+      if (Math.max(at(beside(v.mouth - 6)), at(beside(v.mouth + 2))) > lowest + 1.5) continue;
+    }
     st.course.push(beside(v.mouth - 6), beside(v.mouth + 2), beside(v.mouth + 14), beside(v.mouth + 30), beside(v.mouth + 52));
     st.to = 'out';
   }
@@ -1861,10 +1900,11 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     // The valley the house stands at the head of: the meadow, and open country to walk on three sides of it.
   };
   // (The island is laid out from a stream of its own, so the house on it is the house the same seed has in a valley.)
-  if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'), opts.terrain === 'eroded');
-  else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded');
-  else if (kind === 'town') layOutHarbourTown(site, forecourt, ecx, rng.fork('town'), opts.terrain === 'eroded');
-  else layOutValley(site, forecourt, ecx, rng.fork('valley'), opts.terrain === 'eroded', opts.settlement);
+  const inWorld = opts.terrain === 'eroded' ? opts.world : undefined;
+  if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'), opts.terrain === 'eroded', inWorld);
+  else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded', inWorld);
+  else if (kind === 'town') layOutHarbourTown(site, forecourt, ecx, rng.fork('town'), opts.terrain === 'eroded', inWorld);
+  else layOutValley(site, forecourt, ecx, rng.fork('valley'), opts.terrain === 'eroded', inWorld, opts.settlement);
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);
   const queue = [forecourt.id];
