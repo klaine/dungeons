@@ -47,11 +47,14 @@ export async function loadWorldPlace(seed: string, kind: WorldPlace['kind'], n: 
       const [i, j] = need[k];
       const kept = await shelf?.get<Parameters<typeof adoptTile>[1]>(`${i},${j}`);
       // (A tile is made from the world, which only the worker holds: where the world was kept, the worker makes it first.)
-      const tile = kept ?? await new Promise<Parameters<typeof adoptTile>[1]>((resolve) => {
+      // (If the worker cannot make it, the place is built without it: its share of the land is the world's lattice of 8 metres.)
+      const tile = kept ?? await new Promise<Parameters<typeof adoptTile>[1] | null>((resolve) => {
         worker.onmessage = (e) => { if (e.data.type === 'tile') resolve(e.data.tile); else if (e.data.type === 'progress') report(e.data.text); };
+        worker.onerror = (e) => { console.error('a tile of the world could not be made:', e.message); resolve(null); };
         if (!workerHas) { worker.postMessage({ type: 'world', seed }); workerHas = true; }
         worker.postMessage({ type: 'tile', i, j });
       });
+      if (!tile) break;
       if (!kept) await shelf?.set(`${i},${j}`, tile);
       adoptTile(land, tile);
     }

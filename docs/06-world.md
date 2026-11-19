@@ -410,9 +410,11 @@ Measured, November 2026, in the cloud container of four cores: the four valley h
 made first) and built in 18 to 23, with 730,000 to 950,000 triangles of rock; its first island laid out in
 8 and built in 38, 513,000 of rock; its second found room for a cove on the third draft of its house. In the
 browser, drawing in software, the game built the house at Strath Cal from the world in some ten minutes, of
-which the world was about one. Its first two mountain tops built without fault, laid out in 15 and 24
-seconds and built in 92 and 123, with 3.2 and 4.2 million triangles of rock, the summits 58 and 60 metres
-over the forecourts (the same seed's top drawn alone has 3.7 million and takes 94). Not yet: the squares
+which the world was about one. Its four mountain tops built without fault, laid out in 13 to 23 seconds
+and built in 63 to 102, with 2.5 to 3.8 million triangles of rock, the summits 50 to 60 metres over the
+forecourts, and 19 on the one whose only ground for a hospice is on its summit's dome (the same seed's top
+drawn alone has 3.7 million and takes 94). In the browser, drawing in software, houses at three world valley
+heads and on a world island were played through to the end (`WORLD=w2 node tools/browser/play.cjs`). Not yet: the squares
 at a metre under a place (the
 site reads the tiles at 5 metres, as it read its upland at 5, and lays its own detail); a world's lakes and
 rivers in its places.
