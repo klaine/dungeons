@@ -6,7 +6,7 @@ import { layOutTown as layOutHarbourTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
-import { classicalFront, classicalVariations, floorOf, footprintOf, planClassical, planTimber } from './building';
+import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { brickCountry, dealBrickHouse, dealChurch } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -930,6 +930,10 @@ function layOutBuildings(site: Site, meadow: Place, fromTrack: (x: number, z: nu
       // (Its variations: storeys of other heights, a middle without its pediment, towers at the corners of an L or a U. From a
       // stream of their own, and before anything that reads its storeys' heights.)
       classicalVariations(b, rng.fork('variations'));
+      // How it is dressed, from a stream of its own (`dealDress`): on level ground, at its plinth. Columns and pavilions that would
+      // stand where the track or anything else is are left off, and if even then it would not fit, it is dressed as before.
+      dealDress(b, rng.fork('dress'), { columns: true });
+      if (b.dress && !clearAll(b)) { b.dress.order = 'pilasters'; if (!clearAll(b)) b.dress.pavilions = 0; if (!clearAll(b)) delete b.dress; }
       // About two in five of the taller ones are set into rising ground: the lowest storey open to the front and buried at the back.
       const cut = rng.fork('sunk');
       if (b.storeys >= 3 && cut.chance(0.45)) {

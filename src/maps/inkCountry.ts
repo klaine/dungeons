@@ -517,11 +517,13 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
       ctx.quadraticCurveTo(X(bt.x + hz * (w / (bt.length / 2))), Z(bt.z - hx * (w / (bt.length / 2))), X(bt.x + hx), Z(bt.z + hz));
       ctx.fill();
     }
-    // The buildings: classical ones close-hatched, timber and wooden ones hatched the other way and more openly, each outlined; the
-    // storehouses and the shacks solid.
+    // The buildings: classical ones close-hatched, canal houses close-hatched the other way, timber and wooden ones hatched that way
+    // more openly, each outlined; the storehouses and the shacks solid.
     for (const b of town.buildings) for (const o of outlineOf(b)) {
       ctx.fillStyle = PAPER; poly(o); ctx.fill();
       if (b.style === 'imperial') hatch(o, 2.6 * u, Math.PI / 4, Math.max(0.7, 0.9 * u));
+      // (Canal houses close-hatched the other way: brick, narrow lots, deep from their quay.)
+      else if (b.style === 'canal') hatch(o, 2.6 * u, -Math.PI / 4, Math.max(0.7, 0.9 * u));
       else hatch(o, 3.6 * u, -Math.PI / 4, Math.max(0.6, 0.8 * u));
       ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.4 * u); poly(o); ctx.stroke();
     }

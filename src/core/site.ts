@@ -264,6 +264,10 @@ export interface Grotto {
  * Of the style `brick`: a building of the brick towns of the Baltic and the North Sea coasts, as
  * along the Trave in Lübeck or the harbours of Stralsund and Wismar; `brick` says which of that
  * family it is and how it is made (see `BrickWork`). `colour` is the wash on a rendered front.
+ *
+ * Of the style `canal`: a canal house, as along the canals of Amsterdam: narrow, tall and deep,
+ * its front to the water, its gable in one of the outlines the city built over two centuries;
+ * `canalwork` says how it is made (see `CanalWork`). `colour` is the paint on a painted front.
  */
 /**
  * How a building of brick is made. There are four kinds:
@@ -324,6 +328,123 @@ export interface BrickWork {
 }
 
 /**
+ * How a classical building (style `imperial`) is dressed, from a plain block to a palace on a sloping square: what stands forward
+ * and what carries it, the heads of its windows, its ornament, and how it meets the ground. A building without it is dressed as the
+ * first of them were: the middle three bays standing forward under pilasters where there is a portico, a rusticated ground storey
+ * with flat arches over its windows, a cornice over every window of the principal storey and a pediment over every other, a small
+ * window in the pediment, one door, and a plinth of half a metre on level ground.
+ */
+export interface ClassicalDress {
+  /** How many bays of the middle stand forward, where there is a portico: three, five, seven or nine. */
+  centre: number;
+  /**
+   * What carries the middle's pediment: pilasters against its wall, or columns standing clear of it through the storeys over the
+   * ground storey, on the ground storey of the middle brought forward as their base, its doors and windows deep in it.
+   */
+  order: 'pilasters' | 'columns';
+  /** How many bays at each end stand forward as pavilions, under pilasters of their own: none, or one to three. */
+  pavilions: number;
+  /** Which storeys have windows with round heads: none, the ground storey, or it and the one over it. */
+  arches: 0 | 1 | 2;
+  /** Over the windows of the principal storey: the surround alone; a cornice; a cornice, and a pediment over every other; or a pediment over every one. */
+  heads: 'plain' | 'cornice' | 'alternate' | 'pediments';
+  /** The render of the ground storey cut in courses. */
+  rusticated: boolean;
+  /** Wreaths along the frieze under the cornice, one over each window. */
+  frieze: boolean;
+  /** A balustrade along the top of the cornice, before the roof. */
+  balustrade: boolean;
+  /** In the pediment: a small window, a round one, a clock, or nothing. */
+  tympanum: 'window' | 'oculus' | 'clock' | 'plain';
+  /** A flagpole over the middle. */
+  flag: boolean;
+  /** What the roof is covered with: sheet metal of the tone dealt, or grey, green, red-brown or black; copper gone green; red clay tiles, or dark ones. */
+  roof: 'dealt' | 'grey' | 'green' | 'red' | 'black' | 'copper' | 'tiles' | 'dark';
+  /**
+   * How richly its walls are dressed. `empire`: strips at the corners over the ground storey, surrounds to the windows with sills on
+   * blocks and heads as `heads` says, three bands over the ground storey, a deep cornice on blocks. `quoins`: as the Renaissance did,
+   * stones laid long and short up the corners in place of the strips, and the surrounds eared at their tops. `lesenes`: plainer, as
+   * Nordic classicism was: flat strips up the corners from the plinth, plain frames to the windows with no heads, one band, a lighter
+   * cornice with no blocks, and the order of the middle flat strips too. `bare`: nothing but the openings, their sills, one band and a
+   * slim cornice.
+   */
+  style: 'empire' | 'quoins' | 'lesenes' | 'bare';
+  /** Doors in the middle: one, or three side by side into the one hall (where the middle is three bays broad or more). */
+  doors: 1 | 3;
+  /** How high the floor of the ground storey stands over the ground before the door: half a metre of plinth, or more, a basement with small windows of its own. */
+  plinth: number;
+  /**
+   * How much lower the ground stands at the right end of the front than at the left, as one stands before it (less than nothing
+   * where the left is lower). The building stands level, and the granite of its base shows the more the further the ground falls
+   * away. Never more than the plinth allows: the ground at the upper end stays under the floor.
+   */
+  fall: number;
+}
+
+/**
+ * How a canal house is made: the measures of the house are the building's (`w`, `d`, `storeys`,
+ * `heights`, `bays`); this is the rest. Everything here is chosen independently, so that one house
+ * may be a narrow front of one window with a bell gable and the next a double house of seven
+ * under a raised cornice; but the dealer (`src/core/canal.ts`) keeps them to the combinations the
+ * city built.
+ */
+export interface CanalWork {
+  /** A dwelling, with a stoop and tall windows; or a warehouse, of lower storeys, with a column of loading doors under the hoist and shutters to its windows. */
+  kind: 'house' | 'warehouse';
+  /**
+   * The outline of the front over the eaves, from the oldest to the latest: `spout`, a narrow
+   * upright strip in the middle rising over the roof, the slopes either side boarded; `stepped`, in
+   * `tiers` steps a side; `neck`, a narrow upright neck over shoulders, with carved claw pieces filling
+   * the corners between (with `tiers` 2, a broader neck first and a narrower one on it); `bell`, the
+   * outline curving in from the shoulders to a narrow top as a bell does; `cornice`, a straight
+   * cornice across the whole front, the roof behind it; `raised`, such a cornice with a panel rising
+   * over its middle.
+   */
+  gable: 'spout' | 'stepped' | 'neck' | 'bell' | 'cornice' | 'raised';
+  /** Of a stepped gable, its steps a side (2 to 5); of a neck gable, its tiers (1 or 2). */
+  tiers: number;
+  /** What stands on the top of the gable or the raised panel: a triangular pediment, a segmental one, a curved crest with scrolls, or a flat cap with a ball. */
+  crown: 'triangle' | 'segment' | 'scroll' | 'flat';
+  /** The front is bare brick, or painted over in the building's `colour`. */
+  front: 'brick' | 'painted';
+  /** The clay of the brick, as for `BrickWork`; and its tone, by which its colour is multiplied. */
+  clay: 'red' | 'buff';
+  tone: [number, number, number];
+  /** The colour of what is dressed: sandstone, or paint. */
+  trim: [number, number, number];
+  /**
+   * How much is carved and moulded: 0, a plain front, the windows under flat arches of brick; 1,
+   * bands of stone at the floors, keystones, a moulded door case; 2, besides, garlands under the
+   * windows, crowned windows, vases and scrolls on the gable, an oval window under its crown; 3,
+   * besides, pilasters between the bays storey over storey and a balustrade or a crest at the top.
+   */
+  ornament: 0 | 1 | 2 | 3;
+  /** The windows: `cross`, a mullion and a transom with small panes above and shutters below; `small`, sashes of many small panes; `large`, sashes of one or two panes. */
+  windows: 'cross' | 'small' | 'large';
+  /** Paint: of the window frames; of the shutters, if there are any (a warehouse always has them); of the door. */
+  frame: [number, number, number];
+  shutters: [number, number, number] | null;
+  paint: [number, number, number];
+  /** A timber front to the ground storey, painted this colour, with great windows and the door in it; or none, the brick going down to the plinth. */
+  pui: [number, number, number] | null;
+  /**
+   * How high the floor of the ground storey stands over the street, up a stoop of steps and a landing; and whether under it there
+   * is a basement, half under the street, lit by low windows at the foot of the front.
+   */
+  stoop: number;
+  basement: boolean;
+  /** How far the front leans out over the street for each metre of its height, as the fronts on the canals do so that goods hoisted clear it. */
+  lean: number;
+  /** The bay the door is in, counted from 0 at the left as one stands before the front. */
+  door: number;
+  /** How steep the roof is, in degrees, and what it is covered with: red clay tiles or tiles glazed nearly black. */
+  pitch: number;
+  roof: 'red' | 'dark';
+  /** A hoist beam with its hook over the top hatch. */
+  hoist: boolean;
+}
+
+/**
  * The plan of a building's rooms: alike on every storey, except where a room or a door names the
  * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
  * measures: `u` across the front from its middle, to the right as seen from outside; `v` back
@@ -343,8 +464,8 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), or Hanseatic brick (`brick`). */
-  style: 'timber' | 'imperial' | 'wooden' | 'brick';
+  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
   x: number;
   z: number;
   w: number;
@@ -393,6 +514,14 @@ export interface Building {
   dormers?: number;
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
+  /** Of a classical building: how it is dressed, from a plain block to a palace on a sloping square (see `ClassicalDress`). Without it, as the first of them were. */
+  dress?: ClassicalDress;
+  /**
+   * What stands close about the building, in its own measures (across its front, and back from it): the outline of each such thing,
+   * and how high its walls rise over the ground before this one's door. A window that would look into one from nearer than a few
+   * metres, and under its top, is left out and the wall is blank there, as it is where houses stand against one another.
+   */
+  near?: { at: [number, number][]; top: number }[];
   /**
    * Of a classical building: walls of bare brown brick instead of a wash. `stucco`: its dressings (cornices, bands, surrounds,
    * pilasters, corner strips) stay stuccoed white, and its ground storey is stucco the colour of stone, rusticated; `bare`: all of it
@@ -421,6 +550,8 @@ export interface Building {
   wings?: { side: -1 | 1; width: number; length: number }[];
   /** Of the style `brick`: which of the family it is, and how it is made. */
   brickwork?: BrickWork;
+  /** Of the style `canal`: how it is made. */
+  canalwork?: CanalWork;
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
 }

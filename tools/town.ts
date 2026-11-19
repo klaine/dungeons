@@ -62,7 +62,7 @@ for (let k = 0; k < count; k++) {
   const t = site.town!, kinds = (k: string) => t.buildings.filter((b) => b.style === k).length;
   let triangles = 0;
   for (const set of [scene.meshes, scene.scenery?.meshes ?? new Map()]) for (const m of set.values()) triangles += m.triangleCount;
-  console.log(`${seed}: ${kinds('imperial')} classical, ${kinds('timber')} timber, ${kinds('wooden')} wooden, ${t.storehouses.length} storehouses, ${t.shacks.length} shacks; ${triangles.toLocaleString()} triangles in all;`);
+  console.log(`${seed}: ${kinds('imperial')} classical, ${kinds('timber')} timber, ${kinds('wooden')} wooden, ${kinds('canal')} canal houses, ${t.storehouses.length} storehouses, ${t.shacks.length} shacks; ${triangles.toLocaleString()} triangles in all;`);
   console.log(`${seed}: ${site.setting.stone}, ${scene.fences?.length} fences, ${JSON.stringify(scene.planted)}, built in ${ms.toFixed(0)} ms, ${rockTriangles.toLocaleString()} triangles of rock${problems.length ? ' | ' + problems.join('; ') : ''}`);
 }
 console.log(failed ? `${failed} of ${count} FAILED` : `all ${count} sound; slowest ${slowest.toFixed(0)} ms`);

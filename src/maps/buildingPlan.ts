@@ -1,4 +1,4 @@
-import { buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, entranceBays, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, frontAt, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building } from '../core/site';
 
 /**
@@ -45,7 +45,9 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
     else rect(d.c - d.w / 2, d.c + d.w / 2, d.at - half, d.at + half, FLOOR);
   }
   // Windows and outer doors on this storey: a pale gap the depth of the wall, with the glass drawn as a line across it.
-  const frontV = (u: number) => (b.portico && u > standL && u < standR ? -OUT : 0);
+  // (Where the middle or a pavilion stands forward, its windows are in its own wall.)
+  const frontV = (u: number) => -frontAt(b, u);
+  void standL; void standR; void OUT;
   const pane = (u0: number, u1: number, v0: number, v1: number, glassAt: 'u' | 'v') => {
     rect(u0, u1, v0, v1, PAPER);
     if (glassAt === 'v') line(u0, (v0 + v1) / 2, u1, (v0 + v1) / 2, LINE, Math.max(1, scale * 0.04));
@@ -59,19 +61,22 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
     if (arch && Math.abs(u - arch.u) < arch.w / 2 + 0.7) return;
     const v0 = frontV(u), door = storey === 0 && entranceBays(b).includes(n);
     if (door) rect(u - 0.85, u + 0.85, v0 - 0.01, v0 + T + 0.01, FLOOR);
-    else pane(u - 0.6, u + 0.6, v0, v0 + T, 'v');
+    else if (!blinded(b, u, v0, 0, -1, sill)) pane(u - 0.6, u + 0.6, v0, v0 + T, 'v');
     if (b.backDoor !== undefined && storey === 1 && Math.abs(u - b.backDoor) < 0.05) rect(u - 0.62, u + 0.62, D - T - 0.01, D + 0.01, FLOOR);
-    else if (!buried(b, D, sill) && !(b.wings ?? []).some((g) => g.side * u > W / 2 - g.width - 0.3)) pane(u - 0.6, u + 0.6, D - T, D, 'v');
+    else if (!buried(b, D, sill, u) && !blinded(b, u, D, 0, 1, sill) && !(b.wings ?? []).some((g) => g.side * u > W / 2 - g.width - 0.3)) pane(u - 0.6, u + 0.6, D - T, D, 'v');
   });
   for (const v of classicalEnds(b)) {
-    if (buried(b, v, sill)) continue;
-    pane(-W / 2, -W / 2 + T, v - 0.6, v + 0.6, 'u');
-    pane(W / 2 - T, W / 2, v - 0.6, v + 0.6, 'u');
+    // (Each end on its own: where the ground falls along the front, one end may have a window where the other has none.)
+    if (!buried(b, v, sill, -W / 2) && !blinded(b, -W / 2, v, -1, 0, sill)) pane(-W / 2, -W / 2 + T, v - 0.6, v + 0.6, 'u');
+    if (!buried(b, v, sill, W / 2) && !blinded(b, W / 2, v, 1, 0, sill)) pane(W / 2 - T, W / 2, v - 0.6, v + 0.6, 'u');
   }
   for (const g of b.wings ?? []) {
     const { along, across } = wingWindows(b, g), outer = g.side * W / 2, inner = g.side * (W / 2 - g.width);
-    for (const v of along) if (!buried(b, v, sill)) { pane(Math.min(outer, outer - g.side * T), Math.max(outer, outer - g.side * T), v - 0.6, v + 0.6, 'u'); pane(Math.min(inner, inner + g.side * T), Math.max(inner, inner + g.side * T), v - 0.6, v + 0.6, 'u'); }
-    for (const u of across) if (!buried(b, D + g.length, sill)) pane(u - 0.6, u + 0.6, D + g.length - T, D + g.length, 'v');
+    for (const v of along) if (!buried(b, v, sill, outer)) {
+      if (!blinded(b, outer, v, g.side, 0, sill)) pane(Math.min(outer, outer - g.side * T), Math.max(outer, outer - g.side * T), v - 0.6, v + 0.6, 'u');
+      if (!blinded(b, inner, v, -g.side, 0, sill)) pane(Math.min(inner, inner + g.side * T), Math.max(inner, inner + g.side * T), v - 0.6, v + 0.6, 'u');
+    }
+    for (const u of across) if (!buried(b, D + g.length, sill, u) && !blinded(b, u, D + g.length, 0, 1, sill)) pane(u - 0.6, u + 0.6, D + g.length - T, D + g.length, 'v');
   }
   // The stair: the flight that goes up from this storey, with its treads and an arrow; the landing; and, on the storey above, the well it comes up through.
   // (One behind each entrance.)
@@ -203,7 +208,9 @@ export function storeyName(b: Building, storey: number): string {
 /** All the storeys of a building, each drawn as a plan with its name and a scale, on one sheet. */
 export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
   const timber = b.style === 'timber', jut = timber ? -timberFront(b, b.storeys - 1) : 0;
-  const pad = 1.6 + jut, W = b.w, D = b.d + (b.portico ? CLASSICAL.out : 0) + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
+  // (How far the front stands forward at the most: the middle, with the base of its columns, or a pavilion.)
+  const forward = b.style === 'imperial' ? Math.max(b.portico ? CLASSICAL.out + (dressOf(b).order === 'columns' ? CLASSICAL.columns : 0) : 0, dressOf(b).pavilions ? CLASSICAL.pavilion : 0) : 0;
+  const pad = 1.6 + jut, W = b.w, D = b.d + forward + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
   const pw = Math.max((W + pad * 2) * scale, 250), ph = (D + pad * 2) * scale + 48;
   const cols = W > 17 ? 1 : 2, rows = Math.ceil(b.storeys / cols);
   const canvas = document.createElement('canvas');
@@ -223,7 +230,7 @@ export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
   for (let s = 0; s < b.storeys; s++) {
     const ox = (s % cols) * pw, oy = 46 + Math.floor(s / cols) * ph;
     // The front is at the foot of the sheet, as one stands before it.
-    const page: PageOf = (u, v) => [ox + pw / 2 + u * scale, oy + 44 + (D + pad - (v + (b.portico ? CLASSICAL.out : 0)) - 0.3) * scale];
+    const page: PageOf = (u, v) => [ox + pw / 2 + u * scale, oy + 44 + (D + pad - (v + forward) - 0.3) * scale];
     ctx.fillStyle = INK;
     ctx.font = '600 15px Georgia, serif';
     ctx.textAlign = 'left';
