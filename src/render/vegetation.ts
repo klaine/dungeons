@@ -175,9 +175,16 @@ export function paintCards(kind: CardSet['kind'], seed = 1): Texture {
       ctx.strokeStyle = grey(0.5);
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(x0, size); ctx.lineTo(x0 + lean, size - h); ctx.stroke();
-      ctx.fillStyle = grey(0.2);
+      // (The head brown, painted warm so that the green each reed is tinted with leaves it a chocolate brown, and lighter on one side
+      // than the other, as a round thing is. Painted dark grey, it came out a flat black cut-out against the water.)
+      const hx = x0 + lean, hy = size - h + size * 0.02, hw = size * 0.014;
+      const round = ctx.createLinearGradient(hx - hw, 0, hx + hw, 0);
+      round.addColorStop(0, 'rgb(190,118,86)');
+      round.addColorStop(0.45, 'rgb(158,92,66)');
+      round.addColorStop(1, 'rgb(84,48,36)');
+      ctx.fillStyle = round;
       ctx.beginPath();
-      ctx.ellipse(x0 + lean, size - h + size * 0.02, size * 0.014, size * 0.055, lean * 0.01, 0, Math.PI * 2);
+      ctx.ellipse(hx, hy, hw, size * 0.055, lean * 0.01, 0, Math.PI * 2);
       ctx.fill();
     }
   } else if (kind === 'leaf') {

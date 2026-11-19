@@ -16,6 +16,7 @@ import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './lan
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
+import { placeHouse } from './housePlacing';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
 import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt, valleyLand } from '../core/valley';
@@ -3225,7 +3226,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // Buildings by the track. (The first timber house of a row is its inn.)
     houses.forEach((b, i) => {
       wild.group = 'house';
-      buildBuilding(b, b.base, (material) => wild.mesh(material), rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0 && !b.wheel);
+      // (Made in meshes of its own and then laid, so that its rooms can be marked as indoors and the feet of its walls damp: see `placeHouse`.)
+      const local = new Map<string, MeshBuilder>();
+      buildBuilding(b, b.base, (material) => { if (!local.has(material)) local.set(material, new MeshBuilder()); return local.get(material)!; }, rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0 && !b.wheel);
+      placeHouse(b, b.base, local, (material) => wild.mesh(material), { facing: b.turn ?? (b.faces === 'w' ? Math.PI : 0), foot: ground });
       wild.group = 'wild';
       // A mill's waterwheel: two rims of short timbers, spokes from the hub to each, paddles between the rims, and the axle into the wall.
       if (b.wheel) {

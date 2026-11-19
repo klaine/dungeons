@@ -13,6 +13,7 @@ import { anyAngle, layBoat, layBollard } from './coast';
 import { buildShack } from './shack';
 import { buildBuilding } from './buildings';
 import { layWall } from './walls';
+import { placeHouse } from './housePlacing';
 import { hallGeometry } from './greatHall';
 import type { IslandBuild, IslandResult } from './island';
 
@@ -1176,58 +1177,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     buildBuilding({ ...bd, x: 0, z: 0, faces: 'w', turn: undefined }, y, (m) => { if (!local.has(m)) local.set(m, new MeshBuilder()); return local.get(m)!; }, rng.fork(`building${n}`), [0.86 * tint[0], 0.77 * tint[1], 0.63 * tint[2]], n % 9 === 0 && bd.style === 'timber', tops);
     // (Built facing west, as the builder makes them; turned so that its front faces its bearing: by that bearing less a half turn.)
     const turn = (bd.turn ?? Math.PI) - Math.PI, c = Math.cos(turn), s = Math.sin(turn);
-    // Damp rises in the foot of a wall from the ground it stands in, and the rain splashes the lowest of it with the street's dirt.
-    // (Nothing had marked where a town's walls meet its ground, and every house stood clean to the setts, as if set down that
-    // morning.) It is drawn by the material, which needs to know how high the ground at the wall's foot is: a wall of plaster is
-    // one face from its footing to its beam, and damp marked at its corners was smeared over the whole of it with no line to it.
-    // So each point of a wall that looks out of the house carries the height of the ground at its foot, plus a thousand, in the
-    // fourth number of its field (see `makeSiteMaterial`). A face looks out if stepping a little way along the way it faces leaves
-    // the house.
-    const fp = footprintOf(bd), fa = bd.turn ?? Math.PI, fax = Math.cos(fa), faz = Math.sin(fa);
-    const outOf = (x: number, z: number) => {
-      const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
-      let best = Infinity;
-      for (const r of fp) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - w, 0, w - r.v1)));
-      return best;
-    };
-    // And what is inside the house is marked as indoors (a share of sky less than nothing, which the program reads so): whatever lies
-    // well within its outer walls and below their tops, but its glass and its roof's covering. What lies beyond the site is lit by
-    // the open sky wherever it is, and the rooms of a town's houses, which can be walked into, were lit as if they stood out of
-    // doors, every wall and floor in the full blue light of the sky. (What is under the jetties lies outside the walls, and is not.)
-    const wallTop = y + bd.heights.reduce((a, h) => a + h, 0) + 0.6;
-    const inDepth = (x: number, z: number) => {
-      const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
-      let best = -Infinity;
-      for (const r of fp) best = Math.max(best, Math.min(u - r.u0, r.u1 - u, w - r.v0, r.v1 - w));
-      return best;
-    };
-    for (const [m, src] of local) {
-      const weathers = m === 'plaster' || m === 'stone' || m === 'brick', roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
-      // Which faces are indoors, each judged at its middle, for a face's corners lie on the lines of the walls, where a large one, a
-      // wall the breadth of the house, has no depth inside it at all: a face of a wall that looks into the house (a step along the
-      // way it faces still within the walls), or a floor or a ceiling well within them (a jetty's underside, over the street, is not).
-      const indoors = new Uint8Array(roofOrGlass ? 0 : src.vertexCount);
-      if (!roofOrGlass) src.eachTriangle((a, b, cc, mx, my, mz, nx0, ny0, nz0) => {
-        const wx = bd.x + mx * c - mz * s, wz = bd.z + mx * s + mz * c, wnx = nx0 * c - nz0 * s, wnz = nx0 * s + nz0 * c;
-        if (my > wallTop) return;
-        const inside = Math.abs(ny0) < 0.5 ? outOf(wx + wnx * 0.6, wz + wnz * 0.6) < 0.02 : inDepth(wx, wz) > (ny0 < 0 ? 0.7 : 0.05);
-        if (inside) indoors[a] = indoors[b] = indoors[cc] = 1;
-      });
-      let k = 0;
-      mesh(m).append(src, (v) => {
-        const x = v.p[0], z = v.p[2], nx = v.n[0], nz = v.n[2];
-        v.p[0] = bd.x + x * c - z * s; v.p[2] = bd.z + x * s + z * c;
-        v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
-        // (But a point of it that lies outside the walls, as the end of a joist that carries a jetty does, is out of doors.)
-        if (indoors[k++] && outOf(v.p[0], v.p[2]) < 0.05) v.open = -1;
-        // Only a wall that looks out of the house: and if it looks into the next house, it is indoors, and has no damp.
-        if (Math.abs(v.n[1]) > 0.5 || outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
-        const next = houseNear(v.p[0] + v.n[0] * 0.8, v.p[2] + v.n[2] * 0.8);
-        if (!roofOrGlass && v.p[1] < wallTop && next >= 0 && next !== n) { v.open = -1; return; }
-        if (!weathers || v.p[1] > y + 30) return;
-        v.field[3] = 1000 + footOf(v.p[0] + v.n[0] * 0.3, v.p[2] + v.n[2] * 0.3);
-      });
-    }
+    // Laid where it stands, its rooms marked as indoors and the feet of its walls damp (see `placeHouse`).
+    placeHouse(bd, y, local, mesh, { facing: bd.turn ?? Math.PI, foot: footOf, turn: { angle: turn, x: bd.x, z: bd.z }, neighbour: (x, z) => { const h = houseNear(x, z); return h >= 0 && h !== n; } });
     chimneys[n] = tops.map((p) => ({ x: bd.x + p.x * c - p.z * s, y: p.y, z: bd.z + p.x * s + p.z * c }));
     // The footing: down from its floor a couple of metres, under its main block and its wings.
     for (const r of footprintOf(bd)) {
