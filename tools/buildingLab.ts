@@ -27,7 +27,18 @@ function shake(kind: Kind, s: Shape): Shape {
     t.portico = rng.chance(0.6);
     const width = push(5, 9), side = rng.pick([[-1], [1], [-1, 1], []] as (-1 | 1)[][]);
     t.wings = side.map((g) => ({ side: g, width, length: push(6, 18) }));
+    // The town's variations, asked for whether they can be had or not.
+    t.pediment = rng.chance(0.5) ? false : undefined;
+    t.entrances = rng.chance(0.5) ? Array.from({ length: rng.int(1, 3) }, () => rng.int(0, 20)) : undefined;
+    t.arch = rng.chance(0.4) ? { side: rng.pick([-1, 1] as const) } : undefined;
+    t.brick = rng.pick([undefined, 'stucco', 'bare'] as const);
+    t.towers = rng.chance(0.5) ? Array.from({ length: rng.int(1, 4) }, () => ({ corner: rng.pick(['front', 'wing', 'back'] as const), side: rng.pick([-1, 1] as const), size: push(3, 7), extra: Math.round(push(0, 4)) })) : undefined;
   }
+  if (kind === 'wooden') {
+    t.basement = push(0.4, 2); t.endDoor = rng.pick([-1, 1] as const); t.dormers = Math.round(push(0, 5));
+    t.wings = rng.chance(0.4) ? [{ side: rng.pick([-1, 1] as const), width: push(5, 10), length: push(5, 14) }] : undefined;
+  }
+  if (kind === 'shack') t.shack = { roof: rng.pick(['boards', 'tin', 'turf'] as const), lean: rng.chance(0.5), stilts: push(0, 2.5) };
   const bw = t.brickwork;
   if (bw) {
     bw.gable = rng.pick(['stepped', 'piers', 'volute', 'plain'] as const);

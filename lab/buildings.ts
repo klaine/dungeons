@@ -26,7 +26,7 @@ import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
 import { makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { buildItem, deal, documentOf, eavesOf, Item, Kind, KIND_ORDER, KINDS, normalise, RANGES, Shape, stoneColour } from './buildingKinds';
+import { buildItem, deal, documentOf, eavesOf, Item, Kind, KIND_ORDER, KINDS, normalise, RANGES, shackOf, Shape, stoneColour } from './buildingKinds';
 
 type Tool = 'move' | 'extrude' | 'scale';
 type Colour = [number, number, number];
@@ -598,6 +598,9 @@ async function start(): Promise<void> {
     put('classical', 'lab1', 0, -6, 0, (s) => { s.bays = 9; s.w = 9 * 2.55 + 1.6; s.storeys = 3; s.heights = [3.8, 4.4, 3.2]; s.portico = true; s.d = 10.6; s.wings = [{ side: -1, width: 6.6, length: 11 }, { side: 1, width: 6.6, length: 11 }]; });
     put('timber', 'lab2', -29, 9, 32, (s) => { s.gable = true; s.storeys = 3; }, true);
     put('timber', 'lab3', -32, -3, 40, (s) => { s.gable = false; });
+    put('wooden', 'lab9', -13, 25, 8, (s) => { s.w = 15; s.bays = 6; s.dormers = 2; s.storeys = 1; s.heights = [3.4]; s.basement = 1.2; });
+    put('shack', 'lab10', 9, 27, -12, (s) => { s.shack!.roof = 'tin'; s.shack!.lean = false; });
+    put('shack', 'lab11', 15, 29, -28, (s) => { s.shack!.roof = 'boards'; s.shack!.lean = true; });
     let prev = put('gabled', 'lab4', 23, 13, -20, (s) => { s.brickwork!.gable = 'stepped'; });
     for (const [kind, seed, gable] of [['gabled', 'lab5', 'volute'], ['eaves', 'lab6', 'plain'], ['gabled', 'lab7', 'piers']] as [Kind, string, 'stepped' | 'piers' | 'volute' | 'plain'][]) {
       const it = put(kind, seed, 0, 0, 0, (s) => { s.brickwork!.gable = gable; });
@@ -729,6 +732,7 @@ async function start(): Promise<void> {
         drag: (q, st, by) => reshape(q, st, (t) => { t.brickwork!.church!.choirLength = st.shape.brickwork!.church!.choirLength + by; }) });
       return out;
     }
+    if (it.kind === 'shack') return out;
     // Storeys: dragged up a storey's height, one more; down, one fewer.
     out.push({ id: 'storeys', label: `${s.storeys} storeys`, colour: GREEN, at: worldAt(it, 0, top + 0.6, D / 2), axis: 'y', sign: 1,
       drag: (q, st, by) => reshape(q, st, (t) => { const h = st.shape.heights[st.shape.heights.length - 1] ?? 3; t.storeys = st.shape.storeys + Math.round(by / h); }) });
@@ -910,7 +914,7 @@ async function start(): Promise<void> {
   const layoutOf = (it: Item | undefined) => {
     if (!it) return '';
     const s = it.shape, bw = s.brickwork;
-    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.wings?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire]);
   };
   let shownLayout = '', sliding = false;
   /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
@@ -1082,6 +1086,45 @@ async function start(): Promise<void> {
           num('Wing length', R.classical.wingLength, () => s().wings![0].length, (t, v) => { for (const g of t.wings!) g.length = v; }, 'How far the wings reach back; each has its own arrow too', 0.1);
         }
       } else el('p', selBox, 'Seven bays or more can have wings.').className = 'note';
+      // The variations the town deals.
+      if (s().portico) tick([['Pediment', () => s().pediment !== false, (t, v) => { t.pediment = v ? undefined : false; }, 'Over the middle that stands forward; without it the cornice runs straight across']]);
+      if (s().bays >= 11) pick('Entrances', [['One', 1], ['Two', 2], ['Three', 3]], () => s().entrances?.length ?? 1, (t, v) => { t.entrances = v > 1 ? Array.from({ length: v }, () => 0) : undefined; }, 'Doors along a long front, each with its own hall and stair');
+      if (!s().wings?.length) pick('Carriage way', [['None', 'none'], ['Left end', 'left'], ['Right end', 'right']], () => (s().arch ? (s().arch!.side < 0 ? 'left' : 'right') : 'none'), (t, v) => { t.arch = v === 'none' ? undefined : { side: v === 'left' ? -1 : 1 }; }, 'An arch through the two bays at an end, to the yard behind (where there is room before the first door)');
+      pick('Walls', [['Washed stucco', 'wash'], ['Brick, stucco dressings', 'stucco'], ['Bare brick', 'bare']], () => s().brick ?? 'wash', (t, v) => { t.brick = v === 'wash' ? undefined : v; });
+      if (s().wings?.length) {
+        const towerKind = () => { const q = s().towers ?? []; if (!q.length) return 'none'; const f = q.some((x) => x.corner === 'front'), w = q.some((x) => x.corner === 'wing'); return f && w ? 'all' : f ? 'front' : 'wings'; };
+        pick('Towers', [['None', 'none'], ['Front corners', 'front'], ['Wing ends', 'wings'], ['Front and a wing', 'all']], towerKind, (t, v) => {
+          const extra = t.towers?.[0]?.extra ?? 2, size = 5.6, front = (side: -1 | 1) => ({ corner: 'front' as const, side, size, extra }), wing = (side: -1 | 1) => ({ corner: 'wing' as const, side, size, extra });
+          const sides = (t.wings ?? []).map((g) => g.side);
+          t.towers = v === 'none' ? undefined : v === 'front' ? [front(-1), front(1)] : v === 'wings' ? sides.map(wing) : [front(-1), front(1), wing(sides[0])];
+        }, 'Towers at its corners, rising over the cornice');
+        if (s().towers?.length) ints('Tower storeys', () => s().towers![0].extra, (t, v) => { for (const q of t.towers!) q.extra = v; }, 1, 'w', 'How many storeys the towers rise over the cornice');
+      }
+      wash();
+    } else if (it.kind === 'wooden') {
+      const RW = R.wooden;
+      num('Width', RW.w, () => s().w, (t, v) => { t.w = v; t.bays = Math.max(3, Math.round((v - 2) / 2.2)); }, 'A little over two metres to a window: more windows as it grows', 0.1);
+      num('Depth', RW.d, () => s().d, (t, v) => { t.d = v; });
+      ints('Storeys', () => s().storeys, (t, v) => { t.storeys = v; });
+      heights(RW.height);
+      ints('Windows', () => s().bays, (t, v) => { t.bays = v; }, 1, 'w', 'Windows across the front');
+      num('Basement', RW.basement, () => s().basement ?? 1.1, (t, v) => { t.basement = v; }, 'How high its granite basement stands, and its floor with it', 0.05);
+      pick('Door', [['Left end', -1], ['Right end', 1]], () => s().endDoor ?? -1, (t, v) => { t.endDoor = v; }, 'The door is in an end wall, near the front, up steps under a little roof');
+      ints('Dormers', () => s().dormers ?? 0, (t, v) => { t.dormers = v; }, 1, 'w', 'Half-round dormers in the front slope of the roof');
+      const side = () => { const g = s().wings?.[0]; return g ? (g.side < 0 ? 'left' : 'right') : 'none'; };
+      pick('Wing', [['None', 'none'], ['Left', 'left'], ['Right', 'right']], side, (t, v) => { t.wings = v === 'none' ? undefined : [{ side: v === 'left' ? -1 : 1, width: t.wings?.[0]?.width ?? 7, length: t.wings?.[0]?.length ?? 9 }]; }, 'A wing reaching back from one end: an L, as at a street corner');
+      if (s().wings?.length) {
+        num('Wing width', RW.wingWidth, () => s().wings![0].width, (t, v) => { t.wings![0].width = v; });
+        num('Wing length', RW.wingLength, () => s().wings![0].length, (t, v) => { t.wings![0].length = v; }, undefined, 0.1);
+      }
+      wash();
+    } else if (it.kind === 'shack') {
+      const sh = () => s().shack!;
+      num('Width', R.shack.w, () => s().w, (t, v) => { t.w = v; });
+      num('Depth', R.shack.d, () => s().d, (t, v) => { t.d = v; });
+      pick('Roof', [['Tarred boards', 'boards'], ['Tin', 'tin'], ['Turf', 'turf']], () => sh().roof, (t, v) => { t.shack!.roof = v; });
+      tick([['One slope', () => sh().lean, (t, v) => { t.shack!.lean = v; }, 'Its roof falls one way, from front to back']]);
+      num('On posts', R.shack.stilts, () => sh().stilts, (t, v) => { t.shack!.stilts = v; }, 'How high its floor stands on posts; nothing is on the ground', 0.05);
       wash();
     } else if (it.kind === 'church') {
       const c = () => bw().church!;
@@ -1220,7 +1263,8 @@ async function start(): Promise<void> {
   const docText = () => JSON.stringify({
     lab: 'dungeons building lab', version: 1, stone: state.stone, hour: state.hour,
     note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
-    items: state.items.map((it) => ({ ...it, building: documentOf(it) })),
+    // (A shack is no building of the site document: it is saved as the town keeps one.)
+    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : { ...it, building: documentOf(it) })),
   }, null, 1);
   // (Shown as an artifact, the page may not start a download itself: its host offers the file to the reader, who says yes or no.)
   type Downloads = { save(o: { filename: string; data: string }): Promise<unknown> };
