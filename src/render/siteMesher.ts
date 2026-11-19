@@ -4477,8 +4477,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   // the water shows only where the land lies under it, so each fills its own hollow in the country round about.
   {
     const centre = (r: { x0: number; x1: number; z0: number; z1: number }) => [(r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2] as const;
-    const t = site.valley?.terrain?.world ? site.valley.terrain : site.island?.terrain?.world ? site.island.terrain : site.mountain?.terrain?.world ? site.mountain.terrain : undefined;
-    const anchor = site.valley?.terrain?.world ? centre(approach) : site.island?.terrain?.world ? centre(site.island.level) : site.mountain?.terrain?.world ? centre(site.mountain.level) : undefined;
+    // (A town's frame lays the middle of its quay's edge on the world's point, as `townFrame` has it.)
+    const town = site.town?.terrain.world ? site.town : undefined;
+    const t = site.valley?.terrain?.world ? site.valley.terrain : site.island?.terrain?.world ? site.island.terrain : site.mountain?.terrain?.world ? site.mountain.terrain : town?.terrain;
+    const anchor = site.valley?.terrain?.world ? centre(approach) : site.island?.terrain?.world ? centre(site.island.level) : site.mountain?.terrain?.world ? centre(site.mountain.level) : town ? [(town.quay.x0 + town.quay.x1) / 2, town.quay.z] as const : undefined;
     if (t?.world && anchor && t.u !== undefined && t.v !== undefined && t.turn !== undefined && t.base !== undefined) {
       const frame = { u: t.u, v: t.v, turn: t.turn };
       for (const lk of worldLand(t.world).lakes ?? []) {

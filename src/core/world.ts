@@ -392,7 +392,15 @@ export function worldTile(w: World, i: number, j: number): Tile {
     // (The sea's floor is spared: what the water brought down would otherwise build it up into flats and false islands.)
     keep[k] = 0.8 * smooth((-y - 1) / 6);
   }
+  const before = f.data.slice();
   wear(f, new Rng(`world/${p.seed}/tile/${i},${j}`), TILE_WEAR, keep);
+  // (Nor the lakes' beds: the drops dropped what they carried in the still water, and filled every lake some ten metres over its
+  // surface, so that a lake drawn about a place lay under the land. Where the world has a lake, the bed is what it was before.)
+  const L = w.field, lakeAt = (x: number, z: number) => { const li = Math.round((x - L.x0) / L.cell), lj = Math.round((z - L.z0) / L.cell); return li < 0 || lj < 0 || li >= L.nx || lj >= L.nz ? 0 : w.lake[lj * L.nx + li]; };
+  for (let jj = 0; jj < TILE.n; jj++) for (let ii = 0; ii < TILE.n; ii++) {
+    const k = jj * TILE.n + ii, level = lakeAt(ox + f.x0 + ii * TILE.cell, oz + f.z0 + jj * TILE.cell);
+    if (level > 0 && before[k] < level) f.data[k] = Math.min(f.data[k], before[k]);
+  }
   const outlet = new Uint8Array(TILE.n * TILE.n);
   for (let k = 0; k < outlet.length; k++) outlet[k] = f.data[k] < 0 ? 1 : 0;
   const { acc, down } = drain(f, outlet);

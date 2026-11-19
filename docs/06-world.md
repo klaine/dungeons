@@ -438,9 +438,15 @@ of its surface, and its shore as a ring of points where rays from that point fir
 About a place built in the world they are drawn out to three kilometres, at their own levels, in the place's
 own frame, as still water that does not mirror (a mirror is a second drawing of the scene, and a lake a
 kilometre off is not worth one): the water shows only where the land lies under it, so each fills its own
-hollow. `w2`'s places have six to twenty-one each, its islands none. Its rivers are not drawn: the largest are
-a few metres across, and from a place the land about it is read at five and eight metres. Its floor is read again from the tiles once they are made, since it was found on
-the coarser lattice.
+hollow. `w2`'s places have six to twenty-one each, its islands none. A town's frame lays the middle of its quay
+on the world's point, and its lakes are laid by that (asked: "ok implement the lakes as well"): `w2`'s four coastal
+towns have six to eighteen each within three kilometres. Within the tiles' reach, a kilometre and a half or so
+about a place, the lakes had been under the land: a tile is the world's land worn again at five metres, and its
+drops laid down what they carried in the still water, filling every lake some ten metres over its surface. Where
+the world has a lake, a tile's ground is now put back after its wear to what it was before (`worldTile`), and
+every lake about `w2`'s towns lies two to four metres deep at its point, its shore at or over its surface all
+round, or nearly. Its rivers are not drawn: the largest are a few metres across, and from a place the land about
+it is read at five and eight metres.
 
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
 (`WORLD=w2 npx tsx tools/land.ts 4`) with nothing wrong, laid out in 0.1 to 6 seconds (the tiles about it
