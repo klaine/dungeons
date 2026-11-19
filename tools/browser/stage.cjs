@@ -12,7 +12,9 @@
 //     "poses": [[21, 2, 13, 1.57, 0.3]] }
 // A row is a street front of houses side by side along z from `z`, of the brick of the country of `stone`; each house is dealt
 // from its `seed` as the town deals one (`kind` is `gabled`, `eaves`, `store` or `church`; `room` for a church), and `set` and `b`
-// overwrite what was dealt, in `brickwork` and in the building. A pose is x, y, z, yaw and pitch, measured from the stage's first
+// overwrite what was dealt, in `brickwork` and in the building. A house with `"style": "canal"` is a canal house instead
+// (`src/core/canal.ts`), dealt with whatever `want` fixes of it (`{ "gable": "bell", "bays": 3, "ornament": 2 }`, as the building
+// lab's address does); `set` then overwrites its `canalwork`. A pose is x, y, z, yaw and pitch, measured from the stage's first
 // front: a yaw of 1.57 looks along -x, at fronts facing `e`. Without `plain` the valley is left as it is, and a paving is laid.
 //
 // Against a development server with hot reloading off, so that saving a file does not reload the page while it works: for one,
@@ -38,6 +40,7 @@ const fs = require('fs'), path = require('path');
     const info = await page.evaluate(async (spec) => {
       // (The builders are fetched afresh for every job, so that what was saved since is what is built.)
       const t = Date.now(), BR = await import(`/src/render/brick.ts?t=${t}`), K = await import(`/src/core/brick.ts?t=${t}`);
+      const CR = await import(`/src/render/canal.ts?t=${t}`), CK = await import(`/src/core/canal.ts?t=${t}`);
       const R = await import('/src/core/rng.ts'), MB = await import('/src/render/geom/meshBuilder.ts'), SB = await import('/src/render/buildings.ts');
       const d = window.__dbg, MeshC = d.scene.children.find((c) => c.isMesh).constructor;
       for (const m of window.__stage ?? []) { d.scene.remove(m); m.geometry.dispose(); }
@@ -59,12 +62,14 @@ const fs = require('fs'), path = require('path');
         const country = K.brickCountry(row.stone ?? 'greystone');
         let z = Z0 + (row.z ?? 0);
         for (const h of row.houses) {
-          const rng = new R.Rng(h.seed), deal = h.kind === 'church' ? K.dealChurch(rng, h.room ?? 70, country) : K.dealBrickHouse(rng, h.deep ?? 14, h.kind, country);
+          const rng = new R.Rng(h.seed), canal = h.style === 'canal';
+          const deal = canal ? CK.dealCanalHouse(rng, { deep: h.deep ?? 16, want: h.want ?? {}, country }) : h.kind === 'church' ? K.dealChurch(rng, h.room ?? 70, country) : K.dealBrickHouse(rng, h.deep ?? 14, h.kind, country);
           if (!deal) { placed.push({ seed: h.seed, none: true }); continue; }
-          Object.assign(deal.brickwork, h.set ?? {});
+          Object.assign(canal ? deal.canalwork : deal.brickwork, h.set ?? {});
           Object.assign(deal, h.b ?? {});
-          BR.buildBrick({ ...deal, x: X + (row.x ?? 0) + turn * (deal.d / 2), z: z + deal.w / 2, faces }, y, mesh, rng.fork('build'), [0.7, 0.68, 0.64]);
-          placed.push({ seed: h.seed, kind: deal.brickwork.kind, gable: deal.brickwork.gable, clay: deal.brickwork.clay, w: deal.w, d: deal.d });
+          (canal ? CR.buildCanal : BR.buildBrick)({ ...deal, x: X + (row.x ?? 0) + turn * (deal.d / 2), z: z + deal.w / 2, faces }, y, mesh, rng.fork('build'), [0.7, 0.68, 0.64]);
+          const work = canal ? deal.canalwork : deal.brickwork;
+          placed.push({ seed: h.seed, kind: work.kind, gable: work.gable, clay: work.clay, w: deal.w, d: deal.d });
           z += deal.w + (h.gap ?? 0);
           zEnd = Math.max(zEnd, z);
         }
