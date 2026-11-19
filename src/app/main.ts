@@ -512,6 +512,14 @@ async function start(): Promise<void> {
     await stage('Shaping the land and its rock', 0.72 + 0.1 * (builtMeshes++ / Math.max(1, meshTotal)), `${triTotal.toLocaleString('en')} triangles in the building`);
     const geometry = builder.build();
     const L = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
+    // And the light thrown up from the ground, which the sky's alone left out. What lies beyond the site is not baked, and a harbour
+    // town's houses are all of it: a wall in shade had the blue of the sky and nothing else, cold and dim, and the underside of an
+    // eave or a jettied storey next to black, where in a sunny street the paving and the walls across the way throw up a warm light
+    // about as strong as the sky's on a wall, and nearly all the light an eave's underside has. Taken as ground of a fifth's
+    // whiteness, sunlit over three fifths of it and under the open sky, and seen by whatever faces down or sideways.
+    const sunUp = Math.max(0, desc.sunDir.clone().normalize().y), sunRGB = [SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b];
+    // (`?bounce=0` leaves it out, as it was.)
+    const G = [0, 1, 2].map((c) => (num('bounce', 1) * 0.2 * (0.6 * SUN_INTENSITY * sunRGB[c] * sunUp + Math.PI * 0.9 * L[c])) / Math.PI);
     const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[];
     const bk = geometry.getAttribute('aBake') as BufferAttribute;
     const own = builder.own;
@@ -525,7 +533,7 @@ async function start(): Promise<void> {
       // Rock knows how much of the sky each of its points can see; everything else sees all of it.
       // Even the deepest crack gets a little light back from the rock about it.
       const open = 0.3 + 0.7 * builder.openAt(i);
-      for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * open, 0, (Math.PI / 2) * L[c] * 0.8 * open, 0);
+      for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * (L[c] + G[c]) * open, 0, (Math.PI / 2) * (L[c] * 0.8 - G[c]) * open, 0);
       bk.setXY(i, open, 0.6);
     }
     // (Cut into tiles of the ground, so that what is out of view is left out of the frame: see `tileGeometry`. Not a boat, which

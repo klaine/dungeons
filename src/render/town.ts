@@ -150,8 +150,9 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
     [t.square, { x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z + 0.6 }, { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 + 0.3 }].forEach((r, n) => paint({ x0: r.x0 - 3, x1: r.x1 + 3, z0: r.z0 - 3, z1: r.z1 + 3 }, (k, x, z) => {
       const d = x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1 ? Math.min(x - r.x0, r.x1 - x, z - r.z0, r.z1 - z) : -outsideRect(r, x, z);
-      // (Laid square to the place itself, from its corner.)
-      if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; laidBy.set([x - r.x0, z - r.z0, 0, 1001 + n], k * 4); }
+      // (Laid square to the place itself, from its corner; the waterfront's courses along the quay, as a quay's flags are laid, and
+      // not out to the water's edge.)
+      if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; laidBy.set(n === 1 ? [z - r.z0, r.x0 - x, Math.PI / 2, 1002] : [x - r.x0, z - r.z0, 0, 1001 + n], k * 4); }
     }));
     for (const bd of t.buildings) { const r = Math.max(bd.w, bd.d) + 14; paint({ x0: bd.x - r, x1: bd.x + r, z0: bd.z - r, z1: bd.z + r }, (k, x, z) => { if (outsideBuilt(bd, x, z) < 0.6) zone[k] = Z.built; }); }
     for (const s of t.shacks) { const r = Math.max(s.w, s.d); paint({ x0: s.x - r, x1: s.x + r, z0: s.z - r, z1: s.z + r }, (k, x, z) => { if (Math.hypot(x - s.x, z - s.z) < r * 0.62) zone[k] = Z.shack; }); }
