@@ -331,9 +331,10 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
   // The boards along a roof's sloping edges (0.24 broad) cover the end of its slopes (0.16 thick): their middle is put 0.06 under the
   // tiles, square to the slope, so that they stand that much proud of the tiles and come 0.02 below the boarding under them. (They
   // stood higher, and a strip of the slope's end, a couple of centimetres of it, showed under them; facing the street, it was in the
-  // sun while the boarding beside it was in shade, and drew a lit line in the angle under the board.) They are set against the slope's
-  // end, a little into it, for there was a gap of half a centimetre to see into as well.
-  const board = 0.06 * Math.hypot(1, pitch);
+  // sun while the boarding beside it was in shade, and drew a lit line in the angle under the board.) And they are let two centimetres
+  // into the slope's end, standing three out from it: the boarding's edge is rounded in the shading (`edgeOf`), which turns it towards
+  // the street over its last centimetre and more, and with less of it hidden that edge still drew a thin light line along the angle.
+  const board = 0.06 * Math.hypot(1, pitch), boardOut = 0.005;
   const gableWall = (f: Face, y: number, t: number) => {
     const half = f.L / 2, rise = half * pitch, mid = f.P(half, y + rise, t);
     const into = f.P(0, 0, 0.26).sub(f.P(0, 0, 0));
@@ -361,14 +362,14 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     for (const side of [-1, 1]) slope([at(side * (W / 2 + eave), top - drop, front - verge), at(side * (W / 2 + eave), top - drop, D + verge), at(0, top - drop + rise, D + verge), at(0, top - drop + rise, front - verge)], tile, dark[1]);
     box('tile', -0.13, 0.13, top - drop + rise - 0.06, top - drop + rise + 0.07, front - verge, D + verge, [0.95, 0.85, 0.8]);
     // Boards along the edge of the roof over the street.
-    for (const side of [-1, 1]) stick(at(side * (W / 2 + eave), top - drop - board, front - verge - 0.02), at(0, top - drop + rise - board, front - verge - 0.02), 0.05, 0.24, shade(OAK, 0.9));
+    for (const side of [-1, 1]) stick(at(side * (W / 2 + eave), top - drop - board, front - verge - boardOut), at(0, top - drop + rise - board, front - verge - boardOut), 0.05, 0.24, shade(OAK, 0.9));
   } else {
     const span = D - front, rise = (span / 2 + eave) * pitch, drop = eave * pitch, mid = front + span / 2;
     gableWall(upper[1], top, 0);
     gableWall(upper[3], top, 0);
     for (const v of [front - eave, D + eave]) slope([at(-W / 2 - verge, top - drop, v), at(W / 2 + verge, top - drop, v), at(W / 2 + verge, top - drop + rise, mid), at(-W / 2 - verge, top - drop + rise, mid)], tile, dark[1]);
     box('tile', -W / 2 - verge, W / 2 + verge, top - drop + rise - 0.06, top - drop + rise + 0.07, mid - 0.13, mid + 0.13, [0.95, 0.85, 0.8]);
-    for (const end of [-W / 2 - verge - 0.02, W / 2 + verge + 0.02]) for (const v of [front - eave, D + eave]) stick(at(end, top - drop - board, v), at(end, top - drop + rise - board, mid), 0.05, 0.24, shade(OAK, 0.9));
+    for (const end of [-W / 2 - verge - boardOut, W / 2 + verge + boardOut]) for (const v of [front - eave, D + eave]) stick(at(end, top - drop - board, v), at(end, top - drop + rise - board, mid), 0.05, 0.24, shade(OAK, 0.9));
     // Dormers in the slope over the street: a small framed front with a window, and a roof of its own.
     const dormers = b.bays >= 3 ? 2 : 1;
     for (let n = 0; n < dormers; n++) {

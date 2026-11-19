@@ -134,7 +134,16 @@ const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
   const u3: N = near(float(1).sub(e.x).sub(e.y).div(l3)).mul(tri);
   const tilt: N = gs.div(ls).mul(s1.sub(s0)).add(gt.div(lt).mul(t1.sub(t0))).add(g3.div(l3).mul(u3)).mul(shown).toVar();
   const wear: N = max(max(max(s0, s1), max(t0, t1)), u3).mul(shown);
-  return { bend: (n: N) => normalize(n.add(tilt)), wear };
+  // (Never turned past facing the eye a little. Where the next face is turned away, as the underside of a board seen from below
+  // turns at its back edge towards a face the eye cannot see, the turning would carry the surface past edge-on, and the lighting,
+  // reading that as a surface seen at the most glancing angle, mirrored the open sky in it however deep under the eaves it lay: a
+  // thin pale-blue line along the angle.)
+  const eye: N = normalize(positionView.negate());
+  const bend = (n: N): N => {
+    const m: N = normalize(n.add(tilt)).toVar();
+    return normalize(m.add(eye.mul(max(float(0.2).sub(dot(m, eye)), 0))));
+  };
+  return { bend, wear };
 };
 
 /** The baked light on a surface facing `wn`. */
