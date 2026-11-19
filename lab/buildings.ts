@@ -10,8 +10,8 @@
 // and each change is built again at once. What is set out is kept in the browser, can be undone, and
 // can be saved as a file of site documents and opened again.
 import {
-  ACESFilmicToneMapping, Box3, BufferAttribute, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
-  Material, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Vector2, Vector3,
+  MOUSE, ACESFilmicToneMapping, Box3, BufferAttribute, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
+  InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Material, Matrix4, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
 } from 'three';
 import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { rtt } from 'three/tsl';
@@ -24,14 +24,19 @@ import { Building, Hour, SKIES, Stone } from '../src/core/site';
 import { solids as plainSolids } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
-import { makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
+import { makeGroundMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
+import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../src/render/vegetation';
+import { CardSet } from '../src/render/scene';
+import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
+import { GROUND_PAINTS, natureKit, Painted, PLANT_PAINTS, Season, SEASONS, TREES } from './nature';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { buildGround, buildItem, deal, dealCharacter, documentOf, eavesOf, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, shackOf, Shape, stoneColour } from './buildingKinds';
+import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
+import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
 import type { ClassicalDress } from '../src/core/site';
 
-type Tool = 'move' | 'extrude' | 'scale';
+type Tool = 'move' | 'extrude' | 'scale' | 'paint';
 type Colour = [number, number, number];
 
 // ------------------------------------------------------------------ what is set out, and remembered
@@ -52,17 +57,30 @@ interface State {
   panel: boolean;
   /** The camera: where it is and what it looks at. */
   cam: number[] | null;
+  /** The season: the green of the leaves, and how dry the grass is. */
+  season: Season;
+  /** What has been laid with the brushes (see `Painted` in `nature.ts`). */
+  paint: Painted;
+  /** The brush: what it lays (on the ground, plants, or rock), which of each, whether it digs rock, and its radius in metres. */
+  brush: { layer: 'ground' | 'plants' | 'rock'; ground: number; plant: number; dig: boolean; size: number };
 }
 const KEY = 'dungeons.lab.buildings';
 const query = new URLSearchParams(location.search);
 const STONES: Stone[] = ['limestone', 'sandstone', 'greystone', 'basalt'];
 const DEFAULTS: State = {
   items: [], next: 1, selected: null, tool: 'move', hour: 'morning', stone: 'greystone', snap: 0.5, turnSnap: 15,
-  grid: true, clay: false, air: true, panel: true, cam: null,
+  grid: true, clay: false, air: true, panel: true, cam: null, season: 'summer',
+  paint: { ground: [], plants: [], rock: [] }, brush: { layer: 'ground', ground: 3, plant: 0, dig: false, size: 2 },
+};
+/** What was painted, read from storage or a file, made safe: lists of lists of numbers, and no more of them than can be built. */
+const readPaint = (o: unknown): Painted => {
+  const list = (v: unknown, n: number, most: number) => (Array.isArray(v) ? v.filter((d) => Array.isArray(d) && d.length >= n && d.slice(0, n).every((x) => typeof x === 'number' && Number.isFinite(x))).slice(-most) as number[][] : []);
+  const p = (o ?? {}) as Partial<Painted>;
+  return { ground: list(p.ground, 5, 20000), plants: list(p.plants, 7, 6000), rock: list(p.rock, 5, 3000) };
 };
 /** An item read from storage or a file, made safe: a kind the lab knows, numbers that are numbers, and a shape its kind can be. */
 function readItem(o: Partial<Item> & { building?: Building }, id: number): Item | null {
-  if (!o || !KIND_ORDER.includes(o.kind as Kind)) return null;
+  if (!o || !ALL_KINDS.includes(o.kind as Kind)) return null;
   const kind = o.kind as Kind, num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   const shape = o.shape ?? (o.building ? (({ x, z, faces, plan, ...rest }) => rest)(o.building) : deal(kind, String(o.seed ?? id)));
   const scale = Array.isArray(o.scale) && o.scale.length === 3 ? (o.scale.map((v) => Math.min(5, Math.max(0.2, num(v, 1)))) as [number, number, number]) : [1, 1, 1] as [number, number, number];
@@ -83,6 +101,11 @@ const state: State = (() => {
   for (const o of kept.items ?? []) { const it = readItem(o, s.next); if (it) { s.items.push(it); s.next++; } }
   if (!(s.hour in SKIES)) s.hour = 'morning';
   if (!STONES.includes(s.stone)) s.stone = 'greystone';
+  if (!SEASONS.includes(s.season)) s.season = 'summer';
+  s.paint = readPaint(s.paint);
+  s.brush = { ...DEFAULTS.brush, ...(s.brush ?? {}) };
+  if (!['ground', 'plants', 'rock'].includes(s.brush.layer)) s.brush.layer = 'ground';
+  if (!['move', 'extrude', 'scale', 'paint'].includes(s.tool)) s.tool = 'move';
   if (query.get('hour')! in SKIES) s.hour = query.get('hour') as Hour;
   if (!s.items.some((it) => it.id === s.selected)) s.selected = null;
   return s;
@@ -176,6 +199,19 @@ async function start(): Promise<void> {
   let handing = false, lastAt: [number, number] = [0, 0];
   canvas.addEventListener('pointerdown', (e) => {
     if (!ready || handing) return;
+    // With the brush in hand a press lays what it holds; a second finger takes the stroke back and the two are the view's.
+    if (state.tool === 'paint' && placing === null) {
+      if (stroke && e.pointerType === 'touch' && stroke.pointer !== e.pointerId) {
+        const first = stroke.pointer;
+        paintCancel();
+        handing = true;
+        canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerId: first, pointerType: 'touch', isPrimary: true, clientX: lastAt[0], clientY: lastAt[1], button: 0, buttons: 1, bubbles: true }));
+        handing = false;
+        return;
+      }
+      if (!stroke && paintDown(e)) { lastAt = [e.clientX, e.clientY]; e.stopImmediatePropagation(); return; }
+      if (stroke) return;
+    }
     if (press && press.id !== null && e.pointerType === 'touch' && press.pointer !== e.pointerId) {
       // A second finger while one is on a building: the two are a pinch or a slide of the view, not a move. The building goes back to
       // where it was, and the first finger is handed to the view's controls as if it had come down on the ground, then this one.
@@ -207,6 +243,13 @@ async function start(): Promise<void> {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!ready) return;
+    if (state.tool === 'paint' && placing === null) {
+      if (stroke?.pointer === e.pointerId) lastAt = [e.clientX, e.clientY];
+      if (e.pointerType === 'mouse') canvas.style.cursor = 'crosshair';
+      paintMove(e);
+      return;
+    }
+    brushRing.visible = false;
     if (placing !== null && !press) {
       const p = levelAt(rayAt(e.clientX, e.clientY)), it = itemOf(placing);
       if (p && it) { it.x = snapped(p.x); it.z = snapped(p.z); placeItem(it); changed(false); reflect(); }
@@ -229,6 +272,7 @@ async function start(): Promise<void> {
     reflect();
   });
   const release = (e: PointerEvent) => {
+    if (paintUp(e)) return;
     if (!press || press.pointer !== e.pointerId) return;
     if (press.id !== null) { if (press.moved) commit(); canvas.style.cursor = 'grab'; }
     else if (!press.moved) select(null);
@@ -334,6 +378,84 @@ async function start(): Promise<void> {
     return mesh;
   };
 
+  // ------------------------------------------------------------------ what grows and what lies about
+  // (Their surfaces are painted only when first wanted, by a tree, a boulder or a brush: until then the lab costs what it did.)
+  let natureMade = false;
+  const natureSurfaces = () => {
+    if (natureMade) return;
+    natureMade = true;
+    // (The same recipes with the same seeds as `main.ts`; on a touch screen at 512, as a phone's are, since ten more surfaces are some
+    // 120 MB at 1024 and a tablet's memory is what ran out before.)
+    const n = query.get('tex') ? size : coarse || appleTouch ? Math.min(size, 512) : size;
+    const N = {
+      rock: generateTextureSet('rock', n, 13), ground: generateTextureSet('ground', n, 17), scree: generateTextureSet('scree', n, 23),
+      bark: generateTextureSet('bark', n, 29), barkAsh: generateTextureSet('barkAsh', n, 59), barkPine: generateTextureSet('barkPine', n, 61), barkFir: generateTextureSet('barkFir', n, 67),
+      soil: generateTextureSet('soil', n, 31), litter: generateTextureSet('litter', n, 37), thatch: generateTextureSet('thatch', n, 47),
+    };
+    doneGenerating();
+    Object.assign(materials, {
+      rock: makeRockMaterial(N.rock, T.moss),
+      turf: makeGroundMaterial(N.ground, N.soil, N.scree, N.litter, N.thatch, T.moss),
+      bark: makeSiteMaterial(N.bark, T.moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
+      barkAsh: makeSiteMaterial(N.barkAsh, T.moss, { normalScale: 1.6, mossScale: 2.5, matt: true, deep: 0.02, hollow: 0.5 }),
+      barkPine: makeSiteMaterial(N.barkPine, T.moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.04, hollow: 0.35 }),
+      barkFir: makeSiteMaterial(N.barkFir, T.moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
+    });
+    vegetationRange.value = 120;
+  };
+  /**
+   * Leaves, grass and flowers are cards, drawn as the game draws them. Their shading needs where each stands in the world, so those of
+   * a tree are not carried by its holder: they are kept as grown about its foot, and moved to where it stands whenever it is moved.
+   */
+  const cardGroup = new Group();
+  scene.add(cardGroup);
+  const allCards = new Set<InstancedMesh>(), cardTextures = new Map<string, Texture>();
+  const makeCardMeshes = (sets: CardSet[]): InstancedMesh[] => {
+    natureSurfaces();
+    const out: InstancedMesh[] = [];
+    for (const set of sets) {
+      if (!set.matrices.length) continue;
+      let tex = cardTextures.get(set.kind);
+      if (!tex) cardTextures.set(set.kind, (tex = paintCards(set.kind)));
+      for (const m of makeCards(set, tex)) { m.frustumCulled = false; cardGroup.add(m); allCards.add(m); out.push(m); }
+    }
+    return out;
+  };
+  const dropCards = (meshes: InstancedMesh[]) => {
+    for (const m of meshes) { cardGroup.remove(m); allCards.delete(m); m.geometry.dispose(); (m.material as Material).dispose(); m.dispose(); }
+  };
+  const localOf = new WeakMap<object, Float32Array>();
+  const placeCards = (meshes: InstancedMesh[], H: Matrix4) => {
+    const seen = new Set<object>(), m4 = new Matrix4(), v = new Vector3(), k = Math.cbrt(Math.abs(H.determinant()));
+    // (The layers of one block, near sprigs and far sprays, have attributes of their own over one array: each array is moved once,
+    // and every attribute over it sent again. Moved once for each, the sprigs stood off the tree by as far again as it had moved.)
+    const move = (attr: BufferAttribute, size: number, kind: 'matrix' | 'point' | 'stand') => {
+      attr.needsUpdate = true;
+      const out = attr.array as Float32Array;
+      if (seen.has(out)) return;
+      seen.add(out);
+      let local = localOf.get(out);
+      if (!local) localOf.set(out, (local = out.slice()));
+      for (let i = 0; i < local.length / size; i++) {
+        if (kind === 'matrix') m4.fromArray(local, i * 16).premultiply(H).toArray(out, i * 16);
+        else { v.fromArray(local, i * size).applyMatrix4(H).toArray(out, i * size); if (kind === 'stand') out[i * 4 + 3] = local[i * 4 + 3] * k; }
+      }
+    };
+    for (const m of meshes) {
+      move(m.instanceMatrix as unknown as BufferAttribute, 16, 'matrix');
+      const at = m.geometry.getAttribute('aAt'), centre = m.geometry.getAttribute('aCentre');
+      if (at) move(at as BufferAttribute, 4, 'stand');
+      if (centre) move(centre as BufferAttribute, 3, 'point');
+      m.computeBoundingSphere();
+    }
+  };
+  // The painted layers: the ground's sheet (in place of the plain paving once anything is laid on it), plants, and rock.
+  const natureLayer = new Group();
+  scene.add(natureLayer);
+  const layers = { ground: null as Mesh | null, rock: null as Mesh | null, plants: [] as Mesh[], cards: [] as InstancedMesh[] };
+  let kit: ReturnType<typeof natureKit> | null = null, kitFor = '';
+  const kitOf = () => { const k = `${state.stone} ${state.season}`; if (!kit || kitFor !== k) { kit = natureKit({ stone: state.stone, season: state.season }); kitFor = k; } return kit; };
+
   // ------------------------------------------------------------------ the square
   const groundGroup = new Group();
   scene.add(groundGroup);
@@ -345,6 +467,7 @@ async function start(): Promise<void> {
     plainSolids(() => b).block('floor', new Vector3(-400, -0.4, -400), new Vector3(400, 0, 400), [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     ground = meshOf('floor', b);
     ground.castShadow = false;
+    ground.visible = !layers.ground;
     groundGroup.add(ground);
   };
   lay();
@@ -355,7 +478,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ buildings
   /** What is built of an item: its meshes, the box they fill, the ground it stands on, what it was built from, when and how long it took. */
-  interface Built { holder: Group; meshes: Mesh[]; box: Box3; rects: { u0: number; u1: number; v0: number; v1: number }[]; sig: string; ms: number; at: number; triangles: number }
+  interface Built { holder: Group; meshes: Mesh[]; cards: InstancedMesh[]; box: Box3; rects: { u0: number; u1: number; v0: number; v1: number }[]; sig: string; ms: number; at: number; triangles: number }
   const built = new Map<number, Built>();
   const dirty = new Set<number>();
   const world = new Group();
@@ -365,7 +488,7 @@ async function start(): Promise<void> {
   // (What stands close about a building is part of what it is built from: a window that would look into another building is left out,
   // and comes back when that one is moved away.)
   const nearItem = (it: Item) => nearOf(it, state.items);
-  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null]);
+  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null, it.kind === 'tree' ? state.season : '']);
   /** Puts what is built of an item where the item says it stands, turned and scaled. (Built facing `w`, its front towards -x: a quarter turn more faces it to +z.) */
   const placeItem = (it: Item) => {
     const b = built.get(it.id);
@@ -375,13 +498,16 @@ async function start(): Promise<void> {
     b.holder.rotation.set(0, Math.PI / 2 + rad(it.turn), 0);
     b.holder.scale.set(it.scale[2], it.scale[1], it.scale[0]);
     b.holder.updateMatrixWorld(true);
+    if (b.cards.length) placeCards(b.cards, b.holder.matrixWorld);
   };
   /** Builds an item again from its document. If the builder fails, what was there stays, and the reason is shown. */
   const rebuild = (it: Item): boolean => {
     const builders = new Map<string, MeshBuilder>(), t0 = performance.now();
+    let made: { cards?: CardSet[] } = {};
     try {
       const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
-      buildItem(it, state.stone, into, nearItem(it));
+      if (isNature(it.kind)) natureSurfaces();
+      made = buildItem(it, state.stone, into, nearItem(it), state.season);
       const c = stoneColour(state.stone);
       buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     } catch (e) {
@@ -390,8 +516,10 @@ async function start(): Promise<void> {
       return false;
     }
     let b = built.get(it.id);
-    if (!b) { b = { holder: new Group(), meshes: [], box: new Box3(), rects: [], sig: '', ms: 0, at: 0, triangles: 0 }; world.add(b.holder); built.set(it.id, b); }
+    if (!b) { b = { holder: new Group(), meshes: [], cards: [], box: new Box3(), rects: [], sig: '', ms: 0, at: 0, triangles: 0 }; world.add(b.holder); built.set(it.id, b); }
     for (const m of b.meshes) { b.holder.remove(m); letGo(m); }
+    dropCards(b.cards);
+    b.cards = made.cards?.length ? makeCardMeshes(made.cards) : [];
     b.meshes = []; b.box.makeEmpty(); b.triangles = 0;
     for (const [name, builder] of builders) {
       if (!builder.vertexCount) continue;
@@ -410,12 +538,13 @@ async function start(): Promise<void> {
   const neighbours = () => { for (const it of state.items) { const b = built.get(it.id); if (b && b.sig !== sigOf(it)) dirty.add(it.id); } };
   /** Brings what is built into line with what is set out: new items built, changed ones built again (in the loop, a few at a time), gone ones taken away. */
   const sync = () => {
-    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); built.delete(id); dirty.delete(id); }
+    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); dropCards(b.cards); built.delete(id); dirty.delete(id); }
     for (const it of state.items) { const b = built.get(it.id); if (!b || b.sig !== sigOf(it)) dirty.add(it.id); else placeItem(it); }
     changed(true);
   };
   const dress = () => {
     for (const b of built.values()) for (const m of b.meshes) m.material = materialOf(m.userData.material);
+    for (const m of natureLayer.children as Mesh[]) m.material = materialOf(m.userData.material);
     if (ground) ground.material = materialOf('floor');
     shadowsDue = 3;
   };
@@ -628,7 +757,7 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ undoing
   const history: string[] = [];
   let at = -1;
-  const snapshot = () => JSON.stringify({ items: state.items, next: state.next, selected: state.selected });
+  const snapshot = () => JSON.stringify({ items: state.items, next: state.next, selected: state.selected, paint: state.paint });
   function commit() {
     const s = snapshot();
     if (history[at] !== s) {
@@ -642,12 +771,136 @@ async function start(): Promise<void> {
   }
   const restore = (s: string) => {
     const o = JSON.parse(s);
-    state.items = o.items; state.next = o.next; state.selected = o.selected;
+    state.items = o.items; state.next = o.next; state.selected = o.selected; state.paint = readPaint(o.paint);
     placing = null;
-    sync(); renderSelected(); remember(); reflectTools();
+    sync(); paintLayers(); renderSelected(); remember(); reflectTools();
   };
   const undo = () => { if (at > 0) { at--; restore(history[at]); say('Undone', 'dim', 2); } };
   const redo = () => { if (at < history.length - 1) { at++; restore(history[at]); say('Done again', 'dim', 2); } };
+
+  /** How far a tree's crown reaches from its trunk, in its own measures. */
+  const crownOfTree = (q: Item) => crownOf(q.shape.tree!);
+
+  // ------------------------------------------------------------------ the brushes
+  // Laid on the square with the Paint tool (see `nature.ts`): a stroke is a trail of dabs, each where the pointer met the square or
+  // rock. The ground is laid again as the stroke goes, as often as that can be done without holding the page up; plants and rock when
+  // it is let go, since a wood or a hill takes a moment to grow or carve.
+  const DOWN = new Vector3(0, -1, 0), downRay = new Raycaster();
+  (downRay as unknown as { firstHitOnly: boolean }).firstHitOnly = true;
+  /** How high plants stand at a point: on rock where there is rock, on the square elsewhere. Nothing grows inside a building. */
+  const heightAt = (x: number, z: number): number | null => {
+    if (state.items.some((it) => !isNature(it.kind) && standsIn(it, x, z, 0.25))) return null;
+    if (layers.rock) { downRay.set(new Vector3(x, 500, z), DOWN); const hit = downRay.intersectObject(layers.rock, false)[0]; if (hit) return hit.point.y; }
+    return 0;
+  };
+  const layGround = () => {
+    if (layers.ground) { natureLayer.remove(layers.ground); letGo(layers.ground); layers.ground = null; }
+    if (state.paint.ground.length) { natureSurfaces(); layers.ground = meshOf('turf', kitOf().groundSheet(state.paint.ground)); layers.ground.castShadow = false; natureLayer.add(layers.ground); }
+    // (The plain paving stands in for the sheet until anything is laid: the sheet's surfaces are not painted until wanted.)
+    if (ground) ground.visible = !layers.ground;
+  };
+  const carveRocks = () => {
+    if (layers.rock) { natureLayer.remove(layers.rock); letGo(layers.rock); layers.rock = null; }
+    const mass = state.paint.rock.length ? kitOf().carveMass(state.paint.rock) : null;
+    if (!mass) return;
+    natureSurfaces();
+    const m = meshOf('rock', mass);
+    (m.geometry as unknown as { boundsTree: MeshBVH }).boundsTree = new MeshBVH(m.geometry);
+    m.raycast = acceleratedRaycast;
+    natureLayer.add(m);
+    layers.rock = m;
+  };
+  const growPlants = () => {
+    for (const m of layers.plants) { natureLayer.remove(m); letGo(m); }
+    dropCards(layers.cards);
+    layers.plants = []; layers.cards = [];
+    if (!state.paint.plants.length) return;
+    natureSurfaces();
+    const made = kitOf().growPainted(state.paint.plants, heightAt);
+    for (const [name, builder] of made.meshes) if (builder.vertexCount) { const m = meshOf(name, builder); natureLayer.add(m); layers.plants.push(m); }
+    layers.cards = makeCardMeshes(made.cards);
+  };
+  let paintedSig = { ground: '', rock: '', plants: '' };
+  /** Lays again whatever of what was painted has changed since it was last laid. Returns how long that took, in milliseconds. */
+  const paintLayers = (): number => {
+    const t0 = performance.now(), P = state.paint;
+    const sig = { ground: JSON.stringify([P.ground, state.stone]), rock: JSON.stringify([P.rock, state.stone]), plants: JSON.stringify([P.plants, P.rock, state.season, state.stone]) };
+    if (sig.ground !== paintedSig.ground) layGround();
+    if (sig.rock !== paintedSig.rock) carveRocks();
+    if (sig.plants !== paintedSig.plants) growPlants();
+    paintedSig = sig;
+    changed(true);
+    return performance.now() - t0;
+  };
+  // The brush's ring on the ground, as large as it is.
+  // (A line round and back to its start: the renderer draws no loops.)
+  const brushRing = new Line(new BufferGeometry().setFromPoints(Array.from({ length: 73 }, (_, i) => new Vector3(Math.cos((i / 72) * Math.PI * 2), 0, Math.sin((i / 72) * Math.PI * 2)))), new LineBasicMaterial({ color: 0xe3b56b, transparent: true, opacity: 0.95, depthTest: false }));
+  brushRing.visible = false;
+  brushRing.renderOrder = 10;
+  scene.add(brushRing);
+  /** Where the brush is: where the pointer meets rock (with plants or rock in hand) or else the square; and which way that faces. */
+  const brushPoint = (e: PointerEvent): { p: Vector3; n: Vector3 } | null => {
+    const ray = rayAt(e.clientX, e.clientY);
+    if (state.brush.layer !== 'ground' && layers.rock) {
+      downRay.ray.copy(ray);
+      const hit = downRay.intersectObject(layers.rock, false)[0];
+      if (hit) return { p: hit.point.clone(), n: hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new Vector3(0, 1, 0) };
+    }
+    const p = levelAt(ray);
+    return p && Math.abs(p.x) < 400 && Math.abs(p.z) < 400 ? { p, n: new Vector3(0, 1, 0) } : null;
+  };
+  let stroke: { pointer: number; last: Vector3 | null; id: number; before: string } | null = null, groundDue = 0;
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+  /** Whether a dab takes away (plants) or digs (rock): as chosen, or the other way with Shift held. */
+  const digging = (e: { shiftKey: boolean }) => state.brush.layer !== 'ground' && state.brush.dig !== e.shiftKey;
+  const dab = (at: { p: Vector3; n: Vector3 }, dig: boolean) => {
+    const B = state.brush, r = B.size, P = state.paint, p = at.p;
+    if (B.layer === 'ground') P.ground.push([round2(p.x), round2(p.z), round2(r), B.ground, stroke!.id]);
+    else if (B.layer === 'plants') {
+      if (dig) P.plants = P.plants.filter((d) => Math.hypot(d[0] - p.x, d[2] - p.z) > r);
+      else P.plants.push([round2(p.x), round2(p.y), round2(p.z), round2(r), B.plant, 0, Math.floor(Math.random() * 1e9)]);
+    } else {
+      // (Rock stands out of what it is laid on by half the brush, or is sunk into it to dig: so a mass is built up stroke by stroke.)
+      const c = p.clone().addScaledVector(at.n, r * (dig ? -0.3 : 0.5));
+      P.rock.push([round2(c.x), round2(c.y), round2(c.z), round2(r), dig ? -1 : 1]);
+    }
+    stroke!.last = p.clone();
+  };
+  function paintDown(e: PointerEvent): boolean {
+    if (e.button !== 0) return false;
+    const at = brushPoint(e);
+    if (!at) return false;
+    const ids = state.paint.ground.map((d) => d[4]);
+    stroke = { pointer: e.pointerId, last: null, id: (ids.length ? Math.max(...ids) : 0) + 1, before: JSON.stringify(state.paint) };
+    canvas.setPointerCapture(e.pointerId);
+    dab(at, digging(e));
+    if (state.brush.layer === 'ground') { paintLayers(); groundDue = performance.now() + 150; }
+    return true;
+  }
+  function paintMove(e: PointerEvent) {
+    const at = brushPoint(e);
+    brushRing.visible = !!at;
+    if (at) { brushRing.position.set(at.p.x, at.p.y + 0.04, at.p.z); brushRing.scale.setScalar(state.brush.size); }
+    if (!stroke || stroke.pointer !== e.pointerId || !at) return;
+    if (stroke.last && at.p.distanceTo(stroke.last) < Math.max(0.2, state.brush.size * (state.brush.layer === 'ground' ? 0.3 : 0.6))) return;
+    dab(at, digging(e));
+    if (state.brush.layer === 'ground' && performance.now() > groundDue) { const ms = paintLayers(); groundDue = performance.now() + Math.max(120, ms * 2); }
+  }
+  function paintUp(e: PointerEvent): boolean {
+    if (!stroke || stroke.pointer !== e.pointerId) return false;
+    stroke = null;
+    const ms = paintLayers();
+    say(`Laid in ${ms.toFixed(0)} ms`, 'dim', 3);
+    commit();
+    return true;
+  }
+  /** Takes back the stroke being drawn. */
+  function paintCancel() {
+    if (!stroke) return;
+    state.paint = readPaint(JSON.parse(stroke.before));
+    stroke = null;
+    paintLayers();
+  }
 
   // ------------------------------------------------------------------ snapping
   function snapped(v: number) { return state.snap ? Math.round(v / state.snap) * state.snap : Math.round(v * 100) / 100; }
@@ -695,6 +948,7 @@ async function start(): Promise<void> {
         drag: (q, _start, _by, e) => { const p = levelAt(rayAt(e.clientX, e.clientY)); if (p) { q.turn = turned(deg(Math.atan2(p.x - q.x, p.z - q.z)), e.shiftKey); placeItem(q); changed(false); } } });
       return out;
     }
+    if (state.tool === 'paint') return out;
     if (state.tool === 'scale') {
       // Corners scale the whole; the knobs on the faces stretch it one way only; the one on top, upward.
       const sc = (q: Item, start: Item, k: number[], by: number, extent: number, e: PointerEvent) => {
@@ -722,6 +976,17 @@ async function start(): Promise<void> {
         { id: 'stretchV', label: 'depth', colour: BLUE, at: worldAt(it, 0, E / 2, D), axis: 'v', sign: 1, drag: (q, st, by, e) => sc(q, st, [2], by * st.scale[2], (D / 2) * st.scale[2], e) },
         { id: 'stretchY', label: 'height', colour: BLUE, at: worldAt(it, 0, top, D / 2), axis: 'y', sign: 1, drag: (q, st, by, e) => sc(q, st, [1], by * st.scale[1], top * st.scale[1], e) },
       );
+      return out;
+    }
+    // (A tree is extruded by its top, which makes it taller, and the edge of its crown, which spreads it; a boulder by its top.)
+    if (it.kind === 'tree') {
+      const t = s.tree!, wideOf = (q: Item) => crownOfTree(q);
+      out.push({ id: 'height', label: `${t.height.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.4, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.height = st.shape.tree!.height + by; }) });
+      out.push({ id: 'spread', label: 'spread', colour: AMBER, at: worldAt(it, wideOf(it), Math.min(top * 0.6, 8), D / 2), axis: 'u', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.wide = st.shape.tree!.wide * (1 + by / Math.max(1, wideOf(st))); }) });
+      return out;
+    }
+    if (it.kind === 'boulder') {
+      out.push({ id: 'size', label: `${s.boulder!.size.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.3, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.boulder!.size = st.shape.boulder!.size + by * 1.4; }) });
       return out;
     }
     // Extruding: each face's arrow changes the measure it stands on, and the building is built again as it goes.
@@ -851,7 +1116,8 @@ async function start(): Promise<void> {
   let clashes: [number, number][] = [];
   const findClashes = () => {
     clashes = [];
-    const grounds = state.items.map((it) => ({ id: it.id, g: groundOf(it, 0.08) }));
+    // (Trees and stones stand where they like: a building beside a tree is not standing in it.)
+    const grounds = state.items.filter((it) => !isNature(it.kind)).map((it) => ({ id: it.id, g: groundOf(it, 0.08) }));
     for (let i = 0; i < grounds.length; i++) for (let j = i + 1; j < grounds.length; j++) {
       if (grounds[i].g.some((a) => grounds[j].g.some((c) => overlaps(a, c)))) clashes.push([grounds[i].id, grounds[j].id]);
     }
@@ -861,7 +1127,7 @@ async function start(): Promise<void> {
     let others = '', clash = '', mine = '', ring = '', stems = '';
     for (const it of state.items) {
       const d = groundOf(it).map((r) => polyline(r, true)).join('');
-      if (it === chosen) mine += d; else if (clashing.has(it.id)) clash += d; else if (state.tool !== 'move' || state.items.length < 40) others += d;
+      if (it === chosen) mine += d; else if (clashing.has(it.id)) clash += d; else if (!isNature(it.kind) && state.tool !== 'paint' && (state.tool !== 'move' || state.items.length < 40)) others += d;
     }
     if (chosen && clashing.has(chosen.id)) clash += groundOf(chosen).map((r) => polyline(r, true)).join('');
     const knobs = chosen && placing === null ? knobsOf(chosen) : [];
@@ -998,10 +1264,36 @@ async function start(): Promise<void> {
     b.addEventListener('click', (e) => { add(kind, { follow: (e as PointerEvent).pointerType === 'mouse' }); b.blur(); });
   }
   buttons(panel, [
-    ['A palace', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('palace', seed) }); }, 'A long classical front on a high base, its middle under columns and a pediment, pavilions at its ends, the ground falling along it'],
-    ['A plain block', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('plain', seed) }); }, 'A classical block with nothing on it but its windows, its bands and its cornice'],
+    ['Palace', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('palace', seed) }); }, 'A long classical front on a high base, its middle under columns and a pediment, pavilions at its ends, the ground falling along it'],
+    ['Plain block', (e) => { add('classical', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealCharacter('plain', seed) }); }, 'A classical block with nothing on it but its windows, its bands and its cornice'],
   ]);
-  buttons(panel, [['A street of brick', street, 'Seven houses wall to wall, dealt as a town deals them']]);
+  buttons(panel, [['Brick street', street, 'Seven houses wall to wall, dealt as a town deals them']]);
+  el('h2', panel, 'Trees & stones');
+  const TREE_NAMES: Record<(typeof TREES)[number], string> = { oak: 'Oak', ash: 'Ash', 'old oak': 'Old oak', spruce: 'Spruce', pine: 'Pine', 'coast pine': 'Coast pine', bush: 'Bush' };
+  buttons(panel, [
+    ...TREES.map((k): [string, (e: MouseEvent) => void, string] => [TREE_NAMES[k], (e) => { add('tree', { follow: (e as PointerEvent).pointerType === 'mouse', shape: (seed) => dealTree(k, seed) }); }, `A${k === 'oak' || k === 'old oak' || k === 'ash' ? 'n' : ''} ${k}, grown as the valley grows them`]),
+    ['Boulder', (e) => { add('boulder', { follow: (e as PointerEvent).pointerType === 'mouse' }); }, 'A boulder of the country’s stone'],
+  ]);
+  // The brushes: what each lays, and how large it is.
+  el('h2', panel, 'Paint');
+  const paintBox = el('div', panel);
+  let paintList: (() => void)[] = [];
+  const GROUND_NAMES: Record<(typeof GROUND_PAINTS)[number], string> = { flags: 'Flags', setts: 'Setts', gravel: 'Gravel', turf: 'Turf', earth: 'Earth', mud: 'Mud', track: 'Track', path: 'Path' };
+  const PLANT_NAMES: Record<(typeof PLANT_PAINTS)[number], string> = { grass: 'Grass', flowers: 'Flowers', ferns: 'Ferns', reeds: 'Reeds', wood: 'Mixed wood', oak: 'Oak', ash: 'Ash', spruce: 'Spruce', pine: 'Pine', bush: 'Bush' };
+  const clearPaint = (what: keyof Painted, name: string) => { if (!state.paint[what].length) return; state.paint = { ...state.paint, [what]: [] }; paintLayers(); commit(); say(`${name} cleared`, 'dim', 4); };
+  function renderPaint() {
+    paintBox.innerHTML = '';
+    paintList = [];
+    const B = state.brush, list = paintList;
+    choice<'ground' | 'plants' | 'rock'>(paintBox, list, 'Brush', [['Ground', 'ground'], ['Plants', 'plants'], ['Rock', 'rock']], () => B.layer, (v) => { B.layer = v; if (state.tool !== 'paint') setTool('paint'); renderPaint(); remember(); });
+    if (B.layer === 'ground') choice<number>(paintBox, list, 'Surface', GROUND_PAINTS.map((g, i): [string, number] => [GROUND_NAMES[g], i]), () => B.ground, (v) => { B.ground = v; remember(); }, 'Flags are the square itself: painting them erases. A track or a path follows the stroke.');
+    else if (B.layer === 'plants') choice<number>(paintBox, list, 'Plants', PLANT_PAINTS.map((g, i): [string, number] => [PLANT_NAMES[g], i]), () => B.plant, (v) => { B.plant = v; remember(); }, 'Low things in drifts; trees one by one at their distance; a wood a mixture of them');
+    if (B.layer !== 'ground') checks(paintBox, list, [[B.layer === 'rock' ? 'Dig' : 'Erase', () => B.dig, (v) => { B.dig = v; remember(); }, 'Or hold Shift while painting']]);
+    slider(paintBox, list, 'Size', 0.3, 20, 0.1, () => B.size, (v) => { B.size = v; brushRing.scale.setScalar(v); remember(); }, { title: 'Brush radius in metres ([ and ])' });
+    buttons(paintBox, [['Clear ground', () => clearPaint('ground', 'Ground')], ['Clear plants', () => clearPaint('plants', 'Plants')], ['Clear rock', () => clearPaint('rock', 'Rock')]]);
+    el('p', paintBox, 'Paint (B), then drag on the square. Right drag turns the view; two fingers by touch.').className = 'note';
+  }
+  renderPaint();
 
   // The building chosen.
   el('h2', panel, 'Selected');
@@ -1017,7 +1309,7 @@ async function start(): Promise<void> {
     el('h3', selBox, KINDS[it.kind].name);
     el('p', selBox, KINDS[it.kind].note).className = 'note';
     buttons(selBox, [
-      ['Deal anew', () => { it.seed = Math.random().toString(36).slice(2, 8); it.shape = deal(it.kind, it.seed, state.stone); dirty.add(it.id); renderSelected(); commit(); }, 'Another of its kind, dealt as the generator deals one'],
+      ['Deal anew', () => { it.seed = Math.random().toString(36).slice(2, 8); it.shape = it.kind === 'tree' ? dealTree(it.shape.tree!.kind, it.seed) : deal(it.kind, it.seed, state.stone); dirty.add(it.id); renderSelected(); commit(); }, 'Another of its kind, dealt as the generator deals one'],
       ['New details', () => { it.seed = Math.random().toString(36).slice(2, 8); dirty.add(it.id); commit(); }, 'The same measures; the builder’s own choices made again: door colours, lit rooms, how rooms are dealt'],
     ]);
     buttons(selBox, [
@@ -1130,25 +1422,25 @@ async function start(): Promise<void> {
       ]);
       const dd = (): ClassicalDress => ({ ...PLAIN_DRESS, ...(s().dress ?? {}) });
       const dressed = (f: (d: ClassicalDress) => void) => (t: Shape) => { const d = { ...PLAIN_DRESS, ...(t.dress ?? {}) }; f(d); t.dress = d; };
-      pick('Style', [['Empire: strips and heads', 'empire'], ['Renaissance: quoins', 'quoins'], ['Nordic: lesenes', 'lesenes'], ['None: bare walls', 'bare']], () => dd().style, (t, v) => dressed((d) => { d.style = v; })(t), 'How richly the walls are dressed: strips at the corners and heads over the windows; stones long and short up the corners; flat strips and plain frames; or nothing but the openings');
+      pick('Style', [['Empire', 'empire'], ['Renaissance', 'quoins'], ['Nordic', 'lesenes'], ['Bare', 'bare']], () => dd().style, (t, v) => dressed((d) => { d.style = v; })(t), 'Empire: corner strips, window heads. Renaissance: quoins, eared frames. Nordic: lesenes, plain frames. Bare: no ornament.');
       if (s().portico) {
         ints('Middle bays', () => dd().centre, (t, v) => dressed((d) => { d.centre = v; })(t), 2, 'w', 'How many bays of the middle stand forward: three to nine');
         pick('Middle', [['Pilasters', 'pilasters'], ['Columns', 'columns']], () => dd().order, (t, v) => dressed((d) => { d.order = v; })(t), 'Columns stand clear of the wall through the upper storeys, on the ground storey brought forward');
       }
       ints('Pavilions', () => dd().pavilions, (t, v) => dressed((d) => { d.pavilions = v; })(t), 1, 'w', 'Bays at each end standing forward under pilasters of their own');
-      pick('Round heads', [['None', 0], ['Ground storey', 1], ['Ground and first', 2]], () => dd().arches, (t, v) => dressed((d) => { d.arches = v as 0 | 1 | 2; })(t), 'Windows (and doors) with round heads');
-      pick('Window heads', [['Surround only', 'plain'], ['Cornice', 'cornice'], ['Every other pediment', 'alternate'], ['Pediments', 'pediments']], () => dd().heads, (t, v) => dressed((d) => { d.heads = v; })(t), 'Over the windows of the principal storey');
+      pick('Arched windows', [['None', 0], ['Ground floor', 1], ['Two floors', 2]], () => dd().arches, (t, v) => dressed((d) => { d.arches = v as 0 | 1 | 2; })(t), 'Windows (and doors) with round heads');
+      pick('Window heads', [['Frame only', 'plain'], ['Cornice', 'cornice'], ['Alternating', 'alternate'], ['Pediments', 'pediments']], () => dd().heads, (t, v) => dressed((d) => { d.heads = v; })(t), 'Over the windows of the principal storey');
       tick([
         ['Rusticated', () => dd().rusticated, (t, v) => dressed((d) => { d.rusticated = v; })(t), 'The ground storey cut in courses'],
         ['Wreaths', () => dd().frieze, (t, v) => dressed((d) => { d.frieze = v; })(t), 'A wreath in the frieze over each window'],
         ['Balustrade', () => dd().balustrade, (t, v) => dressed((d) => { d.balustrade = v; })(t), 'Along the top of the cornice, before the roof'],
         ['Flagpole', () => dd().flag, (t, v) => dressed((d) => { d.flag = v; })(t)],
       ]);
-      if (s().portico && s().pediment !== false) pick('In the pediment', [['Small window', 'window'], ['Round window', 'oculus'], ['Clock', 'clock'], ['Nothing', 'plain']], () => dd().tympanum, (t, v) => dressed((d) => { d.tympanum = v; })(t));
-      pick('Roof', [['Sheet metal, as dealt', 'dealt'], ['Grey sheet metal', 'grey'], ['Green sheet metal', 'green'], ['Red-brown sheet metal', 'red'], ['Black sheet metal', 'black'], ['Copper', 'copper'], ['Red tiles', 'tiles'], ['Dark tiles', 'dark']], () => dd().roof, (t, v) => dressed((d) => { d.roof = v; })(t), 'What the roof is covered with');
+      if (s().portico && s().pediment !== false) pick('Pediment', [['Window', 'window'], ['Oculus', 'oculus'], ['Clock', 'clock'], ['Plain', 'plain']], () => dd().tympanum, (t, v) => dressed((d) => { d.tympanum = v; })(t));
+      pick('Roof', [['Dealt', 'dealt'], ['Grey metal', 'grey'], ['Green metal', 'green'], ['Red metal', 'red'], ['Black metal', 'black'], ['Copper', 'copper'], ['Red tiles', 'tiles'], ['Dark tiles', 'dark']], () => dd().roof, (t, v) => dressed((d) => { d.roof = v; })(t));
       if (s().portico || s().bays >= 7) pick('Doors', [['One', 1], ['Three', 3]], () => dd().doors, (t, v) => dressed((d) => { d.doors = v as 1 | 3; })(t), 'Three side by side into the one hall');
-      num('Base', R.classical.plinth, () => dd().plinth, (t, v) => dressed((d) => { d.plinth = v; })(t), 'How high its floor stands over the ground before the door; over a metre, a basement with windows of its own, up a longer flight', 0.05);
-      num('Ground falls', [-4.3, 4.3], () => dd().fall, (t, v) => dressed((d) => { d.fall = v; })(t), 'How much lower the ground is at its right end than its left (less than nothing: the left is lower). As much as the base allows; the building stands level, its granite base showing the more.', 0.05);
+      num('Base', R.classical.plinth, () => dd().plinth, (t, v) => dressed((d) => { d.plinth = v; })(t), 'Floor height over the ground at the door; from 1 m a basement with windows', 0.05);
+      num('Slope', [-4.3, 4.3], () => dd().fall, (t, v) => dressed((d) => { d.fall = v; })(t), 'How much lower the ground is at the right end than the left (negative: the left is lower), up to what the base allows', 0.05);
     } else if (it.kind === 'wooden') {
       const RW = R.wooden;
       num('Width', RW.w, () => s().w, (t, v) => { t.w = v; t.bays = Math.max(3, Math.round((v - 2) / 2.2)); }, 'A little over two metres to a window: more windows as it grows', 0.1);
@@ -1166,6 +1458,15 @@ async function start(): Promise<void> {
         num('Wing length', RW.wingLength, () => s().wings![0].length, (t, v) => { t.wings![0].length = v; }, undefined, 0.1);
       }
       wash();
+    } else if (it.kind === 'tree') {
+      const tr = () => s().tree!, R2 = TREE_RANGES[tr().kind];
+      pick('Kind', TREES.map((k): [string, (typeof TREES)[number]] => [k[0].toUpperCase() + k.slice(1), k]), () => tr().kind, (t, v) => { t.tree = { ...dealTree(v, it.seed).tree!, leaf: t.tree!.leaf }; });
+      num('Height', R2.height, () => tr().height, (t, v) => { t.tree!.height = v; }, 'From its foot to its top, in metres', 0.1);
+      num('Trunk', R2.girth, () => tr().girth, (t, v) => { t.tree!.girth = v; }, 'How thick its trunk is at the foot, in metres', 0.005);
+      num(tr().kind === 'spruce' || tr().kind.endsWith('pine') ? 'Spread' : 'Reach', R2.wide, () => tr().wide, (t, v) => { t.tree!.wide = v; }, 'How far its boughs reach out', 0.01);
+      ints('Leaves', () => tr().leaf + 1, (t, v) => { t.tree!.leaf = v - 1; }, 1, 'w', 'Which of the season’s greens: one to four');
+    } else if (it.kind === 'boulder') {
+      num('Size', RANGES.boulder.size, () => s().boulder!.size, (t, v) => { t.boulder!.size = v; }, 'How far across, near enough, in metres; the Scale tool flattens or stretches it', 0.05);
     } else if (it.kind === 'shack') {
       const sh = () => s().shack!;
       num('Width', R.shack.w, () => s().w, (t, v) => { t.w = v; });
@@ -1229,7 +1530,8 @@ async function start(): Promise<void> {
   // The scene.
   el('h2', panel, 'Scene');
   choice<Hour>(panel, sceneRefreshers, 'Hour', (Object.keys(SKIES) as Hour[]).map((h): [string, Hour] => [h, h]), () => state.hour, (v) => { state.hour = v; windows(); dress(); light(); remember(); });
-  choice<Stone>(panel, sceneRefreshers, 'Stone', STONES.map((s): [string, Stone] => [s, s]), () => state.stone, (v) => { state.stone = v; lay(); dress(); sync(); remember(); }, 'The country’s stone: plinths, steps and the paving');
+  choice<Stone>(panel, sceneRefreshers, 'Stone', STONES.map((s): [string, Stone] => [s, s]), () => state.stone, (v) => { state.stone = v; lay(); dress(); sync(); paintLayers(); remember(); }, 'The country’s stone: plinths, steps and the paving, boulders and rock');
+  choice<Season>(panel, sceneRefreshers, 'Season', SEASONS.map((s): [string, Season] => [s[0].toUpperCase() + s.slice(1), s]), () => state.season, (v) => { state.season = v; sync(); paintLayers(); remember(); }, 'The green of the leaves, and how dry the grass is');
   choice<number>(panel, sceneRefreshers, 'Move by', [['Freely', 0], ['10 cm', 0.1], ['25 cm', 0.25], ['50 cm', 0.5], ['1 m', 1], ['2 m', 2]], () => state.snap, (v) => { state.snap = v; remember(); });
   choice<number>(panel, sceneRefreshers, 'Turn by', [['Freely', 0], ['5°', 5], ['15°', 15], ['45°', 45], ['90°', 90]], () => state.turnSnap, (v) => { state.turnSnap = v; remember(); }, 'Holding Shift while turning turns freely');
   checks(panel, sceneRefreshers, [
@@ -1254,7 +1556,7 @@ async function start(): Promise<void> {
       const [b] = buttons(panel, [['Bring back the last layout', () => { try { localStorage.removeItem(BEFORE); } catch { /* storage refused */ } b.parentElement?.remove(); openText(text, 'the last layout'); }, 'What was set out when the page last failed to open']]);
     }
   }
-  buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
+  buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; state.paint = { ground: [], plants: [], rock: [] }; sync(); paintLayers(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
   el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. M move and turn, E extrude, S scale; [ ] turn a step; arrows nudge; Delete; D copy beside, N next door; Z undo, Shift Z redo; Esc lets go; P hides this panel. All of it is kept in this browser.').className = 'note';
 
   // The tools, over the picture.
@@ -1263,6 +1565,7 @@ async function start(): Promise<void> {
     ['move', 'Move & turn', () => setTool('move'), 'M. Drag a building to move it; drag the knob on its ring to turn it'],
     ['extrude', 'Extrude', () => setTool('extrude'), 'E. Drag the arrows on its faces to change its measures'],
     ['scale', 'Scale', () => setTool('scale'), 'S. Drag a corner to scale it all, a face to stretch it one way'],
+    ['paint', 'Paint', () => setTool(state.tool === 'paint' ? 'move' : 'paint'), 'B. Paint ground, plants or rock'],
     ['gap', '', () => {}, ''],
     ['undo', 'Undo', undo, 'Z'], ['redo', 'Redo', redo, 'Shift Z'],
     ['gap2', '', () => {}, ''],
@@ -1276,11 +1579,17 @@ async function start(): Promise<void> {
     toolButtons[id] = b;
   }
   function reflectTools() {
-    for (const t of ['move', 'extrude', 'scale']) toolButtons[t].classList.toggle('on', state.tool === t);
+    for (const t of ['move', 'extrude', 'scale', 'paint']) toolButtons[t].classList.toggle('on', state.tool === t);
     toolButtons.undo.disabled = at <= 0;
     toolButtons.redo.disabled = at >= history.length - 1;
   }
-  const setTool = (t: Tool) => { state.tool = t; reflectTools(); remember(); };
+  const setTool = (t: Tool) => {
+    state.tool = t;
+    // (With the brush in hand the left button paints; the right turns the view, the wheel closes in.)
+    controls.mouseButtons = t === 'paint' ? { LEFT: -1 as unknown as MOUSE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE } : { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
+    if (t !== 'paint') { brushRing.visible = false; canvas.style.cursor = ''; }
+    reflectTools(); renderPaint(); remember();
+  };
   const togglePanel = () => { state.panel = !state.panel; document.body.classList.toggle('bare', !state.panel); fit(); remember(); };
 
   // ------------------------------------------------------------------ the camera
@@ -1309,10 +1618,13 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ saving and opening
   const docText = () => JSON.stringify({
-    lab: 'dungeons building lab', version: 1, stone: state.stone, hour: state.hour,
+    lab: 'dungeons building lab', version: 1, stone: state.stone, hour: state.hour, season: state.season,
     note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
     // (A shack is no building of the site document: it is saved as the town keeps one.)
-    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : { ...it, building: documentOf(it) })),
+    // (Trees and boulders are no buildings: their measures are all there is of them.)
+    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : isNature(it.kind) ? it : { ...it, building: documentOf(it) })),
+    // (What was painted, as the brushes laid it: see document 5.)
+    paint: state.paint,
   }, null, 1);
   // (Shown as an artifact, the page may not start a download itself: its host offers the file to the reader, who says yes or no.)
   type Downloads = { save(o: { filename: string; data: string }): Promise<unknown> };
@@ -1347,8 +1659,9 @@ async function start(): Promise<void> {
       const items = list.map((o: Partial<Item>) => readItem(o, state.next++)).filter((x): x is Item => !!x);
       if (!items.length) throw new Error('no building in it the lab knows');
       if (STONES.includes(doc.stone)) state.stone = doc.stone;
-      state.items = items; state.selected = null;
-      lay(); sync(); renderSelected(); reflectScene(); commit(); frame(true);
+      if (SEASONS.includes(doc.season)) state.season = doc.season;
+      state.items = items; state.selected = null; state.paint = readPaint(doc.paint);
+      lay(); sync(); paintLayers(); renderSelected(); reflectScene(); commit(); frame(true);
       say(`Opened ${items.length} buildings from ${from}${items.length < list.length ? `; ${list.length - items.length} could not be read` : ''}. Undo goes back.`, 'good');
     } catch (e) { say(`${from} could not be opened: ${(e as Error).message}`, 'bad', 15); }
   };
@@ -1380,6 +1693,8 @@ async function start(): Promise<void> {
     else if (k === 'm') setTool('move');
     else if (k === 'e') setTool('extrude');
     else if (k === 's') setTool('scale');
+    else if (k === 'b') setTool(state.tool === 'paint' ? 'move' : 'paint');
+    else if ((k === '[' || k === ']') && state.tool === 'paint') { state.brush.size = Math.min(20, Math.max(0.3, Math.round(state.brush.size * (k === ']' ? 1.25 : 0.8) * 10) / 10)); brushRing.scale.setScalar(state.brush.size); renderPaint(); remember(); }
     else if (k === 'f') frame(!it);
     else if (k === 'c') { state.clay = !state.clay; dress(); reflectScene(); remember(); }
     else if (k === 'p' || k === 'tab') { e.preventDefault(); togglePanel(); }
@@ -1430,6 +1745,9 @@ async function start(): Promise<void> {
   else placeCamera(new Vector3(2, 31, 84), new Vector3(4, 1, 0));
   say(`${state.items.length} buildings built in ${(performance.now() - t0).toFixed(0)} ms`, 'dim', 6);
   if (failedOpening) say('The page did not finish opening last time, so it starts from the lab’s own buildings. “Bring back the last layout” under Saved opens yours again.', 'bad', 30);
+  // (What was painted, laid as it was left; and the tool in hand as it was.)
+  paintLayers();
+  setTool(state.tool);
   ready = true;
 
   // ------------------------------------------------------------------ the loop
@@ -1459,11 +1777,13 @@ async function start(): Promise<void> {
       }
     }
     if (tick % 10 === 0) { findClashes(); neighbours(); }
+    vegetationUniforms.uTime.value = now / 1000;
+    if (allCards.size) cullCards([...allCards], camera.position);
     controls.update();
     if (shadowsDue > 0) { shadowsDue--; sun.shadow.needsUpdate = true; }
     if (staticAt && now > staticAt && !held && !press?.moved) {
       staticAt = 0;
-      atmosphere.updateStatic([...(ground ? [ground] : []), ...[...built.values()].flatMap((b) => b.meshes)], sunDir, near.min, near.max);
+      atmosphere.updateStatic([...(ground && ground.visible ? [ground] : []), ...[...built.values()].flatMap((b) => b.meshes), ...(natureLayer.children as Mesh[])], sunDir, near.min, near.max);
     }
     atmosphere.update();
     pipeline.render();
@@ -1492,7 +1812,8 @@ async function start(): Promise<void> {
       const it = selectedItem(), b = it && built.get(it.id);
       if (it && b) {
         const s = it.shape, scaled = it.scale.some((v) => v !== 1) ? `, scaled ${it.scale.map((v) => v.toFixed(2)).join(' × ')}` : '';
-        el('div', foot, `${KINDS[it.kind].name}: ${s.w.toFixed(1)} by ${s.d.toFixed(1)} m, ${it.kind === 'church' ? `${s.bays} bays` : `${s.storeys} storey${s.storeys > 1 ? 's' : ''}, ${s.bays} bays`}${scaled}; built in ${b.ms.toFixed(0)} ms, ${Math.round(b.triangles).toLocaleString()} triangles`);
+        const what = it.kind === 'tree' ? `${s.tree!.kind}, ${s.tree!.height.toFixed(1)} m tall` : it.kind === 'boulder' ? `${s.boulder!.size.toFixed(1)} m across` : `${s.w.toFixed(1)} by ${s.d.toFixed(1)} m, ${it.kind === 'church' ? `${s.bays} bays` : `${s.storeys} storey${s.storeys > 1 ? 's' : ''}, ${s.bays} bays`}`;
+        el('div', foot, `${KINDS[it.kind].name}: ${what}${scaled}; built in ${b.ms.toFixed(0)} ms, ${Math.round(b.triangles).toLocaleString()} triangles${b.cards.length ? ` and ${b.cards.reduce((n, m) => n + m.count, 0).toLocaleString()} cards` : ''}`);
       }
       el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawn.triangles / 1e6).toFixed(2)} million triangles drawn · ${state.items.length} building${state.items.length === 1 ? '' : 's'} · ${state.hour}, ${state.stone}`).className = 'dim';
     }
@@ -1505,6 +1826,23 @@ async function start(): Promise<void> {
     add: (kind: Kind, o?: { seed?: string; x?: number; z?: number; turn?: number; character?: 'palace' | 'plain' }) => add(kind, { ...o, shape: o?.character ? (seed) => dealCharacter(o.character!, seed) : undefined }).id,
     select, setTool, frame, look, placeCamera: (from: number[], to: number[]) => placeCamera(new Vector3(...from), new Vector3(...to)),
     reshape: (id: number, f: (s: Shape) => void) => { const it = itemOf(id); if (it) { const t = clone(it.shape); f(t); it.shape = normalise(it.kind, t); dirty.add(id); renderSelected(); commit(); } },
+    // (A stroke laid from a script as the brush lays one: `layer` ground, plants or rock, `which` the number of what it lays, through points [x, z].)
+    stroke: (o: { layer: 'ground' | 'plants' | 'rock'; which?: number; size?: number; dig?: boolean; points: [number, number][] }) => {
+      const B = state.brush;
+      B.layer = o.layer; if (o.which !== undefined) { if (o.layer === 'ground') B.ground = o.which; else B.plant = o.which; } B.size = o.size ?? B.size;
+      const ids = state.paint.ground.map((d) => d[4]);
+      stroke = { pointer: -1, last: null, id: (ids.length ? Math.max(...ids) : 0) + 1, before: JSON.stringify(state.paint) };
+      // (Dabs along the line between the points, as close together as the brush lays them.)
+      const gap = Math.max(0.2, B.size * (o.layer === 'ground' ? 0.3 : 0.6)), pts: [number, number][] = [o.points[0]];
+      for (let k = 1; k < o.points.length; k++) {
+        const [ax, az] = o.points[k - 1], [bx, bz] = o.points[k], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / gap));
+        for (let t = 1; t <= n; t++) pts.push([ax + ((bx - ax) * t) / n, az + ((bz - az) * t) / n]);
+      }
+      for (const [x, z] of pts) { const y = o.layer === 'ground' ? 0 : heightAt(x, z) ?? 0; dab({ p: new Vector3(x, y, z), n: new Vector3(0, 1, 0) }, !!o.dig); }
+      stroke = null;
+      const ms = paintLayers(); commit(); renderPaint();
+      return ms;
+    },
     remove, clear: () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); },
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     pending: () => dirty.size,

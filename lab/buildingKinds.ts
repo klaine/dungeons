@@ -16,15 +16,19 @@ import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { stoneStyles } from '../src/render/geom/styles';
 import { buildShack } from '../src/render/shack';
+import { CardSet } from '../src/render/scene';
+import { boulderOne, crownOf, growOne, Season, TREE_DEALT, TREE_RANGES, TreeKind, TREES, TreeWork } from './nature';
 
-export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'church' | 'shack';
+export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'church' | 'shack' | 'tree' | 'boulder';
 /** A shack's own measures, beyond its breadth, depth and colour: its roof, whether the roof is one slope, and how high it stands on posts. */
 export interface ShackWork { roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number }
 /**
  * What a building is, apart from where it stands: the measures of the site document that the lab lets be changed. (A shack is not a
  * building of the site document but a record of the town's; it is carried here as a breadth, a depth and a colour, and `shack`.)
  */
-export type Shape = Omit<Building, 'x' | 'z' | 'faces' | 'plan' | 'backDoor' | 'sunk' | 'wheel' | 'turn' | 'y'> & { shack?: ShackWork };
+// (A tree and a boulder are not buildings either: each is carried as a breadth and a depth the size of its crown or itself, for picking it
+// out and keeping others off it, and `tree` or `boulder`.)
+export type Shape = Omit<Building, 'x' | 'z' | 'faces' | 'plan' | 'backDoor' | 'sunk' | 'wheel' | 'turn' | 'y'> & { shack?: ShackWork; tree?: TreeWork; boulder?: { size: number } };
 type Colour = [number, number, number];
 
 /** One building set out in the lab. */
@@ -54,8 +58,14 @@ export const KINDS: Record<Kind, { name: string; note: string }> = {
   eaves: { name: 'Eaves house', note: 'Brick, broader and later, its eaves to the street and a small gable over its middle.' },
   store: { name: 'Warehouse', note: 'Brick, many low storeys, a column of loading doors under a hoist.' },
   church: { name: 'Church', note: 'Brick Gothic: a buttressed hall church, a tower or two with a spire, and a choir.' },
+  tree: { name: 'Tree', note: 'Grown as the valley grows its trees: an oak, an ash, an old oak, a spruce, a pine, a pine of the coast, or a bush.' },
+  boulder: { name: 'Boulder', note: 'A boulder of the country’s stone, carved as the valley’s are, bedded and broken as its rock is.' },
 };
 export const KIND_ORDER: Kind[] = ['classical', 'wooden', 'timber', 'gabled', 'eaves', 'store', 'church', 'shack'];
+/** What grows and what lies about, set out one by one as buildings are; and every kind the lab knows. */
+export const NATURE_ORDER: Kind[] = ['tree', 'boulder'];
+export const ALL_KINDS: Kind[] = [...KIND_ORDER, ...NATURE_ORDER];
+export const isNature = (kind: Kind): boolean => kind === 'tree' || kind === 'boulder';
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
@@ -75,6 +85,8 @@ const OWN = {
   timber: ['jetty', 'gable', 'door', 'burnt'],
   brick: ['brickwork'],
   shack: ['shack'],
+  tree: ['tree'],
+  boulder: ['boulder'],
 } as const;
 function keep(s: Shape, ...families: (keyof typeof OWN)[]): void {
   for (const [family, keys] of Object.entries(OWN)) if (!families.includes(family as keyof typeof OWN)) for (const k of keys) delete (s as Record<string, unknown>)[k];
@@ -98,6 +110,7 @@ export const RANGES = {
   classical: { bays: [3, 25], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 16], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], towerSize: [4, 6.4], towerExtra: [1, 3], plinth: [0.5, 2.5] },
   wooden: { w: [9, 24], d: [7, 12], storeys: [1, 2], height: [2.7, 3.8], basement: [0.4, 2], dormers: [0, 5], wingWidth: [5, 10], wingLength: [5, 14] },
   shack: { w: [2.6, 6], d: [3, 6.5], stilts: [0, 2.5] },
+  boulder: { size: [0.3, 8] },
   gabled: { w: [5.5, 11], d: [8, 18], storeys: [1, 5], height: [2.4, 5.2], bays: [1, 5], pitch: [40, 66] },
   eaves: { bays: [3, 9], pitch: [1.9, 2.8], margin: 1.3, d: [8, 14], storeys: [2, 5], height: [2.6, 4.6], roof: [38, 56] },
   store: { w: [6, 11.5], d: [10, 18], storeys: [3, 7], height: [2.3, 4.2], pitch: [48, 64] },
@@ -140,6 +153,20 @@ function fitBays(s: Shape, bays: readonly number[], pitch: readonly number[], ma
 export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): Shape {
   const s: Shape = JSON.parse(JSON.stringify(given));
   s.colour = (s.colour ?? [0.86, 0.8, 0.66]).map((c) => clamp(c, 0, 1)) as Colour;
+  if (kind === 'tree') {
+    const t = s.tree ?? { kind: 'oak', height: 8.5, girth: 0.3, wide: 1, leaf: 0 }, k: TreeKind = (TREES as readonly string[]).includes(t.kind) ? t.kind : 'oak', R = TREE_RANGES[k];
+    s.tree = { kind: k, height: r2(clamp(t.height, R.height[0], R.height[1])), girth: Math.round(clamp(t.girth, R.girth[0], R.girth[1]) * 1000) / 1000, wide: r2(clamp(t.wide, R.wide[0], R.wide[1])), leaf: clamp(Math.round(t.leaf), 0, 3) };
+    Object.assign(s, { style: 'timber', w: r2(Math.max(0.8, crownOf(s.tree) * 1.4)), storeys: 1, heights: [s.tree.height], bays: 1 });
+    s.d = s.w;
+    keep(s, 'tree');
+    return s;
+  }
+  if (kind === 'boulder') {
+    const size = r2(clamp(s.boulder?.size ?? 1.2, RANGES.boulder.size[0], RANGES.boulder.size[1]));
+    Object.assign(s, { style: 'timber', w: r2(size * 1.1), d: r2(size * 1.1), storeys: 1, heights: [r2(size * 0.7)], bays: 1, boulder: { size } });
+    keep(s, 'boulder');
+    return s;
+  }
   if (kind === 'timber') {
     const R = RANGES.timber;
     s.style = 'timber';
@@ -327,8 +354,16 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
 }
 
 /** A building of the kind, dealt from the seed as the generator deals one: the same rules, so that what is added is something a valley could hold. */
+/** A tree of one kind, dealt from the seed as the valley deals them. */
+export function dealTree(kind: TreeKind, seed: string): Shape {
+  const rng = new Rng(`lab tree ${kind} ${seed}`), d = TREE_DEALT[kind];
+  return normalise('tree', { style: 'timber', w: 1, d: 1, storeys: 1, heights: [1], bays: 1, colour: [0.3, 0.4, 0.2], tree: { kind, height: rng.range(d.height[0], d.height[1]), girth: rng.range(d.girth[0], d.girth[1]), wide: rng.range(d.wide[0], d.wide[1]), leaf: rng.int(0, 3) } });
+}
+
 export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shape {
   const rng = new Rng(`lab ${kind} ${seed}`), round = (v: number) => Math.round(v * 10) / 10;
+  if (kind === 'tree') return dealTree(rng.pick(['oak', 'oak', 'ash', 'spruce', 'pine', 'bush'] as const), seed);
+  if (kind === 'boulder') return normalise(kind, { style: 'timber', w: 1, d: 1, storeys: 1, heights: [1], bays: 1, colour: [0.5, 0.5, 0.5], boulder: { size: round(rng.range(0.6, 2.6)) } });
   if (kind === 'timber') {
     const w = round(rng.range(6, 8.6)), d = round(rng.range(6.2, 7.8)), storeys = rng.chance(0.4) ? 3 : 2, jetty = round(rng.range(0.3, 0.45)), gable = rng.chance(0.6);
     const tall = rng.fork('heights'), heights = [round(tall.range(2.6, 3.3)), ...Array.from({ length: storeys - 1 }, (_, n) => round(tall.range(2.35, 2.9) - n * 0.1))];
@@ -447,12 +482,23 @@ export function shackOf(item: Item): Town['shacks'][number] {
 }
 
 /** Builds an item's building into meshes by material, at the origin facing `w` (its front towards -x, its middle at x = 0). */
-export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder, near?: Building['near']): void {
+export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder, near?: Building['near'], season: Season = 'summer'): { cards?: CardSet[] } {
+  // (A tree's leaves are cards, drawn otherwise than its bark: they are given back to be drawn.)
+  if (item.kind === 'tree') return { cards: growOne(item.shape.tree!, season, new Rng(item.seed).fork('tree'), mesh).cards };
+  if (item.kind === 'boulder') { boulderOne(stone, item.shape.boulder!.size, new Rng(item.seed).fork('boulder'), mesh); return {}; }
   // (A shack's posts go down to the ground, which here is level and nowhere near the sea.)
-  if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return; }
+  if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return {}; }
   const b = documentOf(item);
   if (near?.length) b.near = near;
   buildBuilding(b, 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  return {};
+}
+
+/** Whether a point of the square (`x`, `z`) is within an item's ground: under a building, or a boulder, or a tree's trunk. */
+export function standsIn(item: Item, x: number, z: number, room = 0): boolean {
+  const [u, v] = planAt(item, x, z);
+  if (item.kind === 'tree') return Math.hypot(u, v - item.shape.d / 2) < Math.max(0.4, item.shape.tree!.girth * 2) + room;
+  return footprintOfItem(item).some((r) => u > r.u0 - room && u < r.u1 + room && v > r.v0 - room && v < r.v1 + room);
 }
 
 /** Where a point of an item's ground plan (`u` across its front, `v` back from it, in its own measures) stands in the square. */
@@ -474,11 +520,13 @@ const footprintOfItem = (item: Item) => footprintOf({ ...item.shape, x: 0, z: 0,
  * standing still does not make another be built again.)
  */
 export function nearOf(item: Item, others: Item[]): Building['near'] {
+  // (Trees and stones shut no windows; and have none.)
+  if (isNature(item.kind)) return undefined;
   const own = footprintOfItem(item), reach = CLOSE + 0.8;
   const u0 = Math.min(...own.map((r) => r.u0)) - reach, u1 = Math.max(...own.map((r) => r.u1)) + reach, v0 = Math.min(...own.map((r) => r.v0)) - reach, v1 = Math.max(...own.map((r) => r.v1)) + reach;
   const out: NonNullable<Building['near']> = [], tenth = (x: number) => Math.round(x * 10) / 10;
   for (const q of others) {
-    if (q.id === item.id) continue;
+    if (q.id === item.id || isNature(q.kind)) continue;
     const top = tenth((eavesOf(q) * q.scale[1] + liftOf(q) - liftOf(item)) / item.scale[1]);
     for (const r of footprintOfItem(q)) {
       const at = ([[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]] as [number, number][]).map(([u, v]) => planAt(item, ...squareAt(q, u, v)));
@@ -496,6 +544,8 @@ export function eavesOf(item: Item): number {
   if (item.kind === 'classical') return floorOf(b, b.storeys);
   if (item.kind === 'wooden') return (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0);
   if (item.kind === 'shack') return item.shape.shack!.stilts + 2.3;
+  if (item.kind === 'tree') return item.shape.tree!.height;
+  if (item.kind === 'boulder') return item.shape.boulder!.size * 0.7;
   return brickEaves(b);
 }
 

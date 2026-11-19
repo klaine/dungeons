@@ -7,7 +7,8 @@
 //   npx tsx tools/buildingLab.ts          60 of each kind
 //   npx tsx tools/buildingLab.ts 300      300 of each
 import { Box3, Vector3 } from 'three';
-import { buildItem, deal, Item, Kind, KIND_ORDER, normalise, Shape } from '../lab/buildingKinds';
+import { ALL_KINDS, buildItem, deal, Item, Kind, normalise, Shape } from '../lab/buildingKinds';
+import { GROUND_PAINTS, natureKit, PLANT_PAINTS, TREES } from '../lab/nature';
 import { Rng } from '../src/core/rng';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 
@@ -46,6 +47,8 @@ function shake(kind: Kind, s: Shape): Shape {
     t.wings = rng.chance(0.4) ? [{ side: rng.pick([-1, 1] as const), width: push(5, 10), length: push(5, 14) }] : undefined;
   }
   if (kind === 'shack') t.shack = { roof: rng.pick(['boards', 'tin', 'turf'] as const), lean: rng.chance(0.5), stilts: push(0, 2.5) };
+  if (kind === 'tree') t.tree = { kind: rng.pick([...TREES]), height: push(1, 20), girth: push(0.02, 0.7), wide: push(0.8, 3.6), leaf: Math.round(push(0, 3)) };
+  if (kind === 'boulder') t.boulder = { size: push(0.3, 8) };
   const bw = t.brickwork;
   if (bw) {
     bw.gable = rng.pick(['stepped', 'piers', 'volute', 'plain'] as const);
@@ -62,7 +65,7 @@ function shake(kind: Kind, s: Shape): Shape {
 }
 
 const t0 = performance.now();
-for (const kind of KIND_ORDER) {
+for (const kind of ALL_KINDS) {
   let worst = 0, triangles = 0;
   for (let n = 0; n < count; n++) {
     // (The first is as dealt; the rest shaken, and every fifth pushed to the ends of everything at once.)
@@ -102,10 +105,27 @@ for (const kind of KIND_ORDER) {
       if (bad) break;
     }
     const size = box.getSize(new Vector3());
-    if (!bad && (box.isEmpty() || size.x > 150 || size.z > 150 || size.y > 90 || box.min.y < -3)) bad = `built out of bounds: ${box.min.toArray().map((v) => v.toFixed(1))} to ${box.max.toArray().map((v) => v.toFixed(1))}`;
+    if (!bad && (box.isEmpty() || size.x > 150 || size.z > 150 || size.y > 90 || box.min.y < (kind === 'tree' ? -6 : -3))) bad = `built out of bounds: ${box.min.toArray().map((v) => v.toFixed(1))} to ${box.max.toArray().map((v) => v.toFixed(1))}`;
     if (bad) { failed++; console.log(`${kind} ${n}: ${bad}\n  ${JSON.stringify(shape)}`); }
   }
   console.log(`${kind}: ${count} built, the slowest in ${worst.toFixed(0)} ms, ${Math.round(triangles / count).toLocaleString()} triangles on average`);
+}
+// And the brushes: ground, plants and rock laid at random, out past where they can be laid, in every season and stone.
+for (let n = 0; n < Math.max(4, count / 30); n++) {
+  const kit = natureKit({ stone: rng.pick(['limestone', 'sandstone', 'greystone', 'basalt'] as const), season: rng.pick(['spring', 'summer', 'autumn'] as const) });
+  const at = () => push(-70, 70), began = performance.now();
+  const ground = Array.from({ length: rng.int(1, 60) }, (_, k) => [at(), at(), push(0.3, 20), rng.int(0, GROUND_PAINTS.length - 1), k >> 3]);
+  const plants = Array.from({ length: rng.int(1, 12) }, () => [at(), 0, at(), push(0.3, 12), rng.int(0, PLANT_PAINTS.length - 1), 0, rng.int(1, 1e9)]);
+  const rock = Array.from({ length: rng.int(1, 10) }, () => [push(-10, 10), push(-1, 4), push(-10, 10), push(0.3, 6), rng.chance(0.25) ? -1 : 1]);
+  try {
+    const parts = [kit.groundSheet(ground), kit.carveMass(rock), ...kit.growPainted(plants, () => 0).meshes.values()];
+    for (const m of parts) {
+      if (!m) continue;
+      const pos = m.build().getAttribute('position');
+      for (let i = 0; i < pos.count; i++) if (!Number.isFinite(pos.getX(i) + pos.getY(i) + pos.getZ(i))) { failed++; console.log(`brushes ${n}: a point that is not a number`); break; }
+    }
+    console.log(`brushes ${n}: ${ground.length} ground dabs, ${plants.length} plant dabs, ${rock.length} balls of rock laid in ${(performance.now() - began).toFixed(0)} ms`);
+  } catch (e) { failed++; console.log(`brushes ${n}: failed: ${(e as Error).message}`); }
 }
 console.log(`${failed ? `${failed} failed` : 'All built'} in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
 process.exit(failed ? 1 : 0);
