@@ -78,11 +78,13 @@ const num = (key: string, fallback: number) => (params.has(key) ? Number(params.
  * their graphics modest.
  */
 const QUALITY = {
-  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0 },
-  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 512 },
-  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
+  // (`ao`: whether the hollows of what is seen darken it, see `occlusion` in `post.ts`. `mirror`: how many points high still water's
+  // picture is at most, see `Water.update`; it was as high as the view, and is now at most half a common screen's at high.)
+  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0, ao: 0 },
+  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 384, ao: 1 },
+  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 512, ao: 1 },
   // As high, with surfaces painted at 2048: four times the painting time and about a gigabyte of video memory, for desktops with room to spare.
-  ultra: { dpr: 1.5, tex: 2048, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
+  ultra: { dpr: 1.5, tex: 2048, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1080, ao: 1 },
 };
 const coarse = window.matchMedia('(pointer: coarse)').matches;
 const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
@@ -395,7 +397,7 @@ async function start(): Promise<void> {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
       const next = new URLSearchParams(params);
       next.delete('quality');
-      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror');
+      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror'); next.delete('ao');
       go(next);
     });
     document.getElementById('begin')!.addEventListener('click', () => {
@@ -771,7 +773,7 @@ async function start(): Promise<void> {
   // The picture is made in steps: the scene; the air put into it; the glow of what is very bright
   // added; and last the eye's adjustment to light and the screen's colours, which the pipeline does itself.
   const pipeline = new RenderPipeline(renderer);
-  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps));
+  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps), { occlusion: num('ao', quality.ao) > 0 });
   {
     // (The air is drawn once into a picture of its own, which the glow then reads; otherwise it would be worked out twice.)
     const aired = rtt(atmosphere.node);
@@ -1128,7 +1130,7 @@ async function start(): Promise<void> {
   let exposureTarget = 0.5;
   let tick = 0;
   let metering = false;
-  const glow = new Vector3();
+  const glow = new Vector3(), drawn2 = new Vector2();
   let lastPlace = -1;
   const lastStep = { x: 0, z: 0 };
   // How near water is, for the ear: running water, a fall, and whether the player is standing in a stream.
@@ -1211,7 +1213,7 @@ async function start(): Promise<void> {
       sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface, hearing);
     }
     cullCards(cardMeshes, camera.position);
-    water.update(time, camera);
+    water.update(time, camera, renderer.getDrawingBufferSize(drawn2).y);
     sea?.update(time);
     for (const f of floats) {
       // (Tilted with the water's slope, but less: a hull spans the smaller waves. The cove is taken as deep.)
@@ -1318,7 +1320,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, water, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

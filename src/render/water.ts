@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DoubleSide, Matrix4, Mesh, MeshStandardMaterial, Object3D, PlaneGeometry, RepeatWrapping, Texture, Vector2, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Camera, CanvasTexture, CircleGeometry, DoubleSide, Matrix4, Mesh, MeshStandardMaterial, Object3D, PlaneGeometry, RepeatWrapping, Texture, Vector2, Vector3, Vector4 } from 'three';
 import { NodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { Atmosphere, skyParts } from './post';
@@ -100,14 +100,23 @@ interface Mirror {
   /** Stands where the mirror lies, facing up. */
   at: Object3D;
   level: number;
+  /** How many points high its picture is at most. */
+  size: number;
   /** From a place in the picture and its depth back to where the thing is, as the mirror's eye saw it. */
   unproject: N;
   eyeOf: (camera: Camera) => Camera;
+  /** What the picture is drawn into, for the eye of the given camera. */
+  target: (camera: Camera) => { width: number; height: number; scissor: Vector4; scissorTest: boolean };
+  /**
+   * Lines round the water that reads this picture, each its points' x, y and z in turn: the outline of still water, the two
+   * edges of running water. Only the part of the picture they can read is drawn (see `trim`).
+   */
+  readers: number[][];
 }
 
 function makeMirror(size: number, level: number, x: number, z: number): Mirror {
-  // (Its picture is as large as asked for, against a screen about a thousand points high. It is drawn
-  // with one sample to a point: its depths are read, which a picture of several samples does not allow, and ripples hide its edges.)
+  // (Its picture is as many points high as asked for, or as the view if that is less: see `update`. It is drawn with one sample to a
+  // point: its depths are read, which a picture of several samples does not allow, and ripples hide its edges.)
   const picture: N = reflector({ resolutionScale: Math.min(1, size / 1024), bounces: false, depth: true });
   const at: Object3D = picture.target;
   at.rotation.x = -Math.PI / 2;
@@ -115,14 +124,16 @@ function makeMirror(size: number, level: number, x: number, z: number): Mirror {
   const base = picture.reflector, eyeOf = base.getVirtualCamera.bind(base);
   // What is marked as not to be mirrored is kept out of the picture.
   base.getVirtualCamera = (camera: Camera) => { const eye = eyeOf(camera); eye.layers.set(0); return eye; };
-  return { picture, depth: picture.getDepthNode(), at, level, unproject: uniform(new Matrix4()), eyeOf: base.getVirtualCamera };
+  return { picture, depth: picture.getDepthNode(), at, level, size, unproject: uniform(new Matrix4()), eyeOf: base.getVirtualCamera, target: (camera: Camera) => base.getRenderTarget(base.getVirtualCamera(camera)), readers: [] };
 }
+
+const toScreen = new Matrix4(), seenAt = new Vector4(), seenFrom = new Vector4();
 
 export class Water {
   readonly meshes: Mesh[] = [];
   private ripples = rippleMap();
   private material: MeshStandardMaterial;
-  private mirrors: Mirror[] = [];
+  readonly mirrors: Mirror[] = [];
   private still: { material: NodeMaterial; mirror: Mirror }[] = [];
   private flowing: NodeMaterial | null = null;
   /** The mirror whose picture running water borrows. */
@@ -194,6 +205,11 @@ export class Water {
       if (o.mirror && !pool.far) {
         // A mirror: the scene is drawn a second time as water lying at this level would show it, and the water reads that picture.
         const mirror = makeMirror(o.mirror, pool.level, 0, 0), material = sheet(new NodeMaterial());
+        // (The water is read out to its shore, or round its disc.)
+        const shore: number[] = [];
+        if (pool.outline) for (let k = 0; k <= pool.outline.length; k += 2) shore.push(pool.outline[k % pool.outline.length], pool.level, pool.outline[(k + 1) % pool.outline.length]);
+        else for (let k = 0; k <= 16; k++) shore.push(pool.x + pool.r * Math.cos((k * Math.PI) / 8), pool.level, pool.z + pool.r * Math.sin((k * Math.PI) / 8));
+        mirror.readers.push(shore);
         this.mirrors.push(mirror);
         this.still.push({ material, mirror });
         if (!this.sheet) this.sheet = mirror;
@@ -235,6 +251,8 @@ export class Water {
         rest[k] = Math.min(rest[k], far);
       }
       let run = 0, churn = 0;
+      const edges: [number[], number[]] = [[], []];
+      if (this.sheet) this.sheet.readers.push(...edges);
       for (let k = 0; k < n; k++) {
         const x = stream.line[k * 3], y = stream.line[k * 3 + 1], z = stream.line[k * 3 + 2];
         const a = Math.max(0, k - 1) * 3, b = Math.min(n - 1, k + 1) * 3;
@@ -251,6 +269,9 @@ export class Water {
         if (k) run += Math.hypot(x - stream.line[k * 3 - 3], y - stream.line[k * 3 - 2], z - stream.line[k * 3 - 1]);
         const left = stream.banks ? stream.banks[k * 2] : stream.width / 2, right = stream.banks ? stream.banks[k * 2 + 1] : stream.width / 2;
         const shown = stream.fade ? stream.fade[k] : 1;
+        // (Running water reads the sheet's picture where it lies itself in the picture: its two edges say where that is.)
+        edges[0].push(x + dz * right, y, z - dx * right);
+        edges[1].push(x - dz * left, y, z + dx * left);
         ACROSS.forEach(([side, shallow], j) => {
           const off = side < 0 ? side * right : side * left, i = k * 5 + j;
           position.set([x - dz * off, y, z + dx * off], i * 3);
@@ -441,12 +462,62 @@ export class Water {
     }
   }
 
-  /** To be called before each picture is drawn: the time, and whose eye it is drawn for. */
-  update(time: number, camera: Camera): void {
+  /**
+   * To be called before each picture is drawn: the time, whose eye it is drawn for, and how many points high the picture is.
+   * A mirror's picture is as many points high as it was asked to be, or as the view is if that is less. (It was as large as the
+   * view whatever was asked, and on a screen of fine points, two and a half million points of mirror were drawn for a pond. Under
+   * ripples a picture of half the view's height is not told from one of the whole: seen side by side by a pond, nothing differed.)
+   */
+  update(time: number, camera: Camera, viewHeight = 1024): void {
     this.uTime.value = time;
+    for (const m of this.mirrors) m.picture.reflector.resolutionScale = Math.min(1, m.size / Math.max(1, viewHeight));
     for (const m of this.mirrors) m.unproject.value.copy(m.eyeOf(camera).projectionMatrix).invert();
+    this.trim(camera);
     // With the eye below the sheet there is no picture to be had; it gives way before that.
     if (this.sheet) this.uPictured.value = Math.min(1, Math.max(0, (camera.matrixWorld.elements[13] - this.sheet.level - 0.1) / 0.6));
     this.ripples.offset.set(time * 0.013, time * 0.008);
+  }
+
+  /**
+   * A mirror is a second drawing of the whole scene, and most of what it draws is never read: the water that reads it is a pond
+   * in one corner of the view, or a brook along the bottom of it. So the drawing is cut to the part of the picture the water can
+   * read: where its outline or its edges lie in the view, and a little more for the ripples, which bend the reading by up to
+   * about a twentieth of the picture. (The mirror's picture is the view turned half round, so that part is the same rectangle
+   * turned half round.) Things outside it are still sent to be drawn, but nothing of them is painted, which is most of the cost:
+   * by a pond near the eye the mirror's drawing was more than half the cost of the frame.
+   * A line that passes behind the eye is cut where it does so: what lies beyond the cut is out of sight, and the cut itself is
+   * at the edge of the view, on whichever side the line goes off it.
+   */
+  private trim(camera: Camera): void {
+    toScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    for (const m of this.mirrors) {
+      const target = m.target(camera);
+      if (!m.readers.length || target.width < 2) { target.scissorTest = false; continue; }
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      const take = (v: Vector4) => {
+        const sx = v.x / v.w, sy = v.y / v.w;
+        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+      };
+      const NEAR = 0.05;
+      for (const r of m.readers) for (let k = 0; k < r.length; k += 3) {
+        seenAt.set(r[k], r[k + 1], r[k + 2], 1).applyMatrix4(toScreen);
+        if (seenAt.w >= NEAR) take(seenAt);
+        if (k) {
+          // (Where the line between this point and the last passes the eye's own plane, the point it passes at.)
+          seenFrom.set(r[k - 3], r[k - 2], r[k - 1], 1).applyMatrix4(toScreen);
+          if ((seenFrom.w < NEAR) !== (seenAt.w < NEAR)) take(seenFrom.lerp(seenAt, (NEAR - seenFrom.w) / (seenAt.w - seenFrom.w)));
+        }
+      }
+      // (None of the water in front of the eye: the water is not drawn, and nor is its mirror.)
+      if (x0 > x1) continue;
+      // (From -1 to 1 across the view to 0 to 1, with room for the ripples.)
+      const edge = (v: number) => Math.min(1, Math.max(0, v * 0.5 + 0.5));
+      const ax = edge(x0 - 0.1), bx = edge(x1 + 0.1), ay = edge(y0 - 0.1), by = edge(y1 + 0.1);
+      const w = target.width, h = target.height;
+      // Turned half round: the left of the view is the right of the picture, and its foot the picture's first row.
+      const left = Math.floor((1 - bx) * w), top = Math.floor(ay * h);
+      target.scissor.set(left, top, Math.max(1, Math.ceil((1 - ax) * w) - left), Math.max(1, Math.ceil(by * h) - top));
+      target.scissorTest = true;
+    }
   }
 }

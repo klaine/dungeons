@@ -736,7 +736,6 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
     return material;
   };
   const layers: { layer: 'painted' | 'blades' | 'sprigs' | 'far'; base: BufferGeometry; material: MeshStandardNodeMaterial }[] = [];
-  if (sprigs) layers.push({ layer: 'sprigs', base: set.kind === 'needle' ? boughSprig() : sprigClump(), material: materialFor('sprigs') });
   if (split) layers.push({ layer: 'blades', base: bladeClump(), material: materialFor('blades') });
   layers.push({ layer: 'painted', base: shapeGeometry(set.shape, set.kind === 'leaf'), material: materialFor('painted') });
   if (set.kind === 'grass') layers.push({ layer: 'far', base: shapeGeometry(set.shape), material: materialFor('far') });
@@ -785,11 +784,85 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       mesh.castShadow = set.shadow;
       mesh.matrixAutoUpdate = false;
       mesh.userData.ground = ground;
-      mesh.userData.layer = layer === 'far' ? 'far' : split ? layer : sprigs ? (layer === 'sprigs' ? 'sprigs' : 'sprays') : 'whole';
+      mesh.userData.layer = layer === 'far' ? 'far' : split ? layer : sprigs ? 'sprays' : 'whole';
       meshes.push(mesh);
     }
   }
+  if (sprigs) meshes.push(nearSprigs(set, set.kind === 'needle' ? boughSprig() : sprigClump(), materialFor('sprigs')));
   return meshes;
+}
+
+/**
+ * The sprigs of a kind of leaf: one mesh holding those near the eye, and only those. A sprig is a hundred-odd triangles where a
+ * painted spray is two, and sprigs are drawn only within `sprigRange`; beyond it each shrinks to a point. They were sorted into
+ * blocks of ground as the sprays are, forty-eight metres square, and a block was drawn whole if any of it was within the range:
+ * by a wood, fifty thousand sprigs and more than five million triangles in a frame, most of them shrunk to nothing, and as many
+ * again in the mirror of a pond. Now the sprigs within the range and a few metres more are gathered into this mesh whenever the eye
+ * has gone a few metres from where they were last gathered (the cards are kept sorted into cells of ground, so that only those in
+ * the cells about the eye are looked at). It is not drawn into the sun's shadow: that is drawn from far off, where every sprig has
+ * shrunk to nothing anyway, and the sprays throw the shade.
+ */
+function nearSprigs(set: CardSet, base: BufferGeometry, material: MeshStandardNodeMaterial): InstancedMesh {
+  const count = set.matrices.length / 16;
+  const geometry = new BufferGeometry();
+  geometry.setIndex(base.getIndex());
+  for (const name of ['position', 'normal', 'uv', 'color']) if (base.getAttribute(name)) geometry.setAttribute(name, base.getAttribute(name));
+  const centres = new InstancedBufferAttribute(new Float32Array(count * 3), 3), stands = new InstancedBufferAttribute(new Float32Array(count * 4), 4);
+  geometry.setAttribute('aCentre', centres);
+  geometry.setAttribute('aAt', stands);
+  const mesh = new InstancedMesh(geometry, material, count);
+  mesh.instanceColor = new InstancedBufferAttribute(new Float32Array(count * 3), 3);
+  mesh.count = 0;
+  mesh.name = `cards:${set.kind}`;
+  mesh.frustumCulled = false;
+  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  mesh.matrixAutoUpdate = false;
+  mesh.userData.ground = false;
+  mesh.userData.layer = 'sprigs';
+  const cells = new Map<string, number[]>();
+  for (let i = 0; i < count; i++) {
+    const key = `${Math.floor(set.matrices[i * 16 + 12] / NEAR_CELL)},${Math.floor(set.matrices[i * 16 + 14] / NEAR_CELL)}`;
+    let list = cells.get(key);
+    if (!list) cells.set(key, (list = []));
+    list.push(i);
+  }
+  mesh.userData.near = { set, cells, x: NaN, z: NaN };
+  return mesh;
+}
+/** How large the cells are that sprigs are sorted into; how much further than the range they are gathered; how far the eye goes before they are gathered again. */
+const NEAR_CELL = 8, NEAR_MARGIN = 5, NEAR_MOVE = 3.5;
+
+/** Gathers the sprigs near the eye into their mesh, if the eye has gone far enough since they were last gathered. */
+function gatherSprigs(mesh: InstancedMesh, eye: { x: number; y: number; z: number }): void {
+  const near = mesh.userData.near as { set: CardSet; cells: Map<string, number[]>; x: number; z: number };
+  if (Math.hypot(eye.x - near.x, eye.z - near.z) < NEAR_MOVE) return;
+  near.x = eye.x; near.z = eye.z;
+  const { set, cells } = near, reach = sprigRange + NEAR_MARGIN;
+  const matrices = mesh.instanceMatrix.array as Float32Array, colours = mesh.instanceColor!.array as Float32Array;
+  const centres = mesh.geometry.getAttribute('aCentre') as InstancedBufferAttribute, stands = mesh.geometry.getAttribute('aAt') as InstancedBufferAttribute;
+  const cA = centres.array as Float32Array, sA = stands.array as Float32Array;
+  let n = 0;
+  const c0 = Math.floor((eye.x - reach) / NEAR_CELL), c1 = Math.floor((eye.x + reach) / NEAR_CELL);
+  const r0 = Math.floor((eye.z - reach) / NEAR_CELL), r1 = Math.floor((eye.z + reach) / NEAR_CELL);
+  for (let cx = c0; cx <= c1; cx++) for (let cz = r0; cz <= r1; cz++) {
+    const list = cells.get(`${cx},${cz}`);
+    if (!list) continue;
+    for (const i of list) {
+      const m = set.matrices, x = m[i * 16 + 12], y = m[i * 16 + 13], z = m[i * 16 + 14];
+      // (Height counts as well: a crown overhead is as near as one beside the eye.)
+      if ((x - eye.x) ** 2 + (y - eye.y) ** 2 + (z - eye.z) ** 2 > reach * reach) continue;
+      for (let c = 0; c < 16; c++) matrices[n * 16 + c] = m[i * 16 + c];
+      sA[n * 4] = x; sA[n * 4 + 1] = y; sA[n * 4 + 2] = z;
+      sA[n * 4 + 3] = Math.hypot(m[i * 16], m[i * 16 + 1], m[i * 16 + 2]);
+      for (let c = 0; c < 3; c++) { colours[n * 3 + c] = set.colours[i * 3 + c]; cA[n * 3 + c] = set.centres[i * 3 + c]; }
+      n++;
+    }
+  }
+  mesh.count = n;
+  // (Only what was gathered is sent to the graphics card.)
+  const send = (a: InstancedBufferAttribute, size: number) => { a.clearUpdateRanges(); a.addUpdateRange(0, Math.max(1, n) * size); a.needsUpdate = true; };
+  send(mesh.instanceMatrix, 16); send(mesh.instanceColor!, 3); send(centres, 3); send(stands, 4);
 }
 
 /**
@@ -798,10 +871,10 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
  */
 export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; z: number }): void {
   for (const m of meshes) {
+    if (m.userData.layer === 'sprigs') { gatherSprigs(m, eye); m.visible = m.count > 0; continue; }
     const s = m.boundingSphere!;
     const d = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z);
-    // Leaves: sprigs where any of the block is within their range, the painted sprays unless all of it is.
-    if (m.userData.layer === 'sprigs') { m.visible = d - s.radius < sprigRange; continue; }
+    // Leaves: the sprigs gathered about the eye (above), and the painted sprays unless all of the block is within the sprigs' range.
     if (m.userData.layer === 'sprays') { m.visible = d + s.radius > sprigRange * 0.78; continue; }
     if (m.userData.layer === 'far') { m.visible = d + s.radius > vegetationRange.value * 0.4 && d - s.radius < vegetationRange.value * FAR_GRASS; continue; }
     if (!m.userData.ground) continue;
