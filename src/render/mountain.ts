@@ -729,7 +729,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     rounded('rock', [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), top(-1, -1), top(1, -1), top(1, 1), top(-1, 1)], colour, 0.03);
     // In winter the snow lies on it with a depth of its own (`cushion`): painted on by the material alone, a tread was a block with
     // a white top and no snow on it at all.
-    if (winter) cushion(x, y + h, z, w, d, yaw, nose, q);
+    if (winter) cushion(x, y + h, z, w, d, yaw, nose);
   };
   /**
    * Snow lying on a tread: a cushion of it, its top rounded down to nothing at every edge and lying deeper towards the back, where it
@@ -737,9 +737,14 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
    * that it comes out of the tread a little in from the edges and meets the worn nose without a gap; from in front its nose is a
    * soft white lip. Of the rock's material, marked as snow all over, as a cornice is.
    */
-  const cushion = (x: number, top: number, z: number, w: number, d: number, yaw: number, nose: number, q: Rng) => {
+  // (Its unevenness from a stream of its own: drawn from the steps' stream, it moved every step laid after the first.)
+  const snowQ = rng.fork('snow on the treads');
+  const cushion = (x: number, top: number, z: number, w: number, d: number, yaw: number, nose: number, q: Rng = snowQ) => {
     const m = wild.mesh('rock'), c = Math.cos(yaw), s = Math.sin(yaw), deep = q.range(0.12, 0.2), sunk = 0.06, base = top - sunk;
-    const NA = 7, NF = 9, bump = Array.from({ length: (NA + 1) * (NF + 1) }, () => q.range(-0.12, 0.12));
+    const NA = 8, NF = 10, bump = Array.from({ length: (NA + 1) * (NF + 1) }, () => q.range(-0.12, 0.12));
+    // (Its rows closer together towards the edges, where it rounds over: spaced evenly, the rounding fell within one row and the
+    // cushion's edge came out as a slope with a corner at each end.)
+    const row = (i: number, n: number) => -Math.cos((Math.PI * i) / n);
     // (How deep at a place across the tread, `u` along the climb and `v` across it, each -1 to 1: nothing at the edges, rising over
     // a hand's breadth or two from them, and deeper towards the back than at the nose.)
     const depthAt = (u: number, v: number, k: number): number => {
@@ -749,13 +754,14 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     };
     const at = (u: number, v: number, up: number): [number, number, number] => [x + c * u * (w / 2) - s * v * (d / 2), up, z + s * u * (w / 2) + c * v * (d / 2)];
     const heights: number[] = [];
-    for (let i = 0; i <= NA; i++) for (let j = 0; j <= NF; j++) heights.push(depthAt(-1 + (2 * i) / NA, -1 + (2 * j) / NF, i * (NF + 1) + j));
+    for (let i = 0; i <= NA; i++) for (let j = 0; j <= NF; j++) heights.push(depthAt(row(i, NA), row(j, NF), i * (NF + 1) + j));
     const ids: number[] = [];
     for (let i = 0; i <= NA; i++) for (let j = 0; j <= NF; j++) {
-      const k = i * (NF + 1) + j, u = -1 + (2 * i) / NA, v = -1 + (2 * j) / NF;
+      const k = i * (NF + 1) + j, u = row(i, NA), v = row(j, NF);
       // (Shaded as the cushion's own slope, worked out from its neighbours.)
-      const du = (heights[Math.min(NA, i + 1) * (NF + 1) + j] - heights[Math.max(0, i - 1) * (NF + 1) + j]) / (((Math.min(NA, i + 1) - Math.max(0, i - 1)) * w) / NA);
-      const dv = (heights[i * (NF + 1) + Math.min(NF, j + 1)] - heights[i * (NF + 1) + Math.max(0, j - 1)]) / (((Math.min(NF, j + 1) - Math.max(0, j - 1)) * d) / NF);
+      const i0 = Math.max(0, i - 1), i1 = Math.min(NA, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(NF, j + 1);
+      const du = (heights[i1 * (NF + 1) + j] - heights[i0 * (NF + 1) + j]) / (((row(i1, NA) - row(i0, NA)) * w) / 2);
+      const dv = (heights[i * (NF + 1) + j1] - heights[i * (NF + 1) + j0]) / (((row(j1, NF) - row(j0, NF)) * d) / 2);
       const nx = -(c * du - s * dv), nz = -(s * du + c * dv), l = Math.hypot(nx, 1, nz);
       const p = at(u, v, base + heights[k]);
       ids.push(m.addVertex(p[0], p[1], p[2], nx / l, 1 / l, nz / l, p[0] * 0.5, p[2] * 0.5, 0.9, 0.92, 0.96, 0, 0, -1, 0.25));

@@ -60,9 +60,13 @@ export class SunShadow extends ShadowBaseNode {
     map.camera.updateProjectionMatrix();
     // (The bias is a share of the map's depth: kept as many metres as the whole map's was, less as its points are finer.)
     const wholeDeep = sun.shadow.camera.far - sun.shadow.camera.near, wholePoint = (sun.shadow.camera.right - sun.shadow.camera.left) / sun.shadow.mapSize.width;
-    const finer = Math.max(0.25, (2 * o.reach) / o.size / wholePoint);
+    const nearPoint = (2 * o.reach) / o.size, finer = Math.max(0.25, nearPoint / wholePoint);
     map.bias = (sun.shadow.bias * wholeDeep * finer) / deep;
-    map.normalBias = sun.shadow.normalBias * finer;
+    // (And the point a surface is looked up from moved out along its normal by most of one of the map's points, and the map read over
+    // a little more than a point about it: with less, the shadow of a long straight edge thrown slantwise across a wall, a string
+    // course's or a sill's, came out as a row of small teeth, and a lit wall turned to the sun at a slant had faint stripes of shadow on it.)
+    map.normalBias = Math.max(sun.shadow.normalBias * finer, 0.8 * nearPoint);
+    map.radius = 1.8;
     this.nearShadow = shadow(this.near, map);
   }
 
