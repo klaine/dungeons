@@ -1669,7 +1669,7 @@ async function start(): Promise<void> {
     }
   }
   buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; state.paint = { ground: [], plants: [], rock: [] }; sync(); paintLayers(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
-  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. W A S D, Space and Q fly the view, Shift faster; L look mode, the right button turning the view where it stands. M move and turn, E extrude, R scale, B paint; [ ] turn a step; arrows nudge; Delete; N next door, Shift N copy beside; Z undo, Shift Z redo; Esc lets go; H hides the grid, outlines and knobs; P hides this panel. All of it is kept in this browser.').className = 'note';
+  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. W A S D, Space and Q fly the view, Shift faster; L look mode, the right button turning the view where it stands. M move and turn, E extrude, R scale, B paint; [ ] turn a step; arrows nudge; Delete; N next door, Shift N copy beside; Ctrl C, X, V copy, cut and paste; Z undo, Shift Z redo; Esc lets go; H hides the grid, outlines and knobs; P hides this panel. All of it is kept in this browser.').className = 'note';
 
   // The tools, over the picture.
   const toolButtons: Record<string, HTMLButtonElement> = {};
@@ -1782,11 +1782,49 @@ async function start(): Promise<void> {
     fileInput.value = '';
     if (f) openText(await f.text(), f.name);
   });
-  // Text pasted anywhere but into a field is opened, if it is what the lab saves.
+  // Copying and pasting a thing: Ctrl C (or Cmd C) copies the selected building, tree or stone, Ctrl X cuts it, Ctrl V puts the same
+  // again under the pointer (or beside where it was, if the pointer is not over the view) and selects it. What is copied goes on the
+  // clipboard as the lab's own text, so it can be pasted into another of the lab's pages too; and is kept here as well, for where the
+  // page may not write the clipboard.
+  let clip: Item | null = null, hoverAt: Vector3 | null = null, pasted = 0;
+  canvas.addEventListener('pointermove', (e) => { hoverAt = levelAt(rayAt(e.clientX, e.clientY)); });
+  canvas.addEventListener('pointerleave', () => { hoverAt = null; });
+  const clipText = (it: Item) => JSON.stringify({ lab: 'dungeons building lab', clip: true, items: [it] });
+  const copyItem = (cut: boolean) => {
+    const it = selectedItem();
+    if (!it) return false;
+    clip = clone(it); pasted = 0;
+    try { void navigator.clipboard?.writeText(clipText(it)).catch(() => {}); } catch { /* not allowed here: kept on the page alone */ }
+    if (cut) remove(it.id);
+    say(cut ? `${KINDS[it.kind].name} cut` : `${KINDS[it.kind].name} copied`, 'dim', 3);
+    return true;
+  };
+  const pasteItem = (from: Item) => {
+    const it = readItem({ ...from }, state.next++);
+    if (!it) return;
+    // (Under the pointer, if it is over the view; otherwise beside where the copy was taken from, each paste a step further on.)
+    if (hoverAt) { it.x = snapped(hoverAt.x); it.z = snapped(hoverAt.z); }
+    else { const a = axesOf(from.turn).along, step = (from.shape.w * from.scale[0] + 2) * ++pasted; it.x = snapped(from.x + a.x * step); it.z = snapped(from.z + a.z * step); }
+    state.items.push(it);
+    sync(); select(it.id); commit();
+    say(`${KINDS[it.kind].name} pasted`, 'dim', 3);
+  };
+  window.addEventListener('keydown', (e) => {
+    if (!ready || !(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    const k = e.key.toLowerCase();
+    if ((k === 'c' || k === 'x') && copyItem(k === 'x')) e.preventDefault();
+  });
+  // Text pasted anywhere but into a field: a thing the lab copied is added; a layout the lab saved is opened; anything else, and
+  // the page has a thing of its own copied, that is added.
   window.addEventListener('paste', (e) => {
-    if (!ready || e.target instanceof HTMLInputElement) return;
+    if (!ready || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     const text = e.clipboardData?.getData('text') ?? '';
-    if (/"lab"\s*:\s*"dungeons building lab"/.test(text)) { e.preventDefault(); openText(text, 'what was pasted'); }
+    if (/"lab"\s*:\s*"dungeons building lab"/.test(text)) {
+      e.preventDefault();
+      try { const doc = JSON.parse(text); if (doc.clip && Array.isArray(doc.items) && doc.items[0]) { pasteItem(doc.items[0]); return; } } catch { /* opened below, or said why not */ }
+      openText(text, 'what was pasted');
+    } else if (clip) { e.preventDefault(); pasteItem(clip); }
   });
 
   // ------------------------------------------------------------------ keys
