@@ -10,7 +10,7 @@
 // and each change is built again at once. What is set out is kept in the browser, can be undone, and
 // can be saved as a file of site documents and opened again.
 import {
-  ACESFilmicToneMapping, Box3, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
+  ACESFilmicToneMapping, Box3, BufferAttribute, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
   Material, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Vector2, Vector3,
 } from 'three';
 import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
@@ -67,9 +67,15 @@ function readItem(o: Partial<Item> & { building?: Building }, id: number): Item 
     return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, shape: normalise(kind, shape as Shape) };
   } catch { return null; }
 }
+// While the page opens, a note says so; it is taken away once the first pictures are drawn. Found on opening, the page did not get
+// that far last time (the browser threw it out: on a phone, for want of memory), and what was set out then may be what did it. So
+// it starts from the lab's own buildings instead, and keeps what was there to be brought back by a button.
+const OPENING = `${KEY}.opening`, BEFORE = `${KEY}.before`;
+const failedOpening = (() => { try { const t = Number(localStorage.getItem(OPENING)); return t > 0 && Date.now() - t < 6 * 3600e3; } catch { return false; } })();
 const state: State = (() => {
   let kept: Partial<State> = {};
   if (!query.has('fresh')) try { kept = JSON.parse(localStorage.getItem(KEY) ?? '{}'); } catch { /* nothing kept */ }
+  if (failedOpening && kept.items?.length) { try { localStorage.setItem(BEFORE, JSON.stringify(kept)); } catch { /* storage full */ } kept = { ...kept, items: [], selected: null, cam: null }; }
   const s: State = { ...DEFAULTS, ...kept, items: [] };
   for (const o of kept.items ?? []) { const it = readItem(o, s.next); if (it) { s.items.push(it); s.next++; } }
   if (!(s.hour in SKIES)) s.hour = 'morning';
@@ -98,6 +104,8 @@ const rad = (deg: number) => (deg * Math.PI) / 180, deg = (r: number) => (r * 18
 /** An iPad or an iPhone (an iPad says it is a Mac, but a Mac has no touch screen). */
 const appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const coarse = matchMedia('(pointer: coarse)').matches;
+/** A phone: a touch screen too small for a tablet. Its memory is the shortest of all. */
+const phone = coarse && Math.min(screen.width, screen.height) < 600;
 /** The page's host, when it is shown as an artifact on claude.ai: what it lets the page do, such as offer a file to save. */
 const host = (window as unknown as { claude?: { use(name: string): Promise<unknown> } }).claude;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -120,6 +128,13 @@ async function start(): Promise<void> {
   const forceWebGL = query.has('webgl') || (appleTouch && !query.has('webgpu'));
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL });
   await renderer.init();
+  // If the browser takes the graphics card away (a phone short of memory does), what is set out is kept and the page opens again,
+  // rather than standing there blank.
+  renderer.onDeviceLost = () => {
+    remember();
+    foot.textContent = 'The browser took the graphics memory back. Opening again, with what was set out…';
+    setTimeout(() => location.reload(), 1200);
+  };
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, Number(query.get('dpr')) || 1.5));
   const narrow = () => window.innerWidth <= 720;
   /** The picture's size: beside the panel on a broad screen, above it on a narrow one. */
@@ -235,7 +250,9 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ surfaces, made as the game makes them
   foot.textContent = 'Painting surfaces…';
   await frameWait();
-  const size = Number(query.get('tex')) || 1024;
+  // (Each surface is kept twice, as pixels and on the graphics card: some 210 MB at 1024 for the seven, a quarter of it at 512,
+  // which on a phone's screen looks much the same.)
+  const size = Number(query.get('tex')) || (phone ? 512 : 1024);
   // (The same recipes with the same seeds as `main.ts`, so that every surface is the game's.)
   const T = {
     stone: generateTextureSet('stone', size, 3), wood: generateTextureSet('wood', size, 5), moss: generateTextureSet('moss', size / 2, 9),
@@ -282,6 +299,23 @@ async function start(): Promise<void> {
     }
     sh[0].data.needsUpdate = true;
   };
+  /**
+   * Lets go of a mesh that is done with: its buffers on the graphics card, and its points here too. Disposing the geometry frees the
+   * first, but the renderer goes on holding the geometry itself after the mesh has left the scene, and with it every array it was
+   * made of: dragging the largest classical building's sliders about kept each of its old builds, 66 MB apiece, until there was no
+   * memory left on a phone. So the arrays are emptied as well; nothing draws the mesh again.
+   */
+  const EMPTY = new Float32Array(0);
+  const letGo = (m: Mesh) => {
+    const g = m.geometry;
+    g.dispose();
+    for (const a of Object.values(g.attributes)) {
+      if ((a as InterleavedBufferAttribute).isInterleavedBufferAttribute) (a as InterleavedBufferAttribute).data.array = EMPTY;
+      else (a as BufferAttribute).array = EMPTY;
+    }
+    if (g.index) g.index.array = new Uint32Array(0);
+    m.userData.open = EMPTY;
+  };
   const meshOf = (name: string, builder: MeshBuilder): Mesh => {
     const mesh = new Mesh(builder.build(), materialOf(name));
     mesh.name = name;
@@ -299,7 +333,7 @@ async function start(): Promise<void> {
   scene.add(groundGroup);
   let ground: Mesh | null = null;
   const lay = () => {
-    if (ground) { groundGroup.remove(ground); ground.geometry.dispose(); }
+    if (ground) { groundGroup.remove(ground); letGo(ground); }
     const b = new MeshBuilder(), c = stoneColour(state.stone);
     // (A paving of the country's stone, broad enough that its edge is seldom seen.)
     plainSolids(() => b).block('floor', new Vector3(-400, -0.4, -400), new Vector3(400, 0, 400), [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
@@ -344,7 +378,7 @@ async function start(): Promise<void> {
     }
     let b = built.get(it.id);
     if (!b) { b = { holder: new Group(), meshes: [], box: new Box3(), rects: [], sig: '', ms: 0, at: 0, triangles: 0 }; world.add(b.holder); built.set(it.id, b); }
-    for (const m of b.meshes) { b.holder.remove(m); m.geometry.dispose(); }
+    for (const m of b.meshes) { b.holder.remove(m); letGo(m); }
     b.meshes = []; b.box.makeEmpty(); b.triangles = 0;
     for (const [name, builder] of builders) {
       if (!builder.vertexCount) continue;
@@ -361,7 +395,7 @@ async function start(): Promise<void> {
   };
   /** Brings what is built into line with what is set out: new items built, changed ones built again (in the loop, a few at a time), gone ones taken away. */
   const sync = () => {
-    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) m.geometry.dispose(); built.delete(id); dirty.delete(id); }
+    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); built.delete(id); dirty.delete(id); }
     for (const it of state.items) { const b = built.get(it.id); if (!b || b.sig !== sigOf(it)) dirty.add(it.id); else placeItem(it); }
     changed(true);
   };
@@ -1121,6 +1155,14 @@ async function start(): Promise<void> {
     ['Copy', () => copyDoc(), 'Copies the same as text, to paste somewhere else; pasting such text here opens it'],
     ['Open file', () => fileInput.click(), 'Opens a file saved here, in place of what is set out'],
   ]);
+  {
+    let before: string | null = null;
+    try { before = localStorage.getItem(BEFORE); } catch { /* storage refused */ }
+    if (before) {
+      const text = before;
+      const [b] = buttons(panel, [['Bring back the last layout', () => { try { localStorage.removeItem(BEFORE); } catch { /* storage refused */ } b.parentElement?.remove(); openText(text, 'the last layout'); }, 'What was set out when the page last failed to open']]);
+    }
+  }
   buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
   el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. M move and turn, E extrude, S scale; [ ] turn a step; arrows nudge; Delete; D copy beside, N next door; Z undo, Shift Z redo; Esc lets go; P hides this panel. All of it is kept in this browser.').className = 'note';
 
@@ -1283,6 +1325,7 @@ async function start(): Promise<void> {
   fit();
 
   // ------------------------------------------------------------------ first making
+  try { localStorage.setItem(OPENING, String(Date.now())); } catch { /* storage refused */ }
   if (!state.items.length) demo();
   const t0 = performance.now();
   for (const it of state.items) rebuild(it);
@@ -1294,6 +1337,7 @@ async function start(): Promise<void> {
   if (state.cam) placeCamera(new Vector3(...state.cam.slice(0, 3)), new Vector3(...state.cam.slice(3)));
   else placeCamera(new Vector3(2, 31, 84), new Vector3(4, 1, 0));
   say(`${state.items.length} buildings built in ${(performance.now() - t0).toFixed(0)} ms`, 'dim', 6);
+  if (failedOpening) say('The page did not finish opening last time, so it starts from the lab’s own buildings. “Bring back the last layout” under Saved opens yours again.', 'bad', 30);
   ready = true;
 
   // ------------------------------------------------------------------ the loop
@@ -1313,8 +1357,10 @@ async function start(): Promise<void> {
         // (A building is built again no sooner than half as long again as it took to build, after it was last built: a large one dragged
         // through its measures is built a few times a second, not every frame, so that its old geometry can be let go of before the next
         // is made. The largest, a classical front of fifteen bays and six storeys, is some 70 MB a time, and an iPad's memory is short.)
-        const b = built.get(id);
-        if (b && performance.now() - b.at < Math.max(60, b.ms * 1.5)) continue;
+        // While a slider, a knob or a building is held, what is held is built again a few times a second at most, and nothing else.
+        const b = built.get(id), holding = sliding || !!held || !!press?.moved;
+        if (holding && id !== state.selected) continue;
+        if (b && performance.now() - b.at < (holding ? Math.max(250, b.ms * 2) : Math.max(60, b.ms * 1.5))) continue;
         dirty.delete(id);
         const it = itemOf(id);
         if (it) rebuild(it);
@@ -1340,6 +1386,8 @@ async function start(): Promise<void> {
     exposure = exposure < 0 ? exposureTarget : exposure + (exposureTarget - exposure) * (1 - Math.exp(-dt * (exposureTarget < exposure ? 3.5 : 1.1)));
     renderer.toneMappingExposure = exposure;
     tick++;
+    // (Five pictures drawn: the buildings and the surfaces are on the graphics card, which is where opening fails if it fails.)
+    if (tick === 5) try { localStorage.removeItem(OPENING); } catch { /* storage refused */ }
     if (now - told > 300) {
       told = now;
       if (performance.now() > said.until) said.text = '';
@@ -1361,7 +1409,7 @@ async function start(): Promise<void> {
 
   // For driving the lab from a script: add, choose, move the camera, and take a picture of what is drawn.
   (window as unknown as Record<string, unknown>).__lab = {
-    state, camera, controls, built,
+    state, camera, controls, built, renderer,
     add: (kind: Kind, o?: { seed?: string; x?: number; z?: number; turn?: number }) => add(kind, o).id,
     select, setTool, frame, look, placeCamera: (from: number[], to: number[]) => placeCamera(new Vector3(...from), new Vector3(...to)),
     reshape: (id: number, f: (s: Shape) => void) => { const it = itemOf(id); if (it) { const t = clone(it.shape); f(t); it.shape = normalise(it.kind, t); dirty.add(id); renderSelected(); commit(); } },
