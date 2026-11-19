@@ -3583,13 +3583,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
   let cloudDeck: SceneDescription['deck'], rockSharp: number | undefined;
-  const buildMountainApproach = (p: Place) => {
+  function* buildMountainApproach(p: Place, span: [number, number]): Generator<MeshStage, void, void> {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
     const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
-    const made = buildMountain({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    const made = yield* buildMountain({ span, site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
     arrival.spawn = made.spawn;
     arrival.track = made.track;
     farCover = made.far;
@@ -3603,18 +3603,20 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     flockSpots = made.flocks;
     smokes.push(...made.smokes);
     scenery.cards.push(...planting.sets);
-  };
+  }
   const glows: { from: Vector3; position: Vector3; colour: [number, number, number]; strength: number }[] = [];
   // Where a cave's shaft comes up through the hill, the turf laid over the house is left open.
   const skylights = places.filter((q) => q.shaft).map((q) => ({ x0: q.shaft!.x - q.shaft!.r * 1.5 - 0.6, x1: q.shaft!.x + q.shaft!.r * 1.5 + 0.6, z0: q.shaft!.z - q.shaft!.r * 1.5 - 0.6, z1: q.shaft!.z + q.shaft!.r * 1.5 + 0.6 }));
 
   for (const p of places) {
-    yield {
-      label: p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
-        : p.roof === 'cave' ? `Carving cave chamber ${p.id + 1} of ${places.length}` : `Laying stone: place ${p.id + 1} of ${places.length}`,
-      at: 0.1 + 0.8 * (places.indexOf(p) / places.length),
-    };
-    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.mountain) buildMountainApproach(p); else buildApproach(p); continue; }
+    const at0 = 0.1 + 0.8 * (places.indexOf(p) / places.length), at1 = 0.1 + 0.8 * ((places.indexOf(p) + 1) / places.length);
+    const what = p.role === 'approach' ? (site.island ? 'Raising the island, its cliffs and its trees' : site.mountain ? 'Raising the mountain, its rock and its way up' : 'Carving the valley, its rock and its trees')
+      : p.roof === 'cave' ? `Carving cave chamber ${p.id + 1} of ${places.length}` : `Laying stone: place ${p.id + 1} of ${places.length}`;
+    yield { label: what, at: at0 };
+    // (A place is built in one go, and some take seconds: where it is cut into parts, each says which it is on, so that the screen
+    // does not hold still on one line and look hung.)
+    const part = (name: string, f: number): MeshStage => ({ label: `${what}: ${name}`, at: at0 + (at1 - at0) * f });
+    if (p.role === 'approach') { if (site.island) buildIslandApproach(p); else if (site.mountain) yield* buildMountainApproach(p, [at0, at1]); else buildApproach(p); continue; }
     kit.group = `p${p.id}`;
     const open = p.roof === 'sky';
     const damp = { kept: 0.6, damp: 1.9, forsaken: 1.3 }[site.setting.condition];
@@ -3674,6 +3676,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     }
 
     // Walls, and the solid behind them.
+    yield part('walls', 0.1);
     for (const side of SIDES) {
       const top = wallTop(p, side);
       const f = frameOf(p, side, 0.1);
@@ -3693,6 +3696,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     }
 
     // Roof.
+    yield part('roof', 0.4);
     if (cave) {
       // A cave is carved once, whole, when its first chamber comes up: every chamber and every
       // cleft between them as one body of air in one body of rock, so nothing has to be joined.
@@ -3842,6 +3846,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     }
 
     // Furnishings by role.
+    yield part('furnishing', 0.7);
     if (p.role === 'court' && !p.fallen) {
       // (In the middle of a cloister, which the walk round it leaves room for; anywhere near the middle of a smaller court.)
       // (The same chances are drawn either way, so that nothing drawn after them is dealt differently.)
@@ -4033,6 +4038,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       anchors.set(p.id, V(cx, p.floor + 1.04, cz));
     }
 
+    yield part('doorways and stairs', 0.9);
     // Floor that must stay clear: in front of every doorway, and round whatever stands in the middle.
     const keepClear: Rect[] = [];
     const doorPoints: [number, number][] = [];

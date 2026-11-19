@@ -208,7 +208,7 @@ function torsAt(m: Mountain, x: number, z: number): number {
     // A tooth (taller than it is broad) is a fin: a blade of rock standing on edge, its crest notched. A tor is a knob. Either stands
     // in beds: its height comes in steps the thickness of a bed, so its sides are ledges and little walls and not a smooth mound.
     const tooth = t.height > t.r * 1.4, turn = (t.x * 12.9898 + t.z * 78.233) % Math.PI, c = Math.cos(turn), s = Math.sin(turn);
-    const along = (x - t.x) * c + (z - t.z) * s, across = -(x - t.x) * s + (z - t.z) * c, e = tooth ? Math.hypot(along / 1.3, across * 1.9) : d;
+    const along = (x - t.x) * c + (z - t.z) * s, across = -(x - t.x) * s + (z - t.z) * c, e = tooth ? Math.hypot(along / 1.15, across * 1.25) : d;
     if (e >= t.r) continue;
     const notch = tooth ? 0.5 + 0.75 * (1 - Math.abs(fbm2(along * 0.55 + t.x, t.z, 2, 47) * 2 - 1)) : 1;
     const raw = t.height * Math.pow(1 - e / t.r, tooth ? 0.42 : 0.5) * (0.65 + 0.7 * fbm2(x / 2.7 + t.x, z / 2.7 - t.z, 2, 19)) * notch;
@@ -701,11 +701,18 @@ function levelLine(pts: [number, number][], height: (x: number, z: number) => nu
   return pts.map(([x, z], i) => [round(x), round(z), round(h[i])]);
 }
 
+/** How large the top and its ridge are made, 1 being the first pass. */
+export const MOUNTAIN_SCALE = 0.55;
+
 /**
  * Lays out a mountain top round a house whose forecourt is `meadow` and whose door is at `doorX`
  * in the forecourt's north side. Fills in the site's `mountain`, `grounds`, `track` and `paths`.
  */
 export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
+  // (How large the top and its ridge are made, against the first pass: that stood a quarter of a kilometre across with a ridge of three
+  // hundred metres, too large for the world about it and for what it cost to build, nearly all of it rock to carve. The house is not
+  // scaled, and the rim is grown until it fits.)
+  const S = MOUNTAIN_SCALE;
   const round = (v: number) => Math.round(v * 10) / 10, T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   const house = { x0: Math.min(...others.map((q) => q.x0)) - T, x1: Math.max(...others.map((q) => q.x1)) + T, z0: Math.min(...others.map((q) => q.z0)) - T, z1: meadow.z1 };
@@ -716,16 +723,16 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // The rim: an oval turned any way, with spurs of the top standing out from it and gullies cut
   // back into it, as a mountain's top is; the precipice under it high in one place and less in the next.
   const shape = rng.fork('rim');
-  const R = shape.range(120, 160), turn = shape.range(0, Math.PI), seed = shape.range(0, 500), squash = shape.range(0.68, 0.95);
-  const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24), wide: shape.range(0.1, 0.22) }));
-  const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15), wide: shape.range(0.04, 0.08) }));
+  const R = shape.range(120, 160) * S, turn = shape.range(0, Math.PI), seed = shape.range(0, 500), squash = shape.range(0.68, 0.95);
+  const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24) * S, wide: shape.range(0.1, 0.22) }));
+  const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15) * S, wide: shape.range(0.04, 0.08) }));
   const rimOf = (scale: number) => Array.from({ length: N }, (_, k) => {
     const a = (k / N) * TAU, c = Math.cos(a - turn), s = Math.sin(a - turn);
     let r = (R / Math.sqrt(c * c + (s * s) / (squash * squash))) * scale;
     r *= 1 + 0.2 * (fbm2(Math.cos(a) * 1.6 + seed, Math.sin(a) * 1.6, 3) - 0.5) + 0.1 * (fbm2(Math.cos(a) * 7 + seed, Math.sin(a) * 7 - seed, 2) - 0.5);
     for (const h of heads) r += h.out * Math.exp(-((turnBetween(h.at, a) / h.wide) ** 2));
     for (const g of gullies) r -= g.into * Math.exp(-((turnBetween(g.at, a) / g.wide) ** 2));
-    return round(Math.max(40, r));
+    return round(Math.max(40 * S, r));
   });
   const dropSeed = shape.range(0, 500);
   // The house stands on a shoulder near the south edge: the middle of the top lies north of it.
@@ -733,7 +740,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const m: Mountain = {
     x: middle.x, z: middle.z, rim: rimOf(1),
     // (In some stretches hardly a precipice at all, the top going over into a steep slope of scree; in others a wall the height of a church tower.)
-    drop: Array.from({ length: N }, (_, k) => { const a = (k / N) * TAU; return round(6 + 48 * smooth((fbm2(Math.cos(a) * 1.4 + dropSeed, Math.sin(a) * 1.4, 3) - 0.28) / 0.44)); }),
+    drop: Array.from({ length: N }, (_, k) => { const a = (k / N) * TAU; return round((6 + 48 * smooth((fbm2(Math.cos(a) * 1.4 + dropSeed, Math.sin(a) * 1.4, 3) - 0.28) / 0.44)) * Math.max(S, 0.6)); }),
     ribs: { seed: round(shape.range(0, 90)), out: round(shape.range(5, 9)), apart: round(shape.range(17, 27)) },
     deck: 0, billow: 0, spur: { from: [0, 0], to: [0, 0], width: 40, y0: F, y1: F }, peaks: [], level, range: [],
   };
@@ -749,7 +756,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // Where the rim lies south of the forecourt, more or less: the ridge leaves it there.
     const a = Math.atan2(exitZ - m.z, exitX - m.x) + q.range(-0.35, 0.35);
     const at = rimAt(m, a) - 2, fx = m.x + Math.cos(a) * at, fz = m.z + Math.sin(a) * at;
-    const dir = a + q.range(-0.3, 0.3), length = q.range(280, 350);
+    const dir = a + q.range(-0.3, 0.3), length = q.range(280, 350) * S;
     m.spur = { from: [round(fx), round(fz)], to: [round(fx + Math.cos(dir) * length), round(fz + Math.sin(dir) * length)], width: round(q.range(18, 25)), y0: 0, y1: 0 };
     const plainTop = landAt({ ...m, spur: { ...m.spur, y0: -1e4, y1: -1e4 } }, F, fx, fz, false);
     m.spur.y0 = round(plainTop);
@@ -761,16 +768,16 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const q = rng.fork('peaks');
     for (let tries = 0; tries < 400 && m.peaks.length < 1; tries++) {
       const a = -Math.PI / 2 + q.range(-0.9, 0.9), at = rimAt(m, a) * q.range(0.5, 0.74);
-      const r = q.range(42, 70), height = q.range(58, 108), x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
+      const r = q.range(42, 70) * S, height = q.range(58, 108) * S, x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
       // (Well back from the house: the way up to it is to be a walk, not a scramble behind the kitchen.)
       // (And as far off across the top as the top allows, at first asking: the further, the longer and easier the way up, and the higher the summit may stand.)
-      if (outside(level, x, z) < Math.max(r * 0.55 + 28, 95 - tries * 0.3)) continue;
+      if (outside(level, x, z) < Math.max(r * 0.55 + 28 * S, (95 - tries * 0.3) * S)) continue;
       m.peaks.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
     }
     const more = q.int(0, 2);
     for (let tries = 0; tries < 300 && m.peaks.length < 1 + more; tries++) {
       const a = q.range(0, TAU), at = rimAt(m, a) * Math.sqrt(q.next()) * 0.85, x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
-      const r = q.range(26, 45), height = q.range(14, Math.max(16, m.peaks[0].height * 0.6));
+      const r = q.range(26, 45) * S, height = q.range(14 * S, Math.max(16 * S, m.peaks[0].height * 0.6));
       if (outside(level, x, z) < r * 0.4 + 10 || Math.hypot(x - m.spur.from[0], z - m.spur.from[1]) < r + 20) continue;
       if (m.peaks.some((p) => Math.hypot(p.x - x, p.z - z) < (p.r + r) * 0.65)) continue;
       m.peaks.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
@@ -791,7 +798,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       // (Straight out for a little way first, clear of the rim.)
       for (let k = 0; k < 3; k++) { x += Math.cos(h) * STEP; z += Math.sin(h) * STEP; gone += STEP; pts.push([x, z]); }
       while (gone < length && ok) {
-        const r = q.range(60, 150), turn = q.range(0.45, 1.05), n = Math.max(2, Math.round((r * turn) / STEP));
+        const r = q.range(60, 150) * Math.max(S, 0.6), turn = q.range(0.45, 1.05), n = Math.max(2, Math.round((r * turn) / STEP));
         for (let k = 0; k < n && gone < length && ok; k++) {
           h += (sign * STEP) / r; x += Math.cos(h) * STEP; z += Math.sin(h) * STEP; gone += STEP;
           pts.push([x, z]);
@@ -1095,7 +1102,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
           if (m.shelter && Math.hypot(m.shelter.x - x, m.shelter.z - z) < r + 6) continue;
           if (m.gate && Math.hypot(m.gate.x - x, m.gate.z - z) < r + 7) continue;
           if (m.spur.notch) { const sp = onSpur(m, x, z); if (sp.off < 40 && Math.abs(sp.d - m.spur.notch.at) < m.spur.notch.wide / 2 + r + 5) continue; }
-          m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 2.2 : 1.6, 3.1)) });
+          m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 1.9 : 1.45, 2.4)) });
         }
       }
     };

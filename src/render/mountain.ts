@@ -13,6 +13,7 @@ import { layTerrain, turfColour } from './landscape';
 import { Colour, growConifer, Planting } from './planting';
 import { CardSet } from './scene';
 import { anyAngle } from './coast';
+import type { MeshStage } from './siteMesher';
 
 /**
  * The mountain top, built from what the site document says of it: its ground, worn and carved
@@ -32,6 +33,8 @@ import { anyAngle } from './coast';
  */
 
 export interface MountainBuild {
+  /** The share of the whole job this build takes, from and to (0 to 1), for the loading screen. */
+  span?: [number, number];
   site: Site;
   /** The forecourt, which is the mountain's approach place. */
   p: Place;
@@ -72,7 +75,11 @@ export interface MountainResult {
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
 
-export function buildMountain(b: MountainBuild): MountainResult {
+export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainResult, void> {
+  // (A generator, so that the page can paint what is being done between its stages: it is the longest step of making a place, and a
+  // page that says nothing for a minute looks hung. `b.span` is the share of the whole job it takes, from and to.)
+  const span = b.span ?? [0, 1];
+  const say = (what: string, f: number): MeshStage => ({ label: `Raising the mountain: ${what}`, at: span[0] + (span[1] - span[0]) * f });
   // (For finding where the time goes: with DBG_T set, as `DBG_T=1 npx tsx tools/mountain.ts 1`, each stage says how long it took.)
   let __t = performance.now();
   const __T = (label: string) => { if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_T) console.log('  ', label, (performance.now() - __t).toFixed(0), 'ms'); __t = performance.now(); };
@@ -192,7 +199,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   // (Carved at half a metre, where a valley's rim and an island's cliffs are carved at four tenths: there is twice as much rock
   // here, most of it seen from further off, and at four tenths it took a minute and a half to build.)
   // (Rock carved at four tenths of a metre and the sheet laid at a metre: a notch finer than first made.)
-  const CELL = 0.4, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
+  const CELL = 0.5, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(g.x0 - 90, false), x1: snap(g.x1 + 90, true), z0: snap(g.z0 - 90, false), z1: snap(g.z1 + 90, true) };
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.05; };
@@ -234,11 +241,13 @@ export function buildMountain(b: MountainBuild): MountainResult {
   };
 
   __T('tiles');
+  yield say('wearing the precipices', 0.03);
   // ---- the lattice of heights over the band, worn as frost wears a precipice
   const MARGIN = 5.4;
   const land = new Grid2(area.x0 - MARGIN, area.z0 - MARGIN, CELL, Math.round((area.x1 - area.x0 + 2 * MARGIN) / CELL) + 1, Math.round((area.z1 - area.z0 + 2 * MARGIN) / CELL) + 1);
   const known = new Uint8Array(land.data.length), within = new Uint8Array(land.data.length);
   for (let j = 0; j < land.nz; j++) for (let i = 0; i < land.nx; i++) {
+    if (i === 0 && j % 24 === 0) yield say(`reading the land, row ${j + 1} of ${land.nz}`, 0.03 + 0.05 * (j / land.nz));
     const x = land.x0 + i * CELL, z = land.z0 + j * CELL, ti = Math.floor((x - area.x0) / TILE), tj = Math.floor((z - area.z0) / TILE);
     let near = false;
     for (let dj = -1; dj <= 1 && !near; dj++) for (let di = -1; di <= 1 && !near; di++) {
@@ -280,6 +289,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const ground = (x: number, z: number): number => (wornBy.holds(x, z) ? plain(x, z) + wornBy.at(x, z) : plain(x, z));
 
   __T('lattice+erode');
+  yield say('shaping the rock', 0.08);
   // ---- steepness, the way uphill, and how far the ground is rock
   const steepness = land.like(), rocky = land.like(), upX = land.like(), upZ = land.like();
   {
@@ -636,12 +646,16 @@ export function buildMountain(b: MountainBuild): MountainResult {
   };
 
   __T('fields');
+  yield say('carving the rock', 0.12);
   // ---- carving: each tile of the band as a piece, only as tall as its own ground needs
   const sheetEdge = alongSheet(ground, area.x0, area.z0, SHEET);
   wild.group = 'wild';
   const turfMesh = wild.mesh('turf'), screeMesh = wild.mesh('scree'), rockMesh = wild.mesh('rock');
+  let pieces = 0, piecesDone = 0;
+  for (let k = 0; k < tiles.length; k++) if (tiles[k]) pieces++;
   for (let j = 0; j < tilesZ; j++) for (let i = 0; i < tilesX; i++) {
     if (!tiles[j * tilesX + i]) continue;
+    yield say(`carving the rock, piece ${++piecesDone} of ${pieces}`, 0.12 + 0.58 * (piecesDone / pieces));
     const c = { x0: area.x0 + i * TILE, x1: area.x0 + (i + 1) * TILE, z0: area.z0 + j * TILE, z1: area.z0 + (j + 1) * TILE };
     let lo = Infinity, hi = -Infinity;
     // (Its relief here pushes a face sideways by up to nearly five metres.)
@@ -664,6 +678,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
 
   __T('carve');
+  yield say('scattering boulders', 0.7);
   // ---- boulders: fallen from the crags and the precipices' tops, and left by frost all over the top
   const lying: [number, number, number][] = [];
   const layBoulder = (x: number, z: number, size: number, q: Rng, sunk = [0.15, 0.5]) => {
@@ -699,10 +714,12 @@ export function buildMountain(b: MountainBuild): MountainResult {
       const size = q.range(0.5, under > 0.05 ? 2.4 : 1.4);
       if (lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.6)) continue;
       layBoulder(x, z, size, q);
+      if (lying.length % 6 === 0) yield say(`scattering boulders, ${lying.length} of about 70`, 0.7 + 0.04 * Math.min(1, lying.length / 70));
     }
   }
 
   __T('boulders');
+  yield say('laying the ground', 0.74);
   // ---- the sheet of ground over all that is not carved, out and down as far as the cloud lets it be seen
   // (The sheet asks for the height of each of its corners four times over, once for each square that shares it, and four more
   // times round each for the way it slopes: heights are kept as they are worked out.)
@@ -752,6 +769,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
 
   __T('sheet');
+  yield say('raising the hospice, the cairn and the shelter', 0.78);
   // ---- what people have put up here
   wild.group = 'wild';
   const { solid } = anyAngle((mm) => wild.mesh(mm));
@@ -1381,6 +1399,7 @@ export function buildMountain(b: MountainBuild): MountainResult {
   const planted = plantMountain({ site, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, layBare: () => lay.bare, hollowAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0), trackOff, offFoot, insideOuter });
 
   __T('props+plants');
+  yield say('fencing the edge', 0.9);
   // ---- the edge of the world: nobody walks off a precipice or down into the cloud
   const arrive = way.length ? way[way.length - 1] : [m.spur.to[0], m.spur.to[1], m.spur.y1];
   {
@@ -1434,9 +1453,10 @@ export function buildMountain(b: MountainBuild): MountainResult {
   }
 
   __T('fences');
+  yield say('laying the far range and the cloud', 0.92);
   // ---- the other peaks, far off over the cloud, and the mountain's own lower slopes beyond the near ground
   wild.group = 'soft';
-  layRange(wild.mesh('far'), site, F, tint, area, winter);
+  yield* layRange(wild.mesh('far'), site, F, tint, area, winter, (what, f) => say(what, 0.92 + 0.08 * f));
   // The sights of the country round about: built larger than life the further off they stand, or they would be specks; each faces the mountain.
   (m.sights ?? []).forEach((sg, i) => {
     const far = Math.hypot(sg.x - m.x, sg.z - m.z);
@@ -1629,7 +1649,7 @@ const rangeStep = (r: number) => 0.8 + r * 0.0043;
  * each point that stands over the cloud, along the ground towards the sun, rising as the sun's ray does, reading the range's own
  * heights as it goes; the shadow's edge is softer the further off what throws it, as the sun's disc makes it.
  */
-function shadeOfRange(site: Site, radii: number[], around: number, X: Float32Array, Z: Float32Array, H: Float32Array, from: number): Float32Array {
+function* shadeOfRange(site: Site, radii: number[], around: number, X: Float32Array, Z: Float32Array, H: Float32Array, from: number, say: (f: number) => MeshStage): Generator<MeshStage, Float32Array, void> {
   const m = site.mountain!, cx = m.x, cz = m.z, rings = radii.length, out = new Float32Array(rings * around);
   const [sx0, sy0, sz0] = site.sun, flat = Math.hypot(sx0, sz0);
   if (sy0 <= 0.02 || flat < 1e-4) return out;
@@ -1650,6 +1670,7 @@ function shadeOfRange(site: Site, radii: number[], around: number, X: Float32Arr
     return a + (b - a) * fr;
   };
   for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
+    if (k === 0 && ri % 12 === 0) yield say(ri / rings);
     const q = ri * around + k;
     if (H[q] < from) continue;
     const x0 = X[q], z0 = Z[q], y0 = H[q] + 1.5;
@@ -1671,7 +1692,7 @@ function shadeOfRange(site: Site, radii: number[], around: number, X: Float32Arr
   return out;
 }
 
-function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean): void {
+function* layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean, say: (what: string, f: number) => MeshStage): Generator<MeshStage, void, void> {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
   // (A notch finer than first made: half as many points again round each ring. And the rings about as close as the points round
   // them are far apart: twice as far apart, they drew a face looking this way, down which they run, in rows forty metres apart, and
@@ -1682,6 +1703,7 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
   const wet = new Uint8Array(radii.length * around);
   const rings = radii.length, H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
   for (let ri = 0; ri < rings; ri++) for (let k = 0; k < around; k++) {
+    if (k === 0 && ri % 8 === 0) yield say('measuring the country round about', (ri / rings) * 0.6);
     const a = (k / around) * Math.PI * 2, q = ri * around + k;
     X[q] = cx + Math.cos(a) * radii[ri]; Z[q] = cz + Math.sin(a) * radii[ri];
     // (What the near ground covers is not wanted, and its height is not reckoned: it is dear to reckon.)
@@ -1691,7 +1713,7 @@ function layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near:
     H[q] = land.y; wet[q] = land.water ? 1 : 0;
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
-  const shade = shadeOfRange(site, radii, around, X, Z, H, deck - 45);
+  const shade = yield* shadeOfRange(site, radii, around, X, Z, H, deck - 45, (f) => say('shadowing the country round about', 0.6 + 0.3 * f));
   const ids = new Int32Array(rings * around).fill(-1);
   const id = (ri: number, k: number) => {
     const q = at(ri, k);

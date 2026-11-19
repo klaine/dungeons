@@ -668,10 +668,12 @@ const farFbm: N = Fn(([p0]: [N]) => {
  * was smooth between the sheet's points: a cast, not a mountain.)
  */
 const rockRelief = (P: N, n0: N, base: N, grain: N, weight: N, strength = 3.4, dark = 0.55): { normal: N; cavity: N } => {
-  const flatOut: N = vec2(n0.x, n0.z).toVar();
-  const outward: N = flatOut.div(max(length(flatOut), 0.001)).toVar();
-  const alongDir: N = vec2(outward.y.negate(), outward.x).toVar();
-  const sAt: N = dot(P.xz, alongDir).toVar();
+  // (The distance along a face is read off the world's own axes, x for faces that look along z and z for those that look along x,
+  // the two blended where a face turns. It was `dot(P.xz, alongDir)`, with `alongDir` the face's own direction: but P is thousands
+  // of metres from the origin, so the least turn of a curved face, from one point of the picture to the next, swung that distance
+  // by metres, and the relief came out as contour-line moiré over every great wall.)
+  const wz: N = n0.x.mul(n0.x).toVar(), wx: N = n0.z.mul(n0.z).toVar();
+  const wsum: N = max(wx.add(wz), 0.0001).toVar();
   const o1: N = one(smoothstep(2.2, 4.5, grain)).toVar(), o2: N = one(smoothstep(0.9, 1.8, grain)).toVar(), o3: N = one(smoothstep(0.35, 0.7, grain)).toVar();
   const ridgeOf = (q: N): N => { const v = one(abs(farNoise(q).mul(2).sub(1))); return v.mul(v); };
   const reliefAt = (sx: N, y: N): N => {
@@ -688,10 +690,15 @@ const rockRelief = (P: N, n0: N, base: N, grain: N, weight: N, strength = 3.4, d
     const chip = farNoise(vec2(sx.div(2.6), y.div(3.1)).add(3.3)).mul(0.25).mul(o3);
     return gully.add(rib).add(ledge).add(chip);
   };
-  const r0: N = reliefAt(sAt, P.y).toVar();
-  const rs: N = reliefAt(sAt.add(1.2), P.y).sub(r0).div(1.2), ry: N = reliefAt(sAt, P.y.add(1.2)).sub(r0).div(1.2);
+  // Each projection (along x, along z): its value, and its slope along the axis and up.
+  const rx0: N = reliefAt(P.x, P.y).toVar(), rz0: N = reliefAt(P.z, P.y).toVar();
+  const rsx: N = reliefAt(P.x.add(1.2), P.y).sub(rx0).div(1.2), rsz: N = reliefAt(P.z.add(1.2), P.y).sub(rz0).div(1.2);
+  const ryx: N = reliefAt(P.x, P.y.add(1.2)).sub(rx0).div(1.2), ryz: N = reliefAt(P.z, P.y.add(1.2)).sub(rz0).div(1.2);
+  const r0: N = rx0.mul(wx).add(rz0.mul(wz)).div(wsum).toVar();
+  const ry: N = ryx.mul(wx).add(ryz.mul(wz)).div(wsum);
   const upFace: N = normalize(vec3(0, 1, 0).sub(n0.mul(n0.y)).add(vec3(0, 0.0001, 0))).toVar();
-  const normal: N = normalize(base.sub(vec3(alongDir.x, 0, alongDir.y).mul(rs).add(upFace.mul(ry.mul(upFace.y))).mul(strength).mul(weight))).toVar();
+  const along: N = vec3(rsx.mul(wx), 0, rsz.mul(wz)).div(wsum);
+  const normal: N = normalize(base.sub(along.add(upFace.mul(ry.mul(upFace.y))).mul(strength).mul(weight))).toVar();
   // (Darker down in the gullies and cracks, paler on the ribs; the sky's light reaches less far into them, so a face in the shade,
   // which has no sun to model it, still shows its rock.)
   const cavity: N = mix(1, mix(dark, 1.18, smoothstep(0.05, 1.1, r0)), weight.mul(0.9)).toVar();
