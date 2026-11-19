@@ -4,6 +4,7 @@ import { onStair } from '../core/island';
 import { Site } from '../core/site';
 import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
+import { turner } from './geom/turned';
 import { buildLandmark } from './landmarks';
 import { buildBuilding, litRoom } from './buildings';
 import { CLASSICAL, plinthOf } from '../core/building';
@@ -60,12 +61,27 @@ export interface JettyBuild {
 }
 
 /**
+ * A bollard of cast iron, as harbours have: a waisted barrel on a broad foot, and a flared head that a rope cannot slip over; painted
+ * black long ago and gone rusty brown about its waist, where the ropes wear it (`rust`, 0 to 1). Turned, so that it is round and
+ * smoothly shaded. (It was ten wedges each a solid of its own, each its own shade and each face flat: a bollard by the landing, the
+ * first thing seen on an island, read as a cut stone post.)
+ */
+export function layBollard(mesh: (material: string) => MeshBuilder, at: [number, number, number], rust: number): void {
+  // (Height and breadth, from the foot up: closed beneath, where it stands on the deck, and drawn in to a point on top.)
+  const BOLLARD: [number, number][] = [[0, 0], [0, 0.19], [0.05, 0.17], [0.12, 0.145], [0.36, 0.118], [0.44, 0.125], [0.5, 0.19], [0.58, 0.185], [0.62, 0.12], [0.64, 0]];
+  turner(mesh, () => at[1])('metal', at[0], at[1], at[2], BOLLARD.map(([h, r]) => [r, h]), {
+    segments: 16,
+    colour: (_a, h) => { const worn = h >= 0.1 && h <= 0.46 ? rust : rust * 0.3; return [0.05 + 0.13 * worn, 0.045 + 0.06 * worn, 0.04 + 0.02 * worn]; },
+  });
+}
+
+/**
  * A jetty of big stones out from the shore, its deck a little above high water: courses of blocks, coping, bollards, what lies about on
  * a working jetty, a mooring rope, a ladder at the end, and boxes nobody sees along its sides and across its end so that nobody steps
  * off it into the water. An island's cove has one, and a coastal town's harbour. `solid` is the caller's, so that what it makes is
  * shaded in turn with everything else. Gives the level of its deck.
  */
-export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['solid']): number {
+export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['solid'], mesh: (material: string) => MeshBuilder): number {
   const sea = j.sea, deck = sea + 1.35;
   const stone: Colour = [0.78 * j.stoneTint[0], 0.75 * j.stoneTint[1], 0.7 * j.stoneTint[2]];
   const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
@@ -101,9 +117,7 @@ export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['soli
       const local = j.rockAt ? j.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
       box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), local ? shade(local, 1.25) : shade(stone, 1.08), 0.4);
     }
-    // Bollards of cast iron, as harbours have: a waisted barrel on a broad foot, and a flared head that a rope cannot slip over;
-    // painted black long ago and gone rusty brown where the ropes wear them. (Plain six-sided posts read as stumps of slate.)
-    const BOLLARD: [number, number][] = [[0, 0.19], [0.05, 0.17], [0.12, 0.145], [0.36, 0.118], [0.44, 0.125], [0.5, 0.19], [0.58, 0.185], [0.62, 0.12], [0.64, 0]];
+    // Bollards of cast iron (`layBollard`). (Plain six-sided posts read as stumps of slate.)
     const ring = (cx: number, cf: number, y0: number, y1: number, r0: number, r1: number, material: string, colour: Colour, n = 10, turn = 0) => {
       for (let k = 0; k < n; k++) {
         const t0 = turn + (k / n) * Math.PI * 2, t1 = turn + ((k + 1) / n) * Math.PI * 2;
@@ -115,10 +129,7 @@ export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['soli
     for (const f of [len * 0.55, len - 0.9]) for (const side of [-1, 1]) {
       const a = side * (half - 0.7), rust = q.range(0, 1);
       bollards.push([a, f]);
-      for (let k = 0; k + 1 < BOLLARD.length; k++) {
-        const [y0, r0] = BOLLARD[k], [y1, r1] = BOLLARD[k + 1], worn = k >= 2 && k <= 4 ? rust : rust * 0.3;
-        ring(a, f, deck + y0, deck + y1, r0, r1, 'metal', [0.05 + 0.13 * worn, 0.045 + 0.06 * worn, 0.04 + 0.02 * worn]);
-      }
+      layBollard(mesh, at(a, deck, f), rust);
     }
     // What lies about on a working jetty, along one edge where it does not stand in the way: a coil of rope, fish boxes stacked
     // two or three high, a creel or two (a lobster pot: a flat base, hoops of bent wood and the net between them), and a rope
@@ -224,7 +235,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     }
     return false;
   };
-  const deck = layJetty({ jetty: o.jetty, landing: o.landing === 'stair' ? 'stair' : 'beach', sea, ground: c.ground, stoneTint: c.stoneTint, rockAt: c.rockAt, fences: c.fences, rng, keepOpen: (x, z) => onStair(o, x, z).off < 1.7 || onStrand(x, z) }, solid);
+  const deck = layJetty({ jetty: o.jetty, landing: o.landing === 'stair' ? 'stair' : 'beach', sea, ground: c.ground, stoneTint: c.stoneTint, rockAt: c.rockAt, fences: c.fences, rng, keepOpen: (x, z) => onStair(o, x, z).off < 1.7 || onStrand(x, z) }, solid, mesh);
 
   // ---- the stair cut in the cliff: a step at every half stride, cut in the cliff's own rock, set into the slope it is cut in.
   // They are for the eye, as the valley's are: what is walked on is the slope, so no foot catches on a riser.

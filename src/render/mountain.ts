@@ -726,6 +726,47 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
       return at(ea * (w / 2 - inA), ef * (d / 2 - inF), h + (front ? -q.range(0.03, 0.07) : q.range(-0.02, 0.02)));
     };
     solid('rock', [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), top(-1, -1), top(1, -1), top(1, 1), top(-1, 1)], colour);
+    // In winter the snow lies on it with a depth of its own (`cushion`): painted on by the material alone, a tread was a block with
+    // a white top and no snow on it at all.
+    if (winter) cushion(x, y + h, z, w, d, yaw, nose, q);
+  };
+  /**
+   * Snow lying on a tread: a cushion of it, its top rounded down to nothing at every edge and lying deeper towards the back, where it
+   * drifts against the riser of the next step, a little uneven, and a closed body with a flat foot. Its foot is sunk into the slab, so
+   * that it comes out of the tread a little in from the edges and meets the worn nose without a gap; from in front its nose is a
+   * soft white lip. Of the rock's material, marked as snow all over, as a cornice is.
+   */
+  const cushion = (x: number, top: number, z: number, w: number, d: number, yaw: number, nose: number, q: Rng) => {
+    const m = wild.mesh('rock'), c = Math.cos(yaw), s = Math.sin(yaw), deep = q.range(0.12, 0.2), sunk = 0.06, base = top - sunk;
+    const NA = 7, NF = 9, bump = Array.from({ length: (NA + 1) * (NF + 1) }, () => q.range(-0.12, 0.12));
+    // (How deep at a place across the tread, `u` along the climb and `v` across it, each -1 to 1: nothing at the edges, rising over
+    // a hand's breadth or two from them, and deeper towards the back than at the nose.)
+    const depthAt = (u: number, v: number, k: number): number => {
+      const ea = (1 - Math.abs(u)) * (w / 2), ef = (1 - Math.abs(v)) * (d / 2);
+      const round = Math.sqrt(smooth(ea / 0.1)) * Math.sqrt(smooth(ef / 0.16)), back = (1 - u * nose) / 2;
+      return deep * round * (0.7 + 0.45 * back) * (1 + bump[k]);
+    };
+    const at = (u: number, v: number, up: number): [number, number, number] => [x + c * u * (w / 2) - s * v * (d / 2), up, z + s * u * (w / 2) + c * v * (d / 2)];
+    const heights: number[] = [];
+    for (let i = 0; i <= NA; i++) for (let j = 0; j <= NF; j++) heights.push(depthAt(-1 + (2 * i) / NA, -1 + (2 * j) / NF, i * (NF + 1) + j));
+    const ids: number[] = [];
+    for (let i = 0; i <= NA; i++) for (let j = 0; j <= NF; j++) {
+      const k = i * (NF + 1) + j, u = -1 + (2 * i) / NA, v = -1 + (2 * j) / NF;
+      // (Shaded as the cushion's own slope, worked out from its neighbours.)
+      const du = (heights[Math.min(NA, i + 1) * (NF + 1) + j] - heights[Math.max(0, i - 1) * (NF + 1) + j]) / (((Math.min(NA, i + 1) - Math.max(0, i - 1)) * w) / NA);
+      const dv = (heights[i * (NF + 1) + Math.min(NF, j + 1)] - heights[i * (NF + 1) + Math.max(0, j - 1)]) / (((Math.min(NF, j + 1) - Math.max(0, j - 1)) * d) / NF);
+      const nx = -(c * du - s * dv), nz = -(s * du + c * dv), l = Math.hypot(nx, 1, nz);
+      const p = at(u, v, base + heights[k]);
+      ids.push(m.addVertex(p[0], p[1], p[2], nx / l, 1 / l, nz / l, p[0] * 0.5, p[2] * 0.5, 0.9, 0.92, 0.96, 0, 0, -1, 0.25));
+    }
+    for (let i = 0; i < NA; i++) for (let j = 0; j < NF; j++) {
+      const a = ids[i * (NF + 1) + j], b = ids[(i + 1) * (NF + 1) + j], cc = ids[i * (NF + 1) + j + 1], dd = ids[(i + 1) * (NF + 1) + j + 1];
+      // (Wound to face up, whichever way the tread is turned.)
+      m.addTriangle(a, cc, b); m.addTriangle(b, cc, dd);
+    }
+    // Its foot, flat, facing down.
+    const foot = [at(-1, -1, base), at(1, -1, base), at(1, 1, base), at(-1, 1, base)].map((p) => m.addVertex(p[0], p[1], p[2], 0, -1, 0, p[0] * 0.5, p[2] * 0.5, 0.9, 0.92, 0.96, 0, 0, -1, 0.25));
+    m.addTriangle(foot[0], foot[1], foot[2]); m.addTriangle(foot[0], foot[2], foot[3]);
   };
   /** A cairn: stones laid in rings, each ring smaller and set in the hollows of the one under it, to a point. */
   const cairn = (x: number, z: number, high: number, q: Rng) => {

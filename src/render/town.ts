@@ -9,7 +9,7 @@ import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/roc
 import { layTerrain, turfColour } from './landscape';
 import { Colour, growConifer, growTree } from './planting';
 import { CardSet } from './scene';
-import { anyAngle, layBoat } from './coast';
+import { anyAngle, layBoat, layBollard } from './coast';
 import { buildShack } from './shack';
 import { buildBuilding } from './buildings';
 import { layWall } from './walls';
@@ -544,12 +544,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
   }
   function bollard(x: number, z: number, y: number, h: Rng) {
-    const at = frame(x, z, y, 0), iron: Colour = h.chance(0.5) ? [0.05, 0.05, 0.055] : [0.22, 0.12, 0.06];
-    const prof: [number, number][] = [[0, 0.19], [0.05, 0.17], [0.12, 0.145], [0.36, 0.118], [0.44, 0.125], [0.5, 0.19], [0.58, 0.185], [0.62, 0.12], [0.64, 0]];
-    for (let k = 0; k + 1 < prof.length; k++) for (let n = 0; n < 8; n++) {
-      const t0 = (n / 8) * Math.PI * 2, t1 = ((n + 1) / 8) * Math.PI * 2, [y0, r0] = prof[k], [y1, r1] = prof[k + 1];
-      solid('metal', [at(0, y0, 0), at(Math.cos(t0) * r0, y0, Math.sin(t0) * r0), at(Math.cos(t1) * r0, y0, Math.sin(t1) * r0), at(0, y0, 0), at(0, y1, 0), at(Math.cos(t0) * r1, y1, Math.sin(t0) * r1), at(Math.cos(t1) * r1, y1, Math.sin(t1) * r1), at(0, y1, 0)], iron);
-    }
+    // (Black, or gone to rust: as the jetty's, turned and smoothly round.)
+    layBollard(mesh, [x, y, z], h.chance(0.5) ? 0.1 : 1);
   }
   // The moles: a causeway of big blocks, battered, from the sea bed to a deck of flags, with a parapet along its seaward side
   // and blocks of rough stone heaped against its foot out there, where the sea breaks.
