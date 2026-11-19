@@ -394,6 +394,11 @@ export function worldTile(w: World, i: number, j: number): Tile {
   }
   const before = f.data.slice();
   wear(f, new Rng(`world/${p.seed}/tile/${i},${j}`), TILE_WEAR, keep);
+  const outlet = new Uint8Array(TILE.n * TILE.n);
+  for (let k = 0; k < outlet.length; k++) outlet[k] = f.data[k] < 0 ? 1 : 0;
+  // (The water's ways worked out as the lakes are, full: water runs over a lake's surface, and the places looked for along the
+  // streams are the same whether or not the lakes' beds are put back below.)
+  const { acc, down } = drain(f, outlet);
   // (Nor the lakes' beds: the drops dropped what they carried in the still water, and filled every lake some ten metres over its
   // surface, so that a lake drawn about a place lay under the land. Where the world has a lake, the bed is what it was before.)
   const L = w.field, lakeAt = (x: number, z: number) => { const li = Math.round((x - L.x0) / L.cell), lj = Math.round((z - L.z0) / L.cell); return li < 0 || lj < 0 || li >= L.nx || lj >= L.nz ? 0 : w.lake[lj * L.nx + li]; };
@@ -401,9 +406,6 @@ export function worldTile(w: World, i: number, j: number): Tile {
     const k = jj * TILE.n + ii, level = lakeAt(ox + f.x0 + ii * TILE.cell, oz + f.z0 + jj * TILE.cell);
     if (level > 0 && before[k] < level) f.data[k] = Math.min(f.data[k], before[k]);
   }
-  const outlet = new Uint8Array(TILE.n * TILE.n);
-  for (let k = 0; k < outlet.length; k++) outlet[k] = f.data[k] < 0 ? 1 : 0;
-  const { acc, down } = drain(f, outlet);
   t = { i, j, ox, oz, field: f, acc, down };
   TILES.set(key, t);
   return t;

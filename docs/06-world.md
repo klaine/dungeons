@@ -445,7 +445,8 @@ about a place, the lakes had been under the land: a tile is the world's land wor
 drops laid down what they carried in the still water, filling every lake some ten metres over its surface. Where
 the world has a lake, a tile's ground is now put back after its wear to what it was before (`worldTile`), and
 every lake about `w2`'s towns lies two to four metres deep at its point, its shore at or over its surface all
-round, or nearly. Its rivers are not drawn: the largest are a few metres across, and from a place the land about
+round, or nearly. A tile's streams are worked out before the beds are put back, as over full lakes; the valley heads,
+looked for on the tiles, changed with the beds where a glen held a lake (`w2`'s second and fourth). Its rivers are not drawn: the largest are a few metres across, and from a place the land about
 it is read at five and eight metres.
 
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
