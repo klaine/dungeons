@@ -39,8 +39,9 @@ import { inside as onMountain } from '../core/mountain';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
-import { meshSiteSteps } from '../render/siteMesher';
+import { meshSiteSteps, VALLEY_GROUND } from '../render/siteMesher';
 import { breathe, fail, finish as finishLoading, share, stage } from './loader';
+import { loadWorldPlace } from './worldPlace';
 
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
@@ -60,7 +61,7 @@ for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, 
 const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
 /** Goes to the place the given settings describe, by the `#` where the page is framed and by the `?` where it is not. */
 function go(next: URLSearchParams): void {
-  if (framed) { location.hash = next.toString(); location.reload(); } else go(next);
+  if (framed) { location.hash = next.toString(); location.reload(); } else location.search = next.toString();
 }
 /** Writes the settings into the address without going anywhere, so that a link or a reload brings them back. */
 function keep(next: URLSearchParams): void {
@@ -101,7 +102,12 @@ const seed = params.get('seed')!;
 // What kind of place: a valley, unless an island, a mountain top or a harbour town is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
-const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' ? 'town' : 'valley';
+// (`place=coast`, as links to a world's coastal towns once said, is the town.)
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' || asked === 'coast' ? 'town' : 'valley';
+// Or a place in a world (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds, its land
+// the world's; the house is still the seed's own.
+const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : null;
+const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
 
 const hud = {
   status: document.getElementById('status')!,
@@ -116,9 +122,18 @@ const newPlace = () => {
   go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
+// The world's map: of the world this place is in, if it is in one, where its other places can be gone to.
+{
+  const link = document.getElementById('worldmap') as HTMLAnchorElement | null;
+  // (Where the world page is, a page may say in its head, as the published copy does: `<meta name="dungeons-world" content="…">`.)
+  const page = document.querySelector<HTMLMetaElement>('meta[name="dungeons-world"]')?.content;
+  if (link && page) link.href = page;
+  if (link && worldSeed) { link.href = `${page ?? 'world.html'}#${new URLSearchParams({ world: worldSeed })}`; link.textContent = 'World map'; }
+}
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a town, from a town a valley; a new one, since the same seed is the same house.
 {
+  // (In a world, a town is built on one of its coastal towns.)
   const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'town', town: 'valley' } as const)[place];
   button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[then];
   button.addEventListener('click', () => {
@@ -126,6 +141,8 @@ document.getElementById('again')!.addEventListener('click', newPlace);
     next.set('seed', randomSeed());
     next.set('place', then);
     next.delete('at');
+    // (In a world, the first of the other kind: it may not hold as many.)
+    next.delete('n');
     go(next);
   });
 }
@@ -149,6 +166,14 @@ let SKY = { zenith: [0.16, 0.3, 0.62], horizon: [0.62, 0.7, 0.8], ground: [0.09,
 const TORCH_INTENSITY = 3.2;
 
 async function start(): Promise<void> {
+  // The world, if a place in one is asked for: begun now, in a worker, so that it is made while the surfaces are painted.
+  let worldText = 'Lifting the land, and letting the rivers wear it', waitingForWorld = false;
+  const worldComing = worldSeed && params.get('scene') !== 'test' ? loadWorldPlace(worldSeed, place === 'town' ? 'coast' : place, worldN, (text) => {
+    worldText = text;
+    if (waitingForWorld) void stage('Making the world', 0.25, text);
+  }) : null;
+  // (Kept from being reported as unhandled while it is not yet waited for; it is waited for below, and fails there.)
+  worldComing?.catch(() => undefined);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
@@ -236,12 +261,25 @@ async function start(): Promise<void> {
   };
 
   // ------------------------------------------------------------------ geometry
-  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, `Seed “${seed}”: rooms, doors, locks and keys`);
+  let inWorld: Awaited<ReturnType<typeof loadWorldPlace>> | null = null;
+  if (worldComing) {
+    waitingForWorld = true;
+    await stage('Making the world', 0.25, worldText);
+    inWorld = await worldComing;
+    waitingForWorld = false;
+  }
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'town' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
+  // (How finely a valley's ground is laid where it is walked: `?sheet=0.8` for a sheet of 80-centimetre cells instead of 1.2.)
+  const sheet = Number(params.get('sheet'));
+  if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
   const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement: settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined });
+  const settlement = settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined;
+  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement });
+  // (Its name, where the world gave it one.)
+  if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;
@@ -457,11 +495,12 @@ async function start(): Promise<void> {
   // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
   // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
   const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
-  if (sea && (site?.island || site?.town)) {
-    const boats = site.island?.boats ?? site.town!.boats, level = site.island?.sea ?? site.town!.sea;
+  // (An island's boats, or a harbour town's.)
+  const riding = site?.island ? { boats: site.island.boats, sea: site.island.sea } : site?.town ? { boats: site.town.boats, sea: site.town.sea } : null;
+  if (sea && riding) {
     scene.traverse((m) => {
-      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? boats[Number(n[1])] : undefined;
-      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: level });
+      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? riding.boats[Number(n[1])] : undefined;
+      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: riding.sea });
     });
   }
   const floatTilt = new Quaternion(), floatUp = new Vector3(0, 1, 0), floatN = new Vector3(), floatTurn = new Matrix4(), floatBack = new Matrix4();

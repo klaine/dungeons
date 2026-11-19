@@ -1,6 +1,7 @@
 import { fbm2, Rng } from './rng';
 import { Building, Place, Site, Town } from './site';
 import { coastHeight, coastland, findTowns, townFrame, TownNeed, TownSpot } from './coastland';
+import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
 import { HeightField, landDetail, leastPath, smoothLine, wornLattice } from './terrain';
 import { classicalArch, classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry } from './brick';
@@ -82,7 +83,28 @@ export function fromBuilding(b: Building, u: number, v: number): [number, number
 /** The height of the frame's land at a point of the site, before anything is done to it here. */
 export function frameAt(t: Town, floor: number, x: number, z: number, out = 0): number {
   const r = t.terrain, [u, v] = townFrame(r, (t.quay.x0 + t.quay.x1) / 2, t.quay.z, x, z);
+  // (In a world, the world's land, whose sea is at nought as the frame's is: its tiles of five metres near, its lattice beyond.)
+  if (r.world) return worldLandAt(worldLand(r.world), u, v) - r.base + floor;
   return coastHeight(coastland(r.seed), u, v, out) - r.base + floor;
+}
+
+/**
+ * Where a town stands in a world (`?world=w2&place=town&n=2`): at the world's `n`th coastal town, found there on the world's lattice
+ * of eight metres for a house of middling size (`findCoastalTowns` in `world.ts`). Its tiles of five metres made first, if this is
+ * where the world was made; then looked for again on them, within a few hundred metres, for this house; the best spot there nearest
+ * the world's is taken, or failing any, the world's own.
+ */
+function inWorldSpot(inWorld: { seed: string; n: number }, need: TownNeed, rng: Rng): { seed: number; spot: TownSpot; world: string } {
+  const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'coast' && o.n === inWorld.n);
+  if (!q?.town) throw new Error(`world ${inWorld.seed} has no coastal town ${inWorld.n}`);
+  for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
+  // (A lattice of five metres about it, as far as the search reaches round a spot it judges, and three hundred metres more each way.)
+  const cell = 5, M = 120, half = M * cell + 300, n = Math.round((2 * half) / cell) + 1;
+  const f = new HeightField(q.x - half, q.z - half, cell, n, n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = worldLandAt(land, f.x0 + i * cell, f.z0 + j * cell);
+  const spots = findTowns({ inner: f }, need, rng, undefined, { margin: M });
+  const near = spots.filter((s) => Math.hypot(s.u - q.x, s.v - q.z) < 300).sort((a, b) => Math.hypot(a.u - q.x, a.v - q.z) - Math.hypot(b.u - q.x, b.v - q.z) || b.score - a.score);
+  return { seed: 0, spot: near[0] ?? q.town, world: inWorld.seed };
 }
 
 /** How the town's own land is made fine and worn again. */
@@ -335,7 +357,7 @@ const STUCCO: [number, number, number][] = [[0.9, 0.76, 0.42], [0.86, 0.62, 0.56
  * site's `town`, `grounds`, `track` and `paths`. A town is always laid on land that was found: when only the house is being judged
  * (`worn` false), nothing is laid but the box the town would have.
  */
-export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
+export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }): void {
   const T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   site.stands = 'free';
@@ -353,8 +375,9 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const need: TownNeed = { square: { x0: -Wsq / 2, x1: Wsq / 2, z0: -(Dsq + apron), z1: -apron }, house: { x0: level.x0 - qx, x1: level.x1 - qx, z0: level.z0 - qz, z1: level.z1 - qz }, half: 190, deep: 230 };
   // (The coasts are drawn from a pool, as islands' seas are, so that one made serves many sites.)
   const COASTS = 13, tr = rng.fork('terrain'), first = tr.int(0, COASTS - 1), stride = 1 + tr.int(0, 5);
-  let found: { seed: number; spot: TownSpot } | null = null;
-  for (let tries = 0; tries < 9 && !found; tries++) {
+  let found: { seed: number; spot: TownSpot; world?: string } | null = null;
+  if (inWorld) found = inWorldSpot(inWorld, need, tr.fork('world'));
+  else for (let tries = 0; tries < 9 && !found; tries++) {
     const seed = 9001 + ((first + tries * stride) % COASTS) * 131, spots = findTowns(coastland(seed), need, tr.fork(`spot${tries}`));
     if (spots.length) found = { seed, spot: spots[Math.min(spots.length - 1, tr.int(0, 2))] };
   }
@@ -362,7 +385,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const sp = found.spot, sea = round(F - sp.base);
   const quayY = round(sea + dims.range(1.7, 2.1));
   const t: Town = {
-    terrain: { seed: found.seed, u: sp.u, v: sp.v, turn: sp.turn, base: sp.base, cell: 1.5 },
+    terrain: { seed: found.seed, u: sp.u, v: sp.v, turn: sp.turn, base: sp.base, cell: 1.5, ...(found.world ? { world: found.world } : {}) },
     sea, land: box, level,
     quay: { x0: qx - 60, x1: qx + 60, z: qz, y: quayY, apron },
     square: { x0: round(qx - Wsq / 2), x1: round(qx + Wsq / 2), z0: meadow.z1, z1: round(meadow.z1 + Dsq), yN: F - 1, yS: quayY + 0.3 },

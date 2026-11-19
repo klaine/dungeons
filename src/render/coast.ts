@@ -44,41 +44,40 @@ function frame(x: number, z: number, y: number, facing: number) {
   return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a];
 }
 
-export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
-  const { site, wild, rng } = c, o = site.island!, sea = o.sea;
-  const mesh = (m: string) => wild.mesh(m);
-  // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
-  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'window', 'metal', 'lamp', 'thatch', 'slate'];
-  const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
-  const indoors: ((x: number, y: number, z: number) => number)[] = [];
-  const { face, solid } = anyAngle(mesh);
-  const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
-  // How far a point lies from the track or any footpath: what stands about a house is kept off them, or the way would be blocked.
-  const ways = [site.track ?? [], ...(site.paths ?? []).map((w) => w.points)];
-  const offWay = (x: number, z: number) => {
-    let best = Infinity;
-    for (const line of ways) for (let k = 0; k + 1 < line.length; k++) {
-      const [ax, az] = line[k], [bx, bz] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
-      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
-      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
-    }
-    return best;
-  };
-  /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
+/** What a jetty of stone is laid from: where it runs, how it is come to, the sea, the ground, and where else it is kept open. */
+export interface JettyBuild {
+  jetty: { from: [number, number]; to: [number, number]; width: number };
+  /** From a `beach` its first strides come down to the sand as a ramp; from the foot of a cliff (`stair`), it is level. */
+  landing: 'beach' | 'stair';
+  sea: number;
+  ground: (x: number, z: number) => number;
+  stoneTint: Colour;
+  rockAt?: (q: Vector3, n: Vector3, field: Float32Array) => Colour;
+  fences: { min: Vector3; max: Vector3 }[];
+  rng: Rng;
+  /** Where the boxes that keep the walker on the jetty are left out (where a stair or a strand comes down to it). */
+  keepOpen?: (x: number, z: number) => boolean;
+}
+
+/**
+ * A jetty of big stones out from the shore, its deck a little above high water: courses of blocks, coping, bollards, what lies about on
+ * a working jetty, a mooring rope, a ladder at the end, and boxes nobody sees along its sides and across its end so that nobody steps
+ * off it into the water. An island's cove has one, and a coastal town's harbour. `solid` is the caller's, so that what it makes is
+ * shaded in turn with everything else. Gives the level of its deck.
+ */
+export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['solid']): number {
+  const sea = j.sea, deck = sea + 1.35;
+  const stone: Colour = [0.78 * j.stoneTint[0], 0.75 * j.stoneTint[1], 0.7 * j.stoneTint[2]];
   const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
     solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
-
-  // ---- the jetty: a pier of big stones from the beach out into the cove, its deck a little above high water
-  const deck = sea + 1.35;
-  {
-    const [ax, az] = o.jetty.from, [bx, bz] = o.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
-    const at = frame(ax, az, 0, heading), half = o.jetty.width / 2, q = rng.fork('jetty');
+    const [ax, az] = j.jetty.from, [bx, bz] = j.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
+    const at = frame(ax, az, 0, heading), half = j.jetty.width / 2, q = j.rng.fork('jetty');
     // (Where it starts on the beach, its deck comes down to the sand as a ramp.)
     // (Where it stands from the foot of a cliff it is level from end to end; from a beach it comes down to the sand.)
-    const rootY = o.landing === 'stair' ? deck : Math.min(deck, c.ground(ax, az) + 0.04);
+    const rootY = j.landing === 'stair' ? deck : Math.min(deck, j.ground(ax, az) + 0.04);
     for (let f = 0; f < len - 1e-6;) {
       const f1 = Math.min(len, f + q.range(1.1, 1.6)), y0 = rootY + (deck - rootY) * Math.min(1, f / 4), y1 = rootY + (deck - rootY) * Math.min(1, f1 / 4);
-      const foot = Math.min(c.ground(...at2(at, 0, f)), c.ground(...at2(at, 0, f1))) - 0.6;
+      const foot = Math.min(j.ground(...at2(at, 0, f)), j.ground(...at2(at, 0, f1))) - 0.6;
       // Each length is a course of big blocks, two or three across, each set a little proud or sunk of its neighbours and each its
       // own shade; below where the tide comes they are dark with weed. (One block the width of the pier read as a slab of concrete.)
       const across = q.chance(0.5) ? 2 : 3, gap = 0.035, weed = Math.min(y0, sea + 0.55);
@@ -89,7 +88,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
         if (weed > foot) solid('stone', [at(a0, foot, f), at(a1, foot, f), at(a1, foot, f1 - gap), at(a0, foot, f1 - gap), at(a0, weed, f), at(a1, weed, f), at(a1, weed, f1 - gap), at(a0, weed, f1 - gap)], [0.16 * tone, 0.17 * tone, 0.11 * tone], 0.35);
         const b0 = Math.max(foot, weed);
         // (Of the island's own stone, as the cliff it stands under is: its colour at that place, if the island says what that is.)
-        const local = c.rockAt ? c.rockAt(new Vector3(...at((a0 + a1) / 2, t0, (f + f1) / 2)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+        const local = j.rockAt ? j.rockAt(new Vector3(...at((a0 + a1) / 2, t0, (f + f1) / 2)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
         const weathered = local ? shade(local, 1.1 + (tone - 0.69) * 0.8) : shade(stone, tone), stain = q.next();
         if (stain < 0.15) { weathered[0] *= 1.12; weathered[1] *= 0.98; weathered[2] *= 0.82; } else if (stain < 0.35) { weathered[0] *= 0.92; weathered[1] *= 1.02; weathered[2] *= 0.9; }
         solid('stone', [at(a0, b0, f), at(a1, b0, f), at(a1, b0, f1 - gap), at(a0, b0, f1 - gap), at(a0, t0, f), at(a1, t0, f), at(a1, t1, f1 - gap), at(a0, t1, f1 - gap)], weathered, 0.35);
@@ -99,7 +98,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // Coping along either edge, bollards, and a ladder of iron down the end into the water.
     for (const side of [-1, 1]) for (let f = 4.5; f < len - 0.3; f += 0.9) {
       // (The coping of the same stone, a little paler where it is worn by ropes and feet.)
-      const local = c.rockAt ? c.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+      const local = j.rockAt ? j.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
       box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), local ? shade(local, 1.25) : shade(stone, 1.08), 0.4);
     }
     // Bollards of cast iron, as harbours have: a waisted barrel on a broad foot, and a flared head that a rope cannot slip over;
@@ -133,7 +132,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
       }
       // Fish boxes and creels near the root, where things are landed and carted off.
       // (On the level deck only, not the ramp down to a beach; and not against the bollard halfway out, nor the coil by the end one.)
-      let f = o.landing === 'stair' ? 1 : 4.3;
+      let f = j.landing === 'stair' ? 1 : 4.3;
       const end = len - 2.95, mid = len * 0.55;
       while (f < end) {
         if (f > mid - 1.3 && f < mid + 0.35) { f = mid + 0.35; continue; }
@@ -183,20 +182,49 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (let y = sea - 1; y < deck + 0.8; y += 0.3) box(at, 'metal', -0.22, 0.22, y, y + 0.03, len + 0.03, len + 0.06, [0.12, 0.07, 0.04]);
     // Nobody steps off the jetty into the water: the boxes nobody sees, along both sides beyond the beach and across the end.
     // (Nor across the strand of shingle that leaves the quay for the sea cave.)
-    const onStrand = (x: number, z: number) => {
-      if (!o.strand || o.landing !== 'stair') return false;
-      const l = o.strand;
-      for (let k = 0; k + 1 < l.length; k++) {
-        const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
-        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 2.4) return true;
-      }
-      return false;
-    };
-    const fence = (a: number, f: number) => { const p = at(a, 0, f); if (onStair(o, p[0], p[2]).off < 1.7 || onStrand(p[0], p[2])) return; c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
+    const fence = (a: number, f: number) => { const p = at(a, 0, f); if (j.keepOpen?.(p[0], p[2])) return; j.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
     // (From a beach the first strides are over sand; from the foot of a cliff the water is deep from the first.)
-    for (let f = o.landing === 'stair' ? 0.2 : 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
+    for (let f = j.landing === 'stair' ? 0.2 : 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
     for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
-  }
+    return deck;
+}
+
+export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
+  const { site, wild, rng } = c, o = site.island!, sea = o.sea;
+  const mesh = (m: string) => wild.mesh(m);
+  // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
+  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'window', 'metal', 'lamp', 'thatch', 'slate'];
+  const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
+  const indoors: ((x: number, y: number, z: number) => number)[] = [];
+  const { face, solid } = anyAngle(mesh);
+  const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
+  // How far a point lies from the track or any footpath: what stands about a house is kept off them, or the way would be blocked.
+  const ways = [site.track ?? [], ...(site.paths ?? []).map((w) => w.points)];
+  const offWay = (x: number, z: number) => {
+    let best = Infinity;
+    for (const line of ways) for (let k = 0; k + 1 < line.length; k++) {
+      const [ax, az] = line[k], [bx, bz] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
+      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+    }
+    return best;
+  };
+  /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
+  const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
+    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
+
+  // ---- the jetty: a pier of big stones from the beach out into the cove, its deck a little above high water
+  // (Kept open where the stair comes down to the quay, and along the strand of shingle that leaves it for the sea cave.)
+  const onStrand = (x: number, z: number) => {
+    if (!o.strand || o.landing !== 'stair') return false;
+    const l = o.strand;
+    for (let k = 0; k + 1 < l.length; k++) {
+      const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 2.4) return true;
+    }
+    return false;
+  };
+  const deck = layJetty({ jetty: o.jetty, landing: o.landing === 'stair' ? 'stair' : 'beach', sea, ground: c.ground, stoneTint: c.stoneTint, rockAt: c.rockAt, fences: c.fences, rng, keepOpen: (x, z) => onStair(o, x, z).off < 1.7 || onStrand(x, z) }, solid);
 
   // ---- the stair cut in the cliff: a step at every half stride, cut in the cliff's own rock, set into the slope it is cut in.
   // They are for the eye, as the valley's are: what is walked on is the slope, so no foot catches on a riser.
