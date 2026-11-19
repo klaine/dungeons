@@ -10,6 +10,17 @@ import { loopCount } from '../src/core/site';
 import { inland, landAt } from '../src/core/island';
 import { inside } from '../src/core/mountain';
 import { nearLine, outlineOf, outsideBuilt, townGround } from '../src/core/town';
+import { brickDoor, brickShell } from '../src/core/brick';
+import { canalDoor, canalShell } from '../src/core/canal';
+import { planProblem } from '../src/core/interior';
+import { Building } from '../src/core/site';
+
+/** What is wrong with the plan of a house of brick or a canal house, if it has one. */
+function housePlan(b: Building): string | null {
+  if (!b.plan || (b.style !== 'brick' && b.style !== 'canal')) return null;
+  const canal = b.style === 'canal', door = canal ? canalDoor(b) : brickDoor(b), sh = canal ? canalShell(b) : brickShell(b);
+  return planProblem(b.plan, sh, b.storeys, (door.s0 + door.s1) / 2 - b.w / 2);
+}
 
 const count = Number(process.argv[2] ?? 200), only = process.argv[3];
 const tally = new Map<string, number>();
@@ -37,6 +48,9 @@ for (let n = 0; n < (only && only !== 'valley' ? 0 : count); n++) {
       }
     }
     if (site.settlement === 'town') bump(`town houses=${Math.min(14, (site.buildings ?? []).filter((b) => b.brickwork?.kind !== 'church').length)}${(site.buildings ?? []).some((b) => b.brickwork?.kind === 'church') ? ' +church' : ''}`);
+    // A house of brick that can be entered can be gone all through, from its door and up its stair.
+    for (const [i, b] of (site.buildings ?? []).entries()) { const p = housePlan(b); if (p) throw new Error(`building ${i}: ${p}`); }
+    if (site.settlement === 'town') { const hs = (site.buildings ?? []).filter((b) => b.brickwork?.kind !== 'church'); bump(`town houses entered=${hs.length ? Math.round((10 * hs.filter((b) => b.plan).length) / hs.length) * 10 : 0}%`); }
     const rooms = site.places.filter((p) => p.roof !== 'sky').length;
     bump(`rooms=${rooms}`);
     bump(`loops=${loopCount(site)}`);
@@ -288,6 +302,9 @@ for (let n = 0; n < townCount; n++) {
     tally3(`timber=${Math.round(kinds('timber') / 20) * 20}`);
     tally3(`wooden=${Math.round(kinds('wooden') / 5) * 5}`);
     tally3(`canal=${Math.round(kinds('canal') / 10) * 10}`);
+    for (const [i, b] of t.buildings.entries()) { const p = housePlan(b); if (p) throw new Error(`building ${i}: ${p}`); }
+    const canals = t.buildings.filter((b) => b.style === 'canal');
+    if (canals.length) tally3(`canal entered=${Math.round((10 * canals.filter((b) => b.plan).length) / canals.length) * 10}%`);
     tally3(`river=${t.river ? 'yes' : 'no'}`);
     tally3(`storehouses=${t.storehouses.length ? 'yes' : 'no'}`);
     tally3(`outlook=${!!t.outlook}`);

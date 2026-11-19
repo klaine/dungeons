@@ -496,6 +496,24 @@ export function makeWindowMaterial(): MeshStandardNodeMaterial {
   return m;
 }
 
+/**
+ * Clear glass, in the windows of a building that can be entered: seen through both ways, a little
+ * darkened and a little mirroring, and throwing no shadow, so that the sun comes in at the windows
+ * and the rooms are seen from the street. With `lit` (made only for the evening and the night), a
+ * room's lamp or fire shows in it as a glow of the room's colour (given per point, as for the
+ * windows that are not seen through), but the room behind it still shows. Every pane is a closed
+ * solid, so it is looked through twice; the opacity is reckoned for that.
+ */
+export function makePaneMaterial(lit = false): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.05, metalness: 0, color: new Color(0.55, 0.62, 0.64), vertexColors: lit, transparent: true, opacity: lit ? 0.32 : 0.16, depthWrite: false });
+  if (lit) {
+    const c: N = vertexColor();
+    m.colorNode = c.mul(0.05).add(0.25);
+    m.emissiveNode = c.mul(windowUniforms.uLit as N).mul(0.6);
+  }
+  return m;
+}
+
 export function makePropMaterial(o: { color: Color; roughness: number; metalness: number; emissive?: Color; emissiveIntensity?: number }): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({
     color: o.color, roughness: o.roughness, metalness: o.metalness,

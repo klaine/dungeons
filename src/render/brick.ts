@@ -1,10 +1,11 @@
 import { ShapeUtils, Vector2, Vector3 } from 'three';
-import { BRICK, brickEaves, brickFloor, churchParts } from '../core/brick';
+import { BRICK, brickBackWindows, brickColumns, brickDoor, brickEaves, brickFloor, brickGroundWindows, brickShell, churchParts, PIER, pierAt } from '../core/brick';
 import { blinded } from '../core/building';
 import { Rng } from '../core/rng';
 import { Building } from '../core/site';
 import { buildingTools, litRoom } from './buildings';
 import { MeshBuilder } from './geom/meshBuilder';
+import { buildInterior, openLeaves } from './interior';
 
 /**
  * Buildings of brick, as in the old towns of the Baltic coast: the merchants' houses, warehouses
@@ -42,8 +43,6 @@ const GLAZED: Colour = [0.3, 0.42, 0.42];
 /** The roofs of the brick towns: their clay tiles a deeper red than the hamlets', tiles glazed nearly black, or copper gone green. */
 const COPPER: Colour = [0.22, 0.44, 0.36];
 const roofOf = (roof: 'red' | 'dark' | 'copper'): [string, Colour] => (roof === 'copper' ? ['copper', COPPER] : ['tile', roof === 'dark' ? [0.34, 0.32, 0.34] : [0.8, 0.64, 0.58]]);
-/** How broad the piers of a front are, and where the `j`th of `P` stands across a front `W` broad. (The outer ones stand a little in from the corners, so that no face of theirs lies in the plane of the wall's end.) */
-const PIER = 0.5, pierAt = (W: number, P: number, j: number) => PIER / 2 + 0.02 + (j * (W - PIER - 0.04)) / (P - 1);
 /** Door paint of the old towns: bottle green, oxblood, a brown, a dull blue. */
 const DOORS: Colour[] = [[0.08, 0.17, 0.12], [0.3, 0.07, 0.06], [0.2, 0.12, 0.07], [0.1, 0.14, 0.2]];
 
@@ -509,10 +508,7 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   // ---- the front below the gable
   const plan: FrontPlan = { outline: [], openings: [], niches: [] };
   // Columns of windows: between the piers where there are piers; otherwise evenly across.
-  const piers = bw.gable === 'piers', P = 2 * bw.steps + 1, pw = PIER;
-  const cols = piers
-    ? Array.from({ length: P - 1 }, (_, j) => { const a = pierAt(W, P, j), c = pierAt(W, P, j + 1); return { c: (a + c) / 2, room: c - a - pw }; })
-    : Array.from({ length: b.bays }, (_, j) => { const m = 0.75, pitch = (W - 2 * m) / b.bays; return { c: m + (j + 0.5) * pitch, room: pitch - 0.25 }; });
+  const piers = bw.gable === 'piers', cols = brickColumns(b);
   const sunk = bw.niches !== 'none' && (bw.gable === 'stepped' || piers || store);
   const headUp: Head = rendered ? 'flat' : 'segment';
   // A warehouse's middle column is its loading doors, one to a storey, and the windows beside them are small.
@@ -530,16 +526,13 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
     }
   }
   // The ground storey: the door, in its portal, and windows where there is room beside it.
-  const dw = store ? 2.3 : 1.85, dc = Math.min(W - dw / 2 - 0.65, Math.max(dw / 2 + 0.65, W * bw.door));
+  const { s0: ds0, s1: ds1 } = brickDoor(b), dw = ds1 - ds0, dc = (ds0 + ds1) / 2;
   const doorHead: Head = store ? 'round' : rendered ? 'round' : rng.pick(['pointed', 'pointed', 'round', 'segment'] as Head[]);
   const door: Hole = { s0: dc - dw / 2, s1: dc + dw / 2, y0: PL, y1: PL + Math.min(store ? 3.0 : 3.4, H0 - 0.55), head: doorHead };
-  plan.openings.push({ ...door, fill: 'door' });
+  // (A house that can be entered stands with its door open: its leaves are built below, swung in.)
+  plan.openings.push({ ...door, fill: b.plan ? 'none' : 'door' });
   if (!rendered) plan.niches.push({ s0: door.s0 - 0.24, s1: door.s1 + 0.24, y0: PL - 0.02, y1: door.y1 + 0.24 + (riseOf(dw + 0.48, doorHead) - riseOf(dw, doorHead)), head: doorHead, white: false });
-  for (const col of cols) {
-    const ww = Math.min(1.35, col.room - 0.35);
-    if (ww < 0.5 || Math.abs(col.c - dc) < dw / 2 + 0.36 + ww / 2 + 0.35) continue;
-    plan.openings.push({ s0: col.c - ww / 2, s1: col.c + ww / 2, y0: PL + 1.0, y1: PL + H0 - 0.65, head: headUp, fill: 'window', across: 2, down: 4 });
-  }
+  for (const [s0, s1] of brickGroundWindows(b)) plan.openings.push({ s0, s1, y0: PL + 1.0, y1: PL + H0 - 0.65, head: headUp, fill: 'window', across: 2, down: 4 });
   // ---- the gable, and the whole outline
   const g = gableOf(k, b, front, W, E, tan, T, rng, { material, colour, trim, hoist: true });
   plan.niches.push(...g.niches);
@@ -549,6 +542,7 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   shutWindows(b, k, front, plan);
   buildFront(k, front, plan, T, material, colour, { frame: FRAME, paint, door: paint });
   g.after.forEach((f) => f());
+  if (b.plan) openLeaves(k, front, door.s0, door.s1, door.y0, door.y1 - riseOf(dw, door.head), T - 0.16, paint, true);
 
   // ---- what is laid on the front
   // The plinth of granite, broken at the door, and a step before it.
@@ -605,7 +599,8 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
       k.on(front, 'wood', s - hw - 0.04, s + hw + 0.04, y - 0.18, y - 0.1, -out - 0.04, 0, shade(OAK, 0.9), true);
       const into = front.P(0, 0, out + 0.3).sub(front.P(0, 0, 0));
       k.wedge(front.P(s - hw - 0.12, y + h, -out - 0.15), front.P(s + hw + 0.12, y + h, -out - 0.15), front.P(s, y + h + 0.9, -out - 0.15), into, ['tile', [1.1, 1.0, 0.95]], ['wood', shade(OAK, 1.2)], ['wood', shade(OAK, 0.8)]);
-      k.stick(front.P(s, y - 0.12, -out + 0.15), front.P(s, 0.9, -out + 0.15 + 0.001), 0.025, 0.025, [0.45, 0.4, 0.3]);
+      // (The rope hangs to above a head's height: the door is under it.)
+      k.stick(front.P(s, y - 0.12, -out + 0.15), front.P(s, PL + 2.6, -out + 0.15 + 0.001), 0.025, 0.025, [0.45, 0.4, 0.3]);
     } else {
       k.stick(front.P(s, y, T * 0.5), front.P(s, y + 0.001, -1.0), 0.17, 0.2, OAK);
       k.disc(front, s, y - 0.2, 0.17, -0.97, -0.91, 'wood', shade(OAK, 1.2), 0.04);
@@ -620,14 +615,13 @@ function streetHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   }
   {
     const gaps: { s0: number; s1: number; y0: number; y1: number }[] = [];
-    const n = W > 7.6 ? 3 : 2;
-    for (let s = 0; s < N; s++) for (let j = 0; j < n; j++) {
-      const c = W * ((j + 0.5) / n), w = 0.9;
-      gaps.push({ s0: c - w / 2, s1: c + w / 2, y0: floor(s) + (s ? 0.85 : PL + 1.0), y1: floor(s + 1) - 0.5 });
-    }
+    const sh = brickShell(b);
+    for (let s = 0; s < N; s++) for (const [u0, u1] of brickBackWindows(b, s)) gaps.push({ s0: W / 2 - u1, s1: W / 2 - u0, y0: floor(s) + (s ? 0.85 : PL + 1.0), y1: floor(s + 1) - 0.5 });
     // (A figure with its windows cut through it: `pierced` takes one row of openings, and these are a row to a storey.)
     k.prism(back, [[0, -0.45], [W, -0.45], [W, E], [0, E]], gaps.map((g) => shapeOf({ ...g, head: 'flat' })), 0, S, 'brick', brick);
     for (const gp of gaps) { k.glazed(back, gp, 2, 2, FRAME, 0.18); k.on(back, 'brick', gp.s0 - 0.04, gp.s1 + 0.04, gp.y0 - 0.08, gp.y0, -0.06, 0.2, shade(brick, 0.85)); }
+    // ---- inside, if it can be entered: the hall laid with flags of stone, as it was for carts
+    if (b.plan) buildInterior(k, b.plan, sh, N, { W, front: plan.openings.map(shapeOf), back: gaps.map((g) => shapeOf({ ...g, head: 'flat' })), ground: 'flags' });
     const into = back.P(0, 0, S).sub(back.P(0, 0, 0));
     // (Its sloping edges lie just inside the roof's thickness, so that the roof covers them.)
     k.wedge(back.P(0, E, 0), back.P(W, E, 0), back.P(W / 2, g.ridge - 0.1, 0), into, ['brick', brick], ['brick', brick]);
@@ -726,7 +720,8 @@ function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
     const into = front.P(0, 0, 0.3).sub(front.P(0, 0, 0));
     k.wedge(front.P(door.s0 - 0.48, top + 0.44, -0.26), front.P(door.s1 + 0.48, top + 0.44, -0.26), front.P(dc, top + 0.44 + 0.42, -0.26), into, trim, trim);
     const deep = T - 0.16;
-    doorLeaves(k, front, { ...door, y1: light }, deep, paint);
+    if (b.plan) openLeaves(k, front, door.s0, door.s1, door.y0, light, deep, paint, true);
+    else doorLeaves(k, front, { ...door, y1: light }, deep, paint);
     k.on(front, 'wood', door.s0, door.s1, light, light + 0.08, deep - 0.02, deep + 0.08, FRAME, true);
     k.glazed(front, { s0: door.s0, s1: door.s1, y0: light + 0.08, y1: top }, 3, 1, FRAME, deep - 0.02);
   }
@@ -739,9 +734,10 @@ function eavesHouse(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
   }
   {
     const back0: { s0: number; s1: number; y0: number; y1: number }[] = [];
-    for (let s = 0; s < N; s++) for (let j = 0; j < b.bays; j++) if ((j + s) % 2 === 0 || b.bays <= 4) back0.push({ s0: W - centre(j) - 0.45, s1: W - centre(j) + 0.45, y0: floor(s) + (s ? 0.8 : PL + 1.0), y1: floor(s + 1) - 0.55 });
+    for (let s = 0; s < N; s++) for (const [u0, u1] of brickBackWindows(b, s)) back0.push({ s0: W / 2 - u1, s1: W / 2 - u0, y0: floor(s) + (s ? 0.8 : PL + 1.0), y1: floor(s + 1) - 0.55 });
     k.prism(back, [[0, -0.45], [W, -0.45], [W, E], [0, E]], back0.map((g) => shapeOf({ ...g, head: 'flat' })), 0, S, 'brick', brick);
     for (const gp of back0) k.glazed(back, gp, 2, 2, FRAME, 0.18);
+    if (b.plan) buildInterior(k, b.plan, brickShell(b), N, { W, front: plan.openings.map(shapeOf), back: back0.map((g) => shapeOf({ ...g, head: 'flat' })), ground: 'boards' });
   }
   // The dormer's side walls, back as far as the great roof rises above them.
   const deepD = hd / tan + 0.3;
@@ -1042,10 +1038,22 @@ function church(b: Building, k: BrickKit, rng: Rng, stone: Colour): void {
 /** Builds a building of brick where the site document says it stands, on ground at the height `base`. */
 export function buildBrick(b: Building, base: number, mesh: (material: string) => MeshBuilder, rng: Rng, stone: Colour): void {
   // (What is built of brick is built of the building's own clay.)
-  const clay = b.brickwork!.clay === 'buff' ? 'buffBrick' : 'redBrick';
-  const k = brickTools(b, base, (material) => mesh(material === 'brick' ? clay : material));
+  // (A house that can be entered has glass that can be seen through, both ways; and its timber within, laid as `oak`, is timber.)
+  const clay = b.brickwork!.clay === 'buff' ? 'buffBrick' : 'redBrick', enter = !!b.plan;
+  const as = (material: string) => (material === 'brick' ? clay : material === 'oak' ? 'wood' : enter && material === 'glass' ? 'pane' : enter && material === 'window' ? 'paneLit' : material);
+  const begun = new Map<MeshBuilder, number>();
+  const noting = (material: string) => { const m = mesh(as(material)); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
+  const k = brickTools(b, base, noting);
   const kind = b.brickwork!.kind;
   if (kind === 'gabled' || kind === 'store') streetHouse(b, k, rng, stone);
   else if (kind === 'eaves') eavesHouse(b, k, rng, stone);
   else church(b, k, rng, stone);
+  // Indoors only a share of the sky is seen, through the windows: so the rooms are dimmer than the street, and the sun lies on their floors where it comes in.
+  if (enter) {
+    const turn = b.faces === 'w' ? 1 : -1, sh = brickShell(b), lo = sh.floors[0] - 0.1, hi = sh.floors[b.storeys] + 0.05;
+    for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
+      const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2, h = y - base;
+      return u > sh.u0 - 0.01 && u < sh.u1 + 0.01 && v > sh.v0 - 0.01 && v < sh.v1 + 0.01 && h > lo && h < hi ? 0.32 : 1;
+    }, from);
+  }
 }

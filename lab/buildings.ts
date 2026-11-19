@@ -24,13 +24,13 @@ import { Building, Hour, SKIES, Stone } from '../src/core/site';
 import { solids as plainSolids } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
-import { makeGroundMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
+import { makeGroundMaterial, makePaneMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../src/render/vegetation';
 import { CardSet } from '../src/render/scene';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { GROUND_PAINTS, natureKit, Painted, PLANT_PAINTS, Season, SEASONS, TREES } from './nature';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
+import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
 import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
@@ -57,6 +57,8 @@ interface State {
   panel: boolean;
   /** The camera: where it is and what it looks at. */
   cam: number[] | null;
+  /** Whether what is drawn over the picture to work with is shown: the grid, outlines, knobs, rings and the brush. Off, the picture alone. */
+  overlays: boolean;
   /** The season: the green of the leaves, and how dry the grass is. */
   season: Season;
   /** What has been laid with the brushes (see `Painted` in `nature.ts`). */
@@ -69,7 +71,7 @@ const query = new URLSearchParams(location.search);
 const STONES: Stone[] = ['limestone', 'sandstone', 'greystone', 'basalt'];
 const DEFAULTS: State = {
   items: [], next: 1, selected: null, tool: 'move', hour: 'morning', stone: 'greystone', snap: 0.5, turnSnap: 15,
-  grid: true, clay: false, air: true, panel: true, cam: null, season: 'summer',
+  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, season: 'summer',
   paint: { ground: [], plants: [], rock: [] }, brush: { layer: 'ground', ground: 3, plant: 0, dig: false, size: 2 },
 };
 /** What was painted, read from storage or a file, made safe: lists of lists of numbers, and no more of them than can be built. */
@@ -322,6 +324,8 @@ async function start(): Promise<void> {
     metal: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.25, roughness: 0.5 }),
     copper: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1 }),
+    // (Clear glass, for the windows of a building that can be entered, as in the game.)
+    pane: makePaneMaterial(),
   };
   /** Windows with a lamp behind them glow once the light is going, as in the game; by day they are glass. */
   const lampsAt = (hour: Hour) => (hour === 'night' ? 0.5 : hour === 'dusk' ? 0.55 : hour === 'sunset' ? 0.4 : 0);
@@ -329,6 +333,8 @@ async function start(): Promise<void> {
     materials.window?.dispose();
     const lamps = lampsAt(state.hour);
     materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+    if (materials.paneLit && materials.paneLit !== materials.pane) materials.paneLit.dispose();
+    materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
     windowUniforms.uLit.value = lamps;
   };
   windows();
@@ -369,7 +375,7 @@ async function start(): Promise<void> {
   const meshOf = (name: string, builder: MeshBuilder): Mesh => {
     const mesh = new Mesh(builder.build(), materialOf(name));
     mesh.name = name;
-    mesh.castShadow = name !== 'glass' && name !== 'window';
+    mesh.castShadow = name !== 'glass' && name !== 'window' && name !== 'pane' && name !== 'paneLit';
     mesh.receiveShadow = true;
     const open = new Float32Array(builder.vertexCount);
     for (let i = 0; i < open.length; i++) open[i] = builder.openAt(i);
@@ -467,7 +473,6 @@ async function start(): Promise<void> {
     plainSolids(() => b).block('floor', new Vector3(-400, -0.4, -400), new Vector3(400, 0, 400), [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     ground = meshOf('floor', b);
     ground.castShadow = false;
-    ground.visible = !layers.ground;
     groundGroup.add(ground);
   };
   lay();
@@ -488,7 +493,11 @@ async function start(): Promise<void> {
   // (What stands close about a building is part of what it is built from: a window that would look into another building is left out,
   // and comes back when that one is moved away.)
   const nearItem = (it: Item) => nearOf(it, state.items);
-  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null, it.kind === 'tree' ? state.season : '']);
+  /** How high a thing rises over the square: what was built of it, or near enough until it is built. (To half a metre, so that its own small changes do not grow the trees about it again.) */
+  const topOf = (q: Item) => { const b = built.get(q.id); const top = b && !b.box.isEmpty() ? b.box.max.y * q.scale[1] : eavesOf(q) * q.scale[1] + 4; return Math.ceil((top + liftOf(q)) * 2) / 2; };
+  // (And a tree's room: what stands about it, which its boughs keep out of, so that one moved up to a wall grows again against it.)
+  const roomItem = (it: Item) => (it.kind === 'tree' ? roomOf(it, state.items, topOf, state.paint.rock) : undefined);
+  const sigOf = (it: Item) => JSON.stringify([it.kind, it.seed, it.shape, !!it.inn, state.stone, nearItem(it) ?? null, it.kind === 'tree' ? [state.season, roomItem(it)] : '']);
   /** Puts what is built of an item where the item says it stands, turned and scaled. (Built facing `w`, its front towards -x: a quarter turn more faces it to +z.) */
   const placeItem = (it: Item) => {
     const b = built.get(it.id);
@@ -507,7 +516,7 @@ async function start(): Promise<void> {
     try {
       const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
       if (isNature(it.kind)) natureSurfaces();
-      made = buildItem(it, state.stone, into, nearItem(it), state.season);
+      made = buildItem(it, state.stone, into, nearItem(it), state.season, roomItem(it));
       const c = stoneColour(state.stone);
       buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
     } catch (e) {
@@ -760,6 +769,8 @@ async function start(): Promise<void> {
   let at = -1;
   const snapshot = () => JSON.stringify({ items: state.items, next: state.next, selected: state.selected, paint: state.paint });
   function commit() {
+    // (What was painted grows again where what stands about it has changed: a wood beside a building just moved.)
+    if (state.paint.plants.length) paintLayers();
     const s = snapshot();
     if (history[at] !== s) {
       history.splice(at + 1);
@@ -797,8 +808,6 @@ async function start(): Promise<void> {
   const layGround = () => {
     if (layers.ground) { natureLayer.remove(layers.ground); letGo(layers.ground); layers.ground = null; }
     if (state.paint.ground.length) { natureSurfaces(); layers.ground = meshOf('turf', kitOf().groundSheet(state.paint.ground)); layers.ground.castShadow = false; natureLayer.add(layers.ground); }
-    // (The plain paving stands in for the sheet until anything is laid: the sheet's surfaces are not painted until wanted.)
-    if (ground) ground.visible = !layers.ground;
   };
   const carveRocks = () => {
     if (layers.rock) { natureLayer.remove(layers.rock); letGo(layers.rock); layers.rock = null; }
@@ -817,7 +826,9 @@ async function start(): Promise<void> {
     layers.plants = []; layers.cards = [];
     if (!state.paint.plants.length) return;
     natureSurfaces();
-    const made = kitOf().growPainted(state.paint.plants, heightAt);
+    // (Their boughs keep out of the buildings and the boulders, as a tree set out does; the rock they grow on, they stand on.)
+    const solid = state.items.filter((it) => it.kind !== 'tree');
+    const made = kitOf().growPainted(state.paint.plants, heightAt, (p) => p.y > -1 && solid.some((it) => p.y < topOf(it) + 0.3 && standsIn(it, p.x, p.z, 0.35)));
     for (const [name, builder] of made.meshes) if (builder.vertexCount) { const m = meshOf(name, builder); natureLayer.add(m); layers.plants.push(m); }
     layers.cards = makeCardMeshes(made.cards);
   };
@@ -825,7 +836,8 @@ async function start(): Promise<void> {
   /** Lays again whatever of what was painted has changed since it was last laid. Returns how long that took, in milliseconds. */
   const paintLayers = (): number => {
     const t0 = performance.now(), P = state.paint;
-    const sig = { ground: JSON.stringify([P.ground, state.stone]), rock: JSON.stringify([P.rock, state.stone]), plants: JSON.stringify([P.plants, P.rock, state.season, state.stone]) };
+    const standing = state.items.filter((it) => it.kind !== 'tree').map((it) => [it.kind, it.x, it.z, it.turn, it.scale, it.shape.w, it.shape.d, topOf(it)]);
+    const sig = { ground: JSON.stringify([P.ground, state.stone]), rock: JSON.stringify([P.rock, state.stone]), plants: JSON.stringify([P.plants, P.rock, state.season, state.stone, P.plants.length ? standing : 0]) };
     if (sig.ground !== paintedSig.ground) layGround();
     if (sig.rock !== paintedSig.rock) carveRocks();
     if (sig.plants !== paintedSig.plants) growPlants();
@@ -880,7 +892,7 @@ async function start(): Promise<void> {
   }
   function paintMove(e: PointerEvent) {
     const at = brushPoint(e);
-    brushRing.visible = !!at;
+    brushRing.visible = !!at && state.overlays;
     if (at) { brushRing.position.set(at.p.x, at.p.y + 0.04, at.p.z); brushRing.scale.setScalar(state.brush.size); }
     if (!stroke || stroke.pointer !== e.pointerId || !at) return;
     if (stroke.last && at.p.distanceTo(stroke.last) < Math.max(0.2, state.brush.size * (state.brush.layer === 'ground' ? 0.3 : 0.6))) return;
@@ -984,6 +996,8 @@ async function start(): Promise<void> {
       const t = s.tree!, wideOf = (q: Item) => crownOfTree(q);
       out.push({ id: 'height', label: `${t.height.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.4, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.height = st.shape.tree!.height + by; }) });
       out.push({ id: 'spread', label: 'spread', colour: AMBER, at: worldAt(it, wideOf(it), Math.min(top * 0.6, 8), D / 2), axis: 'u', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.wide = st.shape.tree!.wide * (1 + by / Math.max(1, wideOf(st))); }) });
+      // (The trunk, by a knob at its side at the height of a hand: dragged out, it grows thicker.)
+      out.push({ id: 'trunk', label: 'trunk', colour: AMBER, at: worldAt(it, t.girth + 0.25, Math.min(1.3, top * 0.3), D / 2), axis: 'u', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.tree!.girth = st.shape.tree!.girth + by * 0.25; }) });
       return out;
     }
     if (it.kind === 'boulder') {
@@ -1281,7 +1295,7 @@ async function start(): Promise<void> {
   el('h2', panel, 'Paint');
   const paintBox = el('div', panel);
   let paintList: (() => void)[] = [];
-  const GROUND_NAMES: Record<(typeof GROUND_PAINTS)[number], string> = { flags: 'Flags', setts: 'Setts', gravel: 'Gravel', turf: 'Turf', earth: 'Earth', mud: 'Mud', track: 'Track', path: 'Path' };
+  const GROUND_NAMES: Record<(typeof GROUND_PAINTS)[number], string> = { flags: 'Erase', setts: 'Setts', gravel: 'Gravel', turf: 'Turf', earth: 'Earth', mud: 'Mud', track: 'Track', path: 'Path' };
   const PLANT_NAMES: Record<(typeof PLANT_PAINTS)[number], string> = { grass: 'Grass', flowers: 'Flowers', ferns: 'Ferns', reeds: 'Reeds', wood: 'Mixed wood', oak: 'Oak', ash: 'Ash', spruce: 'Spruce', pine: 'Pine', bush: 'Bush' };
   const clearPaint = (what: keyof Painted, name: string) => { if (!state.paint[what].length) return; state.paint = { ...state.paint, [what]: [] }; paintLayers(); commit(); say(`${name} cleared`, 'dim', 4); };
   function renderPaint() {
@@ -1289,7 +1303,7 @@ async function start(): Promise<void> {
     paintList = [];
     const B = state.brush, list = paintList;
     choice<'ground' | 'plants' | 'rock'>(paintBox, list, 'Brush', [['Ground', 'ground'], ['Plants', 'plants'], ['Rock', 'rock']], () => B.layer, (v) => { B.layer = v; if (state.tool !== 'paint') setTool('paint'); renderPaint(); remember(); });
-    if (B.layer === 'ground') choice<number>(paintBox, list, 'Surface', GROUND_PAINTS.map((g, i): [string, number] => [GROUND_NAMES[g], i]), () => B.ground, (v) => { B.ground = v; remember(); }, 'Flags are the square itself: painting them erases. A track or a path follows the stroke.');
+    if (B.layer === 'ground') choice<number>(paintBox, list, 'Surface', GROUND_PAINTS.map((g, i): [string, number] => [GROUND_NAMES[g], i]), () => B.ground, (v) => { B.ground = v; remember(); }, 'Erase takes back what was laid, to the square’s own paving. A track or a path follows the stroke.');
     else if (B.layer === 'plants') choice<number>(paintBox, list, 'Plants', PLANT_PAINTS.map((g, i): [string, number] => [PLANT_NAMES[g], i]), () => B.plant, (v) => { B.plant = v; remember(); }, 'Low things in drifts; trees one by one at their distance; a wood a mixture of them');
     if (B.layer !== 'ground') checks(paintBox, list, [[B.layer === 'rock' ? 'Dig' : 'Erase', () => B.dig, (v) => { B.dig = v; remember(); }, 'Or hold Shift while painting']]);
     slider(paintBox, list, 'Size', 0.3, 20, 0.1, () => B.size, (v) => { B.size = v; brushRing.scale.setScalar(v); remember(); }, { title: 'Brush radius in metres ([ and ])' });
@@ -1317,7 +1331,7 @@ async function start(): Promise<void> {
     ]);
     buttons(selBox, [
       ['Next door', () => nextDoor(false), 'N. A new one of its kind beside it, wall to wall, its front on the same line'],
-      ['Copy beside', () => nextDoor(true), 'D. The same again beside it'],
+      ['Copy beside', () => nextDoor(true), 'Shift N. The same again beside it'],
       ['Delete', () => remove(it.id), 'Delete or Backspace'],
     ]);
     // Where it stands.
@@ -1579,11 +1593,18 @@ async function start(): Promise<void> {
   choice<number>(panel, sceneRefreshers, 'Move by', [['Freely', 0], ['10 cm', 0.1], ['25 cm', 0.25], ['50 cm', 0.5], ['1 m', 1], ['2 m', 2]], () => state.snap, (v) => { state.snap = v; remember(); });
   choice<number>(panel, sceneRefreshers, 'Turn by', [['Freely', 0], ['5°', 5], ['15°', 15], ['45°', 45], ['90°', 90]], () => state.turnSnap, (v) => { state.turnSnap = v; remember(); }, 'Holding Shift while turning turns freely');
   checks(panel, sceneRefreshers, [
-    ['grid', () => state.grid, (v) => { state.grid = v; grid.visible = v; remember(); }, 'A line every metre'],
+    ['overlays', () => state.overlays, (v) => { state.overlays = v; showOverlays(); remember(); }, 'H. The grid, outlines, knobs, rings and the brush: off, the picture alone'],
+    ['grid', () => state.grid, (v) => { state.grid = v; showOverlays(); remember(); }, 'A line every metre'],
     ['clay', () => state.clay, (v) => { state.clay = v; dress(); remember(); }, 'C. Everything in one plain grey: the shapes alone'],
     ['air', () => state.air, (v) => { state.air = v; atmosphere.uniforms.uEnabled.value = v ? 1 : 0; remember(); }, 'Haze and the light in the air, as the game draws them'],
   ]);
-  grid.visible = state.grid;
+  /** Shows or hides what is drawn over the picture to work with. */
+  function showOverlays() {
+    grid.visible = state.grid && state.overlays;
+    over.style.display = state.overlays ? '' : 'none';
+    if (!state.overlays) brushRing.visible = false;
+  }
+  showOverlays();
   el('h3', panel, 'Views');
   buttons(panel, [['F Frame', () => frame(), 'Brings the selected building, or all of them, into view'], ['Front', () => look('front')], ['Corner', () => look('corner')], ['Above', () => look('above')]]);
   el('h3', panel, 'Saved');
@@ -1601,14 +1622,14 @@ async function start(): Promise<void> {
     }
   }
   buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; state.paint = { ground: [], plants: [], rock: [] }; sync(); paintLayers(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
-  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. M move and turn, E extrude, S scale; [ ] turn a step; arrows nudge; Delete; D copy beside, N next door; Z undo, Shift Z redo; Esc lets go; P hides this panel. All of it is kept in this browser.').className = 'note';
+  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. W A S D, Space and Q fly the view, Shift faster. M move and turn, E extrude, R scale, B paint; [ ] turn a step; arrows nudge; Delete; N next door, Shift N copy beside; Z undo, Shift Z redo; Esc lets go; H hides the grid, outlines and knobs; P hides this panel. All of it is kept in this browser.').className = 'note';
 
   // The tools, over the picture.
   const toolButtons: Record<string, HTMLButtonElement> = {};
   const toolDef: [string, string, () => void, string][] = [
     ['move', 'Move & turn', () => setTool('move'), 'M. Drag a building to move it; drag the knob on its ring to turn it'],
     ['extrude', 'Extrude', () => setTool('extrude'), 'E. Drag the arrows on its faces to change its measures'],
-    ['scale', 'Scale', () => setTool('scale'), 'S. Drag a corner to scale it all, a face to stretch it one way'],
+    ['scale', 'Scale', () => setTool('scale'), 'R. Drag a corner to scale it all, a face to stretch it one way'],
     ['paint', 'Paint', () => setTool(state.tool === 'paint' ? 'move' : 'paint'), 'B. Paint ground, plants or rock'],
     ['gap', '', () => {}, ''],
     ['undo', 'Undo', undo, 'Z'], ['redo', 'Redo', redo, 'Shift Z'],
@@ -1722,9 +1743,17 @@ async function start(): Promise<void> {
   });
 
   // ------------------------------------------------------------------ keys
+  // The camera flies on keys held, as in the material lab: W A S D along the ground the way the view looks, Space and Q up and down,
+  // Shift faster. (Taken from `code`, so that it is the same keys whatever the keyboard's letters.)
+  const flying = new Set<string>(), FLY: Record<string, true> = { KeyW: true, KeyA: true, KeyS: true, KeyD: true, KeyQ: true, Space: true };
+  let shiftHeld = false;
+  window.addEventListener('keydown', (e) => { shiftHeld = e.shiftKey; }, true);
+  window.addEventListener('keyup', (e) => { shiftHeld = e.shiftKey; if (flying.delete(e.code) && !flying.size) keepCamera(); });
+  window.addEventListener('blur', () => { if (flying.size) { flying.clear(); keepCamera(); } });
   window.addEventListener('keydown', (e) => {
     if (!ready) return;
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return;
+    if (FLY[e.code] && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); flying.add(e.code); return; }
     const k = e.key.toLowerCase(), it = selectedItem();
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
@@ -1736,16 +1765,16 @@ async function start(): Promise<void> {
     else if (k === 'y') redo();
     else if (k === 'm') setTool('move');
     else if (k === 'e') setTool('extrude');
-    else if (k === 's') setTool('scale');
+    else if (k === 'r') setTool('scale');
     else if (k === 'b') setTool(state.tool === 'paint' ? 'move' : 'paint');
     else if ((k === '[' || k === ']') && state.tool === 'paint') { state.brush.size = Math.min(20, Math.max(0.3, Math.round(state.brush.size * (k === ']' ? 1.25 : 0.8) * 10) / 10)); brushRing.scale.setScalar(state.brush.size); renderPaint(); remember(); }
     else if (k === 'f') frame(!it);
     else if (k === 'c') { state.clay = !state.clay; dress(); reflectScene(); remember(); }
+    else if (k === 'h') { state.overlays = !state.overlays; showOverlays(); reflectScene(); remember(); }
     else if (k === 'p' || k === 'tab') { e.preventDefault(); togglePanel(); }
     else if (!it) return;
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); remove(it.id); }
-    else if (k === 'd') nextDoor(true);
-    else if (k === 'n') nextDoor(false);
+    else if (k === 'n') nextDoor(e.shiftKey);
     else if (k === '[' || k === ']') { it.turn = turned(it.turn + (k === ']' ? -1 : 1) * (state.turnSnap || 15)); placeItem(it); changed(false); reflect(); commit(); }
     else if (k.startsWith('arrow')) {
       e.preventDefault();
@@ -1801,6 +1830,21 @@ async function start(): Promise<void> {
   const step = (now: number) => {
     // (The first frames can be stamped a little before the loop began: no frame is shorter than nothing.)
     const raw = (now - last) / 1000, dt = Math.min(0.1, Math.max(0, raw));
+    if (flying.size) {
+      // (As fast as the eye is far from what it looks at, so that close in it creeps and far out it covers ground.)
+      const ahead = controls.target.clone().sub(camera.position).setY(0), far = camera.position.distanceTo(controls.target);
+      if (ahead.lengthSq() < 1e-6) ahead.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
+      ahead.normalize();
+      const aside = new Vector3(-ahead.z, 0, ahead.x), go = new Vector3();
+      if (flying.has('KeyW')) go.add(ahead); if (flying.has('KeyS')) go.sub(ahead);
+      if (flying.has('KeyD')) go.add(aside); if (flying.has('KeyA')) go.sub(aside);
+      if (flying.has('Space')) go.y += 1; if (flying.has('KeyQ')) go.y -= 1;
+      if (go.lengthSq() > 0) {
+        go.normalize().multiplyScalar(Math.max(4, far * 0.9) * (shiftHeld ? 3 : 1) * dt);
+        if (camera.position.y + go.y < 0.5) go.y = 0.5 - camera.position.y;
+        camera.position.add(go); controls.target.add(go);
+      }
+    }
     last = now;
     if (raw > 0.001) fps += (1 / raw - fps) * 0.05;
     // What has changed is built again: the selected building first, and as many others as there is time for in a frame.

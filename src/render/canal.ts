@@ -1,9 +1,10 @@
 import { Vector3 } from 'three';
-import { CANAL, canalBays, canalDoor, canalEaves, canalFloor, canalStoop } from '../core/canal';
+import { CANAL, canalBackWindows, canalBays, canalDoor, canalEaves, canalFloor, canalShell, canalStoop } from '../core/canal';
 import { Rng } from '../core/rng';
 import { Building } from '../core/site';
 import { BrickKit, brickTools, clipAt, Face, glaze, Hole, Pt, riseOf, shapeOf } from './brick';
 import { MeshBuilder } from './geom/meshBuilder';
+import { buildInterior, openLeaves } from './interior';
 
 /**
  * The canal houses of Amsterdam. The site document says how each is made (`CanalWork`); this
@@ -68,11 +69,22 @@ export function buildCanal(b: Building, base: number, mesh: (material: string) =
   // (What is built of brick is built of the house's own clay. Its woodwork is all painted, frames, doors, shutters, cornices, and is
   // drawn as paint, smooth, not as the grain of bare timber, which showed through white and made it brown. What is laid now is
   // noted, mesh by mesh, so that it can be leaned.)
-  const as = (material: string) => (material === 'brick' ? clay : material === 'wood' ? 'plaster' : material);
+  // (A house that can be entered has glass that can be seen through, both ways, and its lit windows glow without hiding the room;
+  // its bare timber within is laid as `oak`, which is drawn as timber.)
+  const enter = !!b.plan;
+  const as = (material: string) => (material === 'brick' ? clay : material === 'wood' ? 'plaster' : material === 'oak' ? 'wood' : enter && material === 'glass' ? 'pane' : enter && material === 'window' ? 'paneLit' : material);
   const begun = new Map<MeshBuilder, number>();
   const noting = (material: string) => { const m = mesh(as(material)); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
   const k = brickTools(b, base, noting);
   canalHouse(b, k, rng.fork('house'), tops);
+  // Indoors only a share of the sky is seen, through the windows: so the rooms are dimmer than the street, and the sun lies on their floors where it comes in.
+  if (enter) {
+    const turn = b.faces === 'w' ? 1 : -1, sh = canalShell(b), lo = sh.floors[0] - 0.1, hi = sh.floors[b.storeys] + 0.05;
+    for (const [m, from] of begun) m.setOpenBy((x, y, z) => {
+      const u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2, h = y - base;
+      return u > sh.u0 - 0.01 && u < sh.u1 + 0.01 && v > sh.v0 - 0.01 && v < sh.v1 + 0.01 && h > lo && h < hi ? 0.32 : 1;
+    }, from);
+  }
   // The lean: everything of the front, and what is laid on it, out over the street by `lean` for each metre up; the side walls and
   // the roof are carried with it at their front ends, and not at all at their backs.
   if (cw.lean > 0) {
@@ -99,7 +111,7 @@ function canalHouse(b: Building, k: BrickKit, rng: Rng, tops?: Vector3[]): void 
   const [front, right, back, left] = k.walls(0);
   const bays = canalBays(b), door = canalDoor(b), st = canalStoop(b);
   const cornice = cw.gable === 'cornice' || cw.gable === 'raised';
-  const shutterOf = cw.shutters ?? cw.paint;
+  const shutterOf = cw.shutters ?? cw.paint, enter = !!b.plan, hinge: -1 | 1 = (door.s0 + door.s1) / 2 < W / 2 ? -1 : 1;
 
   // ---- the openings below the eaves
   const openings: Opening[] = [];
@@ -397,9 +409,11 @@ function canalHouse(b: Building, k: BrickKit, rng: Rng, tops?: Vector3[]): void 
       k.glazed(front, o, 2, 1, cw.frame, 0.22);
       for (let s = o.s0 + 0.1; s < o.s1 - 0.05; s += 0.13) k.stick(front.P(s, o.y0, 0.06), front.P(s, o.y1, 0.06), 0.025, 0.025, IRON, 'metal');
     } else if (o.fill === 'door') {
-      if (store) hatchLeaves(k, front, o, T - 0.16, shutterOf, cw.frame);
-      else houseDoor(k, front, o, deep + 0.04, cw.paint, cw.frame, orn);
-    } else if (o.fill === 'pui') pui(k, front, b, o, door, rng);
+      // (A house that can be entered stands with its door open.)
+      if (store && enter) openLeaves(k, front, o.s0, o.s1, o.y0, o.y1 - riseOf(o.s1 - o.s0, o.head), T - 0.16, shutterOf, true);
+      else if (store) hatchLeaves(k, front, o, T - 0.16, shutterOf, cw.frame);
+      else houseDoor(k, front, o, deep + 0.04, cw.paint, cw.frame, orn, enter ? hinge : 0);
+    } else if (o.fill === 'pui') pui(k, front, b, o, door, rng, enter ? hinge : 0);
     else if (o.fill === 'oculus') {
       const y = (o.y0 + o.y1) / 2, r = (o.s1 - o.s0) / 2;
       k.disc(front, mid, y, r + 0.1, -0.06, 0.08, tm, tc, r);
@@ -496,14 +510,14 @@ function canalHouse(b: Building, k: BrickKit, rng: Rng, tops?: Vector3[]): void 
     for (let s = 1; s < N; s++) for (const a of [D * 0.3, D * 0.7]) k.on(f, 'metal', a - 0.025, a + 0.025, floor(s) - 0.25, floor(s) + 0.3, -0.04, 0.01, IRON);
   }
   {
-    const gaps: Hole[] = [], n = W > 7.6 ? 3 : W > 4.2 ? 2 : 1;
-    for (let s = 0; s < N; s++) for (let j = 0; j < n; j++) {
-      const c = W * ((j + 0.5) / n), w = Math.min(1.0, W / n - 0.6);
-      gaps.push({ s0: c - w / 2, s1: c + w / 2, y0: (s ? floor(s) : F0) + 0.8, y1: floor(s + 1) - 0.45, head: 'flat' });
-    }
+    // (One to a bay, behind the front's, so that a wall inside that stands between two bays never meets one; and moved off any that does.)
+    const gaps: Hole[] = [], sh = canalShell(b);
+    for (let s = 0; s < N; s++) for (const [u0, u1] of canalBackWindows(b, s)) gaps.push({ s0: W / 2 - u1, s1: W / 2 - u0, y0: (s ? floor(s) : F0) + 0.8, y1: floor(s + 1) - 0.45, head: 'flat' });
     // (A figure with its windows cut through it, a row of them to a storey.)
     k.prism(back, [[0, -0.45], [W, -0.45], [W, wallTop], [0, wallTop]], gaps.map(shapeOf), 0, S, 'brick', brick);
     for (const gp of gaps) { k.glazed(back, gp, 2, 3, cw.frame, 0.16); k.on(back, 'stone', gp.s0 - 0.05, gp.s1 + 0.05, gp.y0 - 0.08, gp.y0, -0.06, 0.18, BLUE); }
+    // ---- inside, if it can be entered
+    if (b.plan) buildInterior(k, b.plan, sh, N, { W, front: openings.map((o) => o.ring ?? shapeOf(o)), back: gaps.map(shapeOf), ground: 'boards' });
   }
 
   // ---- the roofs: ridged from front to back, from behind the front to just past the back; hipped at the front behind a cornice
@@ -685,20 +699,24 @@ function hatchLeaves(k: BrickKit, f: Face, o: Hole, deep: number, paint: Colour,
  * fanlight whose bars spread from the middle of its foot; from the first degree of dressing, a door
  * case of pilasters and a cornice about it, and from the second a pediment on that.
  */
-function houseDoor(k: BrickKit, f: Face, o: Opening, deep: number, paint: Colour, frame: Colour, orn: number) {
+function houseDoor(k: BrickKit, f: Face, o: Opening, deep: number, paint: Colour, frame: Colour, orn: number, open: -1 | 0 | 1 = 0) {
   const w = o.s1 - o.s0, mid = (o.s0 + o.s1) / 2, yL = Math.min(o.y0 + 2.35, o.y1 - 0.5);
   k.on(f, 'wood', o.s0, o.s0 + 0.07, o.y0, o.y1, deep - 0.03, deep + 0.12, frame, true);
   k.on(f, 'wood', o.s1 - 0.07, o.s1, o.y0, o.y1, deep - 0.03, deep + 0.12, frame, true);
   k.on(f, 'wood', o.s0, o.s1, yL, yL + 0.1, deep - 0.03, deep + 0.12, frame, true);
-  k.on(f, 'wood', o.s0 + 0.07, o.s1 - 0.07, o.y0, yL, deep + 0.04, deep + 0.1, paint, true);
+  // (Open, the leaf stands back against the side of the way in, its hinge on the side `open` names; shut, it fills the frame.)
+  if (open) openLeaves(k, f, o.s0 + 0.07, o.s1 - 0.07, o.y0, yL, deep + 0.04, paint, false, open);
+  else k.on(f, 'wood', o.s0 + 0.07, o.s1 - 0.07, o.y0, yL, deep + 0.04, deep + 0.1, paint, true);
   // Raised panels, in two columns on a broad leaf.
   const cols = w > 1.1 ? 2 : 1, rows = 3, pw = (w - 0.14 - 0.12 * (cols + 1)) / cols, ph = (yL - o.y0 - 0.14 * (rows + 1)) / rows;
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-    const s0 = o.s0 + 0.07 + 0.12 + c * (pw + 0.12), y0 = o.y0 + 0.14 + r * (ph + 0.14) + (r === 0 ? 0 : 0);
-    k.on(f, 'wood', s0, s0 + pw, y0, y0 + ph * (r === 1 ? 0.6 : 1), deep + 0.01, deep + 0.04, shade(paint, 1.18), true);
+  if (!open) {
+    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+      const s0 = o.s0 + 0.07 + 0.12 + c * (pw + 0.12), y0 = o.y0 + 0.14 + r * (ph + 0.14);
+      k.on(f, 'wood', s0, s0 + pw, y0, y0 + ph * (r === 1 ? 0.6 : 1), deep + 0.01, deep + 0.04, shade(paint, 1.18), true);
+    }
+    k.disc(f, mid, o.y0 + 1.05, 0.05, deep - 0.02, deep + 0.04, 'metal', BRASS, 0);
+    k.on(f, 'metal', mid - 0.14, mid + 0.14, o.y0 + 0.82, o.y0 + 0.88, deep + 0.0, deep + 0.04, BRASS);
   }
-  k.disc(f, mid, o.y0 + 1.05, 0.05, deep - 0.02, deep + 0.04, 'metal', BRASS, 0);
-  k.on(f, 'metal', mid - 0.14, mid + 0.14, o.y0 + 0.82, o.y0 + 0.88, deep + 0.0, deep + 0.04, BRASS);
   // The fanlight: glass, a ring about the foot of its bars, and the bars spreading to its edges.
   const fy = yL + 0.1, fh = o.y1 - fy;
   if (fh > 0.2) {
@@ -728,7 +746,7 @@ function houseDoor(k: BrickKit, f: Face, o: Opening, deep: number, paint: Colour
  * it, a transom across with lights over it, a great window in each bay over a panel, and the door,
  * all of it painted one colour and set a little back in the opening.
  */
-function pui(k: BrickKit, f: Face, b: Building, o: Opening, door: { s0: number; s1: number }, rng: Rng) {
+function pui(k: BrickKit, f: Face, b: Building, o: Opening, door: { s0: number; s1: number }, rng: Rng, open: -1 | 0 | 1) {
   const cw = b.canalwork!, paint = cw.pui!, frame = cw.frame, F0 = cw.stoop, bays = canalBays(b), dk = 0.12;
   const yT = o.y1 - 0.28, yt = o.y1 - 0.78;
   k.on(f, 'wood', o.s0, o.s1, yT, o.y1, -0.03, 0.2, paint, true);
@@ -747,7 +765,7 @@ function pui(k: BrickKit, f: Face, b: Building, o: Opening, door: { s0: number; 
       // (Beside a narrow door in a broad bay, panels.)
       if (d0 - a > 0.05) { k.on(f, 'wood', a, d0, o.y0, yt - 0.07, dk, dk + 0.06, paint, true); k.on(f, 'wood', d0 + dw, c, o.y0, yt - 0.07, dk, dk + 0.06, paint, true); }
       if (F0 > o.y0 + 0.05) k.on(f, 'wood', d0, d0 + dw, o.y0, F0, dk, dk + 0.06, shade(paint, 0.9), true);
-      houseDoor(k, f, { s0: d0, s1: d0 + dw, y0: Math.max(F0, o.y0), y1: yt - 0.07, head: 'flat', fill: 'door', storey: 0 }, dk - 0.04, cw.paint, frame, 0);
+      houseDoor(k, f, { s0: d0, s1: d0 + dw, y0: Math.max(F0, o.y0), y1: yt - 0.07, head: 'flat', fill: 'door', storey: 0 }, dk - 0.04, cw.paint, frame, 0, open);
       continue;
     }
     // A panel under the window; in it, over a basement, a low barred light.

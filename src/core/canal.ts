@@ -1,6 +1,7 @@
 import { BrickCountry } from './brick';
+import { clearOfWalls, planCorridor, planDouble, planNarrow, planOpen, Shell, wallsAtBack } from './interior';
 import { Rng } from './rng';
-import { Building, CanalWork } from './site';
+import { Building, BuildingPlan, CanalWork } from './site';
 
 /**
  * The canal houses of Amsterdam: how each is dealt from the seed, and the measures that follow
@@ -19,8 +20,8 @@ import { Building, CanalWork } from './site';
  * that any of them may be fixed (`want`) and the rest still dealt as they would have been.
  */
 
-/** Fixed measures: the thickness of the front and of the other walls, and the plinth of stone under the front. */
-export const CANAL = { front: 0.44, wall: 0.36, plinth: 0.28 };
+/** Fixed measures: the thickness of the front and of the other walls, the plinth of stone under the front, and a wall between rooms inside. */
+export const CANAL = { front: 0.44, wall: 0.36, plinth: 0.28, cross: 0.18 };
 
 type Colour = [number, number, number];
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -42,6 +43,43 @@ export function canalDoor(b: Building): { s0: number; s1: number } {
   const { centre, pitch } = canalBays(b), c = centre(b.canalwork!.door);
   const w = b.canalwork!.kind === 'warehouse' ? Math.min(2.1, pitch - 0.3) : Math.min(1.3, Math.max(0.95, pitch - 0.75));
   return { s0: c - w / 2, s1: c + w / 2 };
+}
+
+/** The inside of a canal house: the inside faces of its walls, their thickness, a wall between rooms, and its floors. */
+export function canalShell(b: Building): Shell {
+  return { u0: -b.w / 2 + CANAL.wall, u1: b.w / 2 - CANAL.wall, v0: CANAL.front, v1: b.d - CANAL.wall, front: CANAL.front, wall: CANAL.wall, cross: CANAL.cross, floors: Array.from({ length: b.storeys + 1 }, (_, s) => canalFloor(b, s)) };
+}
+
+/**
+ * The plan of a canal house, as they were planned (see `src/core/interior.ts`): a warehouse open
+ * floors one over another; a double house, its door in the middle, a passage through the middle with
+ * a front room and a back room either side; a house of two to four windows a corridor along the side
+ * its door is on, with the stair in it, and a front room and a back room beside; one too narrow for
+ * that, its rooms one behind another with the stair between. Every storey is alike, and the walls
+ * between rooms stand between the windows. Null for a house whose stair will not fit, which stays shut.
+ */
+export function planCanal(b: Building): BuildingPlan | null {
+  const cw = b.canalwork!, sh = canalShell(b), C = sh.cross, bays = canalBays(b), edge = (j: number) => -b.w / 2 + bays.margin + j * bays.pitch;
+  if (cw.kind === 'warehouse') return planOpen(sh, -1);
+  if (b.bays >= 3 && cw.door > 0 && cw.door < b.bays - 1) {
+    const p = planDouble(sh, edge(cw.door) + C / 2, edge(cw.door + 1) - C / 2);
+    if (p) return p;
+  }
+  if (b.bays >= 2) {
+    const side: -1 | 1 = cw.door < b.bays / 2 ? -1 : 1, p = planCorridor(sh, side, side < 0 ? edge(cw.door + 1) : edge(cw.door));
+    if (p) return p;
+  }
+  return planNarrow(sh);
+}
+
+/**
+ * The windows of a canal house's back on a storey, as spans of `u`: one to a bay, behind the front's, so that a wall within standing
+ * between two bays never meets one; and moved off any wall of its plan that does.
+ */
+export function canalBackWindows(b: Building, storey: number): [number, number][] {
+  const bays = canalBays(b), w = Math.min(1.0, bays.pitch - 0.7);
+  const spans = Array.from({ length: b.bays }, (_, j): [number, number] => { const u = -b.w / 2 + bays.centre(j); return [u - w / 2, u + w / 2]; });
+  return b.plan ? clearOfWalls(spans, wallsAtBack(b.plan, canalShell(b), storey), CANAL.cross) : spans;
 }
 
 /** A flight of the stoop: where it begins across the front, which way it runs (along the front, or straight out), and its steps. */

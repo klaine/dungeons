@@ -456,11 +456,18 @@ export interface BuildingPlan {
    * next room's or the rendered skin outside, in the order front, back, left, right (as `v0`,
    * `v1`, `u0`, `u1`): half a wall between rooms, all of an outer wall within its skin.
    */
-  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing' | 'carriage'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing' | 'carriage' | 'office' | 'loft'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
   /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
   doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number; storey?: number }[];
   /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
   walls: { outer: number; spine: number; cross: number };
+  /**
+   * Of a house of brick or a canal house: where its stair stands, the same on every storey. Its flights stand one over another in
+   * this footprint, each rising from the floor below at `v0` toward `v1`, the longest filling it; `wall` is the side that stands
+   * against a wall (-1 the `u0` side, 1 the `u1`), the other side open, with a rail. The steps follow by rule from the storeys'
+   * heights (`steepFlights` in `src/core/interior.ts`). Every storey but the top has a flight up from it.
+   */
+  stair?: { u0: number; u1: number; v0: number; v1: number; wall: -1 | 1 };
 }
 
 export interface Building {

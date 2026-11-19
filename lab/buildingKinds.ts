@@ -8,10 +8,11 @@
 // it is scaled are the lab's. The document is always made at the origin facing `w`, and the lab
 // places what is built.
 import { classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
-import { brickCountry, brickEaves, dealBrickHouse, dealChurch } from '../src/core/brick';
+import { brickCountry, brickEaves, dealBrickHouse, dealChurch, planBrick } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
+import { Vector3 } from 'three';
 import { BrickWork, Building, CanalWork, ClassicalDress, Stone, Town } from '../src/core/site';
-import { canalEaves, dealCanalHouse } from '../src/core/canal';
+import { canalEaves, dealCanalHouse, planCanal } from '../src/core/canal';
 import { buildBuilding } from '../src/render/buildings';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
@@ -499,6 +500,8 @@ export function documentOf(item: Item): Building {
   const b: Building = { ...JSON.parse(JSON.stringify(item.shape)), x: 0, z: 0, faces: 'w' };
   if (item.kind === 'classical') b.plan = planClassical(b, new Rng(item.seed).fork('plan'));
   else if (item.kind === 'timber') b.plan = planTimber(b);
+  // (A canal house and a house of brick are planned within too, and built so, unless their stair will not fit; a church is not.)
+  else if (item.kind === 'canal' || item.kind === 'gabled' || item.kind === 'eaves' || item.kind === 'store') { const p = item.kind === 'canal' ? planCanal(b) : planBrick(b); if (p) b.plan = p; }
   return b;
 }
 
@@ -515,9 +518,10 @@ export function shackOf(item: Item): Town['shacks'][number] {
 }
 
 /** Builds an item's building into meshes by material, at the origin facing `w` (its front towards -x, its middle at x = 0). */
-export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder, near?: Building['near'], season: Season = 'summer'): { cards?: CardSet[] } {
-  // (A tree's leaves are cards, drawn otherwise than its bark: they are given back to be drawn.)
-  if (item.kind === 'tree') return { cards: growOne(item.shape.tree!, season, new Rng(item.seed).fork('tree'), mesh).cards };
+export function buildItem(item: Item, stone: Stone, mesh: (material: string) => MeshBuilder, near?: Building['near'], season: Season = 'summer', room?: Room): { cards?: CardSet[] } {
+  // (A tree's leaves are cards, drawn otherwise than its bark: they are given back to be drawn. Its boughs keep out of what stands
+  // about it: see `roomOf`.)
+  if (item.kind === 'tree') return { cards: growOne(item.shape.tree!, season, new Rng(item.seed).fork('tree'), mesh, room && (room.walls.length || room.rock.length) ? keepOutOf(room) : undefined).cards };
   if (item.kind === 'boulder') { boulderOne(stone, item.shape.boulder!.size, new Rng(item.seed).fork('boulder'), mesh); return {}; }
   // (A shack's posts go down to the ground, which here is level and nowhere near the sea.)
   if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return {}; }
@@ -525,6 +529,45 @@ export function buildItem(item: Item, stone: Stone, mesh: (material: string) => 
   if (near?.length) b.near = near;
   buildBuilding(b, 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
   return {};
+}
+
+/**
+ * What a tree's boughs must keep out of, in its own measures as it is grown (about its foot, before it is turned or scaled): the
+ * walls of what stands about it, each the outline of its ground (a little enlarged, so that leaves do not brush the wall) from below
+ * the ground to its top; and the balls of painted rock. (To a tenth of a metre, so that one standing still does not make the tree be
+ * grown again.)
+ */
+export interface Room { walls: { at: [number, number][]; y0: number; y1: number }[]; rock: number[][] }
+/** The room a tree has: `topOf` says how high each thing about it rises over the square; `rock` is the painted rock's balls. */
+export function roomOf(item: Item, others: Item[], topOf: (q: Item) => number, rock: number[][] = []): Room {
+  const t = item.shape.tree!, reach = crownOf(t) * 1.8 + 2, tenth = (x: number) => Math.round(x * 10) / 10, half = item.shape.d / 2, sy = item.scale[1];
+  const local = (X: number, Z: number): [number, number] => { const [u, v] = planAt(item, X, Z); return [tenth(-half + v), tenth(u)]; };
+  const walls: Room['walls'] = [], m = 0.35;
+  for (const q of others) {
+    if (q.id === item.id || q.kind === 'tree') continue;
+    for (const r of footprintOfItem(q)) {
+      const at = ([[r.u0 - m, r.v0 - m], [r.u1 + m, r.v0 - m], [r.u1 + m, r.v1 + m], [r.u0 - m, r.v1 + m]] as [number, number][]).map(([u, v]) => local(...squareAt(q, u, v)));
+      if (at.every(([x]) => x < -reach) || at.every(([x]) => x > reach) || at.every(([, z]) => z < -reach) || at.every(([, z]) => z > reach)) continue;
+      walls.push({ at, y0: -2, y1: tenth((topOf(q) + 0.3) / sy) });
+    }
+  }
+  const k = Math.cbrt(item.scale[0] * item.scale[1] * item.scale[2]);
+  const balls = rock.map(([x, y, z, r, sign]) => { const [lx, lz] = local(x, z); return [lx, tenth(y / sy), lz, tenth(r / k), sign]; }).filter(([x, , z, r]) => Math.hypot(x, z) < reach + r + 4);
+  return { walls, rock: balls };
+}
+/** Whether a point (in a tree's own measures) is where its boughs may not go. */
+function keepOutOf(room: Room): (p: Vector3) => boolean {
+  const adds = room.rock.filter((b) => b[4] > 0), digs = room.rock.filter((b) => b[4] < 0);
+  return (p) => room.walls.some((w) => p.y > w.y0 && p.y < w.y1 && within2(w.at, p.x, p.z))
+    || (adds.some((b) => Math.hypot(p.x - b[0], p.y - b[1], p.z - b[2]) < b[3] + 0.3) && !digs.some((b) => Math.hypot(p.x - b[0], p.y - b[1], p.z - b[2]) < b[3] - 0.3));
+}
+function within2(ring: [number, number][], x: number, y: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /** Whether a point of the square (`x`, `z`) is within an item's ground: under a building, or a boulder, or a tree's trunk. */

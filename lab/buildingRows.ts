@@ -1,5 +1,5 @@
 // The building lab: buildings of the town's two styles made by the game's own generator and shown plainly, lit by a sun and a sky,
-// for judging their shapes without building a whole place. Open /lab/buildings.html on the dev server. The address chooses:
+// for judging their shapes without building a whole place. Open /lab/buildingRows.html on the dev server. The address chooses:
 // `?style=imperial|timber`, `bays`, `storeys`, `heights=4.8,3.3,3.3`, `wings=0|1|2`, `towers=0|1|2|3`, `extra` (storeys of the towers),
 // `pediment=0`, `arch=-1|1` (a carriage way at that end), `entrances=3,9` (the bays of its doors), `brick=stucco|bare` (in the row, every
 // other building), and `seed`; (brick is drawn here in a plain brown, without the game's texture); with none, a row of classical buildings is dealt their variations as the town deals them. `turn` turns them all, in degrees.
@@ -7,14 +7,18 @@
 // dealt as a town deals them, or with any of its choices fixed from the address: `gable=spout|stepped|neck|bell|cornice|raised|all` (all:
 // a house of each in turn), `crown=triangle|segment|scroll|flat`, `tiers`, `bays`, `storeys`, `w`, `d`, `ornament=0..3`,
 // `windows=cross|small|large`, `front=brick|painted`, `kind=house|warehouse`, `stoop` (metres), `basement=0|1`, `lean` (per metre),
-// `pui=0|1`, `hoist=0|1`, `door` (its bay), `clay=red|buff`; `n` houses to a row.
-import { AmbientLight, BufferGeometry, Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Scene, SRGBColorSpace, WebGLRenderer } from 'three';
+// `pui=0|1`, `hoist=0|1`, `door` (its bay), `clay=red|buff`; `n` houses to a row. `?style=brick` shows a row of Hanseatic houses
+// dealt as a valley's town deals them (`kind=gabled|eaves|store`, `deep`). Canal and brick houses are planned within and built so,
+// unless `shut=1`; `cut=<height>` cuts away everything above that height, to look down into a storey (and `cam` to look from over it).
+import { AmbientLight, BufferGeometry, Color, DirectionalLight, HemisphereLight, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, Plane, PlaneGeometry, Scene, SRGBColorSpace, Vector3, WebGLRenderer } from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildBuilding } from '../src/render/buildings';
+import { buildingPlans } from '../src/maps/buildingPlan';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { classicalVariations, planClassical, planTimber } from '../src/core/building';
 import { Rng } from '../src/core/rng';
-import { CanalWant, dealCanalHouse } from '../src/core/canal';
+import { CanalWant, dealCanalHouse, planCanal } from '../src/core/canal';
+import { dealBrickHouse, planBrick } from '../src/core/brick';
 import type { Building } from '../src/core/site';
 
 const q = new URLSearchParams(location.search), num = (k: string, d: number) => (q.has(k) ? Number(q.get(k)) : d);
@@ -35,23 +39,28 @@ scene.add(sun);
 const ground = new Mesh(new PlaneGeometry(600, 600), new MeshStandardMaterial({ color: 0x8a8670, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
 
-const looks: Record<string, { roughness: number; metalness?: number; color?: number }> = { glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 }, brick: { roughness: 0.9, color: 0x6e4430 }, redBrick: { roughness: 0.9, color: 0x8a4434 }, buffBrick: { roughness: 0.9, color: 0xc49a62 } };
+const q0 = new URLSearchParams(location.search), cut = q0.has('cut') ? [new Plane(new Vector3(0, -1, 0), Number(q0.get('cut')))] : [];
+renderer.localClippingEnabled = cut.length > 0;
+const looks: Record<string, { roughness: number; metalness?: number; color?: number; clear?: boolean }> = { pane: { roughness: 0.05, color: 0x8fa0a6, clear: true }, paneLit: { roughness: 0.05, color: 0x8fa0a6, clear: true }, glass: { roughness: 0.15, metalness: 0.4 }, window: { roughness: 0.3 }, metal: { roughness: 0.45, metalness: 0.3 }, brick: { roughness: 0.9, color: 0x6e4430 }, redBrick: { roughness: 0.9, color: 0x8a4434 }, buffBrick: { roughness: 0.9, color: 0xc49a62 } };
 /** Builds a building at the origin facing -x (its own way), and lays it in the scene turned to face `turn` at (`x`, `z`). */
 function show(b: Building, x: number, z: number, turn: number, rng: Rng) {
   const meshes = new Map<string, MeshBuilder>();
   buildBuilding({ ...b, x: 0, z: 0, faces: 'w' }, 0, (m) => { if (!meshes.has(m)) meshes.set(m, new MeshBuilder()); return meshes.get(m)!; }, rng, [0.8, 0.78, 0.72], false);
   for (const [name, m] of meshes) {
     const g: BufferGeometry = m.build();
-    const mesh = new Mesh(g, new MeshStandardMaterial({ vertexColors: true, roughness: looks[name]?.roughness ?? 0.85, metalness: looks[name]?.metalness ?? 0, color: looks[name]?.color ?? 0xffffff }));
+    const look = looks[name], clear = !!look?.clear;
+    const mesh = new Mesh(g, new MeshStandardMaterial({ vertexColors: !clear, roughness: look?.roughness ?? 0.85, metalness: look?.metalness ?? 0, color: look?.color ?? 0xffffff, transparent: clear, opacity: clear ? 0.18 : 1, depthWrite: !clear, clippingPlanes: cut, clipShadows: true }));
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.rotation.y = -(turn - Math.PI); mesh.position.set(x, 0, z);
     scene.add(mesh);
   }
 }
 
-/** Builds a building with the middle of its front at (`fx`, `fz`), facing `turn`. */
+/** Builds a building with the middle of its front at (`fx`, `fz`), facing `turn`; and keeps where it stands, for `inside`. */
+const fronts: { b: Building; fx: number; fz: number; turn: number }[] = [];
 function front(b: Building, fx: number, fz: number, turn: number, rng: Rng) {
   show(b, fx - (b.d / 2) * Math.cos(turn), fz - (b.d / 2) * Math.sin(turn), turn, rng);
+  fronts.push({ b, fx, fz, turn });
 }
 const style = q.get('style') ?? 'imperial', seed = q.get('seed') ?? 'lab', turn = (num('turn', 90) * Math.PI) / 180;
 const made: string[] = [];
@@ -81,7 +90,10 @@ if (style === 'canal') {
       const r = new Rng(`${seed}/${row}/${k}`), w: CanalWant = { ...want, ...(all ? { gable: gables[k % 6] } : {}) };
       if (q.get('pui') === '1') w.pui = [0.1, 0.2, 0.13];
       const deal = dealCanalHouse(r, { want: w });
-      if (deal) houses.push({ ...deal, x: 0, z: 0, faces: 'w' });
+      if (!deal) continue;
+      const b: Building = { ...deal, x: 0, z: 0, faces: 'w' }, plan = q.get('shut') === '1' ? null : planCanal(b);
+      if (plan) b.plan = plan;
+      houses.push(b);
     }
     const length = houses.reduce((sum, b) => sum + b.w, 0);
     let s = -length / 2;
@@ -89,8 +101,23 @@ if (style === 'canal') {
       front(b, dir * (s + b.w / 2), z, facing, new Rng(`${seed}/${row}/${k}/build`));
       s += b.w;
       const c = b.canalwork!;
-      if (!row) made.push(`${k}: ${c.kind === 'warehouse' ? 'warehouse, ' : ''}${c.gable}${c.gable === 'stepped' || c.gable === 'neck' ? ` ${c.tiers}` : ''} ${c.crown}, ${b.bays} bays ${b.w} m, ${b.storeys} storeys, ornament ${c.ornament}, ${c.windows}, ${c.front}${c.pui ? ', pui' : ''}, stoop ${c.stoop}${c.basement ? ' over a basement' : ''}, lean ${c.lean}`);
+      if (!row) made.push(`${k}: ${b.plan ? '' : 'shut, '}${c.kind === 'warehouse' ? 'warehouse, ' : ''}${c.gable}${c.gable === 'stepped' || c.gable === 'neck' ? ` ${c.tiers}` : ''} ${c.crown}, ${b.bays} bays ${b.w} m, ${b.storeys} storeys, ornament ${c.ornament}, ${c.windows}, ${c.front}${c.pui ? ', pui' : ''}, stoop ${c.stoop}${c.basement ? ' over a basement' : ''}, lean ${c.lean}`);
     }
+  }
+} else if (style === 'brick') {
+  // Hanseatic houses side by side, their fronts on one line, as a valley's town deals them, each planned within.
+  const n = num('n', 8), kind = q.get('kind') as 'gabled' | 'eaves' | 'store' | null, houses: Building[] = [];
+  for (let k = 0; k < n; k++) {
+    const b: Building = { ...dealBrickHouse(new Rng(`${seed}/${k}`), num('deep', 13), kind ?? undefined), x: 0, z: 0, faces: 'w' }, plan = q.get('shut') === '1' ? null : planBrick(b);
+    if (plan) b.plan = plan;
+    houses.push(b);
+  }
+  let s = -houses.reduce((sum, b) => sum + b.w, 0) / 2;
+  for (const [k, b] of houses.entries()) {
+    front(b, s + b.w / 2, 0, Math.PI / 2, new Rng(`${seed}/${k}/build`));
+    s += b.w;
+    const w = b.brickwork!;
+    made.push(`${k}: ${b.plan ? '' : 'shut, '}${w.kind} ${w.gable}, ${b.w} by ${b.d} m, storeys ${b.heights.join('/')}${b.plan ? `, rooms ${[...new Set(b.plan.rooms.map((r) => r.kind))].join(' ')}` : ''}`);
   }
 } else if (style === 'wooden') {
   // Classical houses of wood: long and low on their basements, one storey or two; and an L, as at a street corner.
@@ -137,8 +164,22 @@ if (style === 'canal') {
   }
 }
 document.getElementById('note')!.textContent = made.join(' · ');
+// `sheet=k`: the floor plans of the `k`th house of the first row, as the game's maps draw them, over the scene.
+if (q.has('sheet') && fronts[num('sheet', 0)]?.b.plan) {
+  const c = buildingPlans(fronts[num('sheet', 0)].b, num('scale', 26));
+  Object.assign(c.style, { position: 'fixed', left: '0', top: '40px', maxWidth: '100%', zIndex: '2' });
+  document.body.appendChild(c);
+}
 const camera = new PerspectiveCamera(40, innerWidth / innerHeight, 0.5, 2000);
-const cam = (q.get('cam') ?? (style === 'canal' ? '-34,5,13,8,10,2' : '-70,55,95,0,8,0')).split(',').map(Number);
+let cam = (q.get('cam') ?? (style === 'canal' ? '-34,5,13,8,10,2' : style === 'brick' ? '0,14,46,0,10,0' : '-70,55,95,0,8,0')).split(',').map(Number);
+// `inside=k,storey,a,e`: stand in the `k`th house of the first row on that storey, at eye height, `a` of the way back from its front and
+// `e` of the way across from its left (as one faces it), looking toward its front.
+if (q.has('inside')) {
+  const [k, storey = 0, a = 0.6, e = 0.5] = q.get('inside')!.split(',').map(Number), f = fronts[k], b = f.b;
+  const floor = (b.style === 'canal' ? b.canalwork!.stoop : 0.32) + b.heights.slice(0, storey).reduce((x, h) => x + h, 0), ox = Math.cos(f.turn), oz = Math.sin(f.turn);
+  const back = -(0.5 + a * (b.d - 1)), across = (e - 0.5) * (b.w - 1.2), px = f.fx + ox * back + oz * across, pz = f.fz + oz * back - ox * across;
+  cam = [px, floor + 1.62, pz, f.fx + oz * across, floor + 1.4, f.fz - ox * across];
+}
 camera.position.set(cam[0], cam[1], cam[2]);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(cam[3], cam[4], cam[5]); controls.update();
