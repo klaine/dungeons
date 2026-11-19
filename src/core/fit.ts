@@ -104,3 +104,19 @@ export function withGrounds(grounds: Ground[], x: number, z: number, natural: nu
   }
   return y;
 }
+
+/**
+ * How much of the land's own small unevenness is left at a point near grounds, 0 to 1: none on a
+ * ground, all of it six metres beyond its edge (the narrowest bank). For laying finer detail on land
+ * the grounds are already made on, without making them a second time.
+ */
+export function groundsOpen(grounds: Ground[], x: number, z: number): number {
+  let open = 1;
+  for (const g of grounds) {
+    const r = bankReach(g) + Math.hypot(g.w, g.d) / 2;
+    if (Math.abs(x - g.x) > r || Math.abs(z - g.z) > r) continue;
+    const [a, b] = local(g, x, z), out = Math.max(Math.abs(a) - g.w / 2, Math.abs(b) - g.d / 2);
+    open = Math.min(open, smooth(out / 6));
+  }
+  return open;
+}

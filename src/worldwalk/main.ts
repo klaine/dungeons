@@ -1,7 +1,7 @@
 import { InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { Hour, SKIES } from '../core/site';
-import { SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor } from '../core/stream';
+import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor } from '../core/stream';
 import { HeightField } from '../core/terrain';
 import { WorldPlace } from '../core/world';
 import { MeshBuilder } from '../render/geom/meshBuilder';
@@ -9,6 +9,7 @@ import { layTerrain } from '../render/landscape';
 import { squareBuilders } from '../render/streamMesh';
 import { cullCards, vegetationUniforms } from '../render/vegetation';
 import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn } from './dress';
+import { WalkTouch } from './touch';
 
 /**
  * A walk over a world's land at a metre, streamed in (`docs/06-world.md`), drawn as the game draws:
@@ -24,6 +25,11 @@ import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMater
  * (texture size); `?webgl` as in the game. The world may be named after a `#` too (`#w3`), since a page
  * shown inside another, as an artifact is, keeps a plain name there and nothing else; and the page's two
  * menus choose the world and the place.
+ *
+ * Its box "Half-metre ground" (or `?fine`, `?fine=0`) splits the squares near the walker into four
+ * at half a metre (`refineSquare`), with tussocks, stones and rills a metre at the most at it; it is
+ * remembered in the browser. With touch, a thumb stick on the left, looking by dragging on the right,
+ * and buttons to fly, rise, sink and go on (`touch.ts`).
  */
 
 const params = new URLSearchParams(location.search);
@@ -33,13 +39,24 @@ const NEAR = Number(params.get('radius')) || 700, DROP = NEAR + 300;
 /** The distances a square may be meshed to, finest first: one is chosen by how far off it lies. */
 const LEVELS = [0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6];
 const levelFor = (d: number) => { const want = Math.max(0.02, d * 0.0016); const k = LEVELS.findIndex((e) => e >= want); return k < 0 ? LEVELS.length - 1 : k; };
+/** How near the walker squares are split into four at half a metre, and how far off they are let go of again. */
+const FINE_NEAR = 150, FINE_DROP = 230;
 /** How far about the walker grass grows (in blocks of `LOW`), whole trees stand (in blocks of `LOW`), and painted trees (in blocks of a square). */
 const LOW = 32, GRASS = 90, TREES = 120, FAR_TREES = 1800;
 const hour: Hour = (params.get('hour') as Hour) in SKIES ? (params.get('hour') as Hour) : 'morning';
 const season: Season = (['spring', 'summer', 'autumn'] as const).find((s) => s === params.get('season')) ?? 'summer';
 
 interface WorldData { plan: { seed: string; n: number; hx: number; hz: number }; name: string; places: WorldPlace[]; field: HeightField; cover: Uint8Array; sea: Uint8Array; grid: TileGrid }
-interface Sq { i: number; j: number; x0: number; z0: number; heights: Float32Array; errors: Float32Array; meshes: Mesh[] | null; level: number; triangles: number }
+interface Sq {
+  i: number; j: number; x0: number; z0: number; heights: Float32Array; errors: Float32Array; meshes: Mesh[] | null; level: number; triangles: number;
+  /** Its four quarters at half a metre, once made; whether they are what is drawn (and walked on) in its place; and whether they are wanted. */
+  fine: Part[] | null; fineShown: boolean; fineWanted: boolean;
+}
+interface Part extends FineSquare { meshes: Mesh[] | null; level: number; triangles: number }
+const readFine = (): boolean => {
+  if (params.has('fine')) return params.get('fine') !== '0';
+  try { return localStorage.getItem('walk.fine') === '1'; } catch { return false; }
+};
 
 async function start(): Promise<void> {
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
@@ -93,10 +110,19 @@ async function start(): Promise<void> {
   const cores = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1));
   const pool = Array.from({ length: cores }, () => ({ w: new Worker(new URL('./squareWorker.ts', import.meta.url), { type: 'module' }), busy: false, has: new Set<string>() }));
   const squares = new Map<string, Sq>(), pending = new Set<string>(), squareMs: number[] = [];
+  const finePending = new Set<string>(), fineMs: number[] = [];
+  let fineOn = readFine();
   for (const p of pool) p.w.onmessage = (e) => {
     const m = e.data, key = `${m.i},${m.j}`;
-    p.busy = false; pending.delete(key); squareMs.push(m.ms);
-    squares.set(key, { i: m.i, j: m.j, x0: m.x0, z0: m.z0, heights: m.heights, errors: m.errors, meshes: null, level: -1, triangles: 0 });
+    p.busy = false;
+    if (m.type === 'fine') {
+      finePending.delete(key); fineMs.push(m.ms);
+      const sq = squares.get(key);
+      if (sq && fineOn) sq.fine = (m.quarters as FineSquare[]).map((q) => ({ ...q, meshes: null, level: -1, triangles: 0 }));
+      return;
+    }
+    pending.delete(key); squareMs.push(m.ms);
+    squares.set(key, { i: m.i, j: m.j, x0: m.x0, z0: m.z0, heights: m.heights, errors: m.errors, meshes: null, level: -1, triangles: 0, fine: null, fineShown: false, fineWanted: false });
   };
   const request = async (i: number, j: number) => {
     const key = `${i},${j}`, worker = pool.find((p) => !p.busy);
@@ -107,16 +133,35 @@ async function start(): Promise<void> {
     for (const t of send) worker.has.add(`${t.i},${t.j}`);
     worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds });
   };
+  /** Asks a worker to split a square into four at half a metre, from its own heights. */
+  const requestFine = (sq: Sq) => {
+    const key = `${sq.i},${sq.j}`, worker = pool.find((p) => !p.busy);
+    if (!worker || finePending.has(key)) return;
+    worker.busy = true; finePending.add(key);
+    const heights = sq.heights.slice();
+    worker.w.postMessage({ type: 'fine', i: sq.i, j: sq.j, x0: sq.x0, z0: sq.z0, heights, seed: W.plan.n, grounds }, [heights.buffer]);
+  };
   const squareAt = (x: number, z: number) => squares.get(`${Math.floor((x + grid.hx) / SQUARE.size)},${Math.floor((z + grid.hz) / SQUARE.size)}`);
-  /** The height of the ground at a point: from its square, where there is one, else from the world's lattice. */
+  /** A height from a square's lattice, at a point given in its points from its north-west corner. */
+  const sample = (h: Float32Array, fx: number, fz: number): number => {
+    const n = SQUARE.n, cx = Math.min(n - 1.001, Math.max(0, fx)), cz = Math.min(n - 1.001, Math.max(0, fz)), a = Math.floor(cx), b = Math.floor(cz), tx = cx - a, tz = cz - b;
+    return h[b * n + a] * (1 - tx) * (1 - tz) + h[b * n + a + 1] * tx * (1 - tz) + h[(b + 1) * n + a] * (1 - tx) * tz + h[(b + 1) * n + a + 1] * tx * tz;
+  };
+  /** The height of the ground at a point: from what is drawn there, its square or the square's quarter at half a metre, else from the world's lattice. */
   const heightAt = (x: number, z: number): number => {
     const s = squareAt(x, z);
     if (!s) return field.smoothAt(x, z);
-    const fx = Math.min(SQUARE.n - 1.001, Math.max(0, x - s.x0)), fz = Math.min(SQUARE.n - 1.001, Math.max(0, z - s.z0)), a = Math.floor(fx), b = Math.floor(fz), tx = fx - a, tz = fz - b, n = SQUARE.n, h = s.heights;
-    return h[b * n + a] * (1 - tx) * (1 - tz) + h[b * n + a + 1] * tx * (1 - tz) + h[(b + 1) * n + a] * (1 - tx) * tz + h[(b + 1) * n + a + 1] * tx * tz;
+    if (s.fineShown && s.fine) {
+      const q = s.fine[(x - s.x0 >= FINE.size ? 1 : 0) + (z - s.z0 >= FINE.size ? 2 : 0)];
+      return sample(q.heights, (x - q.x0) / FINE.cell, (z - q.z0) / FINE.cell);
+    }
+    return sample(s.heights, x - s.x0, z - s.z0);
   };
-  /** Whether every square under a stretch of ground is in: what grows there is grown on the squares' own heights. */
-  const squaresUnder = (x0: number, z0: number, s: number) => [[x0, z0], [x0 + s - 0.01, z0], [x0, z0 + s - 0.01], [x0 + s - 0.01, z0 + s - 0.01]].every(([x, z]) => squareAt(x, z));
+  /**
+   * Whether every square under a stretch of ground is in, at the fineness it is wanted at: what grows
+   * there is grown on the ground as it will be drawn.
+   */
+  const squaresUnder = (x0: number, z0: number, s: number) => [[x0, z0], [x0 + s - 0.01, z0], [x0, z0 + s - 0.01], [x0 + s - 0.01, z0 + s - 0.01]].every(([x, z]) => { const q = squareAt(x, z); return q && q.fineWanted === q.fineShown; });
 
   // ---- the far land: the world's own lattice, read every 32 metres, in blocks of four squares by four, with holes where squares lie
   const BLOCK = 4, FAR = 32, farMeshes = new Map<string, Mesh[]>(), farDirty = new Set<string>();
@@ -128,7 +173,8 @@ async function start(): Promise<void> {
     // (A metre low, so that where a square lies beside it the square's own ground is what shows.)
     const low = (x: number, z: number) => field.smoothAt(x, z) - 1;
     for (let j = bj * BLOCK; j < Math.min(SZ, (bj + 1) * BLOCK); j++) for (let i = bi * BLOCK; i < Math.min(SX, (bi + 1) * BLOCK); i++) {
-      if (squares.get(`${i},${j}`)?.meshes) continue;
+      const sq = squares.get(`${i},${j}`);
+      if (sq && (sq.meshes || sq.fineShown)) continue;
       const [x0, z0] = squareOrigin(grid, i, j);
       layTerrain(turf, rock, low, {
         area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, skip: () => false, seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
@@ -200,19 +246,42 @@ async function start(): Promise<void> {
   let placeIndex = 0;
   let yaw = 0, pitch = -0.05, flying = params.has('fly'), lift = 1.7;
   const keys = new Set<string>();
+  const nextPlace = () => { if (!W.places.length) return; const q = W.places[placeIndex++ % W.places.length]; me.set(q.x, 0, q.z); };
+  const turn = (dYaw: number, dPitch: number) => { yaw += dYaw; pitch = Math.max(-1.5, Math.min(1.5, pitch + dPitch)); };
+  const touch = new WalkTouch(canvas, { look: turn, next: nextPlace, fly: () => toggleFly() });
+  function toggleFly(): boolean { flying = !flying; lift = flying ? Math.max(lift, 20) : 1.7; touch.flying(flying); return flying; }
+  touch.flying(flying);
+  // The box for ground at half a metre: what grows is grown again on the ground as it will now be.
+  const setFine = (on: boolean) => {
+    if (on === fineOn) return;
+    fineOn = on;
+    try { localStorage.setItem('walk.fine', on ? '1' : '0'); } catch { /* (not kept: a private window, or a page shown inside another) */ }
+    for (const meshes of [...lows.values(), ...nears.values()]) drop(meshes);
+    for (const f of fars.values()) drop(f.meshes);
+    lows.clear(); nears.clear(); fars.clear();
+    counts = { tufts: 0, trees: 0, farTrees: 0 };
+  };
+  {
+    const box = document.getElementById('fine') as HTMLInputElement | null;
+    if (box) { box.checked = fineOn; box.addEventListener('change', () => { setFine(box.checked); box.blur(); }); }
+  }
   const wireframe = (on: boolean) => { for (const k of ['turf', 'rock']) (materials[k] as MeshStandardNodeMaterial).wireframe = on; };
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     keys.add(e.code);
-    if (e.code === 'KeyV' && !e.repeat) { flying = !flying; lift = flying ? Math.max(lift, 20) : 1.7; }
+    if (e.code === 'KeyV' && !e.repeat) toggleFly();
     if (e.code === 'KeyM' && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
     // (Numbers for valley heads, with Shift for islands; P for the next place of any kind. Ctrl with a number changes the browser's tab.)
     const digit = /^Digit([1-4])$/.exec(e.code);
     if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) { const kind = e.shiftKey ? 'island' : 'valley', to = place(`${kind}${digit[1]}`); me.set(to.x, 0, to.z); e.preventDefault(); }
-    if (e.code === 'KeyP' && !e.repeat && W.places.length) { const q = W.places[placeIndex++ % W.places.length]; me.set(q.x, 0, q.z); }
+    if (e.code === 'KeyP' && !e.repeat) nextPlace();
   });
   window.addEventListener('keyup', (e: KeyboardEvent) => keys.delete(e.code));
-  canvas.addEventListener('click', () => canvas.requestPointerLock());
-  window.addEventListener('mousemove', (e: MouseEvent) => { if (document.pointerLockElement !== canvas) return; yaw -= e.movementX * 0.0022; pitch = Math.max(-1.5, Math.min(1.5, pitch - e.movementY * 0.0022)); });
+  // (The mouse is caught to look with; a finger is left to the touch controls.)
+  canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
+    try { (canvas.requestPointerLock() as unknown as Promise<void> | undefined)?.catch?.(() => undefined); } catch { /* (refused: some frames do) */ }
+  });
+  window.addEventListener('mousemove', (e: MouseEvent) => { if (document.pointerLockElement === canvas) turn(-e.movementX * 0.0022, -e.movementY * 0.0022); });
 
   // ---- the loop
   const frames: number[] = [];
@@ -222,8 +291,9 @@ async function start(): Promise<void> {
     const ci = Math.floor((me.x + grid.hx) / SQUARE.size), cj = Math.floor((me.z + grid.hz) / SQUARE.size), r = Math.ceil(NEAR / SQUARE.size) + 1;
     for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) if (i >= 0 && j >= 0 && i < SX && j < SZ && distTo(i, j) < NEAR) yield `${i},${j}`;
   }
-  /** How far a square's nearest point lies from where one stands, on the level. */
-  const distTo = (i: number, j: number) => { const [x0, z0] = squareOrigin(grid, i, j); return Math.hypot(Math.max(0, x0 - me.x, me.x - x0 - SQUARE.size), Math.max(0, z0 - me.z, me.z - z0 - SQUARE.size)); };
+  /** How far the nearest point of a stretch of ground lies from where one stands, on the level; and of a square. */
+  const distRect = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - me.x, me.x - x0 - s), Math.max(0, z0 - me.z, me.z - z0 - s));
+  const distTo = (i: number, j: number) => { const [x0, z0] = squareOrigin(grid, i, j); return distRect(x0, z0, SQUARE.size); };
   /** The blocks of `LOW` metres within `r` of where one stands, nearest first. */
   const blocksNear = (r: number): [number, number, number][] => {
     const out: [number, number, number][] = [], c = Math.ceil(r / LOW) + 1, bx = Math.floor(me.x / LOW), bz = Math.floor(me.z / LOW);
@@ -236,51 +306,93 @@ async function start(): Promise<void> {
   const stats = () => {
     let tris = 0;
     const levels = LEVELS.map(() => 0);
-    for (const s of squares.values()) if (s.meshes) { tris += s.triangles; levels[s.level]++; }
-    const ms = frames.length ? frames.reduce((a, b) => a + b, 0) / frames.length : 0, sorted = [...squareMs].sort((a, b) => a - b);
+    let fine = 0, fineTriangles = 0;
+    for (const s of squares.values()) {
+      if (s.meshes) { tris += s.triangles; levels[s.level]++; }
+      if (s.fineShown && s.fine) { fine++; for (const p of s.fine) fineTriangles += p.triangles; }
+    }
+    const ms = frames.length ? frames.reduce((a, b) => a + b, 0) / frames.length : 0, sorted = [...squareMs].sort((a, b) => a - b), fineSorted = [...fineMs].sort((a, b) => a - b);
     let farCount = 0;
     for (const f of fars.values()) for (const m of f.meshes) farCount += m.count;
-    return { frameMs: ms, squares: squares.size, pending: pending.size, tiles: tiles.size, squareTriangles: tris, drawnTriangles: renderer.info.render.triangles, levels, squareMsMiddle: sorted[Math.floor(sorted.length / 2)] ?? 0, worldMs, rebuilt, x: me.x, z: me.z, lowBlocks: lows.size, treeBlocks: nears.size, farTreeCards: farCount, ...counts };
+    return { frameMs: ms, squares: squares.size, pending: pending.size, tiles: tiles.size, squareTriangles: tris + fineTriangles, fineOn, fine, finePending: finePending.size, fineTriangles, fineMsMiddle: fineSorted[Math.floor(fineSorted.length / 2)] ?? 0, drawnTriangles: renderer.info.render.triangles, levels, squareMsMiddle: sorted[Math.floor(sorted.length / 2)] ?? 0, worldMs, rebuilt, x: me.x, z: me.z, y: camera.position.y, yaw, pitch, flying, lowBlocks: lows.size, treeBlocks: nears.size, farTreeCards: farCount, ...counts };
   };
   const wantedLow = () => blocksNear(GRASS).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
   const wantedTrees = () => blocksNear(TREES).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
+    /** Ground at half a metre near the walker, or not. */
+    fine: (on: boolean) => { setFine(on); const box = document.getElementById('fine') as HTMLInputElement | null; if (box) box.checked = on; },
     /** Goes to a place by its kind and number: `valley1`, `island2`, `mountain3`. */
     to: (spec: string) => { const p = place(spec); me.set(p.x, 0, p.z); },
     goto: (x: number, z: number, y?: number, yawTo?: number, pitchTo?: number, fly?: boolean) => { me.set(x, 0, z); if (yawTo !== undefined) yaw = yawTo; if (pitchTo !== undefined) pitch = pitchTo; if (fly !== undefined) flying = fly; if (y !== undefined) lift = y; },
-    settled: () => pending.size === 0 && [...squaresWanted()].every((k) => squares.get(k)?.meshes) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && farDirty.size === 0,
+    settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && farDirty.size === 0,
   };
   const frame = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now; frames.push(dt * 1000); if (frames.length > 90) frames.shift();
     // Moving: along the ground, or flying where one looks.
-    const run = keys.has('ShiftLeft') || keys.has('ShiftRight'), speed = flying ? (run ? 160 : 40) : run ? 12 : 4.5;
-    const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0), s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+    const run = keys.has('ShiftLeft') || keys.has('ShiftRight') || touch.move.run, speed = flying ? (run ? 160 : 40) : run ? 12 : 4.5;
+    const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) - touch.move.y, s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + touch.move.x;
     me.x += (-Math.sin(yaw) * f + Math.cos(yaw) * s) * speed * dt; me.z += (-Math.cos(yaw) * f - Math.sin(yaw) * s) * speed * dt;
     me.x = Math.max(-grid.hx, Math.min(grid.hx, me.x)); me.z = Math.max(-grid.hz, Math.min(grid.hz, me.z));
-    if (flying) lift = Math.max(1.7, lift + ((keys.has('Space') ? 1 : 0) - (keys.has('KeyC') ? 1 : 0)) * speed * dt);
+    if (flying) lift = Math.max(1.7, lift + ((keys.has('Space') ? 1 : 0) - (keys.has('KeyC') ? 1 : 0) + touch.move.rise) * speed * dt);
     const groundY = heightAt(me.x, me.z);
     camera.position.set(me.x, Math.max(groundY, 0) + lift, me.z);
     camera.rotation.set(pitch, yaw, 0, 'YXZ');
     // Streaming: ask for what is near and missing, nearest first; let go of what is far.
     const wanted = [...squaresWanted()].map((k) => { const [i, j] = k.split(',').map(Number); return { k, i, j, d: distTo(i, j) }; }).sort((a, b) => a.d - b.d);
-    for (const q of wanted) if (!squares.has(q.k) && !pending.has(q.k)) void request(q.i, q.j);
-    for (const [k, sq] of squares) if (distTo(sq.i, sq.j) > DROP) { drop(sq.meshes ?? []); squares.delete(k); farDirty.add(blockOf(sq.i, sq.j)); }
+    // (Near squares are split into four at half a metre when that is asked for, once they are in; nearest first, among the rest.)
+    for (const q of wanted) {
+      const sq = squares.get(q.k);
+      if (!sq) { if (!pending.has(q.k)) void request(q.i, q.j); continue; }
+      sq.fineWanted = fineOn && q.d < (sq.fine || sq.fineShown || finePending.has(q.k) ? FINE_DROP : FINE_NEAR);
+      if (sq.fineWanted && !sq.fine) requestFine(sq);
+    }
+    for (const [k, sq] of squares) if (distTo(sq.i, sq.j) > DROP) {
+      drop(sq.meshes ?? []);
+      for (const p of sq.fine ?? []) drop(p.meshes ?? []);
+      squares.delete(k); farDirty.add(blockOf(sq.i, sq.j));
+    }
     // Meshing: each square to the distance its own distance calls for; a few a frame, nearest first, so no frame waits long.
     let budget = 2;
     for (const q of wanted) {
+      if (budget <= 0) break;
       const sq = squares.get(q.k);
-      if (!sq || budget <= 0) continue;
+      if (!sq) continue;
+      if (sq.fineWanted && sq.fine) {
+        // Its four quarters at half a metre, each to its own distance; drawn in its place once all four are made.
+        for (const p of sq.fine) {
+          const level = levelFor(distRect(p.x0, p.z0, FINE.size));
+          if (level === p.level || budget <= 0) continue;
+          const m = squareBuilders(p.x0, p.z0, p.heights, p.errors, LEVELS[level], look, 0.72, FINE.cell);
+          const meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
+          drop(p.meshes ?? []);
+          if (sq.fineShown) for (const mesh of meshes) scene.add(mesh);
+          p.meshes = meshes; p.level = level; p.triangles = m.triangles;
+          budget--; rebuilt++;
+          if (sq.fineShown && q.d < 200) light.redraw();
+        }
+        if (!sq.fineShown && sq.fine.every((p) => p.meshes)) {
+          for (const p of sq.fine) for (const mesh of p.meshes!) scene.add(mesh);
+          if (sq.meshes) drop(sq.meshes); else farDirty.add(blockOf(sq.i, sq.j));
+          sq.meshes = null; sq.level = -1; sq.fineShown = true;
+          light.redraw();
+        }
+        continue;
+      }
+      // At a metre: made again when it is wanted at another distance, or back from half a metre.
       const level = levelFor(q.d);
-      if (level === sq.level) continue;
-      const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look);
-      if (sq.meshes) drop(sq.meshes); else farDirty.add(blockOf(sq.i, sq.j));
-      sq.meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
-      for (const mesh of sq.meshes) scene.add(mesh);
-      sq.level = level; sq.triangles = m.triangles;
-      budget--; rebuilt++;
-      if (q.d < 200) light.redraw();
+      if (level !== sq.level || !sq.meshes) {
+        const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look);
+        if (sq.meshes) drop(sq.meshes); else if (!sq.fineShown) farDirty.add(blockOf(sq.i, sq.j));
+        sq.meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
+        for (const mesh of sq.meshes) scene.add(mesh);
+        sq.level = level; sq.triangles = m.triangles;
+        budget--; rebuilt++;
+        if (q.d < 200) light.redraw();
+      }
+      // (Its quarters let go of only once it is drawn at a metre again, so that no hole shows between.)
+      if (sq.fine) { for (const p of sq.fine) drop(p.meshes ?? []); sq.fine = null; sq.fineShown = false; }
     }
     // The far land: a block or two a frame, where squares have come or gone; and the air's maps of it, once it is all in.
     let farBudget = 2;
@@ -322,6 +434,7 @@ async function start(): Promise<void> {
       hud.textContent = `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
         `frame ${st.frameMs.toFixed(1)} ms · drawn ${st.drawnTriangles.toLocaleString()} triangles\n` +
         `squares ${st.squares} (${st.pending} coming), ${st.squareTriangles.toLocaleString()} triangles; a square ${st.squareMsMiddle.toFixed(0)} ms in a worker (${cores} at work)\n` +
+        (fineOn ? `at half a metre ${st.fine} (${st.finePending} coming), ${st.fineTriangles.toLocaleString()} triangles; four ${st.fineMsMiddle.toFixed(0)} ms\n` : '') +
         `grass in ${st.lowBlocks} blocks · ${st.treeBlocks} blocks of whole trees · ${st.farTreeCards.toLocaleString()} painted trees\n` +
         `at ${me.x.toFixed(0)}, ${me.z.toFixed(0)}, ground ${groundY.toFixed(1)} m${flying ? ', flying' : ''}`;
     }

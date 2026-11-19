@@ -1,6 +1,6 @@
 import { Rng } from './rng';
 import { fbmd, HeightField, landDetail, wearByFrost, wearByWater } from './terrain';
-import { Ground, withGrounds } from './fit';
+import { Ground, groundsOpen, withGrounds } from './fit';
 
 /**
  * The world's land at a metre, made a square at a time where it is wanted (`docs/06-world.md`,
@@ -117,6 +117,78 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
     out[k] = withGrounds(grounds, x0 + ii, z0 + jj, out[k]);
   }
   return { i, j, x0, z0, heights: out, errors: errorsOf(out), ms: performance.now() - t0 };
+}
+
+/**
+ * A square may be split into four of 128 metres, 257 points a side at half a metre, where the walker
+ * is near and asks for it (`refineSquare`).
+ */
+export const FINE = { cell: 0.5, size: 128 };
+/** The light wear a finer square is given at half a metre, on top of the square's own: rills a metre across, and how deep they may cut or fill. */
+const FINE_WEAR = { drops: 0.5, life: 60, inertia: 0.1, capacity: 0.3, erode: 0.1, deposit: 0.2, evaporate: 0.02, gravity: 4, radius: 2, most: 0.06 };
+const FINE_CUT = 0.35, FINE_FILL = 0.2, FINE_FADE = 12;
+
+/**
+ * Unevenness finer than a metre, in metres: tussocks and stones a hand high, more of them in some
+ * patches than in others. A function of where a point lies alone, so that two finer squares meet. (Its
+ * finest bumps are some two metres across: anything less would only flicker at half a metre.)
+ */
+export function fineAt(x: number, z: number, seed: number): number {
+  const patch = smooth(0.5 + 1.5 * fbmd(x / 21, z / 21, 2, seed + 31));
+  const tussocks = Math.max(0, fbmd(x / 1.1, z / 1.1, 1, seed + 37) + 0.04) * (0.14 + 0.22 * patch);
+  const hummocks = 0.05 * fbmd(x / 3.2, z / 3.2, 1, seed + 41);
+  // (Less what tussocks add on the whole, so the finer ground lies about where the square's own does.)
+  return tussocks + hummocks - 0.019 - 0.02 * patch;
+}
+
+/** A quarter of a square at half a metre: where it lies, its heights (257 by 257 from its north-west corner), and how far each point may be left out. */
+export interface FineSquare { x0: number; z0: number; heights: Float32Array; errors: Float32Array }
+
+/**
+ * Splits a made square into four at half a metre. Its own heights are drawn out smooth between its
+ * points (Catmull-Rom, each way in turn, reading only points of the square itself, so that along an
+ * edge only the edge is read and two squares drawn out meet as they did); the tussocks and stones of
+ * `fineAt` are laid on; and rills are worn a little, fading out towards the square's edge as its own
+ * wear does. None of it is laid on the houses' grounds, which are in the square already. Where a finer
+ * square meets a square at a metre, the two differ by the tussocks alone, a hand at most, and the
+ * skirts hide it.
+ */
+export function refineSquare(coarse: Float32Array, i: number, j: number, x0: number, z0: number, seed: number, grounds: Ground[] = []): { quarters: FineSquare[]; ms: number } {
+  const t0 = performance.now(), c = SQUARE.n, last = c - 1, n = 2 * last + 1;
+  const at = (a: number) => Math.min(last, Math.max(0, a));
+  // Catmull-Rom halfway between two points, from the two either side.
+  const half = (p0: number, p1: number, p2: number, p3: number) => (-p0 + 9 * p1 + 9 * p2 - p3) / 16;
+  // Along the rows first (every point of each row of the square, and halfway between), then down the columns.
+  const rows = new Float32Array(c * n);
+  for (let r = 0; r < c; r++) for (let k = 0; k < n; k++) {
+    const a = k >> 1, row = r * c;
+    rows[r * n + k] = k & 1 ? half(coarse[row + at(a - 1)], coarse[row + a], coarse[row + at(a + 1)], coarse[row + at(a + 2)]) : coarse[row + a];
+  }
+  const f = new HeightField(x0, z0, FINE.cell, n, n);
+  for (let jj = 0; jj < n; jj++) for (let k = 0; k < n; k++) {
+    const b = jj >> 1;
+    f.data[jj * n + k] = jj & 1 ? half(rows[at(b - 1) * n + k], rows[b * n + k], rows[at(b + 1) * n + k], rows[at(b + 2) * n + k]) : rows[b * n + k];
+  }
+  const drawn = f.data.slice();
+  for (let jj = 0; jj < n; jj++) for (let ii = 0; ii < n; ii++) f.data[jj * n + ii] += fineAt(x0 + ii * FINE.cell, z0 + jj * FINE.cell, seed);
+  // The rills, only so deep, and only so much of them as lies far enough in from the square's edge.
+  const shaped = f.data.slice();
+  wearByWater(f, new Rng(`fine/${seed}/${i},${j}`), FINE_WEAR);
+  wearByFrost(f, 1, 1.4, 0.4);
+  for (let jj = 0; jj < n; jj++) for (let ii = 0; ii < n; ii++) {
+    const k = jj * n + ii, edge = Math.min(ii, jj, n - 1 - ii, n - 1 - jj) * FINE.cell;
+    const worn = Math.max(shaped[k] - FINE_CUT, Math.min(shaped[k] + FINE_FILL, f.data[k]));
+    const added = shaped[k] - drawn[k] + (worn - shaped[k]) * smooth(edge / FINE_FADE);
+    // (The houses' grounds are in the square already, levelled; none of this is laid on them, and it eases in beyond.)
+    f.data[k] = drawn[k] + added * (grounds.length ? groundsOpen(grounds, x0 + ii * FINE.cell, z0 + jj * FINE.cell) : 1);
+  }
+  const quarters: FineSquare[] = [];
+  for (let q = 0; q < 4; q++) {
+    const qi = (q & 1) * last, qj = (q >> 1) * last, h = new Float32Array(c * c);
+    for (let jj = 0; jj < c; jj++) h.set(f.data.subarray((qj + jj) * n + qi, (qj + jj) * n + qi + c), jj * c);
+    quarters.push({ x0: x0 + qi * FINE.cell, z0: z0 + qj * FINE.cell, heights: h, errors: errorsOf(h) });
+  }
+  return { quarters, ms: performance.now() - t0 };
 }
 
 /**

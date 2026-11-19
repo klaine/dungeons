@@ -281,9 +281,13 @@ by how far off it lies (2 centimetres within a dozen metres, 5 within thirty, 10
 centimetres at 60, 125, 250, 500 and a thousand), and meshed again, a few a frame, as one moves;
 squares let go of beyond a kilometre; beyond them the world's lattice of 8 metres, read every 32, in
 blocks of a kilometre with holes where squares are, a metre low. One walks on the squares' heights
-(or flies, `V`); `1` to `4` go to the valley heads, with Shift the islands, with Ctrl the mountain tops;
-`M` shows the triangles. `tools/stream.ts` makes squares about each place without a browser and checks
-that neighbours meet; `tools/browser/walk.cjs` walks the page to places and keeps pictures.
+(or flies, `V`, rising with Space and sinking with `C`); two menus choose the world (`#w3` after the
+address does too) and the place to go to, `P` goes on to the next place, `1` to `4` to the valley heads
+and with Shift to the islands; `M` shows the triangles. By touch (`touch.ts`, after the game's own): a
+thumb stick wherever the left of the screen is touched, pushed well past its rim to run; looking about by
+dragging on the right; buttons to fly, to rise and sink while flying, and to go on to the next place.
+`tools/stream.ts` makes squares about each place without a browser and checks that neighbours meet;
+`tools/browser/walk.cjs` walks the page to places and keeps pictures.
 
 **Drawn as the game draws** ("2 first": the game's ground, grass and trees on the walk page, to judge the
 land as it will look before anything is built on it; `src/worldwalk/dress.ts`). The game's own textures
@@ -304,10 +308,34 @@ cards out to 1.8 kilometres, as the valley's far hillsides have them. `?hour=`, 
 Not yet: water but the sea (lakes and rivers are not drawn), snow, tracks and roads on the ground, the
 places' houses.
 
+**At half a metre** (asked: "add touch controls and maybe a toggle to build with higher 0.5m
+resolution?"). The page's box **Half-metre ground** (`?fine`, `?fine=0`; the browser remembers it) splits
+each square within 150 metres of the walker into four of 128 metres at half a metre, and lets them go
+again beyond 230 (`refineSquare` in `stream.ts`, made in the same workers). The land at a metre has no
+detail finer than a metre (the valley tried at 0.8 metres looked as it did at 1.2), so made again at half
+a metre it would look the same: the half metre brings its own. A square's heights are drawn out between
+its points (Catmull-Rom, each way in turn, reading only points of the square, so along an edge only the
+edge); tussocks and stones are laid on (`fineAt`: bumps some two metres across and up to a hand high,
+thicker in some patches than others, a function of where a point lies alone); and rills are worn at half
+a metre, cutting 35 centimetres at most and filling 20, faded out over the last 12 metres towards the
+square's edge. None of it is laid on the houses' grounds (`groundsOpen` in `fit.ts`: none on a ground, all
+of it six metres beyond), which are in the square already; laying the grounds a second time moved their
+banks by up to 73 centimetres. So finer squares meet each other exactly, and meet a square at a metre to
+within the tussocks, which the skirts hide. A split square is drawn only once all four quarters are meshed
+(each to its own distance, `squareBuilders` with the spacing given), and the square at a metre is drawn
+again before they are let go of, so no hole shows between. Grass and trees wait for the ground they stand
+on to be what it will be drawn as, and are grown again when the box is changed.
+
 *Measured*, November 2026, in the cloud container of four cores, on `w2`:
 
 - A square takes 0.32 to 0.41 seconds to make (without a browser; 0.37 to 0.40 in a worker of the
   page). 147 edges shared between neighbouring squares about the twelve places differed by nothing.
+- Split into four at half a metre (`tools/stream.ts`, the nine squares about the first place, an
+  island): 0.85 to 0.98 seconds a square. The 60 edges the quarters share differed by nothing. From the
+  squares at a metre they were made from, at the points both have: 16 centimetres at most along the
+  squares' outer edges (the tussocks); inside, 3.7 centimetres on the whole and 40 at most (a rill). Of a
+  quarter's full lattice (131,072 triangles over a quarter of the ground), a mesh true to 2 centimetres
+  keeps 58%; to 5, 30%; 10, 11%; 20, 3%.
 - Of the 131,072 triangles of a square's full lattice, a mesh true to 2 centimetres keeps 84%; to 5,
   68%; 10, 53%; 20, 36%; 40, 19%; 80, 6%; 160, 1%. (More than measured before the detail was laid on:
   the ground at a metre now has a metre's worth of detail in it.)
@@ -321,7 +349,7 @@ places' houses.
 
 Not done: keeping squares once made (the browser's storage); the land beyond the squares is the world's
 lattice of 8 metres, which can lie some metres off the tiles' land where they meet, a step the skirts
-may not hide far off; and the game's ground, grass and trees on the squares, which is step 3.
+may not hide far off.
 
 ## Where next: the land, and places that fit it
 

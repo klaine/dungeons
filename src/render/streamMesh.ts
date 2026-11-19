@@ -67,22 +67,23 @@ export interface GroundLook {
 }
 
 /**
- * A square of land at a metre as the game's own meshes: turf where it is gentle and rock where it
- * is steep (as `layTerrain` lays the valley's sheet, a triangle at a time by how steep it is), with
- * the colours and fields the game's ground and rock materials read, true to within `maxError`
- * metres, and its skirts. Each mesh shares its points among its triangles.
+ * A square of land as the game's own meshes: turf where it is gentle and rock where it is steep (as
+ * `layTerrain` lays the valley's sheet, a triangle at a time by how steep it is), with the colours
+ * and fields the game's ground and rock materials read, true to within `maxError` metres, and its
+ * skirts. Each mesh shares its points among its triangles. `cell` is how far apart its points lie: a
+ * metre, or half a metre for the finer squares near the walker (`refineSquare`).
  */
-export function squareBuilders(x0: number, z0: number, heights: Float32Array, errors: Float32Array, maxError: number, look: GroundLook, bare = 0.72): { turf: MeshBuilder; rock: MeshBuilder; triangles: number } {
+export function squareBuilders(x0: number, z0: number, heights: Float32Array, errors: Float32Array, maxError: number, look: GroundLook, bare = 0.72, cell = 1): { turf: MeshBuilder; rock: MeshBuilder; triangles: number } {
   const size = SQUARE.n, last = size - 1, { triangles } = meshTriangles(errors, maxError);
   const turf = new MeshBuilder(), rock = new MeshBuilder();
   const ids = { turf: new Int32Array(size * size).fill(-1), rock: new Int32Array(size * size).fill(-1) };
   const normalAt = (k: number): [number, number, number, number] => {
     const i = k % size, j = (k - i) / size, l = i > 0 ? k - 1 : k, r = i < last ? k + 1 : k, u = j > 0 ? k - size : k, d = j < last ? k + size : k;
-    const gx = (heights[r] - heights[l]) / Math.max(1, r - l), gz = (heights[d] - heights[u]) / Math.max(1, (d - u) / size), len = Math.hypot(gx, 1, gz);
+    const gx = (heights[r] - heights[l]) / (Math.max(1, r - l) * cell), gz = (heights[d] - heights[u]) / (Math.max(1, (d - u) / size) * cell), len = Math.hypot(gx, 1, gz);
     return [-gx / len, 1 / len, -gz / len, Math.hypot(gx, gz)];
   };
   const add = (which: 'turf' | 'rock', k: number, drop = 0): number => {
-    const i = k % size, j = (k - i) / size, x = x0 + i, z = z0 + j, y = heights[k] - drop, [nx, ny, nz, slope] = normalAt(k);
+    const i = k % size, j = (k - i) / size, x = x0 + i * cell, z = z0 + j * cell, y = heights[k] - drop, [nx, ny, nz, slope] = normalAt(k);
     if (which === 'turf') {
       const c = look.turf(x, z, heights[k], slope);
       return turf.addVertex(x, y, z, nx, ny, nz, x * 2.3, z * 2.3, c[0], c[1], c[2], c[3] ?? 0, c[4] ?? 0, c[5] ?? 0, c[6] ?? 0);
@@ -101,7 +102,7 @@ export function squareBuilders(x0: number, z0: number, heights: Float32Array, er
     const ax = a % size, az = (a - ax) / size, bx = b % size, bz = (b - bx) / size, cx = c % size, cz = (c - cx) / size;
     if ((bz - az) * (cx - ax) - (bx - ax) * (cz - az) < 0) { const s = b; b = c; c = s; }
     // (Which mesh: by the triangle's own slope, as the valley's sheet is laid.)
-    const px = [a % size, b % size, c % size], pz = [(a - px[0]) / size, (b - px[1]) / size, (c - px[2]) / size], py = [heights[a], heights[b], heights[c]];
+    const ix = [a % size, b % size, c % size], px = ix.map((v) => v * cell), pz = [(a - ix[0]) / size, (b - ix[1]) / size, (c - ix[2]) / size].map((v) => v * cell), py = [heights[a], heights[b], heights[c]];
     const ux = px[1] - px[0], uy = py[1] - py[0], uz = pz[1] - pz[0], vx = px[2] - px[0], vy = py[2] - py[0], vz = pz[2] - pz[0];
     const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx, fl = Math.hypot(fx, fy, fz);
     const which = Math.abs(fy) / Math.max(1e-9, fl) < bare ? 'rock' : 'turf', mesh = which === 'turf' ? turf : rock;
