@@ -2,7 +2,7 @@ import { fbm2, Rng } from './rng';
 import { archipelago, findIslands, frameHeight, islandDetail, islandFrame, IslandSpot } from './archipelago';
 import { HeightField, leastPath, smoothLine, wornLattice } from './terrain';
 import { Building, Island, Place, Site } from './site';
-import { classicalVariations, footprintOf, planClassical } from './building';
+import { CLASSICAL, classicalVariations, dealDress, footprintOf, planClassical } from './building';
 
 /**
  * An island in the sea. Where a valley is a strip of land between two lines of rock, an island
@@ -986,6 +986,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
       const doorX = b.x - turn * (b.d / 2 + 3), doorZ = b.z;
       if (inland(island, doorX, doorZ) < 6 || !reached(doorX, doorZ)) continue;
       classicalVariations(b, m.fork('variations'));
+      // (Dressed from a stream of its own, on its level ground: its columns, if it has them, stand well within the levelled margin.)
+      dealDress(b, m.fork('dress'), { columns: true });
       b.plan = planClassical(b, m.fork('plan'));
       island.mansion = { building: b, y: round(y) };
       taken.push({ x: b.x, z: b.z, r: span });
@@ -1268,7 +1270,8 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   const lh = island.lighthouse;
   if (lh) footpath(lh.x + Math.cos(lh.door) * (lh.r + 2.2), lh.z + Math.sin(lh.door) * (lh.r + 2.2), 'lighthouse');
   if (island.castle) { const c = island.castle; footpath(c.x - Math.cos(c.facing) * 13, c.z - Math.sin(c.facing) * 13, 'castle'); }
-  if (island.mansion) { const b = island.mansion.building, turn = b.faces === 'w' ? 1 : -1; footpath(b.x - turn * (b.d / 2 + 2.5), b.z, 'mansion'); }
+  // (To the foot of its steps: further out where columns stand before its middle.)
+  if (island.mansion) { const b = island.mansion.building, turn = b.faces === 'w' ? 1 : -1, cols = b.portico && b.dress?.order === 'columns' ? CLASSICAL.columns + 0.4 : 0; footpath(b.x - turn * (b.d / 2 + 2.5 + cols), b.z, 'mansion'); }
   if (island.chapel) { const c = island.chapel; footpath(c.x - Math.cos(c.facing) * 12, c.z - Math.sin(c.facing) * 12, 'chapel'); }
 
   // Walls. On an island that was found, the head dyke: a dry-stone wall from coast to coast, beyond the house, between the ground

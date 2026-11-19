@@ -165,7 +165,7 @@ export function classicalVariations(b: Building, rng: Rng): void {
  * over the ground); and where the ground falls along its front (`fall`, how much lower at its right end than its left), it takes up as
  * much of that as its base allows. `columns` says whether there is room before it for the middle to come forward on columns.
  */
-export function dealDress(b: Building, rng: Rng, o: { raise?: number; fall?: number; columns?: boolean } = {}): void {
+export function dealDress(b: Building, rng: Rng, o: { raise?: number; fall?: number; columns?: boolean; forward?: boolean; fit?: boolean } = {}): void {
   if (b.style !== 'imperial') return;
   const r1 = (v: number) => Math.round(v * 10) / 10, middle = b.bays >> 1, several = !!(b.entrances && b.entrances.length > 1);
   const grand = b.bays >= 11 && rng.chance(0.55), plain = !grand && b.bays <= 7 && rng.chance(0.35);
@@ -176,6 +176,8 @@ export function dealDress(b: Building, rng: Rng, o: { raise?: number; fall?: num
   }
   const beside = b.portico ? middle - (d.centre - 1) / 2 : middle - (b.bays >= 7 ? 1 : 0);
   if (grand && !several && !b.arch && beside >= 3 && rng.chance(0.5)) d.pavilions = Math.min(beside - 1, rng.pick([1, 2, 2, 3]));
+  // (`forward` false: nothing may stand before the front's line, as along a street of houses wall to wall.)
+  if (o.forward === false) { d.pavilions = 0; d.order = 'pilasters'; }
   d.arches = plain ? 0 : rng.pick(grand ? [0, 1, 1, 2] : [0, 0, 0, 1, 2]) as 0 | 1 | 2;
   if (b.storeys < 2 && d.arches > 1) d.arches = 1;
   d.heads = plain ? rng.pick(['plain', 'cornice'] as const) : rng.pick(['alternate', 'alternate', 'cornice', 'pediments', ...(grand ? ['pediments' as const] : [])] as const);
@@ -190,6 +192,8 @@ export function dealDress(b: Building, rng: Rng, o: { raise?: number; fall?: num
   d.style = rng.fork('style').pick(grand ? ['empire', 'empire', 'quoins'] as const : plain ? ['empire', 'lesenes', 'lesenes', 'bare'] as const : ['empire', 'empire', 'empire', 'quoins', 'lesenes'] as const);
   if (o.raise && o.raise > CLASSICAL.plinth && !b.sunk && (grand ? rng.chance(0.6) : rng.chance(0.2))) d.plinth = r1(rng.range(Math.min(1.1, o.raise), o.raise));
   // (The ground at its upper end stays a little under its floor.)
+  // (`fit`: the plinth raised, as far as `raise` allows, until the floor stands over the ground at the upper end.)
+  if (o.fall && !b.sunk && o.fit) d.plinth = r1(Math.max(d.plinth, Math.min(Math.max(o.raise ?? 0, CLASSICAL.plinth), 0.4 + Math.abs(o.fall) / 2)));
   if (o.fall && !b.sunk) { const most = 2 * (d.plinth - 0.35); d.fall = r1(Math.min(most, Math.max(-most, o.fall))); }
   if ((Object.keys(PLAIN_DRESS) as (keyof ClassicalDress)[]).some((key) => d[key] !== PLAIN_DRESS[key])) b.dress = d;
 }
