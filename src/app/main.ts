@@ -81,6 +81,8 @@ const QUALITY = {
   low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0 },
   medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 512 },
   high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
+  // As high, with surfaces painted at 2048: four times the painting time and about a gigabyte of video memory, for desktops with room to spare.
+  ultra: { dpr: 1.5, tex: 2048, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
 };
 const coarse = window.matchMedia('(pointer: coarse)').matches;
 const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
