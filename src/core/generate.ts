@@ -4,7 +4,7 @@ import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
-import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
+import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
 import { classicalFront, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -314,6 +314,9 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
       // Towards the gap it draws in to the middle of it.
       const near = Math.min(1, Math.max(0, (z - (v.mouth - 30)) / 24));
       x += (middle(v.mouth) - x) * near * near;
+      // (And nowhere nearer either side than eight metres, measured square to the side: the sides draw in to the gap on a slant,
+      // and measured straight across, as above, a track thirteen metres off was four from the side, in the rock carved along it.)
+      for (let k = 0; k < 24 && insideOf(v, x, z) < 8; k++) x += ((edgeAt(v, 'w', z) + edgeAt(v, 'e', z)) / 2 - x) * 0.2;
     }
     track.push([round(x), round(z)]);
   }
@@ -378,6 +381,56 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
       (site.landmarks ??= []).push({ kind, angle, range: kind === 'castle' && far.chance(0.5) ? 'far' : 'near' });
     }
   }
+  // (Only once the land is made: the plain drafts the houses are judged by have no sea.)
+  if (coast && site.valley?.sea !== undefined) layHarbour(site, meadow, rng.fork('harbour'));
+}
+
+/**
+ * A coastal town's harbour: a quay of stone out from the shore at the valley's foot, as straight out as the water lets it reach
+ * deep water soonest, until it stands over two metres of water and a few strides more; boats riding beside it, and one or two drawn
+ * up on the shore beside its root, clear of the track and of what is built.
+ */
+function layHarbour(site: Site, meadow: Place, rng: Rng): void {
+  const v = site.valley!, sea = v.sea!, round = (n: number) => Math.round(n * 100) / 100;
+  const land = (x: number, z: number) => valleyLand(v, meadow.floor, meadow, x, z);
+  const [ex, ez] = site.track![site.track!.length - 1];
+  // The way out to deep water: of the bearings within thirty degrees either side of straight down the valley, the one that gets there soonest.
+  let best: { a: number; root: number; deep: number } | null = null;
+  for (let k = -6; k <= 6; k++) {
+    const a = Math.PI / 2 + (k / 6) * 0.52, cx = Math.cos(a), cz = Math.sin(a);
+    let root = -1, deep = -1;
+    for (let d = 0; d <= 80 && deep < 0; d += 0.5) {
+      const y = land(ex + cx * d, ez + cz * d);
+      if (root < 0 && y < sea + 0.5) root = d;
+      if (root >= 0 && y < sea - 2) deep = d;
+    }
+    if (root < 0) continue;
+    const reach = deep < 0 ? 80 : deep;
+    if (!best || reach - root < best.deep - best.root - 0.5) best = { a, root, deep: reach };
+  }
+  const a = best ? best.a : Math.PI / 2, cx = Math.cos(a), cz = Math.sin(a), root = best ? Math.max(0, best.root - 1.5) : 2;
+  const length = Math.min(34, Math.max(12, (best ? best.deep - root : 20) + rng.range(4, 8))), width = round(rng.range(3.2, 4.2));
+  const from: [number, number] = [round(ex + cx * root), round(ez + cz * root)], to: [number, number] = [round(from[0] + cx * length), round(from[1] + cz * length)];
+  const boats: NonNullable<NonNullable<Site['valley']>['harbour']>['boats'] = [];
+  const clear = (x: number, z: number, r: number) => boats.every((b) => Math.hypot(b.x - x, b.z - z) > r + b.length / 2) &&
+    (site.buildings ?? []).every((b) => Math.hypot(b.x - x, b.z - z) > Math.max(b.w, b.d) / 2 + r + 1.5);
+  // Riding beside the quay, out where there is water under them.
+  for (let tries = 0, want = rng.int(2, 4); tries < 40 && boats.filter((b) => b.afloat).length < want; tries++) {
+    const f = rng.range(0.35, 0.92) * length, side = rng.chance(0.5) ? 1 : -1, off = width / 2 + rng.range(1.9, 3.2), len = rng.range(4.6, 6.4);
+    const x = from[0] + cx * f - cz * side * off, z = from[1] + cz * f + cx * side * off;
+    if (land(x, z) > sea - 0.5 || !clear(x, z, 1.2)) continue;
+    boats.push({ x: round(x), z: round(z), heading: round(a + rng.range(-0.12, 0.12) + (rng.chance(0.5) ? Math.PI : 0)), length: round(len), afloat: true });
+  }
+  // Drawn up on the shore to either hand of the quay's root, above the water and clear of the track.
+  for (let tries = 0, want = rng.int(1, 2); tries < 60 && boats.filter((b) => !b.afloat).length < want; tries++) {
+    const side = rng.chance(0.5) ? 1 : -1, off = rng.range(6, 14), back = rng.range(-6, 3), x = from[0] - cz * side * off - cx * back, z = from[1] + cx * side * off - cz * back, y = land(x, z);
+    if (y < sea + 0.25 || y > sea + 1.8 || !clear(x, z, 1.5)) continue;
+    let off2 = Infinity;
+    for (let k = 0; k + 1 < site.track!.length; k++) { const [px, pz] = site.track![k], [qx, qz] = site.track![k + 1], dx = qx - px, dz = qz - pz, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - px) * dx + (z - pz) * dz) / l2)); off2 = Math.min(off2, Math.hypot(x - px - dx * t, z - pz - dz * t)); }
+    if (off2 < 4) continue;
+    boats.push({ x: round(x), z: round(z), heading: round(a + Math.PI + rng.range(-0.5, 0.5)), length: round(rng.range(4.2, 5.6)), afloat: false });
+  }
+  v.harbour = { quay: { from, to, width }, boats };
 }
 
 /**

@@ -24,6 +24,8 @@ export interface WorldLand {
   tiles: Map<string, { ox: number; oz: number; field: HeightField }>;
   /** The places found in it. */
   places: WorldPlace[];
+  /** Its lakes as bodies of water (`World['lakes']`), for whoever draws the country about a place. */
+  lakes?: World['lakes'];
   /** The world itself, where it was made in this thread (its tiles can then be made here too). */
   world?: World;
 }
@@ -65,7 +67,7 @@ export function worldLand(seed: string): WorldLand {
 export function landOfWorld(w: World): WorldLand {
   const had = LANDS.get(keyOf(w.plan.seed));
   if (had && had.world === w) return had;
-  const land: WorldLand = { seed: w.plan.seed, hx: w.plan.hx, hz: w.plan.hz, field: w.field, tiles: new Map(), places: w.places, world: w };
+  const land: WorldLand = { seed: w.plan.seed, hx: w.plan.hx, hz: w.plan.hz, field: w.field, tiles: new Map(), places: w.places, lakes: w.lakes, world: w };
   LANDS.set(keyOf(w.plan.seed), land);
   return land;
 }
@@ -92,6 +94,15 @@ export function* makeTilesNear(land: WorldLand, x: number, z: number, r: number)
     const t: Tile = worldTile(w, i, j);
     land.tiles.set(`${i},${j}`, { ox: t.ox, oz: t.oz, field: t.field });
   }
+}
+
+/**
+ * A point of the world in a place's own site: the inverse of the place's frame (`valleyFrame`, `islandFrame`, `worldFrame`), which
+ * lays the site's point (`hx`, `hz`) over the world's (`u`, `v`), turned by `turn`.
+ */
+export function toSite(frame: { u: number; v: number; turn: number }, hx: number, hz: number, x: number, z: number): [number, number] {
+  const c = Math.cos(frame.turn), sn = Math.sin(frame.turn), du = x - frame.u, dv = z - frame.v;
+  return [hx + c * du + sn * dv, hz - sn * du + c * dv];
 }
 
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };

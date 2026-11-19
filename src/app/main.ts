@@ -474,11 +474,12 @@ async function start(): Promise<void> {
   // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
   // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
   const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
-  if (sea && site?.island) {
-    const isle = site.island;
+  // (An island's boats, or those in a coastal town's harbour.)
+  const riding = site?.island ? { boats: site.island.boats, sea: site.island.sea } : site?.valley?.harbour && site.valley.sea !== undefined ? { boats: site.valley.harbour.boats, sea: site.valley.sea } : null;
+  if (sea && riding) {
     scene.traverse((m) => {
-      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? isle.boats[Number(n[1])] : undefined;
-      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: isle.sea });
+      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? riding.boats[Number(n[1])] : undefined;
+      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: riding.sea });
     });
   }
   const floatTilt = new Quaternion(), floatUp = new Vector3(0, 1, 0), floatN = new Vector3(), floatTurn = new Matrix4(), floatBack = new Matrix4();

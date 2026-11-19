@@ -19,7 +19,7 @@ self.onmessage = (e: MessageEvent) => {
     const f = w.field;
     // (Copied, not handed over: the tiles are made from the world, which stays here.)
     self.postMessage({ type: 'world', world: {
-      plan: w.plan, name: w.name, places: w.places, towns: w.towns,
+      plan: w.plan, name: w.name, places: w.places, towns: w.towns, lakes: w.lakes,
       field: { x0: f.x0, z0: f.z0, cell: f.cell, nx: f.nx, nz: f.nz, data: f.data.slice() },
       cover: w.cover.slice(), sea: w.sea.slice(), grid: { stride: TILE.stride, over: TILE.over, hx: w.plan.hx, hz: w.plan.hz },
     } });

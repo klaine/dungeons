@@ -394,6 +394,12 @@ export interface Valley {
    * sea, which comes up to the gap at its foot, where the player arrives. The town is the valley's village, along the track.
    */
   sea?: number;
+  /**
+   * At a coastal town, its harbour: a quay of stone from the shore at the valley's foot out into water deep enough for boats, from
+   * `from` to `to`, `width` across, at whose end the player comes in by boat; and the boats, riding beside it (`afloat`) or drawn up
+   * on the shore, as an island's are (`Island.boats`).
+   */
+  harbour?: { quay: { from: [number, number]; to: [number, number]; width: number }; boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[] };
 }
 
 /**

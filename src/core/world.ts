@@ -230,6 +230,11 @@ export interface World {
   /** 1 where the sea is; where a lake stands, its surface (else 0); what lies at each point (`COVER`). */
   sea: Uint8Array;
   lake: Float32Array;
+  /**
+   * The lakes, each as a body of water: a point in it, the level of its surface, and its shore as a ring of points round that point
+   * (where a ray from it first leaves the lake, a few metres out over the shore: the water shows only where the land is under it).
+   */
+  lakes: { x: number; z: number; level: number; outline: [number, number][] }[];
   cover: Uint8Array;
   /** How much ground drains through each point, square metres; and where it drains to next (-1 into the sea or off the world). */
   acc: Float32Array;
@@ -481,6 +486,7 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   // (No lake below the sea's level: a hollow there, shut off from the sea, is land, wet.)
   for (let k = 0; k < n; k++) if (!sea[k] && filled[k] - h[k] > 0.8 && filled[k] > 0.3) lake[k] = filled[k];
   // (A lake of a few points is a hollow the wear left, not a lake: let it go.)
+  const lakes: World['lakes'] = [], body = new Int32Array(n);
   {
     const seen = new Uint8Array(n);
     for (let s = 0; s < n; s++) {
@@ -495,7 +501,23 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
           seen[m] = 1; cells.push(m);
         }
       }
-      if (cells.length < 40) for (const k of cells) lake[k] = 0;
+      if (cells.length < 40) { for (const k of cells) lake[k] = 0; continue; }
+      // (As a body of water, for whoever draws it: from the point of it nearest its middle, its shore along forty-eight rays.)
+      for (const k of cells) body[k] = lakes.length + 1;
+      let cx = 0, cz = 0;
+      for (const k of cells) { cx += f.x0 + (k % NX) * CELL; cz += f.z0 + Math.floor(k / NX) * CELL; }
+      cx /= cells.length; cz /= cells.length;
+      let o = cells[0], od = Infinity;
+      for (const k of cells) { const d = Math.hypot(f.x0 + (k % NX) * CELL - cx, f.z0 + Math.floor(k / NX) * CELL - cz); if (d < od) { od = d; o = k; } }
+      const ox = f.x0 + (o % NX) * CELL, oz = f.z0 + Math.floor(o / NX) * CELL, id = lakes.length + 1, outline: [number, number][] = [];
+      const inLake = (x: number, z: number) => { const i = Math.round((x - f.x0) / CELL), j = Math.round((z - f.z0) / CELL); return i >= 0 && j >= 0 && i < NX && j < NZ && body[j * NX + i] === id; };
+      for (let a = 0; a < 48; a++) {
+        const ux = Math.cos((a / 48) * TAU), uz = Math.sin((a / 48) * TAU);
+        let r = 0;
+        while (r < 4000 && inLake(ox + ux * (r + 4), oz + uz * (r + 4))) r += 4;
+        outline.push([Math.round(ox + ux * (r + 10)), Math.round(oz + uz * (r + 10))]);
+      }
+      lakes.push({ x: ox, z: oz, level: Math.round(lake[s] * 100) / 100, outline });
     }
   }
   const rivers = traceRivers(f, sea, acc, down);
@@ -503,7 +525,7 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   yield 'Seeing what grows';
   const cover = coverOf(p, f, sea, lake, acc);
   lap('cover');
-  const w: World = { plan: p, name: '', regions: { sea: '', bay: '', upland: '', range: '' }, peakNames: [], peaks: [], field: f, shaped, sea, lake, cover, acc, down, rivers, places: [], towns: [], ways: [], timing, why };
+  const w: World = { plan: p, name: '', regions: { sea: '', bay: '', upland: '', range: '' }, peakNames: [], peaks: [], field: f, shaped, sea, lake, lakes, cover, acc, down, rivers, places: [], towns: [], ways: [], timing, why };
 
   // ---- the places
   // Valley heads, in the tiles where the upland is; islands on the world's own lattice, where none crosses a tile's edge.

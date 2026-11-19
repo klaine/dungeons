@@ -14,7 +14,7 @@ export async function loadWorldPlace(seed: string, kind: WorldPlace['kind'], n: 
   const worker = new Worker(new URL('../worldwalk/worldWorker.ts', import.meta.url), { type: 'module' });
   const shelf = await worldShelf(import.meta.url, seed);
   let workerHas = false;
-  type WorldData = { plan: { hx: number; hz: number }; places: WorldPlace[]; field: { x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array } };
+  type WorldData = { plan: { hx: number; hz: number }; places: WorldPlace[]; lakes?: WorldLand['lakes']; field: { x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array } };
   try {
     let land = knownWorldLand(seed);
     if (!land) {
@@ -29,10 +29,10 @@ export async function loadWorldPlace(seed: string, kind: WorldPlace['kind'], n: 
         worker.postMessage({ type: 'world', seed });
         workerHas = true;
       });
-      if (!kept) await shelf?.set('world', { plan: { hx: data.plan.hx, hz: data.plan.hz }, places: data.places, field: data.field });
+      if (!kept) await shelf?.set('world', { plan: { hx: data.plan.hx, hz: data.plan.hz }, places: data.places, lakes: data.lakes, field: data.field });
       const f = new HeightField(data.field.x0, data.field.z0, data.field.cell, data.field.nx, data.field.nz);
       f.data.set(data.field.data);
-      land = adoptWorldLand({ seed, hx: data.plan.hx, hz: data.plan.hz, field: f, tiles: new Map(), places: data.places });
+      land = adoptWorldLand({ seed, hx: data.plan.hx, hz: data.plan.hz, field: f, tiles: new Map(), places: data.places, lakes: data.lakes });
     }
     const place = land.places.find((q) => q.kind === kind && q.n === n);
     if (!place) {

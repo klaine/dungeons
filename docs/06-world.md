@@ -421,8 +421,23 @@ is, on the course the world found from the house down to the sea: the house at t
 village along the track, which a coastal town always has, and the valley's foot, the gap between two crags
 where the player arrives, at the shore, where the land down the line of its stream comes to a metre over
 the sea. The sea is drawn there at the world's level (`valley.sea`), over the world's land below it, out to
-the horizon; the fence across the gap stands at the water's edge, and nothing of the far land's woods
-grows below the shore. Its floor is read again from the tiles once they are made, since it was found on
+the horizon; the fence across the gap stands at the water's edge, and nothing grows below the shore, of
+the far land's woods or the valley's own trees, bushes, grass and flowers. Its harbour (`layHarbour` in
+`generate.ts`): a quay of stone from the shore at the gap out over the water, along whichever bearing within
+thirty degrees of straight down the valley reaches two metres of water soonest, twelve to thirty-four metres
+long; two to four boats riding beside it where there is half a metre of water under them, and one or two drawn
+up on the shore clear of the track and of what is built. The quay and the boats are the island's own, lifted
+out of its builder to serve both (`layJetty`, `layBoat` in `coast.ts`; an island comes out of them the same to
+the last vertex). The player comes in by boat to the quay's end, facing the town; the fence across the gap
+opens where the quay leaves the shore, and runs along its sides until the quay's own begin.
+
+**The world's lakes about a place.** A world records each lake as a body of water: a point in it, the level
+of its surface, and its shore as a ring of points where rays from that point first leave it (`World.lakes`).
+About a place built in the world they are drawn out to three kilometres, at their own levels, in the place's
+own frame, as still water that does not mirror (a mirror is a second drawing of the scene, and a lake a
+kilometre off is not worth one): the water shows only where the land lies under it, so each fills its own
+hollow. `w2`'s places have six to twenty-one each, its islands none. Its rivers are not drawn: the largest are
+a few metres across, and from a place the land about it is read at five and eight metres. Its floor is read again from the tiles once they are made, since it was found on
 the coarser lattice.
 
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built
