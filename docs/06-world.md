@@ -442,11 +442,15 @@ hollow. `w2`'s places have six to twenty-one each, its islands none. A town's fr
 on the world's point, and its lakes are laid by that (asked: "ok implement the lakes as well"): `w2`'s four coastal
 towns have six to eighteen each within three kilometres. Within the tiles' reach, a kilometre and a half or so
 about a place, the lakes had been under the land: a tile is the world's land worn again at five metres, and its
-drops laid down what they carried in the still water, filling every lake some ten metres over its surface. Where
-the world has a lake, a tile's ground is now put back after its wear to what it was before (`worldTile`), and
-every lake about `w2`'s towns lies two to four metres deep at its point, its shore at or over its surface all
-round, or nearly. A tile's streams are worked out before the beds are put back, as over full lakes; the valley heads,
-looked for on the tiles, changed with the beds where a glen held a lake (`w2`'s second and fourth). Its rivers are not drawn: the largest are a few metres across, and from a place the land about
+drops laid down what they carried in the still water, filling every lake some ten metres over its surface. A
+tile's wear now spares the world's lakes, and less and less for twenty metres or so past their shores, so that a
+shore is worn land (`worldTile`); putting the beds back after the wear instead left them in pits with banks ten
+metres high, on the world's eight-metre squares. The tile's streams are worked out over the lakes' surfaces. Every
+lake about `w2`'s fourth town now lies three to four metres deep at its point, its shores sloping one in five to
+one in three, two in five at the steepest. Since the drops wander differently over the whole tile when any of it
+is spared, the valley heads, which are looked for on the tiles, came out other than they were: of `w2`'s four,
+only Strath Normere is still one, now the first, with Glen Valvie, Glen Selmere and Rosdendale; all four built
+sound without a browser. Its rivers are not drawn: the largest are a few metres across, and from a place the land about
 it is read at five and eight metres.
 
 Measured, November 2026, in the cloud container of four cores: the four valley heads of `w2` each built

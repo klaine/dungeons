@@ -392,20 +392,33 @@ export function worldTile(w: World, i: number, j: number): Tile {
     // (The sea's floor is spared: what the water brought down would otherwise build it up into flats and false islands.)
     keep[k] = 0.8 * smooth((-y - 1) / 6);
   }
-  const before = f.data.slice();
+  // (Nor the lakes: the drops dropped what they carried in the still water, and filled every lake some ten metres over its surface,
+  // so that a lake drawn about a place lay under the land. Spared where the world has a lake, and less so for twenty metres or so
+  // about it, so that its shore is worn land and not a step; putting the bed back after the wear left a bank ten metres high.)
+  const L = w.field, lakeCell = (li: number, lj: number) => (li < 0 || lj < 0 || li >= L.nx || lj >= L.nz ? 0 : w.lake[lj * L.nx + li]);
+  const inLake = (x: number, z: number) => {
+    const fx = (x - L.x0) / L.cell, fz = (z - L.z0) / L.cell, li = Math.floor(fx), lj = Math.floor(fz), tx = fx - li, tz = fz - lj;
+    const at = (a: number, b: number) => (lakeCell(a, b) > 0 ? 1 : 0);
+    return (at(li, lj) * (1 - tx) + at(li + 1, lj) * tx) * (1 - tz) + (at(li, lj + 1) * (1 - tx) + at(li + 1, lj + 1) * tx) * tz;
+  };
+  const levelAt = (x: number, z: number) => lakeCell(Math.round((x - L.x0) / L.cell), Math.round((z - L.z0) / L.cell));
+  for (let jj = 0; jj < TILE.n; jj++) for (let ii = 0; ii < TILE.n; ii++) {
+    const x = ox + f.x0 + ii * TILE.cell, z = oz + f.z0 + jj * TILE.cell, k = jj * TILE.n + ii;
+    let soft = 0;
+    for (const dz of [-12, 0, 12]) for (const dx of [-12, 0, 12]) soft += inLake(x + dx, z + dz) / 9;
+    if (soft > 0) keep[k] = Math.max(keep[k], smooth((soft - 0.1) / 0.6));
+  }
   wear(f, new Rng(`world/${p.seed}/tile/${i},${j}`), TILE_WEAR, keep);
+  // (The water's ways worked out over the lakes' surfaces, as water runs, not down into their beds.)
+  const surface = new HeightField(f.x0, f.z0, f.cell, f.nx, f.nz);
+  surface.data.set(f.data);
+  for (let jj = 0; jj < TILE.n; jj++) for (let ii = 0; ii < TILE.n; ii++) {
+    const k = jj * TILE.n + ii, level = levelAt(ox + f.x0 + ii * TILE.cell, oz + f.z0 + jj * TILE.cell);
+    if (level > 0) surface.data[k] = Math.max(surface.data[k], level);
+  }
   const outlet = new Uint8Array(TILE.n * TILE.n);
   for (let k = 0; k < outlet.length; k++) outlet[k] = f.data[k] < 0 ? 1 : 0;
-  // (The water's ways worked out as the lakes are, full: water runs over a lake's surface, and the places looked for along the
-  // streams are the same whether or not the lakes' beds are put back below.)
-  const { acc, down } = drain(f, outlet);
-  // (Nor the lakes' beds: the drops dropped what they carried in the still water, and filled every lake some ten metres over its
-  // surface, so that a lake drawn about a place lay under the land. Where the world has a lake, the bed is what it was before.)
-  const L = w.field, lakeAt = (x: number, z: number) => { const li = Math.round((x - L.x0) / L.cell), lj = Math.round((z - L.z0) / L.cell); return li < 0 || lj < 0 || li >= L.nx || lj >= L.nz ? 0 : w.lake[lj * L.nx + li]; };
-  for (let jj = 0; jj < TILE.n; jj++) for (let ii = 0; ii < TILE.n; ii++) {
-    const k = jj * TILE.n + ii, level = lakeAt(ox + f.x0 + ii * TILE.cell, oz + f.z0 + jj * TILE.cell);
-    if (level > 0 && before[k] < level) f.data[k] = Math.min(f.data[k], before[k]);
-  }
+  const { acc, down } = drain(surface, outlet);
   t = { i, j, ox, oz, field: f, acc, down };
   TILES.set(key, t);
   return t;
