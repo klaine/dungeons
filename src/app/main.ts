@@ -60,7 +60,7 @@ for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, 
 const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
 /** Goes to the place the given settings describe, by the `#` where the page is framed and by the `?` where it is not. */
 function go(next: URLSearchParams): void {
-  if (framed) { location.hash = next.toString(); location.reload(); } else go(next);
+  if (framed) { location.hash = next.toString(); location.reload(); } else location.search = next.toString();
 }
 /** Writes the settings into the address without going anywhere, so that a link or a reload brings them back. */
 function keep(next: URLSearchParams): void {
@@ -123,7 +123,10 @@ document.getElementById('new')!.addEventListener('click', newPlace);
 // The world's map: of the world this place is in, if it is in one, where its other places can be gone to.
 {
   const link = document.getElementById('worldmap') as HTMLAnchorElement | null;
-  if (link && worldSeed) { link.href = `world.html?${new URLSearchParams({ world: worldSeed })}`; link.textContent = 'World map'; }
+  // (Where the world page is, a page may say in its head, as the published copy does: `<meta name="dungeons-world" content="…">`.)
+  const page = document.querySelector<HTMLMetaElement>('meta[name="dungeons-world"]')?.content;
+  if (link && page) link.href = page;
+  if (link && worldSeed) { link.href = `${page ?? 'world.html'}#${new URLSearchParams({ world: worldSeed })}`; link.textContent = 'World map'; }
 }
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.

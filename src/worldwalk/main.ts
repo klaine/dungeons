@@ -33,6 +33,8 @@ import { WalkTouch } from './touch';
  */
 
 const params = new URLSearchParams(location.search);
+// (Settings may follow a `#` too, `#world=w2&at=valley1`, as the world page's links give them; a plain `#w2` names the world alone.)
+if (location.hash.includes('=')) for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, v);
 const hud = document.getElementById('hud')!;
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 const NEAR = Number(params.get('radius')) || 700, DROP = NEAR + 300;

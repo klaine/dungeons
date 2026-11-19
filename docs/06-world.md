@@ -372,7 +372,7 @@ from a sea of islands, each through a frame (`terrain`: a point of the land unde
 land's height there). A world is a third such land (`src/core/worldLand.ts`): its tiles where they are
 made, each weighed by how far inside its own lattice a point lies, as the squares at a metre weigh them;
 the world's lattice of 8 metres for the share of a tile not made, so that it passes from one to the other
-without a seam; and beyond the world's edge the world in a mirror laid along it. The frame's point and
+without a seam; and beyond the world's edge the world in a mirror laid along it, but the open sea beyond its southern edge. The frame's point and
 turn are the world's own coordinates and the place's turn as the world found it (a valley head turned to
 run south from the house; an island's house turned to face its landing), and the land is at its own
 height: an upland's glens were three tenths of theirs, since its hills stood two hundred metres sheer, but

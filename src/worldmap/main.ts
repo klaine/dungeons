@@ -13,6 +13,9 @@ const pick = <T>(list: T[]) => list[Math.floor(Math.random() * list.length)];
 const randomSeed = () => `${pick(WORDS_A)}-${pick(WORDS_B)}-${Math.floor(Math.random() * 90 + 10)}`;
 
 const params = new URLSearchParams(location.search);
+// (Or after a `#`: `#world=w2`, or `#w2` alone, which a page shown inside another keeps where it may not keep a `?`.)
+if (location.hash.includes('=')) for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, v);
+else if (/^[A-Za-z0-9-]{1,24}$/.test(location.hash.slice(1))) params.set('world', location.hash.slice(1));
 const input = document.getElementById('seed') as HTMLInputElement;
 const status = document.getElementById('status')!;
 const canvas = document.getElementById('map') as HTMLCanvasElement;
@@ -27,6 +30,9 @@ function draw(): void {
   if (view === 'ink') drawInkWorld(canvas, map); else drawWorldRelief(canvas, map);
 }
 
+/** Where another page of the tool is: as the page's head says (`<meta name="dungeons-game" content="…">`), or the usual file. */
+const pageOf = (name: string, usual: string) => document.querySelector<HTMLMetaElement>(`meta[name="dungeons-${name}"]`)?.content || usual;
+
 /** The places found, each with the way to it: a house built there and played (the game), or its land walked (the walk page). */
 function listPlaces(seed: string): void {
   if (!placesEl || !map) return;
@@ -38,8 +44,10 @@ function listPlaces(seed: string): void {
     name.textContent = q.name;
     kind.textContent = `${KIND[q.kind]} ${q.n} · ${Math.round(q.y)} m`;
     const link = (text: string, href: string) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
+    // (After a `#`, which a page shown inside another keeps where it may not keep a `?`; both pages read it. Where the game and the walk
+    // are, a page may say in its head, as the published copy does, where they are not the usual files.)
     const game = new URLSearchParams({ world: seed, place: q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
-    card.append(name, kind, document.createElement('br'), link('Build a house here', `./?${game}`), link('Walk the land', `./walk.html?${walk}`));
+    card.append(name, kind, document.createElement('br'), link('Build a house here', `${pageOf('game', './index.html')}#${game}`), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
     placesEl.append(card);
   }
 }

@@ -7,7 +7,8 @@ import { TILE, Tile, World, WorldPlace, worldTile, WORLD_SIZE, worldSteps } from
  * squares at a metre weigh them, `tilesAt` in `stream.ts`), and the world's own lattice of 8 metres
  * for the share of any tile not made; so near a place, where its tiles are made, the land is the
  * tiles', and further off it passes to the world's. Beyond the world's edge it is the world seen in
- * a mirror laid along that edge: land that goes on, with no streaks run out from the edge.
+ * a mirror laid along that edge: land that goes on, with no streaks run out from the edge; but the
+ * open sea beyond the southern edge.
  *
  * A place's site records which world it was built in (`terrain.world`), and whoever builds it reads
  * the world's land from here. In a browser the world and its tiles are made in a worker and handed
@@ -95,10 +96,14 @@ export function* makeTilesNear(land: WorldLand, x: number, z: number, r: number)
 
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
 
-/** The world's own lattice at a point, the world mirrored beyond its edge. */
+/**
+ * The world's own lattice at a point, the world mirrored beyond its edge; except beyond its southern edge, which is the open sea's,
+ * where the land sinks away. (Mirrored there too, the mountains of the far north stood across the water from the islands, white.)
+ */
 function fieldAt(land: WorldLand, x: number, z: number): number {
   const mirror = (v: number, h: number) => (v > h ? 2 * h - v : v < -h ? -2 * h - v : v);
-  return land.field.smoothAt(mirror(x, land.hx - 4), mirror(z, land.hz - 4));
+  const y = land.field.smoothAt(mirror(x, land.hx - 4), mirror(z, land.hz - 4)), past = z - land.hz;
+  return past > 0 ? Math.min(y, -12 - past * 0.03) : y;
 }
 
 /** The height of a world's land at a point of the world (`x` east, `z` south, metres from its middle). */
