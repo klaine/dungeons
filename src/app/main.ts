@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -239,6 +239,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
+  edgeUniforms.uEdges.value = num('edges', 1);
   // Each surface is painted in turn, with the page given a chance to draw between them.
   const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
   const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 1 : 0);
@@ -269,10 +270,12 @@ async function start(): Promise<void> {
   const talus = place === 'mountain' ? await paint('talus', texSize, 71) : null;
   doneGenerating();
   const materials: Record<string, Material> = {
-    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
+    // (Stone and timber cut square have their edges rounded in the shading: see `edgeOf`.)
+    // (`?edges=0` draws them sharp, as they were.)
+    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
+    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012 }),
     rock: makeRockMaterial(rock, moss),
     // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
     rockSheet: makeRockMaterial(rock, moss, { relief: true }),
@@ -1355,7 +1358,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { edgeUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

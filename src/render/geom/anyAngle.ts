@@ -26,6 +26,7 @@ export function anyAngle(mesh: (material: string) => MeshBuilder) {
     const flat = Math.abs(ny) > 0.7, side = Math.abs(nx) > Math.abs(nz);
     const ids = list.map((q) => m.addVertex(q[0], q[1], q[2], nx, ny, nz, (flat ? q[0] : side ? q[2] : q[0]) * scale, (flat ? q[2] : q[1]) * scale, colour[0], colour[1], colour[2]));
     for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+    m.markFace(ids);
   };
   const solid = (material: string, c: P3[], colour: Colour, scale = 0.5) => {
     const tone = shade(colour, 0.95 + 0.1 * (((count++ * 7919) % 13) / 13));

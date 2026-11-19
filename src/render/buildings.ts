@@ -64,6 +64,7 @@ export function buildingTools(b: Building, base: number, mesh: (material: string
     }
     const ids = list.map((p) => m.addVertex(p.x, p.y, p.z, N.x, N.y, N.z, p.dot(U) * scale, p.dot(V) * scale, colour[0], colour[1], colour[2]));
     for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+    m.markFace(ids);
   };
   /** A block between two opposite corners, square to the world. No two are quite the same tone. */
   const block = (material: string, a: Vector3, c: Vector3, colour: Colour, grain = false) => {

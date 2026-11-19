@@ -23,7 +23,7 @@ import { TextureSet } from './textures';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
   normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
@@ -102,6 +102,41 @@ const one = (x: N): N => float(1).sub(x);
 /** `smoothstep`, which may also be asked to fall instead of rise (the first edge above the second). */
 const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x)) : smoothstep(a, b, x));
 
+/**
+ * The edges of what is cut square: blocks, steps, sills, cornices, timbers. Nothing cut by hand has an edge as sharp as a box's: a
+ * dressed stone's arris is eased by the mason and then by weather, a step's nose by feet, a beam's by the adze and by years, and the
+ * rounded edge catches a thin line of light where the two faces turn away from each other; there too the stone is chipped and worn
+ * paler. Drawn as plain boxes, a building's mouldings and a stair's treads read as cut card. Modelled, every edge would be some
+ * dozen more triangles, and there are a great many of them; so the rounding is drawn instead (a bevel in the shading only): every
+ * face of such a solid says where its corners are (`markFace`), and here the distance to each of its edges is worked out in metres
+ * (from how the face's own coordinates change across the picture, so that it holds for a face of any shape and any size), and within
+ * `radius` of an edge the surface is turned towards it, a little at first and half way to the next face at the edge itself, as a
+ * rounded arris turns. It fades out where the rounding would be smaller than a point of the picture. Gives the bent normal (from the
+ * one given, in the eye's terms) and how near an edge the point is, 0 to 1, for wear.
+ */
+export const edgeUniforms: { uEdges: { value: number } } = { uEdges: uniform(1) as N };
+const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
+  const e: N = attribute('aEdge', 'vec4');
+  const P: N = positionView, dPx: N = dFdx(P), dPy: N = dFdy(P);
+  const ng: N = normalize(normalViewGeometry);
+  // (The way each of the face's two coordinates rises across it, in metres, from how they change from one point of the picture to the next.)
+  const a: N = cross(dPy, ng), b: N = cross(ng, dPx), d0: N = dot(dPx, a);
+  const det: N = d0.add(select(d0.greaterThanEqual(0), float(1e-14), float(-1e-14)));
+  const rise = (f: N): N => a.mul(dFdx(f)).add(b.mul(dFdy(f))).div(det);
+  const gs: N = rise(e.x).toVar(), gt: N = rise(e.y).toVar(), g3: N = gs.add(gt).toVar();
+  const ls: N = max(length(gs), 1e-4), lt: N = max(length(gt), 1e-4), l3: N = max(length(g3), 1e-4);
+  const quad: N = step(0.25, e.z).mul(step(e.z, 0.75)), tri: N = step(0.75, e.z);
+  // (Not narrower than a point of the picture; and gone where it would be much narrower.)
+  const point: N = max(length(fwidth(P)), 1e-5), r: N = max(float(radius), point), shown: N = smoothstep(0.15, 0.6, float(radius).div(point)).mul(edgeUniforms.uEdges as N);
+  const near = (d: N): N => pow(clamp(float(1).sub(d.div(r)), 0, 1), 2);
+  const s0: N = near(e.x.div(ls)).mul(quad.add(tri)), s1: N = near(float(1).sub(e.x).div(ls)).mul(quad);
+  const t0: N = near(e.y.div(lt)).mul(quad.add(tri)), t1: N = near(float(1).sub(e.y).div(lt)).mul(quad);
+  const u3: N = near(float(1).sub(e.x).sub(e.y).div(l3)).mul(tri);
+  const tilt: N = gs.div(ls).mul(s1.sub(s0)).add(gt.div(lt).mul(t1.sub(t0))).add(g3.div(l3).mul(u3)).mul(shown).toVar();
+  const wear: N = max(max(max(s0, s1), max(t0, t1)), u3).mul(shown);
+  return { bend: (n: N) => normalize(n.add(tilt)), wear };
+};
+
 /** The baked light on a surface facing `wn`. */
 const bakedAt = (wn: N): N => {
   const [r, g, b] = shOf(), n4 = vec4(1, wn);
@@ -164,7 +199,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near' } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -190,6 +225,12 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // from the bake, which says how much sky each point sees; until it arrives, nothing built has snow on it.
   const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y.add(one(stone.a).mul(0.1))).mul(smoothstep(0.3, 0.55, bk.x)).mul(uBake).toVar();
   colour = mix(colour, vec3(...SNOW), snowy);
+  // The edges of what is cut square, rounded in the shading (`edgeOf`), and a little paler where they are worn.
+  if (o.bevel) {
+    const edge = edgeOf(o.bevel);
+    colour = colour.mul(edge.wear.mul(0.12).add(1));
+    m.normalNode = edge.bend(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
+  }
   m.colorNode = vec4(colour, 1);
   m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
@@ -740,7 +781,10 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
     sheetCavity = r.cavity;
     m.colorNode = vec4((m.colorNode as N).xyz.mul(mix(1, sheetCavity, one(snowy))), 1);
   }
-  m.normalNode = transformNormalToView(bent);
+  // (Blocks of it laid by hand, steps, kerbs and cairns, have their edges rounded as dressed stone's are (`edgeOf`); what is carved has none to round.)
+  const rockEdge = edgeOf(0.03);
+  m.normalNode = rockEdge.bend(transformNormalToView(bent));
+  m.colorNode = vec4((m.colorNode as N).xyz.mul(rockEdge.wear.mul(0.1).add(1)), 1);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
   const inShaft = smoothstep(0.62, 0.95, bk.y).mul(step(bk.x, 0.004)).mul(step(0.001, uShaftTop.w));
