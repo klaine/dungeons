@@ -128,16 +128,52 @@ function makeMirror(size: number, level: number, x: number, z: number): Mirror {
   // What is marked as not to be mirrored is kept out of the picture.
   base.getVirtualCamera = (camera: Camera) => { const eye = eyeOf(camera); eye.layers.set(0); return eye; };
   const mirror: Mirror = { picture, depth: picture.getDepthNode(), at, level, size, unproject: uniform(new Matrix4()), eyeOf: base.getVirtualCamera, target: (camera: Camera) => base.getRenderTarget(base.getVirtualCamera(camera)), cut: null, readers: [] };
-  // Only the part of the picture that is read is painted (see `trim`). The picture is sized afresh just before it is drawn, every
-  // time, and sizing it opens it all again; so the cut is made after that. (Made before, it was undone every frame, and did nothing.)
-  const resize = base._updateResolution.bind(base);
-  base._updateResolution = (target: { width: number; height: number; scissor: Vector4; scissorTest: boolean }, renderer: unknown) => {
+  // Only the part of the picture that is read is drawn (see `trim`). The picture is sized afresh just before it is drawn, every time,
+  // and sizing it opens it all again; so the cut is made after that. (Made before, it was undone every frame, and did nothing.)
+  // And not only painted there: the mirror's eye is given a narrower view, which takes in that part alone and is drawn into that part
+  // of the picture alone, so that what lies outside it is not sent to be drawn at all. Point for point the picture is what the whole
+  // view would have drawn there. The eye's view is narrowed by narrowing the view of the eye it mirrors, for as long as the mirror
+  // takes to copy it, which is how its own view is set; and the picture's depths are read back through the same narrowing.
+  const resize = base._updateResolution.bind(base), draw = base.updateBefore.bind(base);
+  const kept = new Matrix4(), narrow = new Matrix4(), toPart = new Matrix4();
+  let eye: Camera | null = null, held: Camera | null = null, sized = false;
+  base._updateResolution = (target: { width: number; height: number; scissor: Vector4; viewport: Vector4; scissorTest: boolean }, renderer: unknown) => {
     resize(target, renderer);
+    // (The picture is also sized when the water's material is built, outside any drawing of the mirror: the eye is narrowed only
+    // while the mirror is being drawn, and only once, or it was left narrowed and the whole view went on through a keyhole.)
+    if (!eye || held) { target.scissorTest = false; return; }
+    sized = true;
+    toPart.identity();
     const c = mirror.cut;
     if (!c) { target.scissorTest = false; return; }
-    const w = target.width, h = target.height, left = Math.floor(c.x * w), top = Math.floor(c.y * h);
-    target.scissor.set(left, top, Math.max(1, Math.ceil((c.x + c.z) * w) - left), Math.max(1, Math.ceil((c.y + c.w) * h) - top));
+    const W = target.width, H = target.height;
+    const left = Math.max(0, Math.floor(c.x * W)), top = Math.max(0, Math.floor(c.y * H));
+    const w = Math.max(1, Math.min(W, Math.ceil((c.x + c.z) * W)) - left), h = Math.max(1, Math.min(H, Math.ceil((c.y + c.w) * H)) - top);
+    target.scissor.set(left, top, w, h);
+    target.viewport.set(left, top, w, h);
     target.scissorTest = true;
+    // (The part as it was rounded to whole points, so that the narrowed view fills it exactly: its middle and half its size, across
+    // and up, in the terms of the view it mirrors. Across is turned about: the right of the picture is the left of that view.)
+    const pl = left / W, pr = (left + w) / W, pt = top / H, pb = (top + h) / H;
+    const cx = 1 - pl - pr, hx = pr - pl, cy = 1 - pt - pb, hy = pb - pt;
+    narrow.set(1 / hx, 0, 0, -cx / hx, 0, 1 / hy, 0, -cy / hy, 0, 0, 1, 0, 0, 0, 0, 1);
+    kept.copy(eye.projectionMatrix);
+    held = eye;
+    eye.projectionMatrix.premultiply(narrow);
+    // (From a place in the whole picture to the same place in the narrowed view, in the mirror's own terms, where across is turned about.)
+    toPart.set(1 / hx, 0, 0, cx / hx, 0, 1 / hy, 0, -cy / hy, 0, 0, 1, 0, 0, 0, 0, 1);
+  };
+  base.updateBefore = (frame: { camera: Camera }) => {
+    eye = frame.camera;
+    sized = false;
+    try {
+      return draw(frame);
+    } finally {
+      if (held) { held.projectionMatrix.copy(kept); held = null; }
+      eye = null;
+      // From a place in the picture and its depth back to where the thing is, through the view it was drawn with.
+      if (sized) mirror.unproject.value.copy(base.getVirtualCamera(frame.camera).projectionMatrix).invert().multiply(toPart);
+    }
   };
   return mirror;
 }
@@ -490,7 +526,6 @@ export class Water {
   update(time: number, camera: Camera, viewHeight = 1024): void {
     this.uTime.value = time;
     for (const m of this.mirrors) m.picture.reflector.resolutionScale = Math.min(1, m.size / Math.max(1, viewHeight));
-    for (const m of this.mirrors) m.unproject.value.copy(m.eyeOf(camera).projectionMatrix).invert();
     this.trim(camera);
     // With the eye below the sheet there is no picture to be had; it gives way before that.
     if (this.sheet) this.uPictured.value = Math.min(1, Math.max(0, (camera.matrixWorld.elements[13] - this.sheet.level - 0.1) / 0.6));
