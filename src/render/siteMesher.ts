@@ -2455,7 +2455,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
           // (Its boughs kept out of the house: a great oak by a house standing free reached over its roofs and drooped into its court,
           // and through the arch from the court, where it stopped whoever walked through.)
-          keepOut: (q) => q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4),
+          // (Nor low over the track and the paths, where a bough at head height stopped whoever walked up from the gap.)
+          keepOut: (q) => (q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4)) || (q.y < y + 2.6 && Math.min(offTrack(q.x, q.z), offFoot(q.x, q.z)) < 1.2),
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }

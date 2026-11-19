@@ -365,7 +365,10 @@ Asked: "make the locations adapt and the game work with this kind of world creat
 its places on a world's when asked (`?world=w2&n=2`, with `place=island` for an island): the world made
 in a worker (the walk page's, `worldWorker.ts`) while the surfaces are painted, then the world's tiles of
 5 metres about the place, each a second or two (`src/app/worldPlace.ts`); then the site, as it is built
-anywhere, on that land.
+anywhere, on that land. A world once made, and its tiles, are kept in the browser (`worldStore.ts`, the last
+three worlds), so that going on to another place of the same world does not make it again; they are kept
+under the name of the program's own module, which in a build carries a hash of its code, so a world made by
+code since changed is never read back (in development nothing is kept).
 
 The seam was already there: a found valley read its land from an upland made by noise, a found island
 from a sea of islands, each through a frame (`terrain`: a point of the land under the house, a turn, the
