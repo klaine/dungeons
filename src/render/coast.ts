@@ -6,8 +6,11 @@ import { Kit } from './geom/kit';
 import { MeshBuilder } from './geom/meshBuilder';
 import { buildLandmark } from './landmarks';
 import { buildBuilding, litRoom } from './buildings';
-import { CLASSICAL } from '../core/building';
+import { CLASSICAL, plinthOf } from '../core/building';
 import { Colour } from './planting';
+import { anyAngle } from './geom/anyAngle';
+
+export { anyAngle };
 
 /**
  * What people have built on the island, other than the house: the jetty where the boats come
@@ -34,31 +37,6 @@ type P3 = [number, number, number];
 const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
 
 /** Solids at any angle: a face through points, wound away from a point inside; and a solid of eight corners, bottom four then top four, going round the same way. */
-export function anyAngle(mesh: (material: string) => MeshBuilder) {
-  let count = 0;
-  const face = (material: string, pts: P3[], colour: Colour, inside: P3, scale = 0.5) => {
-    const m = mesh(material);
-    const [a, b, c] = pts;
-    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]), ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]), nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    const l = Math.hypot(nx, ny, nz);
-    if (l < 1e-9) return;
-    nx /= l; ny /= l; nz /= l;
-    const mid = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
-    let list = pts;
-    if ((mid[0] - inside[0]) * nx + (mid[1] - inside[1]) * ny + (mid[2] - inside[2]) * nz < 0) { nx = -nx; ny = -ny; nz = -nz; list = [...pts].reverse(); }
-    // Texture laid from where the point is, on whichever plane the face lies most nearly in.
-    const flat = Math.abs(ny) > 0.7, side = Math.abs(nx) > Math.abs(nz);
-    const ids = list.map((q) => m.addVertex(q[0], q[1], q[2], nx, ny, nz, (flat ? q[0] : side ? q[2] : q[0]) * scale, (flat ? q[2] : q[1]) * scale, colour[0], colour[1], colour[2]));
-    for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
-  };
-  const solid = (material: string, c: P3[], colour: Colour, scale = 0.5) => {
-    const tone = shade(colour, 0.95 + 0.1 * (((count++ * 7919) % 13) / 13));
-    const inside: P3 = [0, 0, 0];
-    for (const q of c) { inside[0] += q[0] / 8; inside[1] += q[1] / 8; inside[2] += q[2] / 8; }
-    for (const f of [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]) face(material, f.map((i) => c[i]), tone, inside, scale);
-  };
-  return { face, solid };
-}
 
 /** A frame turned to face a bearing: `a` along to the right as one faces it, `f` forward, `y` up, about an origin. */
 function frame(x: number, z: number, y: number, facing: number) {
@@ -66,41 +44,40 @@ function frame(x: number, z: number, y: number, facing: number) {
   return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a];
 }
 
-export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
-  const { site, wild, rng } = c, o = site.island!, sea = o.sea;
-  const mesh = (m: string) => wild.mesh(m);
-  // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
-  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'window', 'metal', 'lamp', 'thatch', 'slate'];
-  const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
-  const indoors: ((x: number, y: number, z: number) => number)[] = [];
-  const { face, solid } = anyAngle(mesh);
-  const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
-  // How far a point lies from the track or any footpath: what stands about a house is kept off them, or the way would be blocked.
-  const ways = [site.track ?? [], ...(site.paths ?? []).map((w) => w.points)];
-  const offWay = (x: number, z: number) => {
-    let best = Infinity;
-    for (const line of ways) for (let k = 0; k + 1 < line.length; k++) {
-      const [ax, az] = line[k], [bx, bz] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
-      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
-      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
-    }
-    return best;
-  };
-  /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
+/** What a jetty of stone is laid from: where it runs, how it is come to, the sea, the ground, and where else it is kept open. */
+export interface JettyBuild {
+  jetty: { from: [number, number]; to: [number, number]; width: number };
+  /** From a `beach` its first strides come down to the sand as a ramp; from the foot of a cliff (`stair`), it is level. */
+  landing: 'beach' | 'stair';
+  sea: number;
+  ground: (x: number, z: number) => number;
+  stoneTint: Colour;
+  rockAt?: (q: Vector3, n: Vector3, field: Float32Array) => Colour;
+  fences: { min: Vector3; max: Vector3 }[];
+  rng: Rng;
+  /** Where the boxes that keep the walker on the jetty are left out (where a stair or a strand comes down to it). */
+  keepOpen?: (x: number, z: number) => boolean;
+}
+
+/**
+ * A jetty of big stones out from the shore, its deck a little above high water: courses of blocks, coping, bollards, what lies about on
+ * a working jetty, a mooring rope, a ladder at the end, and boxes nobody sees along its sides and across its end so that nobody steps
+ * off it into the water. An island's cove has one, and a coastal town's harbour. `solid` is the caller's, so that what it makes is
+ * shaded in turn with everything else. Gives the level of its deck.
+ */
+export function layJetty(j: JettyBuild, solid: ReturnType<typeof anyAngle>['solid']): number {
+  const sea = j.sea, deck = sea + 1.35;
+  const stone: Colour = [0.78 * j.stoneTint[0], 0.75 * j.stoneTint[1], 0.7 * j.stoneTint[2]];
   const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
     solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
-
-  // ---- the jetty: a pier of big stones from the beach out into the cove, its deck a little above high water
-  const deck = sea + 1.35;
-  {
-    const [ax, az] = o.jetty.from, [bx, bz] = o.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
-    const at = frame(ax, az, 0, heading), half = o.jetty.width / 2, q = rng.fork('jetty');
+    const [ax, az] = j.jetty.from, [bx, bz] = j.jetty.to, len = Math.hypot(bx - ax, bz - az), heading = Math.atan2(bz - az, bx - ax);
+    const at = frame(ax, az, 0, heading), half = j.jetty.width / 2, q = j.rng.fork('jetty');
     // (Where it starts on the beach, its deck comes down to the sand as a ramp.)
     // (Where it stands from the foot of a cliff it is level from end to end; from a beach it comes down to the sand.)
-    const rootY = o.landing === 'stair' ? deck : Math.min(deck, c.ground(ax, az) + 0.04);
+    const rootY = j.landing === 'stair' ? deck : Math.min(deck, j.ground(ax, az) + 0.04);
     for (let f = 0; f < len - 1e-6;) {
       const f1 = Math.min(len, f + q.range(1.1, 1.6)), y0 = rootY + (deck - rootY) * Math.min(1, f / 4), y1 = rootY + (deck - rootY) * Math.min(1, f1 / 4);
-      const foot = Math.min(c.ground(...at2(at, 0, f)), c.ground(...at2(at, 0, f1))) - 0.6;
+      const foot = Math.min(j.ground(...at2(at, 0, f)), j.ground(...at2(at, 0, f1))) - 0.6;
       // Each length is a course of big blocks, two or three across, each set a little proud or sunk of its neighbours and each its
       // own shade; below where the tide comes they are dark with weed. (One block the width of the pier read as a slab of concrete.)
       const across = q.chance(0.5) ? 2 : 3, gap = 0.035, weed = Math.min(y0, sea + 0.55);
@@ -111,7 +88,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
         if (weed > foot) solid('stone', [at(a0, foot, f), at(a1, foot, f), at(a1, foot, f1 - gap), at(a0, foot, f1 - gap), at(a0, weed, f), at(a1, weed, f), at(a1, weed, f1 - gap), at(a0, weed, f1 - gap)], [0.16 * tone, 0.17 * tone, 0.11 * tone], 0.35);
         const b0 = Math.max(foot, weed);
         // (Of the island's own stone, as the cliff it stands under is: its colour at that place, if the island says what that is.)
-        const local = c.rockAt ? c.rockAt(new Vector3(...at((a0 + a1) / 2, t0, (f + f1) / 2)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+        const local = j.rockAt ? j.rockAt(new Vector3(...at((a0 + a1) / 2, t0, (f + f1) / 2)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
         const weathered = local ? shade(local, 1.1 + (tone - 0.69) * 0.8) : shade(stone, tone), stain = q.next();
         if (stain < 0.15) { weathered[0] *= 1.12; weathered[1] *= 0.98; weathered[2] *= 0.82; } else if (stain < 0.35) { weathered[0] *= 0.92; weathered[1] *= 1.02; weathered[2] *= 0.9; }
         solid('stone', [at(a0, b0, f), at(a1, b0, f), at(a1, b0, f1 - gap), at(a0, b0, f1 - gap), at(a0, t0, f), at(a1, t0, f), at(a1, t1, f1 - gap), at(a0, t1, f1 - gap)], weathered, 0.35);
@@ -121,7 +98,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     // Coping along either edge, bollards, and a ladder of iron down the end into the water.
     for (const side of [-1, 1]) for (let f = 4.5; f < len - 0.3; f += 0.9) {
       // (The coping of the same stone, a little paler where it is worn by ropes and feet.)
-      const local = c.rockAt ? c.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
+      const local = j.rockAt ? j.rockAt(new Vector3(...at(side * (half - 0.21), deck + 0.14, f + 0.45)), new Vector3(0, 1, 0), new Float32Array(4)) : null;
       box(at, 'stone', side > 0 ? half - 0.42 : -half, side > 0 ? half : -half + 0.42, deck, deck + 0.14, f, Math.min(len, f + 0.9), local ? shade(local, 1.25) : shade(stone, 1.08), 0.4);
     }
     // Bollards of cast iron, as harbours have: a waisted barrel on a broad foot, and a flared head that a rope cannot slip over;
@@ -155,7 +132,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
       }
       // Fish boxes and creels near the root, where things are landed and carted off.
       // (On the level deck only, not the ramp down to a beach; and not against the bollard halfway out, nor the coil by the end one.)
-      let f = o.landing === 'stair' ? 1 : 4.3;
+      let f = j.landing === 'stair' ? 1 : 4.3;
       const end = len - 2.95, mid = len * 0.55;
       while (f < end) {
         if (f > mid - 1.3 && f < mid + 0.35) { f = mid + 0.35; continue; }
@@ -205,20 +182,49 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     for (let y = sea - 1; y < deck + 0.8; y += 0.3) box(at, 'metal', -0.22, 0.22, y, y + 0.03, len + 0.03, len + 0.06, [0.12, 0.07, 0.04]);
     // Nobody steps off the jetty into the water: the boxes nobody sees, along both sides beyond the beach and across the end.
     // (Nor across the strand of shingle that leaves the quay for the sea cave.)
-    const onStrand = (x: number, z: number) => {
-      if (!o.strand || o.landing !== 'stair') return false;
-      const l = o.strand;
-      for (let k = 0; k + 1 < l.length; k++) {
-        const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
-        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 2.4) return true;
-      }
-      return false;
-    };
-    const fence = (a: number, f: number) => { const p = at(a, 0, f); if (onStair(o, p[0], p[2]).off < 1.7 || onStrand(p[0], p[2])) return; c.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
+    const fence = (a: number, f: number) => { const p = at(a, 0, f); if (j.keepOpen?.(p[0], p[2])) return; j.fences.push({ min: new Vector3(p[0] - 0.3, sea - 6, p[2] - 0.3), max: new Vector3(p[0] + 0.3, deck + 4, p[2] + 0.3) }); };
     // (From a beach the first strides are over sand; from the foot of a cliff the water is deep from the first.)
-    for (let f = o.landing === 'stair' ? 0.2 : 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
+    for (let f = j.landing === 'stair' ? 0.2 : 5; f <= len + 0.4; f += 0.45) for (const side of [-1, 1]) fence(side * (half + 0.32), f);
     for (let a = -half; a <= half; a += 0.45) fence(a, len + 0.35);
-  }
+    return deck;
+}
+
+export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y: number; z: number } } {
+  const { site, wild, rng } = c, o = site.island!, sea = o.sea;
+  const mesh = (m: string) => wild.mesh(m);
+  // (What is built here is noted, mesh by mesh, so that what is indoors can be told afterwards and lit as indoors.)
+  const MATERIALS = ['plaster', 'stone', 'wood', 'glass', 'window', 'metal', 'lamp', 'thatch', 'slate'];
+  const begun = new Map(MATERIALS.map((m) => [m, mesh(m).vertexCount]));
+  const indoors: ((x: number, y: number, z: number) => number)[] = [];
+  const { face, solid } = anyAngle(mesh);
+  const stone: Colour = [0.78 * c.stoneTint[0], 0.75 * c.stoneTint[1], 0.7 * c.stoneTint[2]];
+  // How far a point lies from the track or any footpath: what stands about a house is kept off them, or the way would be blocked.
+  const ways = [site.track ?? [], ...(site.paths ?? []).map((w) => w.points)];
+  const offWay = (x: number, z: number) => {
+    let best = Infinity;
+    for (const line of ways) for (let k = 0; k + 1 < line.length; k++) {
+      const [ax, az] = line[k], [bx, bz] = line[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz;
+      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0;
+      best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
+    }
+    return best;
+  };
+  /** A block in a frame: from `a0` to `a1` across, `h0` to `h1` up, `f0` to `f1` forward. */
+  const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
+    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
+
+  // ---- the jetty: a pier of big stones from the beach out into the cove, its deck a little above high water
+  // (Kept open where the stair comes down to the quay, and along the strand of shingle that leaves it for the sea cave.)
+  const onStrand = (x: number, z: number) => {
+    if (!o.strand || o.landing !== 'stair') return false;
+    const l = o.strand;
+    for (let k = 0; k + 1 < l.length; k++) {
+      const [ax, az] = l[k], [bx, bz] = l[k + 1], dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1, t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2));
+      if (Math.hypot(x - ax - dx * t, z - az - dz * t) < 2.4) return true;
+    }
+    return false;
+  };
+  const deck = layJetty({ jetty: o.jetty, landing: o.landing === 'stair' ? 'stair' : 'beach', sea, ground: c.ground, stoneTint: c.stoneTint, rockAt: c.rockAt, fences: c.fences, rng, keepOpen: (x, z) => onStair(o, x, z).off < 1.7 || onStrand(x, z) }, solid);
 
   // ---- the stair cut in the cliff: a step at every half stride, cut in the cliff's own rock, set into the slope it is cut in.
   // They are for the eye, as the valley's are: what is walked on is the slope, so no foot catches on a riser.
@@ -409,44 +415,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
   }
 
   // ---- boats, drawn up on the beach or riding in the cove
-  o.boats.forEach((bt, n) => {
-    // (A boat riding in the cove is a mesh of its own, `boat` and its number, so that it can rise and fall with the swell.)
-    const was = wild.group;
-    if (bt.afloat) wild.group = `boat${n}`;
-    const q = rng.fork(`boat${n}`), L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
-    const y = bt.afloat ? sea - depth * 0.45 : c.ground(bt.x, bt.z) + 0.08;
-    const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
-    const at = frame(bt.x, bt.z, y, bt.heading);
-    const tilt = (a: number, h: number, f: number): P3 => at(a * Math.cos(roll) - h * Math.sin(roll), h * Math.cos(roll) + a * Math.sin(roll), f);
-    const paint: Colour = q.pick([[0.12, 0.27, 0.4], [0.5, 0.12, 0.08], [0.18, 0.35, 0.2], [0.75, 0.74, 0.7], [0.55, 0.42, 0.12]] as Colour[]);
-    // The hull: stations from stern to bow, each a rounded bottom and flaring sides; the outside painted, tarred below, the inside bare wood.
-    const S = 9, R = 5, sec: P3[][] = [], inner: P3[][] = [];
-    for (let i = 0; i <= S; i++) {
-      const f = -L + (2 * L * i) / S, t = i / S, w = B * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * t)), 0.6) * (t > 0.6 ? 1 - (t - 0.6) * 0.9 : 1), sheer = depth * (1 + 0.5 * (t > 0.5 ? (t - 0.5) * 2 : (0.5 - t) * 0.6));
-      const ring: P3[] = [], ringIn: P3[] = [];
-      for (let k = 0; k <= R; k++) {
-        const u = -1 + (2 * k) / R, a = u * w, h = sheer - depth * (1 - u * u) * 1.1 * (t > 0.92 ? 0.3 : 1) - (Math.abs(u) < 1 ? 0 : 0);
-        ring.push(tilt(a, h - sheer * 0.4 + depth * 0.6, f));
-        ringIn.push(tilt(a * 0.88, h - sheer * 0.4 + depth * 0.6 + 0.05, f));
-      }
-      sec.push(ring); inner.push(ringIn);
-    }
-    const mid = at(0, depth * 2, 0);
-    for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
-      const low = Math.abs(-1 + (2 * (k + 0.5)) / R) < 0.6;
-      face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], low ? [0.05, 0.045, 0.04] : paint, mid, 0.9);
-      face('wood', [inner[i][k], inner[i][k + 1], inner[i + 1][k + 1], inner[i + 1][k]], [0.42, 0.33, 0.22], at(0, -depth * 3, 0), 0.9);
-    }
-    // The gunwale joins inside to out along both sides, and the stern and bow are closed.
-    for (let i = 0; i < S; i++) for (const k of [0, R]) face('wood', [sec[i][k], sec[i + 1][k], inner[i + 1][k], inner[i][k]], [0.85, 0.83, 0.78], at(0, -depth * 5, 0), 0.9);
-    for (const i of [0, S]) for (let k = 0; k < R; k++) face('wood', [sec[i][k], sec[i][k + 1], inner[i][k + 1], inner[i][k]], paint, at(0, depth, i ? -L * 3 : L * 3), 0.9);
-    // Thwarts across, and a pair of oars laid in her.
-    for (const f of [-L * 0.45, 0.1, L * 0.4]) {
-      const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
-      solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
-    }
-    wild.group = was;
-  });
+  o.boats.forEach((bt, n) => layBoat(wild, mesh, bt, n, sea, c.ground, rng.fork(`boat${n}`)));
 
   // ---- the lighthouse
   const lh = o.lighthouse;
@@ -643,7 +612,7 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
     const b = o.mansion.building, turn = b.faces === 'w' ? 1 : -1;
     buildBuilding(b, o.mansion.y, mesh, rng.fork('mansion'), c.stoneTint, false);
     // Somebody left something in its entrance hall.
-    c.finds.push({ at: new Vector3(b.x - turn * (b.d / 2 - 3), o.mansion.y + CLASSICAL.plinth + 0.3, b.z + 0.6), what: 'a silver snuffbox' });
+    c.finds.push({ at: new Vector3(b.x - turn * (b.d / 2 - 3), o.mansion.y + plinthOf(b) + 0.3, b.z + 0.6), what: 'a silver snuffbox' });
   }
   return { deck, lamp: o.lighthouse ? { x: o.lighthouse.x, y: o.lighthouse.y + o.lighthouse.height + 1.6, z: o.lighthouse.z } : undefined };
 }
@@ -652,4 +621,132 @@ export function buildCoast(c: CoastBuild): { deck: number; lamp?: { x: number; y
 function at2(at: ReturnType<typeof frame>, a: number, f: number): [number, number] {
   const p = at(a, 0, f);
   return [p[0], p[2]];
+}
+
+/**
+ * A boat: clinker-built and open, drawn up on a beach or riding at her mooring (`afloat`); a boat afloat is a mesh of its own, `boat`
+ * and its number, so that she can rise and fall with the swell. For the island's cove and the town's harbour alike.
+ */
+export function layBoat(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }, n: number, sea: number, ground: (x: number, z: number) => number, rng: Rng): void {
+  if (bt.masts) { layVessel(wild, mesh, bt, n, sea, rng); return; }
+  const { face, solid } = anyAngle(mesh);
+  const was = wild.group;
+  if (bt.afloat) wild.group = `boat${n}`;
+  const q = rng, L = bt.length / 2, B = bt.length * 0.19, depth = bt.length * 0.09;
+  const y = bt.afloat ? sea - depth * 0.45 : ground(bt.x, bt.z) + 0.08;
+  const roll = bt.afloat ? 0 : q.range(-0.18, 0.18);
+  const at = frame(bt.x, bt.z, y, bt.heading);
+  const tilt = (a: number, h: number, f: number): P3 => at(a * Math.cos(roll) - h * Math.sin(roll), h * Math.cos(roll) + a * Math.sin(roll), f);
+  const paint: Colour = q.pick([[0.12, 0.27, 0.4], [0.5, 0.12, 0.08], [0.18, 0.35, 0.2], [0.75, 0.74, 0.7], [0.55, 0.42, 0.12]] as Colour[]);
+  // The hull: stations from stern to bow, each a rounded bottom and flaring sides; the outside painted, tarred below, the inside bare wood.
+  const S = 9, R = 5, sec: P3[][] = [], inner: P3[][] = [];
+  for (let i = 0; i <= S; i++) {
+    const f = -L + (2 * L * i) / S, t = i / S, w = B * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * t)), 0.6) * (t > 0.6 ? 1 - (t - 0.6) * 0.9 : 1), sheer = depth * (1 + 0.5 * (t > 0.5 ? (t - 0.5) * 2 : (0.5 - t) * 0.6));
+    const ring: P3[] = [], ringIn: P3[] = [];
+    for (let k = 0; k <= R; k++) {
+      const u = -1 + (2 * k) / R, a = u * w, h = sheer - depth * (1 - u * u) * 1.1 * (t > 0.92 ? 0.3 : 1) - (Math.abs(u) < 1 ? 0 : 0);
+      ring.push(tilt(a, h - sheer * 0.4 + depth * 0.6, f));
+      ringIn.push(tilt(a * 0.88, h - sheer * 0.4 + depth * 0.6 + 0.05, f));
+    }
+    sec.push(ring); inner.push(ringIn);
+  }
+  const mid = at(0, depth * 2, 0);
+  for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
+    const low = Math.abs(-1 + (2 * (k + 0.5)) / R) < 0.6;
+    face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], low ? [0.05, 0.045, 0.04] : paint, mid, 0.9);
+    face('wood', [inner[i][k], inner[i][k + 1], inner[i + 1][k + 1], inner[i + 1][k]], [0.42, 0.33, 0.22], at(0, -depth * 3, 0), 0.9);
+  }
+  // The gunwale joins inside to out along both sides, and the stern and bow are closed.
+  for (let i = 0; i < S; i++) for (const k of [0, R]) face('wood', [sec[i][k], sec[i + 1][k], inner[i + 1][k], inner[i][k]], [0.85, 0.83, 0.78], at(0, -depth * 5, 0), 0.9);
+  for (const i of [0, S]) for (let k = 0; k < R; k++) face('wood', [sec[i][k], sec[i][k + 1], inner[i][k + 1], inner[i][k]], paint, at(0, depth, i ? -L * 3 : L * 3), 0.9);
+  // Thwarts across, and a pair of oars laid in her.
+  for (const f of [-L * 0.45, 0.1, L * 0.4]) {
+    const wAt = B * 0.82 * Math.pow(Math.sin(Math.PI * (0.08 + 0.92 * ((f + L) / (2 * L)))), 0.6);
+    solid('wood', [tilt(-wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f - 0.1), tilt(wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.55, f + 0.1), tilt(-wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f - 0.1), tilt(wAt, depth * 0.62, f + 0.1), tilt(-wAt, depth * 0.62, f + 0.1)], [0.45, 0.36, 0.25], 0.9);
+  }
+  wild.group = was;
+}
+
+/**
+ * A decked vessel lying at her moorings: a smack of one mast, or a schooner of two. Her hull is stations from stern to bow, full
+ * amidships and fine at the bow, painted above a band at the waterline and tarred below; a deck of planks within low bulwarks with
+ * a rail, a hatch and a deckhouse; and her masts, raked a little aft, each with a boom low over the deck and a gaff above it, and
+ * the sail furled along the boom; a bowsprit; and the stays from the mastheads to the bow and the sides. A mesh of her own, `boat`
+ * and her number, so that she rides the swell.
+ */
+function layVessel(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number; z: number; heading: number; length: number; masts?: number }, n: number, sea: number, rng: Rng): void {
+  const { face, solid } = anyAngle(mesh);
+  const was = wild.group;
+  wild.group = `boat${n}`;
+  const q = rng, L = bt.length / 2, B = bt.length * 0.13, depth = Math.max(1.3, bt.length * 0.11), draft = depth * 0.62;
+  const at = frame(bt.x, bt.z, sea - draft, bt.heading);
+  const paint: Colour = q.pick([[0.05, 0.05, 0.055], [0.08, 0.16, 0.12], [0.1, 0.13, 0.22], [0.42, 0.1, 0.07], [0.78, 0.76, 0.7]] as Colour[]);
+  const band: Colour = q.pick([[0.8, 0.78, 0.72], [0.62, 0.1, 0.06], [0.75, 0.6, 0.15]] as Colour[]), tar: Colour = [0.06, 0.055, 0.05], deckC: Colour = [0.5, 0.42, 0.3];
+  // The hull: stations along her length, each a section full at the turn of the bilge and narrowing to the keel.
+  const S = 16, R = 6, sec: P3[][] = [];
+  const halfAt = (t: number) => B * Math.pow(Math.sin(Math.PI * (0.06 + 0.94 * t)), 0.55) * (t > 0.55 ? 1 - Math.pow((t - 0.55) / 0.45, 1.6) * 0.92 : 1 - Math.pow((0.55 - t) / 0.55, 2) * 0.35);
+  const sheerAt = (t: number) => depth * (1 + 0.28 * Math.pow(Math.abs(t - 0.45) / 0.55, 2));
+  for (let i = 0; i <= S; i++) {
+    const t = i / S, f = -L + 2 * L * t, w = Math.max(0.05, halfAt(t)), top = sheerAt(t), ring: P3[] = [];
+    for (let k = 0; k <= R; k++) {
+      const u = -1 + (2 * k) / R, a = u * w * (1 - 0.15 * (1 - u * u));
+      ring.push(at(a, top - depth * Math.pow(1 - u * u, 0.8) * (t > 0.92 ? 0.4 : 1), f));
+    }
+    sec.push(ring);
+  }
+  const mid = at(0, depth * 0.5, 0), wl = draft + 0.1;
+  for (let i = 0; i < S; i++) for (let k = 0; k < R; k++) {
+    const yAvg = (sec[i][k][1] + sec[i][k + 1][1] + sec[i + 1][k][1] + sec[i + 1][k + 1][1]) / 4 - (sea - draft);
+    face('wood', [sec[i][k], sec[i][k + 1], sec[i + 1][k + 1], sec[i + 1][k]], yAvg < wl ? tar : yAvg < wl + 0.22 ? band : paint, mid, 0.9);
+  }
+  // The transom across her stern, and the deck at the sheer; bulwarks and a rail along both sides.
+  face('wood', sec[0], paint, at(0, depth, L * 3), 0.9);
+  const deckL: P3[] = sec.map((r) => r[0]), deckR: P3[] = sec.map((r) => r[R]);
+  for (let i = 0; i < S; i++) face('wood', [deckL[i], deckR[i], deckR[i + 1], deckL[i + 1]], deckC, at(0, -depth * 4, 0), 0.9);
+  for (let i = 0; i < S; i++) for (const side of [-1, 1]) {
+    // (Each length of bulwark a board standing on the sheer, a hand thick, and a rail capping it.)
+    const t0 = i / S, t1 = (i + 1) / S, f0 = -L + 2 * L * t0, f1 = -L + 2 * L * t1, w0 = Math.max(0.05, halfAt(t0)), w1 = Math.max(0.05, halfAt(t1)), y0 = sheerAt(t0), y1 = sheerAt(t1);
+    solid('wood', [at(side * w0, y0, f0), at(side * w1, y1, f1), at(side * (w1 - 0.06), y1, f1), at(side * (w0 - 0.06), y0, f0), at(side * w0, y0 + 0.55, f0), at(side * w1, y1 + 0.55, f1), at(side * (w1 - 0.06), y1 + 0.55, f1), at(side * (w0 - 0.06), y0 + 0.55, f0)], paint);
+    solid('wood', [at(side * (w0 + 0.03), y0 + 0.55, f0), at(side * (w1 + 0.03), y1 + 0.55, f1), at(side * (w1 - 0.12), y1 + 0.55, f1), at(side * (w0 - 0.12), y0 + 0.55, f0), at(side * (w0 + 0.03), y0 + 0.63, f0), at(side * (w1 + 0.03), y1 + 0.63, f1), at(side * (w1 - 0.12), y1 + 0.63, f1), at(side * (w0 - 0.12), y0 + 0.63, f0)], [0.55, 0.45, 0.3]);
+  }
+  const deckY = (f: number) => sheerAt((f + L) / (2 * L));
+  const box = (a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, material = 'wood') =>
+    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, 0.9);
+  // A hatch amidships and a deckhouse aft.
+  box(-B * 0.32, B * 0.32, deckY(0) - 0.05, deckY(0) + 0.45, -L * 0.12, L * 0.12, [0.42, 0.33, 0.22]);
+  box(-B * 0.4, B * 0.4, deckY(-L * 0.6) - 0.05, deckY(-L * 0.6) + 1.5, -L * 0.78, -L * 0.48, q.pick([[0.7, 0.66, 0.58], [0.45, 0.32, 0.2]] as Colour[]));
+  box(-B * 0.46, B * 0.46, deckY(-L * 0.6) + 1.5, deckY(-L * 0.6) + 1.6, -L * 0.8, -L * 0.46, [0.3, 0.25, 0.2]);
+  // The masts, raked a little aft; boom, gaff and the furled sail; the bowsprit; the stays.
+  const masts = bt.masts ?? 1, spars: Colour = [0.55, 0.42, 0.26], sail: Colour = q.pick([[0.82, 0.76, 0.62], [0.62, 0.38, 0.22], [0.86, 0.84, 0.78]] as Colour[]);
+  const tops: P3[] = [];
+  for (let m = 0; m < masts; m++) {
+    const f0 = masts === 1 ? L * 0.25 : m === 0 ? L * 0.35 : -L * 0.2, h0 = deckY(f0), tall = bt.length * (masts === 1 ? 0.95 : m === 0 ? 0.62 : 0.68), rake = 0.05;
+    const rad = 0.09 + bt.length * 0.004;
+    for (let k = 0; k < 8; k++) {
+      const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2;
+      solid('wood', [at(Math.cos(a0) * rad, h0 - 0.4, f0 + Math.sin(a0) * rad), at(Math.cos(a1) * rad, h0 - 0.4, f0 + Math.sin(a1) * rad), at(0, h0 - 0.4, f0), at(0, h0 - 0.4, f0),
+        at(Math.cos(a0) * rad * 0.6, h0 + tall, f0 - tall * rake + Math.sin(a0) * rad * 0.6), at(Math.cos(a1) * rad * 0.6, h0 + tall, f0 - tall * rake + Math.sin(a1) * rad * 0.6), at(0, h0 + tall, f0 - tall * rake), at(0, h0 + tall, f0 - tall * rake)], spars);
+    }
+    tops.push(at(0, h0 + tall, f0 - tall * rake));
+    // The boom along the deck aft of the mast, the sail furled on it, and the gaff over it.
+    const bl = masts === 1 ? L * 1.15 : L * 0.55, hb = h0 + 1.2, beam = (a0: number, a1: number, y0: number, y1: number, fa: number, fb: number, colour: Colour, r: number) =>
+      solid('wood', [at(a0 - r, y0 - r, fa), at(a0 + r, y0 - r, fa), at(a0 + r, y0 + r, fa), at(a0 - r, y0 + r, fa), at(a1 - r, y1 - r, fb), at(a1 + r, y1 - r, fb), at(a1 + r, y1 + r, fb), at(a1 - r, y1 + r, fb)], colour);
+    beam(0, 0, hb, hb + 0.15, f0 - 0.2, f0 - bl, spars, 0.08);
+    beam(0, 0, hb + 0.18, hb + 0.3, f0 - 0.4, f0 - bl * 0.92, sail, 0.2);
+    beam(0, 0, h0 + tall * 0.62, h0 + tall * 0.62 + bl * 0.35, f0 - tall * 0.62 * rake - 0.2, f0 - bl * 0.75, spars, 0.065);
+  }
+  // The bowsprit, and the stays: forestays from the foremost masthead to the bowsprit's end, shrouds to either side.
+  const bowF = L * 0.98, sprit = at(0, deckY(L) + 0.4, bowF + bt.length * 0.18);
+  {
+    const p0 = at(0, deckY(L) + 0.2, bowF - 0.5);
+    solid('wood', [[p0[0], p0[1] - 0.09, p0[2]], [p0[0] + 0.09, p0[1], p0[2]], [p0[0], p0[1] + 0.09, p0[2]], [p0[0] - 0.09, p0[1], p0[2]], [sprit[0], sprit[1] - 0.06, sprit[2]], [sprit[0] + 0.06, sprit[1], sprit[2]], [sprit[0], sprit[1] + 0.06, sprit[2]], [sprit[0] - 0.06, sprit[1], sprit[2]]], spars);
+  }
+  const line = (a: P3, c: P3) => solid('metal', [[a[0] - 0.015, a[1], a[2]], [a[0] + 0.015, a[1], a[2]], [a[0], a[1], a[2] + 0.015], [a[0], a[1], a[2] - 0.015], [c[0] - 0.015, c[1], c[2]], [c[0] + 0.015, c[1], c[2]], [c[0], c[1], c[2] + 0.015], [c[0], c[1], c[2] - 0.015]], [0.12, 0.1, 0.08]);
+  line(tops[0], sprit);
+  if (tops[1]) line(tops[1], tops[0]);
+  for (const top of tops) for (const side of [-1, 1]) for (const df of [-0.6, 0.3]) {
+    const f = masts === 1 ? L * 0.25 + df : df + (top === tops[0] ? L * 0.35 : -L * 0.2), t2 = (f + L) / (2 * L);
+    line(top, at(side * halfAt(t2), deckY(f) + 0.6, f));
+  }
+  wild.group = was;
 }

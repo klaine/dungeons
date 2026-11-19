@@ -14,17 +14,18 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
-import { generateSite } from '../core/generate';
+import { generateSite, generateWorldPlace, MakeOptions } from '../core/generate';
 import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
 import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
+import { tileGeometry } from '../render/geom/tiles';
 import { Water } from '../render/water';
 import { Sea, swellAt } from '../render/sea';
 import { Birds } from '../render/birds';
@@ -38,13 +39,17 @@ import { inside as onMountain } from '../core/mountain';
 import { Sound, Surface } from './sound';
 import { Rng } from '../core/rng';
 import { drawPlan, placeAt } from '../maps/plan';
-import { meshSiteSteps } from '../render/siteMesher';
+import { meshSiteSteps, VALLEY_GROUND } from '../render/siteMesher';
 import { breathe, fail, finish as finishLoading, share, stage } from './loader';
+import { loadWorldPlace } from './worldPlace';
+import { WorldView } from './worldView';
+import { WorldPlace } from '../core/world';
+import { placeSeed, siteFrame } from '../core/worldLand';
 
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
-  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', sand: 'sand',
+  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
 };
 import { Torch, TorchLights } from '../render/torch';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
@@ -59,7 +64,7 @@ for (const [k, v] of new URLSearchParams(location.hash.slice(1))) params.set(k, 
 const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
 /** Goes to the place the given settings describe, by the `#` where the page is framed and by the `?` where it is not. */
 function go(next: URLSearchParams): void {
-  if (framed) { location.hash = next.toString(); location.reload(); } else go(next);
+  if (framed) { location.hash = next.toString(); location.reload(); } else location.search = next.toString();
 }
 /** Writes the settings into the address without going anywhere, so that a link or a reload brings them back. */
 function keep(next: URLSearchParams): void {
@@ -91,16 +96,29 @@ function randomSeed(): string {
   return `${pick(a)}-${pick(b)}-${Math.floor(Math.random() * 90 + 10)}`;
 }
 
-// Every place has a seed in its address, so a link reproduces it.
-if (!params.has('seed')) {
-  params.set('seed', randomSeed());
-  keep(params);
-}
-const seed = params.get('seed')!;
-// What kind of place: a valley, unless an island or a mountain top is asked for.
+// What kind of place: a valley, unless an island, a mountain top or a harbour town is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
-const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : 'valley';
+// (`place=coast`, as links to a world's coastal towns once said, is the town.)
+const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' || asked === 'coast' ? 'town' : 'valley';
+/** The world's own name for a kind of place: a harbour town is built on what a world calls a coastal town. */
+const worldKind = (kind: typeof place): WorldPlace['kind'] => (kind === 'town' ? 'coast' : kind);
+// A place in a world, by default (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds,
+// its land the world's. Without a world named, the world everyone starts in; `?world=none` for a place of its own, on land of its own.
+// (Places of their own were all there was, until worlds; asked: "'Worlds' should be now the default mode".)
+const DEFAULT_WORLD = 'w2';
+const worldAsked = params.get('world');
+const worldSeed = params.get('scene') === 'test' || worldAsked === 'none' ? null : /^[A-Za-z0-9-]{1,24}$/.test(worldAsked ?? '') ? worldAsked! : DEFAULT_WORLD;
+const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
+// Every place has a seed in its address, so a link reproduces it: in a world, its house is the place's own unless another is asked
+// for (`placeSeed`), so that the same place is the same house, and one built beforehand on the world's page is the one built here.
+if (worldSeed && !params.has('world')) params.set('world', worldSeed);
+if (!params.has('seed') && !worldSeed) params.set('seed', randomSeed());
+keep(params);
+const seedAsked = params.has('seed');
+let seed = params.get('seed') ?? placeSeed(worldSeed!, worldKind(place), worldN);
+/** The world's places, once it is made: for going on from one to the next. */
+let worldPlaces: WorldPlace[] | null = null;
 
 const hud = {
   status: document.getElementById('status')!,
@@ -109,24 +127,52 @@ const hud = {
   title: document.getElementById('title')!,
   seed: document.getElementById('seed')!,
 };
+const KINDS = ['valley', 'island', 'mountain', 'town'] as const;
+/** In a world, the first place of the next kind after `kind` that the world holds any of (all, until it is made). */
+const nextKind = (kind: typeof place): typeof place => {
+  for (let k = 1; k <= KINDS.length; k++) {
+    const then = KINDS[(KINDS.indexOf(kind) + k) % KINDS.length];
+    if (!worldPlaces || worldPlaces.some((q) => q.kind === worldKind(then))) return then;
+  }
+  return kind;
+};
+// Another place: of a place of its own, a new house; in a world, the world's next place, of this kind and then the next, each its own house.
 const newPlace = () => {
   const next = new URLSearchParams(params);
-  next.set('seed', randomSeed());
+  if (worldSeed) {
+    next.delete('seed');
+    next.delete('at');
+    const many = worldPlaces ? worldPlaces.filter((q) => q.kind === worldKind(place)).length : 4;
+    if (worldN < many) next.set('n', String(worldN + 1));
+    else { next.set('place', nextKind(place)); next.set('n', '1'); }
+  } else next.set('seed', randomSeed());
   go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
-document.getElementById('again')!.addEventListener('click', newPlace);
-// Another kind of place: from a valley an island, from an island a mountain top, from a mountain a valley; a new one, since the same seed is the same house.
+// The world's map: of the world this place is in, if it is in one, where its other places can be gone to.
 {
-  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'valley' } as const)[place];
-  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain' }[then];
+  const link = document.getElementById('worldmap') as HTMLAnchorElement | null;
+  // (Where the world page is, a page may say in its head, as the published copy does: `<meta name="dungeons-world" content="…">`.)
+  const page = document.querySelector<HTMLMetaElement>('meta[name="dungeons-world"]')?.content;
+  if (link && page) link.href = page;
+  if (link && worldSeed) { link.href = `${page ?? 'world.html'}#${new URLSearchParams({ world: worldSeed })}`; link.textContent = 'World map'; }
+}
+document.getElementById('again')!.addEventListener('click', newPlace);
+// Another kind of place: from a valley an island, from an island a mountain top, from a mountain a town, from a town a valley; a new one, since the same seed is the same house.
+{
+  // (In a world, a town is built on one of its coastal towns; and a kind the world has none of is passed over.)
+  const button = document.getElementById('kind')!, label = (k: typeof place) => ({ valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[k]);
+  button.textContent = label(nextKind(place));
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
-    next.set('seed', randomSeed());
-    next.set('place', then);
+    next.set('place', nextKind(place));
     next.delete('at');
+    // (In a world, the first of the other kind, its house its own: the world may not hold as many.)
+    next.delete('n');
+    if (worldSeed) next.delete('seed'); else next.set('seed', randomSeed());
     go(next);
   });
+  (window as unknown as { __kindLabel: () => void }).__kindLabel = () => { button.textContent = label(nextKind(place)); };
 }
 
 let toastTimer = 0;
@@ -139,7 +185,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -148,6 +194,14 @@ let SKY = { zenith: [0.16, 0.3, 0.62], horizon: [0.62, 0.7, 0.8], ground: [0.09,
 const TORCH_INTENSITY = 3.2;
 
 async function start(): Promise<void> {
+  // The world, if a place in one is asked for: begun now, in a worker, so that it is made while the surfaces are painted.
+  let worldText = 'Lifting the land, and letting the rivers wear it', waitingForWorld = false;
+  const worldComing = worldSeed ? loadWorldPlace(worldSeed, worldKind(place), worldN, (text) => {
+    worldText = text;
+    if (waitingForWorld) void stage('Making the world', 0.25, text);
+  }) : null;
+  // (Kept from being reported as unhandled while it is not yet waited for; it is waited for below, and fails there.)
+  worldComing?.catch(() => undefined);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
   const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
@@ -168,8 +222,8 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
   // Each surface is painted in turn, with the page given a chance to draw between them.
-  const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile'];
-  const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0);
+  const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
+  const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 1 : 0);
   let textureDone = 0;
   const paint = async (name: string, size: number, tseed: number) => {
     await stage(`Painting surfaces: ${TEXTURE_NAMES[name] ?? name}`, 0.04 + 0.2 * (textureDone++ / textureCount), `${textureDone} of ${textureCount} textures, ${size} pixels square`);
@@ -188,6 +242,9 @@ async function start(): Promise<void> {
   const plaster = await paint('plaster', texSize, 41);
   const thatch = await paint('thatch', texSize, 47);
   const tile = await paint('tile', texSize, 43);
+  const redBrick = await paint('redBrick', texSize, 73), buffBrick = await paint('buffBrick', texSize, 79);
+  // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
+  const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -216,8 +273,16 @@ async function start(): Promise<void> {
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
     plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8 }),
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
+    ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3 }) } : {}),
+    // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
+    redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2 }),
+    buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2 }),
     metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
+    // Copper gone green, on the roofs and spires of the brick towns: the patina is matt, and does not mirror the sky as sheet metal does.
+    copper: makeSiteMaterial(plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
+    // Clear glass, for the windows of buildings that can be entered, which are seen through both ways.
+    pane: makePaneMaterial(),
     // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
     thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
     lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
@@ -226,11 +291,35 @@ async function start(): Promise<void> {
   };
 
   // ------------------------------------------------------------------ geometry
-  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : 'the valley and its house'}`, 0.25, `Seed “${seed}”: rooms, doors, locks and keys`);
+  let inWorld: Awaited<ReturnType<typeof loadWorldPlace>> | null = null;
+  if (worldComing) {
+    waitingForWorld = true;
+    await stage('Making the world', 0.25, worldText);
+    inWorld = await worldComing;
+    waitingForWorld = false;
+    worldPlaces = inWorld.land.places;
+    (window as unknown as { __kindLabel?: () => void }).__kindLabel?.();
+  }
+  await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'town' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
   const t0 = performance.now();
   // The hand-built look test scene is still available as ?scene=test.
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined });
+  // (How finely a valley's ground is laid where it is walked: `?sheet=0.8` for a sheet of 80-centimetre cells instead of 1.2.)
+  const sheet = Number(params.get('sheet'));
+  if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
+  const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
+  const settlement = settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined;
+  // (In a world, the layout the world's page built beforehand, where it is this house's and nothing else is asked of it.)
+  // (Its own house, or the next where its own will not go there, `generateWorldPlace`; unless a seed is asked for.)
+  const kept = inWorld && !settlement ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
+  if (kept) seed = kept.seed;
+  const own = !kept && inWorld && !seedAsked && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
+  if (own) seed = own.seed;
+  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement });
+  // (Its name, where the world gave it one.)
+  if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
+  // (Whether the layout was one built beforehand, for whoever checks.)
+  (window as unknown as { __keptLayout?: boolean }).__keptLayout = !!kept;
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;
@@ -249,7 +338,10 @@ async function start(): Promise<void> {
   // Windows with a lamp or a fire behind them glow once the light is going; by day they are glass like the rest.
   // (The eyes open wider as the light goes, so the lamps need not be brighter by night than at dusk to tell more.)
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
-  materials.window = lamps ? makeWindowMaterial() : materials.glass;
+  // (By day a window that would be lit is glass like any other: its points carry the lamp's colour, which the glass must not take.)
+  materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+  // (And in a building that can be entered, a lit room shows through its glass as a glow, without hiding the room.)
+  materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
   windowUniforms.uLit.value = lamps;
   let desc: SceneDescription;
   if (site) {
@@ -317,9 +409,24 @@ async function start(): Promise<void> {
   }
   const map = document.getElementById('map') as HTMLCanvasElement;
   map.hidden = !site;
-  map.addEventListener('click', () => map.classList.toggle('big'));
+  // In a world, a third step: the world's map about the place, with what is built in it and where one is (`WorldView`).
+  const worldCanvas = document.getElementById('worldview') as HTMLCanvasElement;
+  const worldView = site && inWorld?.map && siteFrame(site) ? new WorldView(worldCanvas, inWorld.map, site, inWorld.sites, { kind: worldKind(place), n: worldN }) : null;
+  let worldShown = false;
+  /** The plan small, the plan large, the world's map (in a world), and round again. */
+  const nextMap = () => {
+    if (worldShown) { worldShown = false; worldCanvas.hidden = true; map.hidden = false; map.classList.remove('big'); return; }
+    if (!map.classList.contains('big')) { map.classList.add('big'); return; }
+    if (!worldView) { map.classList.remove('big'); return; }
+    // (The world's map is drawn the first time it is shown, which holds the page still a moment: said first.)
+    if (!worldView.ready) toast('Drawing the world’s map…');
+    worldShown = true; map.hidden = true; worldCanvas.hidden = false;
+    setTimeout(() => worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw }), 30);
+  };
+  map.addEventListener('click', nextMap);
+  worldCanvas.addEventListener('click', nextMap);
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyM') map.classList.toggle('big');
+    if (e.code === 'KeyM') nextMap();
   });
   hud.seed.textContent = seed;
   const statics: Mesh[] = [];
@@ -333,7 +440,8 @@ async function start(): Promise<void> {
     const material = name.split('|')[1];
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.name = name;
-    mesh.castShadow = true;
+    // (Clear glass throws no shadow, so that the sun comes in at the windows.)
+    mesh.castShadow = material !== 'pane' && material !== 'paneLit';
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
@@ -346,6 +454,8 @@ async function start(): Promise<void> {
   // whole sky, written into the same attributes the bake fills for everything else.
   const scenic: Mesh[] = [];
   const solidScenery: Mesh[] = [];
+  // How large the tiles are that what lies beyond the site is cut into, in metres; `?tiles=0` leaves each material one mesh, as it was.
+  const tiling = num('tiles', 64);
   for (const [key, builder] of desc.scenery?.meshes ?? []) {
     // Keyed as the site's own meshes are, by group and material.
     const material = key.split('|').pop()!;
@@ -368,17 +478,23 @@ async function start(): Promise<void> {
       for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * open, 0, (Math.PI / 2) * L[c] * 0.8 * open, 0);
       bk.setXY(i, open, 0.6);
     }
-    const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
-    mesh.name = `scenery:${material}`;
-    mesh.userData.group = key.split('|')[0];
-    mesh.receiveShadow = true;
-    // (Glass throws no shadow: the sun comes in at windows.)
-    mesh.castShadow = material !== 'glass' && material !== 'window';
-    mesh.matrixAutoUpdate = false;
-    scene.add(mesh);
-    scenic.push(mesh);
-    // Twigs, roots and low boughs are drawn but stop nobody.
-    if (!key.startsWith('soft|')) solidScenery.push(mesh);
+    // (Cut into tiles of the ground, so that what is out of view is left out of the frame: see `tileGeometry`. Not a boat, which
+    // rides the swell as one; and the far country in larger tiles, as it reaches some kilometres.)
+    const group = key.split('|')[0], box = geometry.boundingBox!, reach = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
+    const pieces = /^boat/.test(group) || !tiling ? [geometry] : tileGeometry(geometry, Math.max(tiling, reach / 12));
+    for (const piece of pieces) {
+      const mesh = new Mesh(piece, materials[material] ?? materials.stone);
+      mesh.name = `scenery:${material}`;
+      mesh.userData.group = group;
+      mesh.receiveShadow = true;
+      // (Glass throws no shadow: the sun comes in at windows.)
+      mesh.castShadow = material !== 'glass' && material !== 'window' && material !== 'pane' && material !== 'paneLit';
+      mesh.matrixAutoUpdate = false;
+      scene.add(mesh);
+      scenic.push(mesh);
+      // Twigs, roots and low boughs are drawn but stop nobody.
+      if (!key.startsWith('soft|')) solidScenery.push(mesh);
+    }
   }
   // Grass, flowers and leaves: one draw call for each kind.
   let cardTotal = 0;
@@ -437,11 +553,12 @@ async function start(): Promise<void> {
   // Boats riding in the cove rise and fall and rock with the swell, as the sea's surface does: each was built as a mesh of its own
   // (`boat` and its number, in `coast.ts`). Without it the water rose over their gunwales and fell away below their keels.
   const floats: { mesh: Mesh; x: number; z: number; y: number }[] = [];
-  if (sea && site?.island) {
-    const isle = site.island;
+  // (An island's boats, or a harbour town's.)
+  const riding = site?.island ? { boats: site.island.boats, sea: site.island.sea } : site?.town ? { boats: site.town.boats, sea: site.town.sea } : null;
+  if (sea && riding) {
     scene.traverse((m) => {
-      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? isle.boats[Number(n[1])] : undefined;
-      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: isle.sea });
+      const n = (m as Mesh).isMesh && typeof m.userData.group === 'string' ? /^boat(\d+)$/.exec(m.userData.group) : null, b = n ? riding.boats[Number(n[1])] : undefined;
+      if (b?.afloat) floats.push({ mesh: m as Mesh, x: b.x, z: b.z, y: riding.sea });
     });
   }
   const floatTilt = new Quaternion(), floatUp = new Vector3(0, 1, 0), floatN = new Vector3(), floatTurn = new Matrix4(), floatBack = new Matrix4();
@@ -505,7 +622,7 @@ async function start(): Promise<void> {
   const fireflies = warm && desc.fireflies?.length ? new Fireflies(desc.fireflies, seed, site.setting.hour === 'night' ? 1.6 : 2.4) : null;
   if (fireflies) scene.add(fireflies.mesh);
   // A haze of light about each lit window, after dark.
-  const windowPanes = lamps ? scenic.filter((m) => m.name === 'scenery:window').map((m) => ({ position: m.geometry.getAttribute('position').array, color: m.geometry.getAttribute('color').array })) : [];
+  const windowPanes = lamps ? scenic.filter((m) => m.name === 'scenery:window' || m.name === 'scenery:paneLit').map((m) => ({ position: m.geometry.getAttribute('position').array, color: m.geometry.getAttribute('color').array })) : [];
   const windowGlow = windowPanes.length ? new WindowGlow(windowPanes, lamps * 0.28) : null;
   if (windowGlow) scene.add(windowGlow.mesh);
   const flocks = desc.flocks?.length ? (() => {
@@ -796,7 +913,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, metal: plaster, glass: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
@@ -1015,7 +1132,7 @@ async function start(): Promise<void> {
   // In a software-rendered test run, drawing starves the bake workers; this draws rarely until the bake is done.
   const bakeFirst = params.has('bakefirst');
   let last = performance.now();
-  let frames = 0, fpsAt = last;
+  let frames = 0, fpsAt = last, drawn = 0;
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
 
   const frame = (now: number) => {
@@ -1065,6 +1182,8 @@ async function start(): Promise<void> {
           fall = Math.max(fall, 0.5 / (1 + (edge / 14) ** 2));
           if (py < site.island.sea + 1.9) hearing.wading = true;
         }
+        // In a town, the sea is heard along the shore and the moles.
+        if (site?.town) { const tw = site.town, off = Math.max(0, tw.quay.z - pz) * (px > tw.quay.x0 - 40 && px < tw.quay.x1 + 40 ? 1 : 0.4); fall = Math.max(fall, 0.3 / (1 + (off / 30) ** 2)); if (py < tw.sea + 1.9) hearing.wading = true; }
         hearing.fall = fall < 0.02 ? 0 : fall;
       }
       let surface: Surface = 'stone';
@@ -1130,9 +1249,10 @@ async function start(): Promise<void> {
     exposure = exposure < 0 ? exposureTarget : exposure + (exposureTarget - exposure) * (1 - Math.exp(-dt * rate));
     renderer.toneMappingExposure = exposure;
 
-    // The plan follows the player, and the readout names the place they are standing in.
+    // The plan follows the player, and the readout names the place they are standing in. (Or the world's map, when it is shown.)
+    if (site && worldShown && worldView?.ready && tick % 6 === 1) worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw });
     if (site && tick % 6 === 1) {
-      drawPlan(map, site, {
+      if (!worldShown) drawPlan(map, site, {
         player: { x: player.position.x, z: player.position.z, yaw: player.yaw },
         labels: map.classList.contains('big'),
         visited: revealAll || !game ? undefined : game.visited,
@@ -1152,11 +1272,16 @@ async function start(): Promise<void> {
       } else if (!here && lastPlace !== -2) {
         lastPlace = -2;
         // (Out of doors: the valley, or the island.)
-        hud.seed.textContent = `${seed} · ${site.island ? 'island' : site.mountain ? 'mountain' : 'valley'}`;
+        hud.seed.textContent = `${seed} · ${site.island ? 'island' : site.mountain ? 'mountain' : site.town ? 'town' : 'valley'}`;
       }
     }
 
     frames++;
+    // (The sun's shadow is drawn once, not every frame; but the first frames are drawn while the graphics card is still preparing
+    // what it draws with, which it does only once something asks to draw with it, and whatever is not ready is left out of the
+    // shadow. At an evening hour that was the hills' long shadow over a whole town. So it is drawn again every thirty frames over
+    // the first six hundred, by when all of it is ready.)
+    if (++drawn <= 600 && drawn % 30 === 2) sun.shadow.needsUpdate = true;
     if (now - fpsAt > 500) {
       document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
       frames = 0;
@@ -1344,6 +1469,8 @@ async function start(): Promise<void> {
   (window as any).__dbg.beyond = (x: number, z: number) => {
     if (site?.island) return -inland(site.island, x, z);
     if (site?.mountain) return -onMountain(site.mountain, x, z);
+    // (A town's country is the box its land was made over, less the strip at its edges that is fenced.)
+    if (site?.town) { const g = site.grounds!; return Math.max(g.x0 - x, x - g.x1, g.z0 - z, z - g.z1); }
     const v = site?.valley;
     if (!v) return -1;
     // (Nor whoever is down a mine.)
@@ -1399,6 +1526,8 @@ async function start(): Promise<void> {
     // (The renderer draws the scene once to a frame of the browser's, however often it is asked; a capture is a frame of its own.)
     const fresh = () => (renderer as any)._nodes?.nodeFrame?.update();
     fresh();
+    // (And a picture draws the sun's shadow afresh, so that one taken soon after the start does not miss what was not ready.)
+    sun.shadow.needsUpdate = true;
     if (pose) {
       player.place(new Vector3(pose[0], pose[1], pose[2]), pose[3] ?? 0, pose[4] ?? 0);
       // Let the torch lights finish moving to the new position before the picture is taken.

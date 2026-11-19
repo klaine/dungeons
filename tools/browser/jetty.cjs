@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
   const browser = await chromium.launch(process.env.REAL_GPU ? { headless: false } : { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   for (const seed of process.argv.slice(2)) {
     const page = await browser.newPage({ viewport: { width: 240, height: 135 }, deviceScaleFactor: 1 });
-    await page.goto(`http://localhost:5173/?seed=${seed}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
+    await page.goto(`http://localhost:5173/?seed=${seed}&world=none&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 600000 });
     console.log(seed, JSON.stringify(await page.evaluate(() => {
       const { site, player, desc, groundAt, game } = window.__dbg;

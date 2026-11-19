@@ -200,13 +200,40 @@ export interface TreeOptions {
    */
   wind?: { x: number; z: number; strength: number };
   /**
-   * Where no limb may grow: a limb that would is cut off where it would enter, and bears nothing beyond. For a house beside a wood,
-   * whose walls a great tree's boughs would otherwise reach through, and droop into its court.
+   * Where no limb may grow: a wall, a roof, a cliff. A limb that would grow into it turns aside, as a bough does that has grown
+   * against a wall, and goes on along it or away; only where every way is shut is it cut off, bearing nothing beyond. Leaves keep
+   * clear of it too. For a house beside a wood, whose walls a great tree's boughs would otherwise reach through and droop into its court.
    */
   keepOut?: (p: Vector3) => boolean;
 }
 
 const UP = new Vector3(0, 1, 0);
+
+/**
+ * The way a limb growing from `from` along `d` turns where its next stretch (`step` long) would enter what it may not: the first of a
+ * fan of ways turned further and further from it, to either side, up and down, whose stretch ends clear and passes clear at its
+ * middle; or null if every one is shut. Always the same fan in the same order, so that nothing is drawn from a stream for it.
+ */
+function giveWay(from: Vector3, d: Vector3, step: number, keepOut: (p: Vector3) => boolean): Vector3 | null {
+  const side = new Vector3().crossVectors(d, Math.abs(d.y) > 0.9 ? new Vector3(1, 0, 0) : UP).normalize(), lift = new Vector3().crossVectors(side, d).normalize();
+  const way = new Vector3(), end = new Vector3(), mid = new Vector3();
+  // (The least turn that clears first, so that a limb bends no more than it must; and as far as back the way it came, so that it is
+  // almost never stopped.)
+  for (const turn of [0.3, 0.6, 0.9, 1.25, 1.65, 2.1, 2.6]) for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0.7, 0.7], [-0.7, 0.7], [0, -1]]) {
+    way.copy(d).multiplyScalar(Math.cos(turn)).addScaledVector(side, a * Math.sin(turn)).addScaledVector(lift, b * Math.sin(turn)).normalize();
+    end.copy(from).addScaledVector(way, step); mid.copy(from).addScaledVector(way, step / 2);
+    if (!keepOut(end) && !keepOut(mid)) return way.clone();
+  }
+  return null;
+}
+/** How large a spray of leaves (`r` about `at`, its cards `size` across) may be and keep clear of what they may not enter: smaller near it, nothing inside it. */
+function roomFor(at: Vector3, r: number, size: number, keepOut: (p: Vector3) => boolean): number {
+  if (keepOut(at)) return 0;
+  const q = new Vector3();
+  const blocked = (rr: number) => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -0.7, 0]].some(([x, y, z]) => keepOut(q.set(at.x + x * (rr + size * 0.45), at.y + y * (rr + size * 0.45), at.z + z * (rr + size * 0.45))));
+  while (r > 0.2 && blocked(r)) r *= 0.7;
+  return r > 0.2 ? r : 0.2;
+}
 
 /**
  * A length of trunk or branch: a tube through the given points, round, tapering, closed at both
@@ -377,9 +404,12 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
       d.y += level === 0 ? 0 : (oak ? 0.1 : 0.16) / wide;
       if (level === 0) d.addScaledVector(bend, 1);
       d.normalize();
+      // (Where it may not go, it turns aside; where every way is shut, it stops short of it, as a bough lopped off a wall.)
+      if (level > 0 && o.keepOut) {
+        const step = length / steps, next = p.clone().addScaledVector(d, step);
+        if (o.keepOut(next) || o.keepOut(next.lerp(p, 0.5))) { const way = giveWay(p, d, step, o.keepOut); if (!way) { cut = true; break; } d.copy(way); }
+      }
       p.addScaledVector(d, length / steps);
-      // (Where it may not go, it stops: cut back a little short of it, as a bough lopped off a wall is.)
-      if (level > 0 && o.keepOut?.(p)) { cut = true; break; }
       points.push(p.clone());
       radii.push(radius * (1 - (taper * s) / steps));
     }
@@ -460,7 +490,9 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
     const each = Math.max(1, Math.round(cards / Math.max(1, kept)));
     list.forEach((tip, i) => {
       if (!keep[i]) return;
-      const r = Math.min(1.6, 0.3 + tip.reach * 0.55);
+      // (Smaller where it would reach into what it may not, and none at all inside it.)
+      let r = Math.min(1.6, 0.3 + tip.reach * 0.55);
+      if (o.keepOut) { r = roomFor(tip.at, r, size, o.keepOut); if (!r) return; }
       const depth = Math.min(1, tip.at.distanceTo(heart) / crownReach);
       const up = Math.min(1, Math.max(0, (tip.at.y - heart.y) / (crownReach * 0.7) + 0.5));
       const light = dim * (0.5 + 0.5 * depth * depth) * (tip.at.y < heart.y ? 0.82 : 1);
@@ -489,6 +521,8 @@ export interface ConiferOptions {
   soft: MeshBuilder;
   /** A pine that has stood in the sea wind: short, its trunk leaning and bent, its crown a flat-topped umbrella. */
   coastal?: boolean;
+  /** Where no bough may grow: as for `TreeOptions`. A bough that would turns aside, or grows shorter, or is not there. */
+  keepOut?: (p: Vector3) => boolean;
 }
 
 const BX = new Vector3(), BY = new Vector3(), BZ = new Vector3();
@@ -520,6 +554,19 @@ export function growConifer(planting: Planting, wood: MeshBuilder, x: number, ba
   const dir = new Vector3(), tip = new Vector3(), at = new Vector3();
   let reach = 0, turn = rng.range(0, Math.PI * 2);
   const bough = (from: Vector3, az: number, rise: number, length: number, f: number, thick: number) => {
+    // (Where it would grow into what it may not, it is turned aside a little, or else grows shorter, or is not there at all. A spruce
+    // against a wall is flat on that side.)
+    if (o.keepOut) {
+      const shape = (a: number, l: number) => {
+        const m = from.clone().add(dir.set(Math.cos(a) * Math.cos(rise), Math.sin(rise), Math.sin(a) * Math.cos(rise)).multiplyScalar(l * 0.55));
+        return [m, m.clone().add(tip.set(Math.cos(a) * Math.cos(rise + 0.4), Math.sin(rise + 0.4), Math.sin(a) * Math.cos(rise + 0.4)).multiplyScalar(l * 0.45))];
+      };
+      const clear = (a: number, l: number) => { const [m, e] = shape(a, l); return !o.keepOut!(m) && !o.keepOut!(e) && !o.keepOut!(e.clone().addScaledVector(tip, 0.4)); };
+      let found = clear(az, length);
+      for (const turn of [0.3, -0.3, 0.6, -0.6]) if (!found && clear(az + turn, length)) { az += turn; found = true; }
+      while (!found && length > 0.35) { length *= 0.7; found = clear(az, length); }
+      if (!found) return;
+    }
     // Out from the trunk, then turning upward towards its tip.
     dir.set(Math.cos(az) * Math.cos(rise), Math.sin(rise), Math.sin(az) * Math.cos(rise));
     const mid = from.clone().addScaledVector(dir, length * 0.55);
@@ -620,6 +667,8 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
   const dir = new Vector3(), any = new Vector3();
   /** A brush of needles at the end of a twig, pointing the way the twig does and a little skyward. */
   const brush = (at: Vector3, way: Vector3, size: number, light: number) => {
+    // (None where it would be inside what may not be grown into.)
+    if (o.keepOut?.(at)) return;
     BY.copy(way).multiplyScalar(0.7).add(UP).normalize();
     BX.crossVectors(BY, Math.abs(BY.y) > 0.95 ? any.set(1, 0, 0) : UP).normalize();
     BZ.crossVectors(BX, BY);
@@ -644,17 +693,23 @@ function growPine(planting: Planting, wood: MeshBuilder, x: number, base: number
       d.add(any.set(rng.range(-1, 1), rng.range(-0.5, 0.5), rng.range(-1, 1)).multiplyScalar((level === 0 ? 0.13 : 0.2) * (coastal ? 2.4 : 1)));
       d.y += (level === 0 ? 0.03 : 0.16) + (level === 0 ? 0.13 : 0.2) * (s / steps) * (coastal ? 0.6 : 1);
       d.normalize();
+      // (Where it may not go, it turns aside; where every way is shut, it ends there.)
+      if (o.keepOut) {
+        const step = length / steps, next = p.clone().addScaledVector(d, step);
+        if (o.keepOut(next) || o.keepOut(next.lerp(p, 0.5))) { const way = giveWay(p, d, step, o.keepOut); if (!way) break; d.copy(way); }
+      }
       p.addScaledVector(d, length / steps);
       points.push(p.clone());
       thicks.push(thick * (1 - 0.62 * (s / steps)));
       ways.push(d.clone());
     }
+    if (points.length < 2) return;
     const sides = level === 0 ? (rich ? 6 : 4) : level === 1 ? 4 : 3;
     layLimb(o.soft, points, thicks, sides + (coastal && level === 0 ? 2 : 0), limbBark, rng.range(0, 3), open ? (y) => open(y) * (level === 0 ? 0.9 : 0.7) : null,
       coastal && level === 0 && rich ? { lobes: 3, amp: 0, phase: 0, oval: 0.08, ovalAt: rng.range(0, 3), lumps: 0.12, burrs: trunkGrowths(rng, rng.int(0, 2), rng.int(1, 3)), seed: rng.int(1, 9999) } : undefined);
-    const end = points[points.length - 1], endWay = ways[ways.length - 1];
+    const end = points[points.length - 1], endWay = ways[ways.length - 1], grown = points.length - 1;
     const at = (t: number): [Vector3, Vector3] => {
-      const g = Math.min(steps - 1e-4, t * steps), i = Math.floor(g);
+      const g = Math.min(grown - 1e-4, t * grown), i = Math.floor(g);
       return [points[i].clone().lerp(points[i + 1], g - i), ways[i + 1]];
     };
     const last = level >= (rich ? 2 : 1);

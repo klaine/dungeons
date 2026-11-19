@@ -2,6 +2,23 @@ import { fbm2, Rng } from './rng';
 import { Mountain, Place, Site } from './site';
 import { turnBetween } from './island';
 import { erodedFbmLod, fbmd, HeightField, landDetail, ridgedFbm, wearByFrost, wearByWater } from './terrain';
+import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
+
+/** Mountains being laid out on a world's summit, whose country is not yet to be read (as `range` is empty until it is laid). */
+const LAYING = new WeakSet<Mountain>();
+/** Whether the country round about has been laid out: the range drawn, or the world's, once the top is laid out on it. */
+function hasCountry(m: Mountain): boolean {
+  return m.range.length > 0 || (!!m.terrain?.world && !LAYING.has(m));
+}
+/** A point of the site in the world a top was found in: the middle of the level ground over the world's `u`, `v`, turned by `turn`. */
+function worldFrame(m: Mountain, x: number, z: number): [number, number] {
+  const t = m.terrain!, c = Math.cos(t.turn!), sn = Math.sin(t.turn!), dx = x - (m.level.x0 + m.level.x1) / 2, dz = z - (m.level.z0 + m.level.z1) / 2;
+  return [t.u! + c * dx - sn * dz, t.v! + sn * dx + c * dz];
+}
+/** The level of water in the country: a world's sea, or the lakes deep under the cloud of a country drawn. */
+function waterLevel(m: Mountain, floor: number): number {
+  return m.terrain?.world ? floor - m.terrain.base! : m.deck - 610;
+}
 
 /**
  * The top of a mountain above a sea of cloud. Where an island is land inside a coast that falls
@@ -264,7 +281,7 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   // Beyond that lattice, once the country round about has been laid out, the mountain's lower flanks are the country's: worn with
   // it, on its finer lattice. (Before then, while the top is being laid out, its plain shape stands for them.)
   const field = m.terrain ? fieldOf(m, floor) : null;
-  const below = (bx: number, bz: number) => (field && m.range.length ? nearCountryOf(m, floor).smoothAt(bx, bz) : baseLand(m, floor, bx, bz));
+  const below = (bx: number, bz: number) => (field && hasCountry(m) ? nearCountryOf(m, floor).smoothAt(bx, bz) : baseLand(m, floor, bx, bz));
   let y: number;
   if (field && field.holds(x, z)) {
     const edge = Math.min(x - field.x0, z - field.z0, field.x0 + (field.nx - 1) * field.cell - x, field.z0 + (field.nz - 1) * field.cell - z);
@@ -273,7 +290,7 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
     y = edge > 60 ? fy : below(x, z) + (fy - below(x, z)) * smooth(edge / 60);
     // (Deep under the cloud, where nothing has been laid out, the mountain's lattice is joined to the country it stands in: else, in
     // the corners of that lattice, it would go down below the valley floors about it.)
-    if (m.range.length && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
+    if (hasCountry(m) && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
   } else y = below(x, z);
   // The cleft across the ridge: a gap cut clean across it, steep-walled, where a band of weaker rock has gone; the bridge is over it.
   const notch = m.spur.notch;
@@ -436,7 +453,7 @@ function wornCountryAt(m: Mountain, floor: number, x: number, z: number): { y: n
   // (The rock of the great horns' faces is laid on as the land is read, after all the wearing: worn with the rest, the frost, which
   // knocks back what is steeper than its faces already are, rubbed it away.)
   const y = top.holds(x, z) ? landAt(m, floor, x, z, false) : (near.holds(x, z) ? near.smoothAt(x, z) : countryDetailed(m, floor, x, z)) + hornRelief(m, x, z, detailOctaves(m, x, z), m.terrain!.seed);
-  const lake = m.deck - 610;
+  const lake = waterLevel(m, floor);
   return y < lake ? { y: lake, water: true } : { y, water: false };
 }
 
@@ -449,6 +466,8 @@ function detailOctaves(m: Mountain, x: number, z: number): number {
 function countryDetailed(m: Mountain, floor: number, x: number, z: number): number {
   const field = countryOf(m, floor), seed = m.terrain!.seed;
   const base = field.holds(x, z) ? field.smoothAt(x, z) : countryShape(m, floor, x, z);
+  // (A world's land has its own detail, made at its own scale.)
+  if (m.terrain!.world) return base;
   const rel = Math.max(0, base - (m.deck - 690));
   return base + (12 + 0.05 * rel) * erodedFbmLod(x / 620 + 3.3, z / 620 - 1.1, detailOctaves(m, x, z), seed + 77);
 }
@@ -533,6 +552,11 @@ function hornRelief(m: Mountain, x: number, z: number, octaves: number, seed: nu
  * and the summits are where the noise puts them.
  */
 function countryShape(m: Mountain, floor: number, x: number, z: number): number {
+  // On a world's summit: the world's land, at its own height under the forecourt's floor, with this top standing on it.
+  if (m.terrain!.world) {
+    const [u, v] = worldFrame(m, x, z), land = worldLandAt(worldLand(m.terrain!.world), u, v) - m.terrain!.base! + floor;
+    return Math.hypot(x - m.x, z - m.z) >= 2600 ? land : softMax(land, baseLand(m, floor, x, z), 20);
+  }
   const deck = m.deck, seed = m.terrain!.seed, s = (m.x * 7.31 + m.z * 3.17) % 97;
   const fl = deck - 690;
   // The floors, rolling a little over the miles.
@@ -602,6 +626,8 @@ function nearCountryOf(m: Mountain, floor: number): HeightField {
   const W = NEAR_WEAR, cell = W.cell, n = Math.ceil((2 * W.half) / cell) + 1;
   const f = new HeightField(m.x - W.half, m.z - W.half, cell, n, n);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = countryDetailed(m, floor, f.x0 + i * cell, f.z0 + j * cell);
+  // (A world's country is worn already, at its own scale: only read here.)
+  if (m.terrain!.world) { NEARS.set(m, { sig: [m.deck, m.range.length, floor, m.peaks[0]?.height], field: f }); return f; }
   const shaped = f.data.slice();
   wearByWater(f, new Rng(`country-near/${m.terrain!.seed}`), W.water);
   for (let k = 0; k < f.data.length; k++) f.data[k] = Math.max(shaped[k] - W.cut, Math.min(shaped[k] + W.fill, f.data[k]));
@@ -620,6 +646,7 @@ function countryOf(m: Mountain, floor: number): HeightField {
   const W = COUNTRY_WEAR, cell = W.cell, n = Math.ceil((2 * W.half) / cell) + 1;
   const f = new HeightField(m.x - W.half, m.z - W.half, cell, n, n);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = countryShape(m, floor, f.x0 + i * cell, f.z0 + j * cell);
+  if (m.terrain!.world) { COUNTRIES.set(m, { sig: [m.deck, m.range.length, floor, m.peaks[0]?.height], field: f }); return f; }
   const shaped = f.data.slice();
   wearByWater(f, new Rng(`country/${m.terrain!.seed}`), W.water);
   for (let k = 0; k < f.data.length; k++) f.data[k] = Math.max(shaped[k] - W.cut, Math.min(shaped[k] + W.fill, f.data[k]));
@@ -708,7 +735,7 @@ export const MOUNTAIN_SCALE = 0.55;
  * Lays out a mountain top round a house whose forecourt is `meadow` and whose door is at `doorX`
  * in the forecourt's north side. Fills in the site's `mountain`, `grounds`, `track` and `paths`.
  */
-export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false): void {
+export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }): void {
   // (How large the top and its ridge are made, against the first pass: that stood a quarter of a kilometre across with a ridge of three
   // hundred metres, too large for the world about it and for what it cost to build, nearly all of it rock to carve. The house is not
   // scaled, and the rim is grown until it fits.)
@@ -719,11 +746,31 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   site.stands = 'free';
   const level = { x0: round(Math.min(house.x0, meadow.x0) - 6), x1: round(Math.max(house.x1, meadow.x1) + 6), z0: round(house.z0 - 6), z1: round(meadow.z1 + 2) };
   const hx = (level.x0 + level.x1) / 2, hz = (level.z0 + level.z1) / 2;
+  // On a world's summit (`docs/06-world.md`, step 4): the house's level ground where the world found ground for the hospice, on a
+  // shoulder of the ridge below the summit, turned so that the ridge runs south from it; and the summit where it is, in the site.
+  let onWorld: { seed: string; u: number; v: number; turn: number; base: number; summit: { x: number; z: number; height: number } } | null = null;
+  if (worn && inWorld) {
+    const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'mountain' && o.n === inWorld.n);
+    if (!q?.ground) throw new Error(`world ${inWorld.seed} has no mountain top ${inWorld.n}`);
+    for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
+    const g = q.ground, base = worldLandAt(land, g.x, g.z), c = Math.cos(g.turn), sn = Math.sin(g.turn), du = q.x - g.x, dv = q.z - g.z;
+    onWorld = { seed: inWorld.seed, u: g.x, v: g.z, turn: g.turn, base: round(base), summit: { x: round(hx + c * du + sn * dv), z: round(hz - sn * du + c * dv), height: round(Math.max(20, q.y - base)) } };
+  }
 
   // The rim: an oval turned any way, with spurs of the top standing out from it and gullies cut
   // back into it, as a mountain's top is; the precipice under it high in one place and less in the next.
   const shape = rng.fork('rim');
-  const R = shape.range(120, 160) * S, turn = shape.range(0, Math.PI), seed = shape.range(0, 500), squash = shape.range(0.68, 0.95);
+  let R = shape.range(120, 160) * S, turn = shape.range(0, Math.PI), squash = shape.range(0.68, 0.95);
+  const seed = shape.range(0, 500);
+  // (On a world's summit, the top is drawn out along the line from the house to the summit, as broad as a top drawn alone: a
+  // summit ridge, with the house at its lower end. Grown all round to reach a summit three hundred metres off, it was twice as
+  // broad every way, and twice the rock round its rim to carve.)
+  if (onWorld) {
+    const along = Math.hypot(onWorld.summit.x - hx, onWorld.summit.z - hz), wide = R * squash;
+    turn = Math.atan2(onWorld.summit.z - hz, onWorld.summit.x - hx);
+    R = Math.max(R, along / 2 + 80);
+    squash = Math.min(0.95, Math.max(0.35, wide / R));
+  }
   const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24) * S, wide: shape.range(0.1, 0.22) }));
   const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15) * S, wide: shape.range(0.04, 0.08) }));
   const rimOf = (scale: number) => Array.from({ length: N }, (_, k) => {
@@ -737,6 +784,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const dropSeed = shape.range(0, 500);
   // The house stands on a shoulder near the south edge: the middle of the top lies north of it.
   const middle = { x: round(hx + shape.range(-15, 15)), z: round(hz - R * squash * shape.range(0.3, 0.45)) };
+  // (On a world's summit the top's middle lies between the house and the summit, so that the summit stands on the top.)
+  if (onWorld) { middle.x = round((hx + onWorld.summit.x) / 2); middle.z = round((hz + onWorld.summit.z) / 2); }
   const m: Mountain = {
     x: middle.x, z: middle.z, rim: rimOf(1),
     // (In some stretches hardly a precipice at all, the top going over into a steep slope of scree; in others a wall the height of a church tower.)
@@ -748,6 +797,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const corners = [[level.x0, level.z0], [level.x1, level.z0], [level.x0, level.z1], [level.x1, level.z1], [hx, level.z1]];
   const margin = () => Math.min(...corners.map(([x, z]) => insideTop(m, x, z)));
   for (let grow = 1; grow < 2 && margin() < 16; grow += 0.05) m.rim = rimOf(grow);
+  // (And until the world's summit stands well inside it too.)
+  if (onWorld) for (let grow = 1; grow < 3.5 && (margin() < 16 || insideTop(m, onWorld.summit.x, onWorld.summit.z) < 40); grow += 0.05) m.rim = rimOf(grow);
 
   // The ridge: out from the rim on the south side, beyond the forecourt, and down.
   {
@@ -766,6 +817,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // Summits: the highest behind the house, on the north side; perhaps one or two lesser, anywhere clear of the house and the head of the ridge.
   {
     const q = rng.fork('peaks');
+    // (On a world's summit, the first is the world's, as high over the forecourt as the world has it.)
+    if (onWorld) m.peaks.push({ x: onWorld.summit.x, z: onWorld.summit.z, r: round(Math.min(70, 30 + onWorld.summit.height * 0.4)), height: onWorld.summit.height });
     for (let tries = 0; tries < 400 && m.peaks.length < 1; tries++) {
       const a = -Math.PI / 2 + q.range(-0.9, 0.9), at = rimAt(m, a) * q.range(0.5, 0.74);
       const r = q.range(42, 70) * S, height = q.range(58, 108) * S, x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
@@ -829,6 +882,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   }
   // (If the land is to be worn, it is worn now that its large shape is decided, so that every way and platform after is laid on the worn land.)
   if (worn) m.terrain = { seed: rng.fork('terrain').int(0, 1e6), cell: 1 };
+  // (On a world's summit, the world's frame; its country is not read until the top is laid out, as the range drawn is not.)
+  if (m.terrain && onWorld) { m.terrain = { ...m.terrain, world: onWorld.seed, u: onWorld.u, v: onWorld.v, turn: onWorld.turn, base: onWorld.base }; LAYING.add(m); }
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.
@@ -919,6 +974,11 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       const x = x0 + Math.cos(dir + (side * Math.PI) / 2) * off, z = z0 + Math.sin(dir + (side * Math.PI) / 2) * off;
       if (inside(m, x, z) < 7.5 || nearestOn(wy, x, z, 9).off < 5.4) continue;
       if (m.spur.notch && Math.abs(onSpur(m, x, z).d - m.spur.notch.at) < m.spur.notch.wide / 2 + 16) continue;
+      // (Not by a drop: on a narrower ridge, or on a world's land, the rim's own reckoning may leave the hut a few strides from a fall, and the
+      // fence that keeps people off an edge then takes in its floor. The ground all round it must lie within a few metres of its level.)
+      let drop = 0;
+      for (let k = 0; k < 16; k++) drop = Math.max(drop, y0 - plain(x + Math.cos((k / 16) * TAU) * 8, z + Math.sin((k / 16) * TAU) * 8));
+      if (drop > 5) continue;
       m.shelter = { x: round(x), z: round(z), y: y0, facing: Math.round(Math.atan2(z0 - z, x0 - x) * 1000) / 1000 };
     }
   }
@@ -1113,9 +1173,11 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // Other peaks, far off, standing out of the cloud: a few near enough to show their faces, more
   // beyond, and one or two great ones; none near, so the top stands alone over the cloud.
   {
-    const q = rng.fork('range'), want = q.int(30, 42);
+    const q = rng.fork('range'), want = onWorld ? 0 : q.int(30, 42);
+    // (On a world's summit the mountains round about are the world's own, and its country is now laid.)
+    LAYING.delete(m);
     // (Far off, beyond them all, a few giants: the great range this mountain is an outlier of.)
-    for (let k = 0, n = q.int(5, 8), a0 = q.range(0, TAU); k < n; k++) {
+    for (let k = 0, n = onWorld ? 0 : q.int(5, 8), a0 = q.range(0, TAU); k < n; k++) {
       const a = a0 + q.range(-0.5, 0.5) + (k / n) * q.range(2.2, 3.6), d = q.range(3700, 6200);
       // (Their heights over the cloud: some hundreds of metres, not a thousand. Higher, standing as near as they do, they towered
       // over the top like spires in a drawing.)

@@ -260,7 +260,190 @@ export interface Grotto {
  * the market squares of the northern capitals. A rusticated ground storey, tall windows in even
  * rows above it, a heavy cornice and a low metal roof; with `portico`, the middle bays stand
  * forward under pilasters and a pediment.
+ *
+ * Of the style `brick`: a building of the brick towns of the Baltic and the North Sea coasts, as
+ * along the Trave in Lübeck or the harbours of Stralsund and Wismar; `brick` says which of that
+ * family it is and how it is made (see `BrickWork`). `colour` is the wash on a rendered front.
+ *
+ * Of the style `canal`: a canal house, as along the canals of Amsterdam: narrow, tall and deep,
+ * its front to the water, its gable in one of the outlines the city built over two centuries;
+ * `canalwork` says how it is made (see `CanalWork`). `colour` is the paint on a painted front.
  */
+/**
+ * How a building of brick is made. There are four kinds:
+ *  - `gabled`: a merchant's house, narrow and deep, its steep gable to the street, a tall hall
+ *    for goods on the ground storey behind a broad door, living storeys over it, and lofts in
+ *    the roof reached by a hoist from the street;
+ *  - `eaves`: a broader house of later date with its eaves to the street, its front rendered and
+ *    washed, and over its middle bays a small gable of its own rising through the roof;
+ *  - `store`: a warehouse, gable to the street, of many low storeys, with a column of loading
+ *    doors up its middle under a hoist;
+ *  - `church`: a church of the brick Gothic, standing with its long side to the street: a nave
+ *    of `bays` bays (its length is the building's `w`, its breadth `d`, and `heights[0]` how high
+ *    its walls stand), buttressed, with tall pointed windows; a tower or two at one end, and a
+ *    choir at the other.
+ * Measures not given here follow by rule from these (see `src/core/brick.ts`).
+ */
+export interface BrickWork {
+  kind: 'gabled' | 'eaves' | 'store' | 'church';
+  /**
+   * The outline of the gable to the street (of an eaves house, of the small gable over its
+   * middle; of a church, of the gable at its east end): in `steps` steps a side; with piers that
+   * rise through it into pinnacles, `steps` spaces either side of the middle one; in `steps`
+   * tiers that narrow upward with scrolls at their sides; or a plain triangle.
+   */
+  gable: 'stepped' | 'piers' | 'volute' | 'plain';
+  steps: number;
+  /** The front is rendered and washed with the building's `colour`, and what is moulded on it is white; otherwise it is bare brick. */
+  rendered: boolean;
+  /**
+   * The clay the brick was burnt from, dug near the town as brick clay always was: `red` from clays with iron in them, as
+   * along the Baltic, or `buff`, pale yellow to ochre, from clays with lime in them, as in limestone country.
+   */
+  clay: 'red' | 'buff';
+  /** The brick's tone: its colour is multiplied by this, from dark brown to orange. */
+  tone: [number, number, number];
+  /** Bands of dark glazed brick run across the front, at the floors and under the gable. */
+  glazed: boolean;
+  /** The upper windows stand in tall pointed recesses, and the gable has rows of them: with their backs plastered white, of brick, or none. */
+  niches: 'white' | 'brick' | 'none';
+  /** Where the door is across the front, as a share of its breadth from its left end as one stands before it. */
+  door: number;
+  /** How steep the roof is, in degrees. */
+  pitch: number;
+  /** What the roof is covered with: red clay tiles, tiles glazed nearly black, or copper gone green. */
+  roof: 'red' | 'dark' | 'copper';
+  /**
+   * Of a church. `end` is the end its tower stands at (-1 the left as one stands before it, 1 the
+   * right): one tower, `side` metres square, in the middle of that end, or two filling it; the
+   * tower's walls stand `height` metres, and over them a `spire` of `spireHeight`: a tall
+   * octagonal needle; a pyramid with a spirelet at each corner; or a ridged roof between two
+   * gables. At the other end stands the choir, `choirLength` long and narrower than the nave,
+   * ending in a half-polygon (`apse`) or a flat wall with a gable (`flat`).
+   */
+  church?: {
+    end: -1 | 1; towers: 1 | 2; side: number; height: number; spire: 'needle' | 'corners' | 'saddle'; spireHeight: number;
+    choir: 'apse' | 'flat'; choirLength: number;
+  };
+}
+
+/**
+ * How a classical building (style `imperial`) is dressed, from a plain block to a palace on a sloping square: what stands forward
+ * and what carries it, the heads of its windows, its ornament, and how it meets the ground. A building without it is dressed as the
+ * first of them were: the middle three bays standing forward under pilasters where there is a portico, a rusticated ground storey
+ * with flat arches over its windows, a cornice over every window of the principal storey and a pediment over every other, a small
+ * window in the pediment, one door, and a plinth of half a metre on level ground.
+ */
+export interface ClassicalDress {
+  /** How many bays of the middle stand forward, where there is a portico: three, five, seven or nine. */
+  centre: number;
+  /**
+   * What carries the middle's pediment: pilasters against its wall, or columns standing clear of it through the storeys over the
+   * ground storey, on the ground storey of the middle brought forward as their base, its doors and windows deep in it.
+   */
+  order: 'pilasters' | 'columns';
+  /** How many bays at each end stand forward as pavilions, under pilasters of their own: none, or one to three. */
+  pavilions: number;
+  /** Which storeys have windows with round heads: none, the ground storey, or it and the one over it. */
+  arches: 0 | 1 | 2;
+  /** Over the windows of the principal storey: the surround alone; a cornice; a cornice, and a pediment over every other; or a pediment over every one. */
+  heads: 'plain' | 'cornice' | 'alternate' | 'pediments';
+  /** The render of the ground storey cut in courses. */
+  rusticated: boolean;
+  /** Wreaths along the frieze under the cornice, one over each window. */
+  frieze: boolean;
+  /** A balustrade along the top of the cornice, before the roof. */
+  balustrade: boolean;
+  /** In the pediment: a small window, a round one, a clock, or nothing. */
+  tympanum: 'window' | 'oculus' | 'clock' | 'plain';
+  /** A flagpole over the middle. */
+  flag: boolean;
+  /** What the roof is covered with: sheet metal of the tone dealt, or grey, green, red-brown or black; copper gone green; red clay tiles, or dark ones. */
+  roof: 'dealt' | 'grey' | 'green' | 'red' | 'black' | 'copper' | 'tiles' | 'dark';
+  /**
+   * How richly its walls are dressed. `empire`: strips at the corners over the ground storey, surrounds to the windows with sills on
+   * blocks and heads as `heads` says, three bands over the ground storey, a deep cornice on blocks. `quoins`: as the Renaissance did,
+   * stones laid long and short up the corners in place of the strips, and the surrounds eared at their tops. `lesenes`: plainer, as
+   * Nordic classicism was: flat strips up the corners from the plinth, plain frames to the windows with no heads, one band, a lighter
+   * cornice with no blocks, and the order of the middle flat strips too. `bare`: nothing but the openings, their sills, one band and a
+   * slim cornice.
+   */
+  style: 'empire' | 'quoins' | 'lesenes' | 'bare';
+  /** Doors in the middle: one, or three side by side into the one hall (where the middle is three bays broad or more). */
+  doors: 1 | 3;
+  /** How high the floor of the ground storey stands over the ground before the door: half a metre of plinth, or more, a basement with small windows of its own. */
+  plinth: number;
+  /**
+   * How much lower the ground stands at the right end of the front than at the left, as one stands before it (less than nothing
+   * where the left is lower). The building stands level, and the granite of its base shows the more the further the ground falls
+   * away. Never more than the plinth allows: the ground at the upper end stays under the floor.
+   */
+  fall: number;
+}
+
+/**
+ * How a canal house is made: the measures of the house are the building's (`w`, `d`, `storeys`,
+ * `heights`, `bays`); this is the rest. Everything here is chosen independently, so that one house
+ * may be a narrow front of one window with a bell gable and the next a double house of seven
+ * under a raised cornice; but the dealer (`src/core/canal.ts`) keeps them to the combinations the
+ * city built.
+ */
+export interface CanalWork {
+  /** A dwelling, with a stoop and tall windows; or a warehouse, of lower storeys, with a column of loading doors under the hoist and shutters to its windows. */
+  kind: 'house' | 'warehouse';
+  /**
+   * The outline of the front over the eaves, from the oldest to the latest: `spout`, a narrow
+   * upright strip in the middle rising over the roof, the slopes either side boarded; `stepped`, in
+   * `tiers` steps a side; `neck`, a narrow upright neck over shoulders, with carved claw pieces filling
+   * the corners between (with `tiers` 2, a broader neck first and a narrower one on it); `bell`, the
+   * outline curving in from the shoulders to a narrow top as a bell does; `cornice`, a straight
+   * cornice across the whole front, the roof behind it; `raised`, such a cornice with a panel rising
+   * over its middle.
+   */
+  gable: 'spout' | 'stepped' | 'neck' | 'bell' | 'cornice' | 'raised';
+  /** Of a stepped gable, its steps a side (2 to 5); of a neck gable, its tiers (1 or 2). */
+  tiers: number;
+  /** What stands on the top of the gable or the raised panel: a triangular pediment, a segmental one, a curved crest with scrolls, or a flat cap with a ball. */
+  crown: 'triangle' | 'segment' | 'scroll' | 'flat';
+  /** The front is bare brick, or painted over in the building's `colour`. */
+  front: 'brick' | 'painted';
+  /** The clay of the brick, as for `BrickWork`; and its tone, by which its colour is multiplied. */
+  clay: 'red' | 'buff';
+  tone: [number, number, number];
+  /** The colour of what is dressed: sandstone, or paint. */
+  trim: [number, number, number];
+  /**
+   * How much is carved and moulded: 0, a plain front, the windows under flat arches of brick; 1,
+   * bands of stone at the floors, keystones, a moulded door case; 2, besides, garlands under the
+   * windows, crowned windows, vases and scrolls on the gable, an oval window under its crown; 3,
+   * besides, pilasters between the bays storey over storey and a balustrade or a crest at the top.
+   */
+  ornament: 0 | 1 | 2 | 3;
+  /** The windows: `cross`, a mullion and a transom with small panes above and shutters below; `small`, sashes of many small panes; `large`, sashes of one or two panes. */
+  windows: 'cross' | 'small' | 'large';
+  /** Paint: of the window frames; of the shutters, if there are any (a warehouse always has them); of the door. */
+  frame: [number, number, number];
+  shutters: [number, number, number] | null;
+  paint: [number, number, number];
+  /** A timber front to the ground storey, painted this colour, with great windows and the door in it; or none, the brick going down to the plinth. */
+  pui: [number, number, number] | null;
+  /**
+   * How high the floor of the ground storey stands over the street, up a stoop of steps and a landing; and whether under it there
+   * is a basement, half under the street, lit by low windows at the foot of the front.
+   */
+  stoop: number;
+  basement: boolean;
+  /** How far the front leans out over the street for each metre of its height, as the fronts on the canals do so that goods hoisted clear it. */
+  lean: number;
+  /** The bay the door is in, counted from 0 at the left as one stands before the front. */
+  door: number;
+  /** How steep the roof is, in degrees, and what it is covered with: red clay tiles or tiles glazed nearly black. */
+  pitch: number;
+  roof: 'red' | 'dark';
+  /** A hoist beam with its hook over the top hatch. */
+  hoist: boolean;
+}
+
 /**
  * The plan of a building's rooms: alike on every storey, except where a room or a door names the
  * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
@@ -273,20 +456,34 @@ export interface BuildingPlan {
    * next room's or the rendered skin outside, in the order front, back, left, right (as `v0`,
    * `v1`, `u0`, `u1`): half a wall between rooms, all of an outer wall within its skin.
    */
-  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
+  rooms: { kind: 'hall' | 'stair' | 'passage' | 'front' | 'back' | 'wing' | 'carriage' | 'office' | 'loft'; u0: number; u1: number; v0: number; v1: number; linings: [number, number, number, number]; storey?: number }[];
   /** Doorways between rooms: in the wall whose middle line is at `at` (a `u` if `line` is `u`, a `v` if `v`), centred at `c` along it, `w` wide; `tall` for an arch into a stair hall. */
   doors: { line: 'u' | 'v'; at: number; c: number; w: number; tall?: boolean; through?: number; storey?: number }[];
   /** The thickness of the outer walls, of the wall down the middle of the depth, and of the walls between rooms. */
   walls: { outer: number; spine: number; cross: number };
+  /**
+   * Of a house of brick or a canal house: where its stair stands, the same on every storey. Its flights stand one over another in
+   * this footprint, each rising from the floor below at `v0` toward `v1`, the longest filling it; `wall` is the side that stands
+   * against a wall (-1 the `u0` side, 1 the `u1`), the other side open, with a rail. The steps follow by rule from the storeys'
+   * heights (`steepFlights` in `src/core/interior.ts`). Every storey but the top has a flight up from it.
+   */
+  stair?: { u0: number; u1: number; v0: number; v1: number; wall: -1 | 1 };
 }
 
 export interface Building {
-  style: 'timber' | 'imperial';
+  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
   x: number;
   z: number;
   w: number;
   d: number;
   faces: 'e' | 'w';
+  /**
+   * Of a building in a town, which stands along a street whichever way it runs: the bearing its front faces, in radians from the
+   * direction of greater x towards greater z (so `faces` is not read); and the height of the ground it stands on.
+   */
+  turn?: number;
+  y?: number;
   storeys: number;
   heights: number[];
   bays: number;
@@ -305,6 +502,46 @@ export interface Building {
   burnt?: boolean;
   portico?: boolean;
   /**
+   * Of a classical building in a closed block: a carriage way through its ground storey from the street to the yard behind, under a
+   * round arch in the front and the back, through the two bays at its left end (-1) or its right (1) as one stands before it.
+   */
+  arch?: { side: -1 | 1 };
+  /**
+   * Of a broad classical building: the bays its front doors are in, counted from 0 at the left as one stands before it, if it has more
+   * than the one in its middle bay. Each is an entrance with a stair of its own.
+   */
+  entrances?: number[];
+  /**
+   * Of a wooden house: how high its basement of rough granite stands over the ground before its front (its floor is that high), the end
+   * its door is in (-1 the left as one stands before the front, 1 the right), up steps under a little roof, near the front; and how
+   * many half-round dormers light its attic from the front's slope of the roof.
+   */
+  basement?: number;
+  endDoor?: -1 | 1;
+  dormers?: number;
+  /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
+  pediment?: boolean;
+  /** Of a classical building: how it is dressed, from a plain block to a palace on a sloping square (see `ClassicalDress`). Without it, as the first of them were. */
+  dress?: ClassicalDress;
+  /**
+   * What stands close about the building, in its own measures (across its front, and back from it): the outline of each such thing,
+   * and how high its walls rise over the ground before this one's door. A window that would look into one from nearer than a few
+   * metres, and under its top, is left out and the wall is blank there, as it is where houses stand against one another.
+   */
+  near?: { at: [number, number][]; top: number }[];
+  /**
+   * Of a classical building: walls of bare brown brick instead of a wash. `stucco`: its dressings (cornices, bands, surrounds,
+   * pilasters, corner strips) stay stuccoed white, and its ground storey is stucco the colour of stone, rusticated; `bare`: all of it
+   * is brick, dressings included, laid a little paler as moulded brick is.
+   */
+  brick?: 'stucco' | 'bare';
+  /**
+   * Of a classical building with wings: towers at its corners, rising `extra` storeys over its cornice, each `size` metres square
+   * and standing on the corner named: the ends of the front (`front`), the far ends of the wings (`wing`), or the back corner of an end
+   * that has no wing (`back`), on the left (-1) or right (1) as one stands before the front.
+   */
+  towers?: { corner: 'front' | 'wing' | 'back'; side: -1 | 1; size: number; extra: number }[];
+  /**
    * For a building set into rising ground: how much higher the ground stands at its back than
    * before its door. Its lowest storey is then half a basement, open to the front and buried at
    * the back, and it has a second door in the back wall, at `backDoor` across it, onto the ground there.
@@ -318,8 +555,107 @@ export interface Building {
    * inward; `length` is how far it reaches back beyond the main block. It has the main block's storeys.
    */
   wings?: { side: -1 | 1; width: number; length: number }[];
+  /** Of the style `brick`: which of the family it is, and how it is made. */
+  brickwork?: BrickWork;
+  /** Of the style `canal`: how it is made. */
+  canalwork?: CanalWork;
   /** Its rooms, if it has any that can be gone into. */
   plan?: BuildingPlan;
+}
+
+/**
+ * A harbour town on a coast, in a bay between headlands, with the mountains behind it. The land
+ * was found (`coastland.ts`) and the town laid on it: the sea lies south, and everything is in the
+ * site's measures. The house stands at the head of the market square on a terrace, its forecourt
+ * the terrace's top; a broad stair comes down from it into the square, which opens at its foot
+ * onto the waterfront and the quay. Blocks of buildings stand about the square in streets laid
+ * square to it: the classical buildings nearest the square and the harbour, timber houses beyond,
+ * and on the fringes, along the shore and up the slopes, shacks. Outside the town are fields, and
+ * woods up the hills.
+ */
+export interface Town {
+  /**
+   * Where the land was found: the frame's seed, the point of the frame under the middle of the quay's edge, how far the frame is
+   * turned, and the height in the frame of the house's ground; and the lattice, in metres, that the town's own land is made on.
+   */
+  terrain: { seed: number; u: number; v: number; turn: number; base: number; cell: number; world?: string };
+  /** The sea's level. */
+  sea: number;
+  /** The box the town's own land is made over: beyond it the country is the frame's, seen and not walked. */
+  land: { x0: number; x1: number; z0: number; z1: number };
+  /** The house's level ground, at the forecourt's floor: the terrace at the head of the square. */
+  level: { x0: number; x1: number; z0: number; z1: number };
+  /** The quay: its edge runs along `x` at `z`, from `x0` to `x1`, its top at `y`; the waterfront behind it is `apron` deep. */
+  quay: { x0: number; x1: number; z: number; y: number; apron: number };
+  /** The market square: its ground falls from `yN` at its north side to `yS` at its south, where it opens onto the waterfront. */
+  square: { x0: number; x1: number; z0: number; z1: number; yN: number; yS: number };
+  /** The stair from the forecourt down into the square: `x0` to `x1` broad, from the forecourt's edge at `z0` to its foot at `z1`. */
+  stair: { x0: number; x1: number; z0: number; z1: number };
+  /** The moles that close the harbour: each a line of points from where it leaves the quay, `width` across, its top at `y`. */
+  moles: { line: [number, number][]; width: number; y: number }[];
+  /** The harbour light at the end of a mole, which can be climbed. */
+  light?: { x: number; z: number; y: number; r: number; height: number; door: number };
+  /** Streets, lanes, stepped lanes and tracks, as lines of points `[x, z, y]`, `width` across. */
+  /**
+   * The ways of the town: `street`s and `lane`s at their own levels, `track`s and `path`s cut to the land; and what each is laid with,
+   * if not what its kind is usually laid with (setts for a street or a lane, beaten earth for a track, a trodden line for a path):
+   * `flags` (dressed stone, as beside the classical quarter), `setts`, `gravel`, or `dirt` (beaten earth, with ruts).
+   */
+  streets: { line: [number, number, number][]; width: number; kind: 'street' | 'lane' | 'track' | 'path'; surface?: 'flags' | 'setts' | 'gravel' | 'dirt' }[];
+  /** Blocks of the town between its streets, and which of its three kinds of building each is built up with. */
+  /** The form of the harbour: two arms curving towards each other, one long breakwater, straight piers, a breakwater standing off with two mouths, or a mole bent square. */
+  harbourForm?: 'arms' | 'breakwater' | 'piers' | 'detached' | 'dogleg';
+  /**
+   * A river, if the town has one: its middle line from the hills down to the harbour, each point `[x, z, y]` with the level of its
+   * water there (never falling as it goes up; a step where it rises sharply is a weir, or in the hills a fall); its breadth at each
+   * point; whether it runs between stone walls there (in the town) or between banks of earth; the breadth of the quay along the top of
+   * each wall; the side of the square it runs down (-1 west, 1 east); and its bridges, each at a way's crossing, at the way's level,
+   * facing along the way, spanning the water, as broad as the way, of stone or of timber.
+   */
+  river?: {
+    line: [number, number, number][]; width: number[]; walled: boolean[]; quay: number; side: -1 | 1;
+    bridges: { x: number; z: number; y: number; heading: number; span: number; width: number; kind: 'stone' | 'timber' }[];
+  };
+  /** The outline of the harbour's water: the quay's edge, the moles' lines and the mouths between their heads. */
+  harbour?: [number, number][];
+  /** What kind of plan the town's streets are laid on: square and straight, following the shore, fanning out from the harbour, or crooked as an old town's. */
+  plan?: 'planned' | 'shore' | 'fan' | 'old';
+  /** The blocks of buildings: each its four corners, south-west, south-east, north-east, north-west (south being towards the sea), and the box about them. */
+  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber'; corners?: [number, number][] }[];
+  /** The buildings of the blocks and the farms: each with its `turn` and its `y`. */
+  buildings: Building[];
+  /**
+   * Shacks: one room of boards under a roof of tarred boards, tin or turf, on the fringes of the town and along the shore; each
+   * `w` across its front by `d` deep, its front facing the bearing `turn`, its floor at `y`; `stilts` if it stands on posts over
+   * low ground or the water's edge, `lean` if its roof is one slope.
+   */
+  shacks: { x: number; z: number; y: number; w: number; d: number; turn: number; roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number; colour: [number, number, number] }[];
+  /**
+   * Storehouses along the shore beyond the harbour, in a row, their gable ends to the water: each `w` across its gable by `d` deep,
+   * its gable facing the bearing `turn`, its floor at `y`, its walls `height` high to the eaves, of upright boards with battens over
+   * the joints painted the red of iron ochre (or another `colour`), or of logs; a door and a hatch for loading in its gable.
+   */
+  storehouses: { x: number; z: number; y: number; w: number; d: number; turn: number; height: number; colour: [number, number, number]; logs: boolean }[];
+  /** The stone quays the storehouses stand on: each a line of points along the water's edge, the sea on its right hand going along it, its top at `y`. */
+  wharves: { line: [number, number][]; y: number }[];
+  /** Stalls on the market square, each `w` by `d`, its counter facing `turn`, its awning's colours. */
+  stalls: { x: number; z: number; w: number; d: number; turn: number; awning: [number, number, number]; goods: 'fish' | 'fruit' | 'cloth' | 'pots' | 'bread' }[];
+  /** The fountain in the square. */
+  fountain?: { x: number; z: number; r: number };
+  /** Boats: open ones rowed or sailed from the beach; and, with `masts`, decked vessels (a smack of one mast, a schooner of two). */
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }[];
+  /** Fields outside the town: each a four-cornered parcel and what is grown in it. */
+  fields: { corners: [number, number][]; crop: 'wheat' | 'barley' | 'oats' | 'fallow' | 'pasture' | 'roots' | 'orchard' | 'vines' }[];
+  /** Walls of dry stone about the fields, as the island's are. */
+  walls: { line: [number, number][]; gaps: [number, number][]; fallen: [number, number][]; height: number }[];
+  /** The outlook on the headland beside the town: a level place at the cliff's edge, with a parapet towards the sea and a belvedere. */
+  outlook?: { x: number; z: number; y: number; facing: number };
+  /**
+   * A great hall cut in the rock of a hill or a headland outside the town, of the same make as a mountain top's (see `Mountain`):
+   * where a cliff stands high over the sea, its windows look out through the cliff's face; deep in a hill it has none. Its stair comes
+   * down to it from a portal in the open ground, which a path leads to.
+   */
+  hall?: NonNullable<Mountain['hall']>;
 }
 
 /**
@@ -384,8 +720,11 @@ export interface Valley {
    * `turn` so that the valley runs south, and the land's height there, `base`, is the meadow's floor. The line down its middle is
    * its stream's, and its sides lie where the land has risen four metres over that; its floor, its walls and the hills beyond are
    * that land. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, its
+   * land is read at its own height (not a share of it), and `seed` is not used.
    */
-  terrain?: { seed: number; u: number; v: number; turn: number; base: number };
+  terrain?: { seed: number; u: number; v: number; turn: number; base: number; world?: string };
 }
 
 /**
@@ -433,8 +772,11 @@ export interface Island {
    * frame. The island's own land is that
    * land made fine on a lattice `cell` metres fine and worn again; its coast is read off it, and the land across the water is
    * the rest of that sea. Recorded so that whoever builds the place makes the same land.
+   *
+   * With `world`, it was found in that world instead (`world.ts`, `worldLand.ts`): `u`, `v` are the world's own coordinates, the
+   * sea stands at its level, nought, and the land across the water is the rest of the world; `seed` is then only for the detail.
    */
-  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number };
+  terrain?: { seed: number; cell: number; u: number; v: number; turn: number; base: number; shore: number; world?: string };
   /** The island's back, a rise of `height` metres over the forecourt's level, round `x`, `z`, falling away over `r`. */
   crown: { x: number; z: number; r: number; height: number };
   /** How far up from the beach the land comes down to it, in metres: the hollow the village stands in. */
@@ -472,7 +814,8 @@ export interface Island {
    */
   cottages: { x: number; z: number; y: number; w: number; d: number; faces: number; roof: 'thatch' | 'slate'; wash: [number, number, number] }[];
   /** Boats drawn up on the beach, or moored in the cove: where, which way the bow points, and how long. */
-  boats: { x: number; z: number; heading: number; length: number; afloat: boolean }[];
+  /** Boats: open ones rowed or sailed from the beach; and, with `masts`, decked vessels (a smack of one mast, a schooner of two). */
+  boats: { x: number; z: number; heading: number; length: number; afloat: boolean; masts?: number }[];
   /** Pillars of rock standing out of the sea off the cliffs: where, how broad at the foot, how high their tops stand over the sea. */
   stacks: { x: number; z: number; r: number; height: number }[];
   /**
@@ -538,7 +881,16 @@ export interface Mountain {
    * If present, the land is not the plain shape alone but that shape given fractal detail and worn by water and frost on a lattice
    * `cell` metres fine, from the stream `seed` (see `terrain.ts`). Recorded so that whoever builds the place makes the same land.
    */
-  terrain?: { seed: number; cell: number };
+  terrain?: {
+    seed: number; cell: number;
+    /**
+     * If present, the top stands on a summit of that world (`world.ts`): the middle of `level` lies over the world's point `u`, `v`,
+     * the site turned by `turn` so that the ridge it comes up runs south, and the world's land there is `base` high. The country
+     * round about is then the world's own, at its own height, unworn here (it is worn already), with no `range` drawn; the drawn top
+     * stands on it, its summit where the world's is.
+     */
+    world?: string; u?: number; v?: number; turn?: number; base?: number;
+  };
   /** The level of the top of the sea of cloud, and how high its billows rise above it and sink below it. */
   deck: number;
   billow: number;
@@ -660,6 +1012,8 @@ export interface Site {
   island?: Island;
   /** If present, the site is neither a valley nor an island but the top of a mountain above a sea of cloud; `valley` is absent. */
   mountain?: Mountain;
+  /** If present, the site is a harbour town on a coast between the sea and the mountains, and the house stands at the head of its square; `valley` is absent. */
+  town?: Town;
   /**
    * How the house stands: built into the end of a ridge, its rooms under the hill with courts
    * open through it (`hill`, and so when absent); standing free in the valley, walled and
@@ -697,9 +1051,10 @@ export interface Site {
   /**
    * What kind of settlement the valley has, decided before anything else is put in it: a
    * village along the track with a keep above it, a hamlet of a few houses, a manor house of
-   * the classical kind, or none.
+   * the classical kind, or none. Or a `town`: a street of brick houses along the track, close
+   * against one another, of the kinds in `BrickWork`, and where there is room a church of brick.
    */
-  settlement?: 'village' | 'hamlet' | 'manor';
+  settlement?: 'village' | 'hamlet' | 'manor' | 'town';
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
    * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,

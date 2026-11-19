@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
   for (const seed of process.argv.slice(2)) {
     const page = await browser.newPage({ viewport: { width: 240, height: 135 }, deviceScaleFactor: 1 });
     page.on('pageerror', (e) => console.log('[pageerror]', e.message.slice(0, 200)));
-    await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${seed}&place=island&nobake=1&dpr=1&bloom=0&air=0&nointro`);
+    await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${seed}&place=island&world=none&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 600000 });
     const r = await page.evaluate(() => {
       const { site, player, game, groundAt } = window.__dbg, lh = site.island.lighthouse;

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Dungeons Building Lab</title>
+  <style>
+    /* A tool over a lit square: one dark look on purpose, as the game's own tools have, whatever the reader's theme.
+       The picture fills the screen; the panel stands at its right, or along its foot on a narrow screen. */
+    :root {
+      color-scheme: dark;
+      --ground: #0b0a09;          /* behind everything */
+      --sheet: rgba(11, 10, 9, .88); /* the panel */
+      --chip: rgba(11, 10, 9, .66);  /* buttons and fields */
+      --ink: #e8e2d6;            /* text */
+      --ink-strong: #f2ead9;     /* small headings */
+      --rule: rgba(232, 226, 214, .2);
+      --edge: rgba(232, 226, 214, .42);
+      --brass: #e0b070;          /* the accent: headings, sliders, the tool in hand */
+      --brass-wash: rgba(224, 176, 112, .32);
+      --on-brass: #1a1408;
+      --good: #b9d99a;
+      --bad: #ff9a80;
+      --shadow: rgba(0, 0, 0, .85);
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --serif: ui-serif, Georgia, "Times New Roman", serif;
+      --hit: 22px;               /* the least height of a row of controls */
+    }
+    @media (pointer: coarse) { :root { --hit: 32px; } }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    body { background: var(--ground); color: var(--ink); font: 12px/1.45 var(--sans);
+      -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+    @media (pointer: coarse) { body { font-size: 13px; } }
+    #view { position: fixed; left: 0; top: 0; display: block; touch-action: none; }
+    /* What is drawn over the picture: outlines, the ring to turn by, and the knobs to drag. Only the knobs take the pointer. */
+    #over { position: fixed; left: 0; top: 0; pointer-events: none; overflow: visible; }
+    #over .knob { pointer-events: auto; cursor: grab; touch-action: none; }
+    #over .knob:active { cursor: grabbing; }
+    #over text { font: 600 11px var(--sans); paint-order: stroke; stroke: var(--shadow); stroke-width: 3px; fill: var(--ink-strong); }
+    #panel { position: fixed; top: 0; right: 0; bottom: 0; width: 280px; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+      padding: calc(12px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) 16px;
+      background: var(--sheet); border-left: 1px solid var(--rule); scrollbar-width: thin; }
+    body.bare #panel { display: none; }
+    #panel h2 { margin: 16px 0 6px; font: 600 11px/1.2 var(--serif); letter-spacing: .14em; text-transform: uppercase; color: var(--brass); }
+    #panel h2:first-child { margin-top: 0; }
+    #panel h3 { margin: 12px 0 4px; font: 600 1em/1.2 var(--sans); color: var(--ink-strong); }
+    .row { display: grid; grid-template-columns: 92px minmax(0, 1fr) 42px; gap: 2px 8px; align-items: center; min-height: var(--hit); }
+    .row.wide { grid-template-columns: 92px minmax(0, 1fr); }
+    .row label { opacity: .8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .row output { opacity: .65; text-align: right; font-variant-numeric: tabular-nums; }
+    .row .step { display: flex; gap: 6px; align-items: center; }
+    .row .step output { min-width: 24px; text-align: center; }
+    .row .step button { min-width: calc(var(--hit) + 4px); }
+    input[type=range] { width: 100%; margin: 0; accent-color: var(--brass); min-height: var(--hit); }
+    input[type=color] { width: 100%; height: calc(var(--hit) - 2px); padding: 0; border: 1px solid var(--edge); border-radius: 3px; background: none; }
+    select, button { font: inherit; color: inherit; background: var(--chip); border: 1px solid var(--edge); border-radius: 3px; padding: 2px 8px; min-height: var(--hit); touch-action: manipulation; }
+    button { cursor: pointer; }
+    button:hover, button.on { background: var(--brass-wash); }
+    button:disabled { opacity: .4; cursor: default; background: var(--chip); }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0; }
+    .buttons button { flex: 1 1 auto; }
+    .checks { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 3px 0; min-height: var(--hit); align-items: center; }
+    .checks label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; min-height: var(--hit); }
+    .checks input { margin: 0; accent-color: var(--brass); width: 16px; height: 16px; }
+    .note { opacity: .6; margin: 5px 0 0; }
+    #tools { position: fixed; left: calc(16px + env(safe-area-inset-left, 0px)); top: calc(12px + env(safe-area-inset-top, 0px));
+      display: flex; flex-wrap: wrap; gap: 5px; max-width: calc(100% - 32px); touch-action: manipulation; }
+    #tools button { background: var(--chip); padding: 5px 11px; }
+    #tools button.on { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+    #tools .gap { width: 8px; }
+    #foot { position: fixed; left: calc(16px + env(safe-area-inset-left, 0px)); bottom: 10px; pointer-events: none; text-shadow: 0 1px 3px var(--shadow);
+      font-variant-numeric: tabular-nums; white-space: pre-wrap; }
+    #foot .dim { opacity: .62; }
+    #foot .bad { color: var(--bad); }
+    #foot .good { color: var(--good); }
+    /* On a narrow screen the panel is a sheet along the foot of the picture. */
+    @media (max-width: 720px) {
+      #panel { top: auto; left: 0; width: auto; height: 44vh; border-left: 0; border-top: 1px solid var(--rule);
+        padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+      #tools button { padding: 6px 10px; }
+      /* (The picture is small: the line of frame rates and counts gives way.) */
+      #foot .dim { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <svg id="over" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="tools"></div>
+  <div id="foot"></div>
+  <div id="panel"></div>
+  <input id="file" type="file" accept=".json,application/json" hidden />
+  <script type="module" src="./buildings.ts"></script>
+</body>
+</html>

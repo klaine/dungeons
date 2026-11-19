@@ -9,12 +9,18 @@
  */
 import { generateSite } from '../src/core/generate';
 import { meshSite } from '../src/render/siteMesher';
+import { worldLand } from '../src/core/worldLand';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'peak', terrain = process.argv[4] === 'plain' ? 'plain' : undefined;
+// (`WORLD=w2` before the command builds each hospice on a summit of that world in turn, as `?world=w2&place=mountain` does.)
+const inWorld = process.env.WORLD, tops = inWorld ? worldLand(inWorld).places.filter((q) => q.kind === 'mountain') : [];
+if (inWorld && !tops.length) { console.log(`world ${inWorld} has no mountain tops`); process.exit(1); }
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`;
-  const site = generateSite(seed, 'mountain', { terrain });
+  const top = inWorld ? tops[k % tops.length] : undefined, t1 = performance.now();
+  const site = generateSite(seed, 'mountain', top ? { world: { seed: inWorld!, n: top.n } } : { terrain });
+  if (top) console.log(`${seed} at ${top.name} (mountain ${top.n} of ${inWorld}${site.mountain?.terrain?.world ? '' : ', NOT FOUND THERE'}): laid out in ${(performance.now() - t1).toFixed(0)} ms; summit ${site.mountain?.peaks[0]?.height} m over the forecourt, cloud ${site.mountain ? (site.mountain.deck - site.places.find((p) => p.id === site.start)!.floor).toFixed(0) : '?'} m`);
   const t0 = performance.now();
   const scene = meshSite(site);
   const ms = performance.now() - t0;

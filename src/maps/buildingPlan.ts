@@ -1,4 +1,7 @@
-import { buried, CLASSICAL, classicalEnds, classicalFront, classicalStair, floorOf, footprintOf, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, frontAt, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { brickBackWindows, brickColumns, brickDoor, brickFloor, brickGroundWindows, brickShell, eavesBays } from '../core/brick';
+import { canalBackWindows, canalBays, canalDoor, canalFloor, canalShell } from '../core/canal';
+import { steepFlights } from '../core/interior';
 import { Building } from '../core/site';
 
 /**
@@ -18,6 +21,7 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
   const plan = b.plan;
   if (!plan) return;
   if (b.style === 'timber') { drawTimberStorey(ctx, b, storey, page, scale, o); return; }
+  if (b.style === 'canal' || b.style === 'brick') { drawHouseStorey(ctx, b, storey, page, scale, o); return; }
   const { outer: T, spine: SPINE, cross: CROSS, out: OUT } = CLASSICAL, W = b.w, D = b.d;
   const { windows, standL, standR } = classicalFront(b);
   const rect = (u0: number, u1: number, v0: number, v1: number, fill: string) => {
@@ -35,40 +39,53 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
   };
   // The walls: the whole footprint in ink, then the floors laid over it.
   for (const r of footprintOf(b)) rect(r.u0, r.u1, r.v0, r.v1, INK);
-  for (const r of plan.rooms) rect(r.u0, r.u1, r.v0, r.v1, r.kind === 'front' || r.kind === 'back' || r.kind === 'wing' ? FLOOR : HALL);
+  // (A room or door named for one storey is drawn on that one alone: over a carriage way, the rooms above it.)
+  const here = <T extends { storey?: number }>(q: T) => q.storey === undefined || q.storey === storey;
+  for (const r of plan.rooms.filter(here)) rect(r.u0, r.u1, r.v0, r.v1, r.kind === 'front' || r.kind === 'back' || r.kind === 'wing' ? FLOOR : HALL);
   // Doors between rooms: the wall cut away the width of the door.
-  for (const d of plan.doors) {
+  for (const d of plan.doors.filter(here)) {
     const half = (d.through ?? (d.line === 'v' ? SPINE : CROSS)) / 2 + 0.01;
     if (d.line === 'u') rect(d.at - half, d.at + half, d.c - d.w / 2, d.c + d.w / 2, FLOOR);
     else rect(d.c - d.w / 2, d.c + d.w / 2, d.at - half, d.at + half, FLOOR);
   }
   // Windows and outer doors on this storey: a pale gap the depth of the wall, with the glass drawn as a line across it.
-  const frontV = (u: number) => (b.portico && u > standL && u < standR ? -OUT : 0);
+  // (Where the middle or a pavilion stands forward, its windows are in its own wall.)
+  const frontV = (u: number) => -frontAt(b, u);
+  void standL; void standR; void OUT;
   const pane = (u0: number, u1: number, v0: number, v1: number, glassAt: 'u' | 'v') => {
     rect(u0, u1, v0, v1, PAPER);
     if (glassAt === 'v') line(u0, (v0 + v1) / 2, u1, (v0 + v1) / 2, LINE, Math.max(1, scale * 0.04));
     else line((u0 + u1) / 2, v0, (u0 + u1) / 2, v1, LINE, Math.max(1, scale * 0.04));
   };
   const sill = floorOf(b, storey) + (storey === 0 ? 0.85 : 0.6), middle = b.bays >> 1;
+  // The carriage way's arch, front and back, on the ground storey: open the arch's breadth, with no window in it.
+  const arch = storey === 0 ? classicalArch(b) : null;
+  if (arch) for (const [v0, v1] of [[-0.01, T + 0.01], [D - T - 0.01, D + 0.01]]) rect(arch.u - arch.w / 2, arch.u + arch.w / 2, v0, v1, HALL);
   windows.forEach((u, n) => {
-    const v0 = frontV(u), door = storey === 0 && n === middle;
+    if (arch && Math.abs(u - arch.u) < arch.w / 2 + 0.7) return;
+    const v0 = frontV(u), door = storey === 0 && entranceBays(b).includes(n);
     if (door) rect(u - 0.85, u + 0.85, v0 - 0.01, v0 + T + 0.01, FLOOR);
-    else pane(u - 0.6, u + 0.6, v0, v0 + T, 'v');
+    else if (!blinded(b, u, v0, 0, -1, sill)) pane(u - 0.6, u + 0.6, v0, v0 + T, 'v');
     if (b.backDoor !== undefined && storey === 1 && Math.abs(u - b.backDoor) < 0.05) rect(u - 0.62, u + 0.62, D - T - 0.01, D + 0.01, FLOOR);
-    else if (!buried(b, D, sill) && !(b.wings ?? []).some((g) => g.side * u > W / 2 - g.width - 0.3)) pane(u - 0.6, u + 0.6, D - T, D, 'v');
+    else if (!buried(b, D, sill, u) && !blinded(b, u, D, 0, 1, sill) && !(b.wings ?? []).some((g) => g.side * u > W / 2 - g.width - 0.3)) pane(u - 0.6, u + 0.6, D - T, D, 'v');
   });
   for (const v of classicalEnds(b)) {
-    if (buried(b, v, sill)) continue;
-    pane(-W / 2, -W / 2 + T, v - 0.6, v + 0.6, 'u');
-    pane(W / 2 - T, W / 2, v - 0.6, v + 0.6, 'u');
+    // (Each end on its own: where the ground falls along the front, one end may have a window where the other has none.)
+    if (!buried(b, v, sill, -W / 2) && !blinded(b, -W / 2, v, -1, 0, sill)) pane(-W / 2, -W / 2 + T, v - 0.6, v + 0.6, 'u');
+    if (!buried(b, v, sill, W / 2) && !blinded(b, W / 2, v, 1, 0, sill)) pane(W / 2 - T, W / 2, v - 0.6, v + 0.6, 'u');
   }
   for (const g of b.wings ?? []) {
     const { along, across } = wingWindows(b, g), outer = g.side * W / 2, inner = g.side * (W / 2 - g.width);
-    for (const v of along) if (!buried(b, v, sill)) { pane(Math.min(outer, outer - g.side * T), Math.max(outer, outer - g.side * T), v - 0.6, v + 0.6, 'u'); pane(Math.min(inner, inner + g.side * T), Math.max(inner, inner + g.side * T), v - 0.6, v + 0.6, 'u'); }
-    for (const u of across) if (!buried(b, D + g.length, sill)) pane(u - 0.6, u + 0.6, D + g.length - T, D + g.length, 'v');
+    for (const v of along) if (!buried(b, v, sill, outer)) {
+      if (!blinded(b, outer, v, g.side, 0, sill)) pane(Math.min(outer, outer - g.side * T), Math.max(outer, outer - g.side * T), v - 0.6, v + 0.6, 'u');
+      if (!blinded(b, inner, v, -g.side, 0, sill)) pane(Math.min(inner, inner + g.side * T), Math.max(inner, inner + g.side * T), v - 0.6, v + 0.6, 'u');
+    }
+    for (const u of across) if (!buried(b, D + g.length, sill, u) && !blinded(b, u, D + g.length, 0, 1, sill)) pane(u - 0.6, u + 0.6, D + g.length - T, D + g.length, 'v');
   }
   // The stair: the flight that goes up from this storey, with its treads and an arrow; the landing; and, on the storey above, the well it comes up through.
-  const stair = classicalStair(b), { START, TREAD, LANDING, across, strip } = stair;
+  // (One behind each entrance.)
+  for (const stair of classicalStairs(b)) {
+  const { START, TREAD, LANDING, across, strip } = stair;
   const at = (a: number, e: number) => stair.place(a, e);
   const box = (a0: number, a1: number, e0: number, e1: number, fill: string) => {
     const p = at(a0, e0), q = at(a1, e1);
@@ -105,13 +122,14 @@ export function drawStorey(ctx: CanvasRenderingContext2D, b: Building, storey: n
     ctx.fillStyle = INK;
     ctx.fill();
   }
+  }
   if (!o.labels) return;
   ctx.fillStyle = LINE;
   ctx.font = `${Math.max(9, Math.round(scale * 0.42))}px Georgia, serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const names: Record<string, string> = { hall: 'hall', stair: 'stair hall', passage: 'passage', front: 'room', back: 'room', wing: 'room' };
-  for (const r of plan.rooms) {
+  const names: Record<string, string> = { hall: 'hall', stair: 'stair hall', passage: 'passage', front: 'room', back: 'room', wing: 'room', carriage: 'carriage way' };
+  for (const r of plan.rooms.filter(here)) {
     const [x, y] = page((r.u0 + r.u1) / 2, r.kind === 'passage' ? r.v0 + 1.4 : (r.v0 + r.v1) / 2);
     const area = (r.u1 - r.u0) * (r.v1 - r.v0);
     ctx.fillText(r.kind === 'front' || r.kind === 'back' || r.kind === 'wing' ? `${area.toFixed(0)} m²` : names[r.kind], x, y);
@@ -183,6 +201,81 @@ function drawTimberStorey(ctx: CanvasRenderingContext2D, b: Building, storey: nu
   }
 }
 
+/**
+ * A storey of a house of brick or a canal house: its walls in ink, its rooms, the doors between them, the windows of its front and
+ * back, the front door on the ground storey, and the stair, the flight going up from this storey with its treads and an arrow, or
+ * on the top storey the well it comes up through.
+ */
+function drawHouseStorey(ctx: CanvasRenderingContext2D, b: Building, storey: number, page: PageOf, scale: number, o: { labels?: boolean }): void {
+  const plan = b.plan!, canal = b.style === 'canal', sh = canal ? canalShell(b) : brickShell(b), W = b.w, D = b.d, C = sh.cross;
+  const rect = (u0: number, u1: number, v0: number, v1: number, fill: string) => {
+    const [ax, ay] = page(u0, v0), [bx, by] = page(u1, v1);
+    ctx.fillStyle = fill;
+    ctx.fillRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
+  };
+  const line = (u0: number, v0: number, u1: number, v1: number, colour: string, width: number) => {
+    ctx.strokeStyle = colour; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(...page(u0, v0)); ctx.lineTo(...page(u1, v1)); ctx.stroke();
+  };
+  rect(-W / 2, W / 2, 0, D, INK);
+  const here = <T extends { storey?: number }>(q: T) => q.storey === undefined || q.storey === storey;
+  const rooms = plan.rooms.filter(here);
+  for (const r of rooms) rect(r.u0, r.u1, r.v0, r.v1, r.kind === 'front' || r.kind === 'back' || r.kind === 'office' || r.kind === 'loft' ? FLOOR : HALL);
+  for (const d of plan.doors.filter(here)) {
+    const half = C / 2 + 0.01;
+    if (d.line === 'u') rect(d.at - half, d.at + half, d.c - d.w / 2, d.c + d.w / 2, FLOOR); else rect(d.c - d.w / 2, d.c + d.w / 2, d.at - half, d.at + half, FLOOR);
+  }
+  // Windows: a pale gap through the wall with the glass as a line across it; the door, a gap.
+  const glass = Math.max(1, scale * 0.04);
+  const pane = (u0: number, u1: number, v0: number, v1: number) => { rect(u0, u1, v0, v1, PAPER); line(u0, (v0 + v1) / 2, u1, (v0 + v1) / 2, LINE, glass); };
+  const fronts: [number, number][] = [];
+  let door: [number, number] | null = null;
+  if (canal) {
+    const bays = canalBays(b), cw = b.canalwork!, ww = cw.kind === 'warehouse' ? Math.min(0.95, bays.window) : bays.window, dr = canalDoor(b);
+    if (storey === 0) door = [dr.s0 - W / 2, dr.s1 - W / 2];
+    if (storey === 0 && cw.pui) fronts.push([0.2 - W / 2, W / 2 - 0.2]);
+    else for (let j = 0; j < b.bays; j++) if (!(storey === 0 && j === cw.door)) fronts.push([bays.centre(j) - ww / 2 - W / 2, bays.centre(j) + ww / 2 - W / 2]);
+  } else if (b.brickwork!.kind === 'eaves') {
+    const e = eavesBays(b), ww = Math.min(1.15, e.pitch - 0.9), dr = brickDoor(b);
+    if (storey === 0) door = [dr.s0 - W / 2, dr.s1 - W / 2];
+    for (let j = 0; j < b.bays; j++) if (!(storey === 0 && j === b.bays >> 1)) fronts.push([e.centre(j) - ww / 2 - W / 2, e.centre(j) + ww / 2 - W / 2]);
+  } else if (storey === 0) {
+    const dr = brickDoor(b);
+    door = [dr.s0 - W / 2, dr.s1 - W / 2];
+    for (const [a, c] of brickGroundWindows(b)) fronts.push([a - W / 2, c - W / 2]);
+  } else for (const col of brickColumns(b)) { const ww = Math.min(1.2, col.room - 0.45); if (ww >= 0.4) fronts.push([col.c - ww / 2 - W / 2, col.c + ww / 2 - W / 2]); }
+  for (const [a, c] of fronts) if (!door || c < door[0] || a > door[1]) pane(a, c, -0.01, sh.front + 0.01);
+  if (door) rect(door[0], door[1], -0.01, sh.front + 0.01, HALL);
+  for (const [a, c] of canal ? canalBackWindows(b, storey) : brickBackWindows(b, storey)) pane(a, c, D - sh.wall - 0.01, D + 0.01);
+  // The stair.
+  const st = plan.stair;
+  if (st) {
+    const flights = steepFlights(sh.floors, st.v1 - st.v0), f = flights[storey], g = f ?? flights[storey - 1];
+    if (g) {
+      rect(st.u0, st.u1, st.v0, st.v0 + g.length, f ? '#e9dfc9' : '#d8ccb2');
+      for (let i = 0; i < g.steps; i++) line(st.u0, st.v0 + i * g.tread, st.u1, st.v0 + i * g.tread, LINE, Math.max(1, scale * 0.025));
+    }
+    if (f) {
+      const mid = (st.u0 + st.u1) / 2;
+      ctx.strokeStyle = INK; ctx.fillStyle = INK; ctx.lineWidth = Math.max(1, scale * 0.05);
+      const [ax, ay] = page(mid, st.v0 + 0.1), [bx, by] = page(mid, st.v0 + f.length - 0.3), head = scale * 0.3, ang = Math.atan2(by - ay, bx - ax);
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx - head * Math.cos(ang - 0.45), by - head * Math.sin(ang - 0.45)); ctx.lineTo(bx - head * Math.cos(ang + 0.45), by - head * Math.sin(ang + 0.45)); ctx.closePath(); ctx.fill();
+    }
+  }
+  if (!o.labels) return;
+  ctx.fillStyle = LINE;
+  ctx.font = `${Math.max(9, Math.round(scale * 0.42))}px Georgia, serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const r of rooms) {
+    const hall = r.kind === 'hall' || r.kind === 'passage', name = r.kind === 'office' ? 'office' : r.kind === 'loft' ? 'loft' : hall ? (storey === 0 ? 'hall' : 'landing') : `${((r.u1 - r.u0) * (r.v1 - r.v0)).toFixed(0)} m²`;
+    // (A hall's name at its front, clear of the stair.)
+    const [x, y] = page((r.u0 + r.u1) / 2, hall ? r.v0 + Math.min(0.8, (r.v1 - r.v0) / 2) : (r.v0 + r.v1) / 2);
+    if (r.u1 - r.u0 > 1.2 && r.v1 - r.v0 > 1.0) ctx.fillText(name, x, y);
+  }
+}
+
 /** The name of a storey, as plans name them. */
 export function storeyName(b: Building, storey: number): string {
   const lower = (b.sunk ?? 0) > 0.5;
@@ -193,8 +286,10 @@ export function storeyName(b: Building, storey: number): string {
 
 /** All the storeys of a building, each drawn as a plan with its name and a scale, on one sheet. */
 export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
-  const timber = b.style === 'timber', jut = timber ? -timberFront(b, b.storeys - 1) : 0;
-  const pad = 1.6 + jut, W = b.w, D = b.d + (b.portico ? CLASSICAL.out : 0) + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
+  const timber = b.style === 'timber', house = b.style === 'canal' || b.style === 'brick', jut = timber ? -timberFront(b, b.storeys - 1) : 0;
+  // (How far the front stands forward at the most: the middle, with the base of its columns, or a pavilion.)
+  const forward = b.style === 'imperial' ? Math.max(b.portico ? CLASSICAL.out + (dressOf(b).order === 'columns' ? CLASSICAL.columns : 0) : 0, dressOf(b).pavilions ? CLASSICAL.pavilion : 0) : 0;
+  const pad = 1.6 + jut, W = b.w, D = b.d + forward + 0.6 + Math.max(0, ...(b.wings ?? []).map((g) => g.length));
   const pw = Math.max((W + pad * 2) * scale, 250), ph = (D + pad * 2) * scale + 48;
   const cols = W > 17 ? 1 : 2, rows = Math.ceil(b.storeys / cols);
   const canvas = document.createElement('canvas');
@@ -208,20 +303,23 @@ export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
   ctx.font = '600 18px Georgia, serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(timber
+  const what = b.style === 'canal'
+    ? `${b.canalwork!.kind === 'warehouse' ? 'Canal warehouse' : 'Canal house'}, ${b.bays} ${b.bays === 1 ? 'bay' : 'bays'}, ${b.storeys} storeys, ${W.toFixed(1)} by ${b.d.toFixed(1)} m, ${b.canalwork!.gable} gable`
+    : `${b.brickwork?.kind === 'store' ? 'Warehouse' : b.brickwork?.kind === 'eaves' ? 'Brick house, eaves to the street' : "Merchant's house"}, ${b.storeys} storeys, ${W.toFixed(1)} by ${b.d.toFixed(1)} m, ${b.brickwork?.gable} gable`;
+  ctx.fillText(house ? what : timber
     ? `Timber-framed, ${b.storeys} storeys, ${W.toFixed(1)} by ${b.d.toFixed(1)} m, ${b.gable ? 'gable' : 'eaves'} to the street`
     : `${b.bays} bays, ${b.storeys} ${b.storeys === 1 ? 'storey' : 'storeys'}, ${W.toFixed(1)} by ${b.d.toFixed(1)} m${b.wings ? (b.wings.length === 2 ? ', U-shaped' : ', L-shaped') : ''}${b.portico ? ', pediment' : ''}${b.sunk ? ', on a slope' : ''}`, 14, 12);
   for (let s = 0; s < b.storeys; s++) {
     const ox = (s % cols) * pw, oy = 46 + Math.floor(s / cols) * ph;
     // The front is at the foot of the sheet, as one stands before it.
-    const page: PageOf = (u, v) => [ox + pw / 2 + u * scale, oy + 44 + (D + pad - (v + (b.portico ? CLASSICAL.out : 0)) - 0.3) * scale];
+    const page: PageOf = (u, v) => [ox + pw / 2 + u * scale, oy + 44 + (D + pad - (v + forward) - 0.3) * scale];
     ctx.fillStyle = INK;
     ctx.font = '600 15px Georgia, serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillText(storeyName(b, s), ox + 14, oy + 4);
     ctx.font = '12px Georgia, serif';
-    ctx.fillText(`floor ${(timber ? timberFloor(b, s) : floorOf(b, s)).toFixed(1)} m up, rooms ${b.heights[s].toFixed(1)} m high`, ox + 14, oy + 23);
+    ctx.fillText(`floor ${(timber ? timberFloor(b, s) : b.style === 'canal' ? canalFloor(b, s) : b.style === 'brick' ? brickFloor(b, s) : floorOf(b, s)).toFixed(1)} m up, rooms ${b.heights[s].toFixed(1)} m high`, ox + 14, oy + 23);
     drawStorey(ctx, b, s, page, scale, { labels: true });
     // A scale of five metres, and an arrow for the way in.
     const [sx, sy] = page(-W / 2, (timber ? -1.45 : -1.0) - jut);
@@ -231,7 +329,8 @@ export function buildingPlans(b: Building, scale = 26): HTMLCanvasElement {
     ctx.textBaseline = 'top';
     ctx.fillText('5 m', sx + 5 * scale + 6, sy - 4);
     if (s === 0) {
-      const [dx, dy] = page(timber ? -W / 2 + W * (b.door ?? 0.24) : 0, timber ? -0.75 : -1.1);
+      const doorU = b.style === 'canal' ? (canalDoor(b).s0 + canalDoor(b).s1) / 2 - W / 2 : b.style === 'brick' ? (brickDoor(b).s0 + brickDoor(b).s1) / 2 - W / 2 : timber ? -W / 2 + W * (b.door ?? 0.24) : 0;
+      const [dx, dy] = page(doorU, timber ? -0.75 : -1.1);
       ctx.textAlign = 'center';
       ctx.fillText('▲ entrance', dx, dy - 2);
     }

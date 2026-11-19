@@ -18,7 +18,7 @@
     #title { max-width: 46em; }
     #place { margin: 3px 0 4px; }
     #seed { opacity: .62; margin-right: 6px; }
-    #browse { pointer-events: auto; color: inherit; margin: 0 4px; }
+    #browse, #worldmap, #buildingsLab { pointer-events: auto; color: inherit; margin: 0 4px; }
     #new, #export, #mute, #weather, #exportMenu button { pointer-events: auto; font: inherit; color: inherit; background: rgba(11, 10, 9, .45); cursor: pointer;
       border: 1px solid rgba(232, 226, 214, .45); border-radius: 3px; padding: 2px 9px; }
     #new:hover, #again:hover, #export:hover, #mute:hover, #weather:hover, #exportMenu button:hover { background: rgba(224, 176, 112, .35); }
@@ -102,6 +102,12 @@
     #map[hidden] { display: none; }
     body.touch #map { right: calc(14px + env(safe-area-inset-right)); top: calc(14px + env(safe-area-inset-top)); width: 132px; height: 132px; }
     body.touch #map.big { width: 78vmin; height: 78vmin; }
+    /* The world's map, for a place in a world: where the plan made large is, and as large. */
+    #worldview { position: fixed; right: 16px; top: 16px; width: min(72vmin, 620px); height: min(72vmin, 620px); border-radius: 4px; cursor: pointer;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, .5); touch-action: manipulation; background: #f1eadb; }
+    #worldview[hidden] { display: none; }
+    body.touch #worldview { right: calc(14px + env(safe-area-inset-right)); top: calc(14px + env(safe-area-inset-top)); width: 78vmin; height: 78vmin; }
+    body.intro #worldview, body.loading #worldview { visibility: hidden; }
     body.touch #hint { margin-right: 148px; }
     kbd { font: inherit; padding: 0 5px; border: 1px solid rgba(232, 226, 214, .4); border-radius: 3px; }
     #loader { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: #0b0a09; transition: opacity .5s; }
@@ -124,6 +130,7 @@
 <body class="loading">
   <canvas id="view"></canvas>
   <canvas id="map" title="Plan of this place. Click to enlarge."></canvas>
+  <canvas id="worldview" hidden title="The world about this place, with what is built in it. Click, or M, for the plan."></canvas>
   <div id="toast" role="status" aria-live="polite"></div>
   <div id="won" hidden>
     <h2>The sanctum</h2>
@@ -156,7 +163,7 @@
     <div>
       <h1>Dungeons</h1>
       <div id="title"></div>
-      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <button id="kind" type="button">An island</button> <a id="browse" href="gallery.html">Gallery</a> <button id="mute" type="button">Sound on</button> <button id="weather" type="button">Weather</button> <button id="export" type="button">Export</button>
+      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <button id="kind" type="button">An island</button> <a id="browse" href="gallery.html">Gallery</a> <a id="worldmap" href="world.html">World</a> <a id="buildingsLab" href="lab/buildings.html" title="Set out, move, turn and reshape buildings of every kind">Buildings</a> <button id="mute" type="button">Sound on</button> <button id="weather" type="button">Weather</button> <button id="export" type="button">Export</button>
         <span id="exportMenu" hidden>
           <button id="exportPlan" type="button">Plan (PNG)</button>
           <button id="exportInk" type="button">Ink map (PNG)</button>

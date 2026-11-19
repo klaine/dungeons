@@ -138,7 +138,7 @@ export class Water {
    * down the course of its stream, falling as the bed falls, whose ripples travel downstream.
    */
   constructor(
-    pools: { x: number; z: number; r: number; level: number; outline?: number[] }[],
+    pools: { x: number; z: number; r: number; level: number; outline?: number[]; far?: boolean }[],
     streams: { line: number[]; width: number; banks?: number[]; fade?: number[] }[] = [],
     /**
      * `mirror` is the size of the picture still water reflects, in pixels; 0 for none, and the sky alone is mirrored.
@@ -190,7 +190,8 @@ export class Water {
         geometry.setAttribute('aShallow', new BufferAttribute(new Float32Array(uv.count), 1));
       }
       let mesh: Mesh;
-      if (o.mirror) {
+      // (Not a lake far off in the country: a mirror is a second drawing of the scene, and a lake a kilometre off is not worth one.)
+      if (o.mirror && !pool.far) {
         // A mirror: the scene is drawn a second time as water lying at this level would show it, and the water reads that picture.
         const mirror = makeMirror(o.mirror, pool.level, 0, 0), material = sheet(new NodeMaterial());
         this.mirrors.push(mirror);

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dungeons: world</title>
+  <style>
+    /* (On :root and on body, not html: a page that wraps this one may set a light scheme on :root, which outranks html.) */
+    :root { color-scheme: dark; background: #0b0a09; color: #e8e2d6; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    body { margin: 0 auto; max-width: 1400px; padding-block: 20px 60px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); background: #0b0a09; color: #e8e2d6; }
+    h1 { margin: 0 0 4px; font: 600 17px/1.2 ui-serif, Georgia, serif; letter-spacing: .14em; text-transform: uppercase; }
+    header p { margin: 0 0 14px; max-width: 72ch; opacity: .78; }
+    a { color: inherit; }
+    nav { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 14px; }
+    input, button { font: inherit; color: inherit; background: rgba(232, 226, 214, .08); border: 1px solid rgba(232, 226, 214, .35); border-radius: 4px; padding: 6px 10px; }
+    input { width: min(100%, 220px); }
+    button { cursor: pointer; }
+    button:hover, button[aria-pressed="true"] { background: rgba(224, 176, 112, .35); }
+    #status { opacity: .7; }
+    #making { margin: 0 0 16px; max-width: 640px; }
+    #making .bar { height: 6px; border-radius: 3px; overflow: hidden; background: rgba(232, 226, 214, .14); }
+    #making .bar span { display: block; height: 100%; width: 0; background: #e0b070; }
+    #making p { margin: 6px 0 0; opacity: .8; font-variant-numeric: tabular-nums; }
+    canvas.dim { opacity: .3; }
+    canvas { display: block; width: 100%; height: auto; border-radius: 4px; background: #f1eadb; }
+    #places { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px 12px; margin: 0 0 16px; }
+    #places:empty { display: none; }
+    .place { min-width: 0; padding: 8px 10px; border: 1px solid rgba(232, 226, 214, .2); border-radius: 4px; }
+    .place b { display: block; font: 600 15px/1.3 ui-serif, Georgia, serif; }
+    .place .kind { opacity: .7; font-size: 12px; letter-spacing: .02em; }
+    .place a { display: inline-block; margin: 4px 12px 0 0; color: #e0b070; }
+    .place a:focus-visible { outline: 2px solid #e0b070; outline-offset: 2px; }
+    .place .built { color: #e0b070; font-size: 12px; margin-left: 6px; }
+    .place .built.failed { color: #d8806a; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dungeons: world</h1>
+    <p>One country, six kilometres by ten, from the sea and its islands in the south across the low country and the fells to the hills in the north. The islands, the valley heads, the mountain tops and the coastal towns a house could stand on are found in it, not drawn, and marked in red; each can be gone to, a house built on it and played, or its land walked. Making a world takes half a minute or so.</p>
+  </header>
+  <nav>
+    <label>World <input id="seed" spellcheck="false"></label>
+    <button id="make" type="button">Make</button>
+    <button id="another" type="button">Another world</button>
+    <button id="ink" type="button" aria-pressed="true">Ink map</button>
+    <button id="relief" type="button" aria-pressed="false">Relief</button>
+    <button id="save" type="button">Save picture</button>
+    <button id="prebuild" type="button" title="Lay out every place of this world now, and keep them in this browser: going to one is quicker, and the map shows what is built at each.">Build every place</button>
+    <span id="status"></span>
+  </nav>
+  <div id="making" hidden>
+    <div class="bar" role="progressbar" aria-label="Making the world" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+    <p></p>
+  </div>
+  <section id="places" aria-label="The places in this world"></section>
+  <canvas id="map" width="2400" height="3060"></canvas>
+  <script type="module" src="/src/worldmap/main.ts"></script>
+</body>
+</html>
