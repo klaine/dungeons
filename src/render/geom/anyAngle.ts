@@ -1,5 +1,6 @@
 import type { Colour } from '../planting';
 import { MeshBuilder } from './meshBuilder';
+import { chamfered, chamfering } from './chamfer';
 
 /** A point in the world, as a triple. */
 export type P3 = [number, number, number];
@@ -34,5 +35,18 @@ export function anyAngle(mesh: (material: string) => MeshBuilder) {
     for (const q of c) { inside[0] += q[0] / 8; inside[1] += q[1] / 8; inside[2] += q[2] / 8; }
     for (const f of [[0, 1, 2, 3], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]) face(material, f.map((i) => c[i]), tone, inside, scale);
   };
-  return { face, solid };
+  /**
+   * A solid as `solid` makes it, with its edges taken off by `bevel` (see `chamfered`): for what is seen close and whose edges a
+   * hand or feet have rounded, a step's tread above all.
+   */
+  const rounded = (material: string, c: P3[], colour: Colour, bevel: number, scale = 0.5) => {
+    if (!chamfering.on) { solid(material, c, colour, scale); return; }
+    const tone = shade(colour, 0.95 + 0.1 * (((count++ * 7919) % 13) / 13)), m = mesh(material);
+    for (const piece of chamfered(c, bevel)) {
+      const [ox, oy, oz] = piece.out, flat = Math.abs(oy) > 0.7, side = Math.abs(ox) > Math.abs(oz);
+      const ids = piece.pts.map((q, k) => m.addVertex(q[0], q[1], q[2], piece.normals[k][0], piece.normals[k][1], piece.normals[k][2], (flat ? q[0] : side ? q[2] : q[0]) * scale, (flat ? q[2] : q[1]) * scale, tone[0], tone[1], tone[2]));
+      for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+    }
+  };
+  return { face, solid, rounded };
 }

@@ -483,12 +483,15 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   });
 
   const mesh = (m: string) => wild.mesh(m);
-  const { face, solid } = anyAngle(mesh);
+  const { face, solid, rounded } = anyAngle(mesh);
   const stone: Colour = [0.74 * tint[0] + 0.1, 0.72 * tint[1] + 0.1, 0.68 * tint[2] + 0.1];
   /** A frame turned to face a bearing about a point: `a` to the right as one faces it, `f` forward, `h` up. */
   const frame = (x: number, z: number, y: number, facing: number) => { const fx = Math.cos(facing), fz = Math.sin(facing); return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a]; };
-  const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5) =>
-    solid(material, [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)], colour, scale);
+  // (`bevel`, if given, takes the edges off by that much: see `chamfered`.)
+  const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5, bevel = 0) => {
+    const c: P3[] = [at(a0, h0, f0), at(a1, h0, f0), at(a1, h0, f1), at(a0, h0, f1), at(a0, h1, f0), at(a1, h1, f0), at(a1, h1, f1), at(a0, h1, f1)];
+    if (bevel > 0) rounded(material, c, colour, bevel, scale); else solid(material, c, colour, scale);
+  };
   /** Courses of dressed blocks along a line from `a` to `c` (in a frame facing out from the face), from `y0` up to `y1`, `deep` thick. */
   const masonry = (at: ReturnType<typeof frame>, a0: number, a1: number, y0: number, y1: number, deep: number, q: Rng, colour: Colour, weedTo = -Infinity) => {
     let row = 0;
@@ -523,7 +526,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       // The coping: long stones laid across the edge, standing a little out over the face.
       for (let a = a0; a < a1 - 0.05;) {
         const len = h.range(1.1, 1.9), e = Math.min(a1, a + len);
-        box(at, 'stone', a + 0.02, e - 0.02, deck - 0.3, deck, -0.12, 0.9, shade(stone, h.range(0.95, 1.12)), 0.4);
+        box(at, 'stone', a + 0.02, e - 0.02, deck - 0.3, deck, -0.12, 0.9, shade(stone, h.range(0.95, 1.12)), 0.4, 0.025);
         a = e;
       }
     }
@@ -539,7 +542,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       for (let k = 0; k < 9; k++) {
         const y = deck - 0.3 - k * 0.27;
         if (y < sea - 0.6) break;
-        box(at, 'stone', a + k * 0.32, a + k * 0.32 + 1.2, y - 0.27, y, -1.25, 0.02, shade(stone, h.range(0.8, 1)), 0.4);
+        box(at, 'stone', a + k * 0.32, a + k * 0.32 + 1.2, y - 0.27, y, -1.25, 0.02, shade(stone, h.range(0.8, 1)), 0.4, 0.02);
       }
     }
   }
