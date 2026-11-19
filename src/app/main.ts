@@ -280,7 +280,7 @@ async function start(): Promise<void> {
     stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012 }),
+    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered }),
     rock: makeRockMaterial(rock, moss),
     // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
     rockSheet: makeRockMaterial(rock, moss, { relief: true }),

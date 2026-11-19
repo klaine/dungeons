@@ -52,12 +52,24 @@ export function placeHouse(
       const inside = Math.abs(ny0) < 0.5 ? outOf(wx + wnx * 0.6, wz + wnz * 0.6) < 0.02 : inDepth(wx, wz) > (ny0 < 0 ? 0.7 : 0.05);
       if (inside) indoors[a] = indoors[b] = indoors[cc] = 1;
     });
+    // Timber out of doors (`wood` not marked indoors, and lying no more than a third of a metre within the walls' line: the frame of
+    // a wall, its doors, shutters and windows, the boards along a roof's edge), judged at each face's middle so that a face is all one
+    // or the other, carries the height of the ground at its foot as a wall does, made negative where it is painted, so that the
+    // material can weather it: bare timber faded and checked, paint worn and peeling (see `makeSiteMaterial`).
+    const woodOut = new Uint8Array(m === 'wood' ? src.vertexCount : 0);
+    if (m === 'wood') src.eachTriangle((a, b, cc, mx, my, mz) => {
+      if (indoors[a] && indoors[b] && indoors[cc]) return;
+      const wx = ox + mx * c - mz * s, wz = oz + mx * s + mz * c;
+      if (my < y + 120 && inDepth(wx, wz) < 0.35) woodOut[a] = woodOut[b] = woodOut[cc] = 1;
+    });
     let k = 0;
     into(m).append(src, (v) => {
+      const i = k;
       const x = v.p[0], z = v.p[2], nx = v.n[0], nz = v.n[2];
       v.p[0] = ox + x * c - z * s; v.p[2] = oz + x * s + z * c;
       v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
       if (indoors[k++] && outOf(v.p[0], v.p[2]) < 0.05) v.open = -1;
+      if (woodOut[i]) { v.field[3] = (paintedWood(v.colour) ? -1 : 1) * (1000 + o.foot(v.p[0], v.p[2])); return; }
       // Only a wall that looks out of the house: and if it looks into the next house, it is indoors, and has no damp.
       if (Math.abs(v.n[1]) > 0.5 || outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
       if (!roofOrGlass && v.p[1] < wallTop && o.neighbour?.(v.p[0] + v.n[0] * 0.8, v.p[2] + v.n[2] * 0.8)) { v.open = -1; return; }
@@ -66,4 +78,14 @@ export function placeHouse(
       v.field[3] = 1000 + o.foot(v.p[0] + v.n[0] * 0.3, v.p[2] + v.n[2] * 0.3);
     });
   }
+}
+
+/**
+ * Whether timber of this colour is painted, and not bare or stained: bare timber is of the oak's brown, a red brown with little
+ * blue in it (`OAK` in `buildings.ts`, and the boards' browns, which are near it whatever their shade); shutters, doors and frames are
+ * green, blue, red or white. (A brown paint near the oak's is taken for oak, which it looks like.)
+ */
+function paintedWood(col: number[]): boolean {
+  const sum = col[0] + col[1] + col[2] || 1, r = col[0] / sum, g = col[1] / sum;
+  return Math.hypot(r - 0.475, g - 0.315) > 0.06 || sum / 3 > 0.45;
 }
