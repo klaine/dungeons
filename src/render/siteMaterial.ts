@@ -1,7 +1,8 @@
-import { Color, Vector2, Vector3, Vector4 } from 'three';
+import { Color, DataTexture, FloatType, NearestFilter, RGBAFormat, Vector2, Vector3, Vector4 } from 'three';
 import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { TextureSet } from './textures';
+import type { PaveFrame } from './scene';
 
 /**
  * The materials used for all static site geometry: standard physically based materials with
@@ -23,7 +24,7 @@ import { TextureSet } from './textures';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cos, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, ivec2, length, materialRoughness, max, min, mix,
   normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
@@ -346,6 +347,114 @@ export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: 
   uBare: uniform(new Vector4(1, 1, 1, 0)) as N,
 };
 
+/**
+ * Which way a town's paving is laid (`PaveFrame`, made by the town), read point by point without a filter: a lattice of a metre,
+ * holding at each point how far along and across its street (or square) it lies, which way that runs, and which it is. Between the
+ * lattice's points each of the four about is carried on to this point the way its street runs, and the four are mixed by nearness;
+ * those of another street than the nearest are left out, so that where two streets meet their courses meet along a line, as they do.
+ */
+const paveFrameTex = new DataTexture(new Float32Array(4), 1, 1, RGBAFormat, FloatType);
+paveFrameTex.magFilter = paveFrameTex.minFilter = NearestFilter;
+paveFrameTex.generateMipmaps = false;
+paveFrameTex.needsUpdate = true;
+const paveFrameNode: N = texture(paveFrameTex);
+/** Where the lattice begins, how many points to a metre, and whether there is one (x0, z0, 1/cell, on); and how many points it has each way. */
+export const paveUniforms: { uPave: { value: Vector4 }; uPaveSize: { value: Vector2 }; uSun: { value: Vector3 } } = { uPave: uniform(new Vector4(0, 0, 1, 0)) as N, uPaveSize: uniform(new Vector2(1, 1)) as N, uSun: uniform(new Vector3(0.5, 0.6, 0.6)) as N };
+// (`uSun` is the way to the sun, for the shadows in the paving's joints.)
+/** Gives the ground's material a town's paving frame, or none (`on` false where the graphics card cannot read one more texture). */
+export function setPaving(f: PaveFrame | undefined, on = true): void {
+  if (!f || !on) { paveUniforms.uPave.value.set(0, 0, 1, 0); return; }
+  paveFrameTex.dispose();
+  paveFrameTex.image = { data: f.data, width: f.nx, height: f.nz } as N;
+  paveFrameTex.needsUpdate = true;
+  paveUniforms.uPave.value.set(f.x0, f.z0, 1 / f.cell, 1);
+  paveUniforms.uPaveSize.value.set(f.nx, f.nz);
+}
+const paveFrameAt = (p: N): { c: N; a: N; d: N; e: N; id: N } => {
+  const P: N = paveUniforms.uPave, S: N = paveUniforms.uPaveSize;
+  const gp: N = p.sub(P.xy).mul(P.z).toVar();
+  const base: N = floor(gp).toVar(), w: N = gp.sub(base).toVar();
+  const load = (ij: N): N => paveFrameNode.load(ivec2(clamp(ij, vec2(0, 0), S.sub(1))));
+  const idN: N = load(floor(gp.add(0.5))).w.toVar();
+  let sum: N = vec2(0, 0), dir: N = vec2(0, 0), wsum: N = float(0);
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const ij: N = base.add(vec2(dx, dy));
+    const t: N = load(ij).toVar();
+    const off: N = p.sub(ij.div(P.z).add(P.xy));
+    const d: N = vec2(cos(t.z), sin(t.z)), e: N = vec2(d.y.negate(), d.x);
+    const wt: N = (dx ? w.x : one(w.x)).mul(dy ? w.y : one(w.y)).mul(step(abs(t.w.sub(idN)), 0.5));
+    sum = sum.add(vec2(t.y.add(dot(off, e)), t.x.add(dot(off, d))).mul(wt));
+    dir = dir.add(d.mul(wt));
+    wsum = wsum.add(wt);
+  }
+  const on: N = step(0.5, idN).mul(P.w).toVar();
+  const fr: N = sum.div(max(wsum, 1e-6)).toVar(), dn: N = normalize(dir.add(vec2(1e-6, 0))).toVar();
+  // (Where there is none, as everywhere but a town, courses run along x, as they always did.)
+  return { c: mix(p.x.negate(), fr.x, on), a: mix(p.y, fr.y, on), d: mix(vec2(0, 1), dn, on), e: mix(vec2(-1, 0), vec2(dn.y.negate(), dn.x), on), id: idN.mul(on) };
+};
+/** A plane turned a little more than a third of a right angle, so that noise read through it shows none of the squares it is made on. */
+const rot = (q: N): N => vec2(q.x.mul(0.8).sub(q.y.mul(0.6)), q.x.mul(0.6).add(q.y.mul(0.8)));
+/** A row of cells each one wide, their ends moved by up to `j` either way: which one `x` falls in, how far through it (0 to 1), and how wide it is. */
+const cellsOf = (x: N, seed: N, j: number | N): { k: N; at: N; size: N } => {
+  const k0: N = floor(x).toVar();
+  const end = (k: N): N => k.add(farHash(vec2(k, seed)).sub(0.5).mul(float(j).mul(2)));
+  const b0: N = end(k0).toVar(), b1: N = end(k0.add(1)).toVar();
+  const below: N = x.lessThan(b0), above: N = x.greaterThanEqual(b1);
+  const lo: N = select(below, end(k0.sub(1)), select(above, b1, b0)).toVar(), hi: N = select(below, b0, select(above, end(k0.add(2)), b1)).toVar();
+  return { k: select(below, k0.sub(1), select(above, k0.add(1), k0)), at: x.sub(lo).div(hi.sub(lo)), size: hi.sub(lo) };
+};
+/**
+ * The stone of a pavement a point falls on, from where it is in the paving (`c` along the courses, `a` across them): which stone,
+ * how far it is from the stone's nearer edges each way, in metres, and how far through the stone it is each way (0 to 1). Setts
+ * are in courses of fourteen centimetres or so, seventeen across; flags in courses of some fifty-five, each stone its own length.
+ * Neither courses nor stones are all one size: sorted by eye from what the quarry gave, they differ by a quarter either way, and
+ * each course begins its stones at its own place, so that no joint runs on from one course into the next. `arcs`, where 1, lays
+ * the courses in arcs between springings two metres apart, as the setts of old streets were laid, so that wheels cross the joints
+ * at a slant and do not wear them into ruts.
+ */
+const stonesAt = (c: N, a: N, flagged: N, arcs: N): { id: N; ex: N; ez: N; lx: N; lz: N } => {
+  const rowM: N = mix(0.14, 0.55, flagged), widM: N = mix(0.17, 0.9, flagged);
+  const sx: N = fract(c.div(2.2).add(0.5)).sub(0.5);
+  // (Each arc rises a quarter of a metre over its two: steeper, and where two arcs met their courses ran together in sharp points.)
+  const aw: N = a.sub(arcs.mul(1.0).mul(float(0.25).sub(sx.mul(sx))));
+  const row = cellsOf(aw.div(rowM), float(17.31), mix(0.2, 0.3, flagged));
+  const st = cellsOf(c.div(widM).add(farHash(vec2(row.k, 5.17)).mul(9.7)), row.k.add(31.7), mix(0.32, 0.36, flagged));
+  const at: N = st.at.toVar(), az: N = row.at.toVar();
+  return { id: vec2(st.k, row.k), ex: min(at, one(at)).mul(st.size).mul(widM), ez: min(az, one(az)).mul(row.size).mul(rowM), lx: at, lz: az };
+};
+
+/** The stone a point of the paving falls on (`stonesAt`), with its edge's distance, the corners rounded and the edge a little ragged, as split stone is. */
+const stoneAt = (q: N, flagged: N, arcs: N, id: N, detail: N): { sto: ReturnType<typeof stonesAt>; edge: N; inCorner: N; rc: N; tone: N } => {
+  const sto = stonesAt(q.x, q.y, flagged, arcs);
+  const tone: N = farHash(sto.id.add(vec2(id.mul(13.1), 0.5))).toVar();
+  // (A flag's corners are broken off more on some than others: old flags are chipped, and none is square.)
+  const rc: N = mix(0.028, mix(0.035, 0.09, tone), flagged);
+  const inCorner: N = sto.ex.lessThan(rc).and(sto.ez.lessThan(rc));
+  const ragged: N = farNoise(rot(q.mul(mix(41, 17, flagged))).add(tone.mul(17))).sub(0.5).mul(mix(0.014, 0.012, flagged)).mul(detail);
+  const edge: N = select(inCorner, rc.sub(length(vec2(rc.sub(sto.ex), rc.sub(sto.ez)))), min(sto.ex, sto.ez)).add(ragged).toVar();
+  return { sto, edge, inCorner, rc, tone };
+};
+/** How high a point of a stone stands, from 0 at the bottom of a joint to 1 at the top of the stone: the sand of a joint a little up, the stone rising over its last few centimetres to its edge, and domed. */
+const stoneHeight = (st: ReturnType<typeof stoneAt>, flagged: N, jw: N): N => {
+  const rise: N = smoothstep(jw.mul(0.5), jw.add(mix(0.026, 0.03, flagged)), st.edge);
+  const dome: N = one(st.sto.lx.sub(0.5).mul(st.sto.lx.sub(0.5)).add(st.sto.lz.sub(0.5).mul(st.sto.lz.sub(0.5))).mul(2));
+  // (Flags have settled each its own way, some a few millimetres lower than their neighbours.)
+  return mix(0.18, mix(0.8, 1, dome).mul(mix(1, mix(0.72, 1, st.tone), flagged)), rise);
+};
+
+/**
+ * Round spots scattered over a surface, as lichen grows on stone: a cell of `cell` metres holds one spot or none (`share` of them
+ * do), somewhere in its middle half, from `r0` to `r1` metres across, its edge ragged. 1 in a spot, 0 between. (Read from noise
+ * cut at a level, as they were, they were angular blots like the chips in terrazzo.)
+ */
+const spotsOf = (q: N, cell: number, share: N, r0: number, r1: number, k: number): N => {
+  const g: N = q.div(cell), i: N = floor(g), f: N = fract(g);
+  const at: N = vec2(farHash(i.add(k + 1.7)), farHash(i.add(k + 3.1))).mul(0.5).add(0.25);
+  const r: N = mix(r0 / cell, r1 / cell, farHash(i.add(k + 5.3)));
+  const d: N = length(f.sub(at)).div(r).add(farNoise(rot(q.mul(90).add(k))).sub(0.5).mul(0.35));
+  return one(smoothstep(0.75, 1, d)).mul(step(farHash(i.add(k)), share));
+};
+
 export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
@@ -361,7 +470,12 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const wander = turfAt(at0.div(5.3).add(0.61)).a.sub(0.5);
   const off = abs(f.x.sub(100).add(wander.mul(0.34))).add(mid.sub(0.5).mul(0.3));
   // (The field says how far from the track's middle, plus a hundred; or from a footpath's, plus two hundred.)
-  const onFoot: N = step(150, f.x), onTrack: N = step(50, f.x).mul(one(onFoot));
+  // (Only where the number changes across the ground as a distance does, a metre to the metre. Between a point of the sheet on a
+  // track and one off it, a town's paving (less than minus three hundred) or the grass beside it (nothing), the sheet's triangle
+  // carries the number through every value between, and the material found a rut's floor wherever it passed the rut's place: a
+  // line of ruts, holding water, along every edge of every track and across a street of earth where it met paving.)
+  const trueWay: N = one(smoothstep(3, 8, fwidth(f.x).div(length(fwidth(at0)).add(1e-4)))).toVar();
+  const onFoot: N = step(150, f.x).mul(trueWay), onTrack: N = step(50, f.x).mul(step(f.x, 150)).mul(trueWay);
   // Paving, in a town: where the field's first number is less than nothing it is how far in from the paving's edge this point is,
   // plus three hundred, made negative; and what the paving is, the litter channel says, which paving has no other use for: nothing
   // or more for setts (a street), less than nothing for flags (a square, a quay), less than minus one and a half for gravel (a
@@ -372,42 +486,124 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // off every flagged edge, first a strip and, with the band narrowed, a hairline. One band for all crosses nothing on its way.)
   const flagged: N = step(f.w, -0.5), gravelled: N = step(f.w, -1.5), paveSd: N = f.x.negate().sub(300).toVar();
   const paved: N = smoothstep(-0.04, 0.04, paveSd).mul(step(f.x, -250)).toVar();
-  // (Each course of flags is its own length of stone, as flags are laid from what the quarry gave; each stone its own tone and cast.)
-  const courseOf = (): N => { const rowH: N = mix(0.14, 0.62, flagged), row0: N = floor(at0.y.div(rowH)), lenX: N = mix(0.23, mix(0.66, 1.3, fract(sin(row0.mul(78.233)).mul(43758.5453))), flagged); return vec2(lenX, rowH); };
-  const pave: N = Fn(() => {
-    const size: N = courseOf(), pp: N = at0.div(size), row: N = floor(pp.y);
-    const shift: N = fract(sin(row.mul(12.9898).add(flagged.mul(3.1))).mul(43758.5453)), cx: N = pp.x.add(shift);
-    const lx: N = fract(cx), lz: N = fract(pp.y), ex: N = min(lx, one(lx)).mul(size.x), ez: N = min(lz, one(lz)).mul(size.y), edge: N = min(ex, ez);
-    const tone: N = fract(sin(dot(vec2(floor(cx), row), vec2(127.1, 311.7))).mul(43758.5453)), cast: N = fract(sin(dot(vec2(floor(cx), row), vec2(269.5, 183.3))).mul(43758.5453));
-    const jw: N = mix(0.009, 0.012, flagged), aa: N = fwidth(at0.x).mul(1.5).add(0.002);
-    const detail: N = one(smoothstep(mix(16, 36, flagged), mix(55, 130, flagged), far));
-    const joint: N = one(smoothstep(jw, jw.add(aa), edge)).mul(detail).add(one(detail).mul(0.1));
-    const rim: N = one(smoothstep(jw, jw.add(mix(0.045, 0.02, flagged)), edge)).mul(detail);
-    const warm: N = mix(vec3(0.95, 0.98, 1.04), vec3(1.06, 1.0, 0.92), cast);
-    // (The grain of the stone itself, laid differently in each stone, and a mottle across it: old wet and lichen on some, scrubbed
-    // pale on others. Without them a flag close by was one flat colour, and the paving looked like a floor of tiles.)
-    // (The noise keeps near its middle, so it is stretched: a speckle as granite has, a coarser grain, and the mottle; and dirt gathers
-    // towards each stone's edges, where feet and brooms do not reach.)
-    const seed: N = vec2(tone.mul(37.1), cast.mul(53.7));
-    const speckle: N = smoothstep(0.3, 0.7, farNoise(at0.mul(43).add(seed.yx))), grain: N = smoothstep(0.25, 0.75, farNoise(at0.mul(mix(9, 4.5, flagged)).add(seed)));
-    const mottle: N = smoothstep(0.2, 0.8, farNoise(at0.mul(mix(2.6, 1.3, flagged)).add(seed.mul(1.3))));
-    const grime: N = mix(0.82, 1, smoothstep(0.01, mix(0.05, 0.14, flagged), edge));
-    const worn: N = mix(0.86, 1.14, speckle).mul(mix(0.84, 1.1, grain)).mul(mix(0.8, 1.08, mottle)).mul(grime);
-    const stones: N = vertexColor().rgb.mul(mix(1, mix(0.8, 1.16, tone).mul(worn), detail)).mul(mix(vec3(1, 1, 1), warm, detail)).mul(one(rim.mul(0.2))).mul(mix(0.9, 1.08, macro));
-    // (Moss and dirt in the joints, more of it in some places than others: where feet go least.)
-    const mossy: N = smoothstep(0.45, 0.75, mid.add(macro.sub(0.5).mul(0.8)));
-    return mix(stones, mix(stones.mul(vec3(0.32, 0.3, 0.27)), vec3(0.05, 0.075, 0.03), mossy.mul(0.7)), joint);
-  })().toVar();
-  const paveNormal: N = Fn(() => {
-    const size: N = courseOf(), pp: N = at0.div(size), row: N = floor(pp.y);
-    const cx: N = pp.x.add(fract(sin(row.mul(12.9898).add(flagged.mul(3.1))).mul(43758.5453)));
-    const lx: N = fract(cx), lz: N = fract(pp.y), ex: N = min(lx, one(lx)).mul(size.x), ez: N = min(lz, one(lz)).mul(size.y);
-    const detail: N = one(smoothstep(mix(16, 36, flagged), mix(55, 130, flagged), far));
-    const fall: N = one(smoothstep(0.008, mix(0.05, 0.022, flagged), min(ex, ez))).mul(detail).mul(0.65);
-    const sx: N = select(lx.lessThan(0.5), float(-1), float(1)), sz: N = select(lz.lessThan(0.5), float(-1), float(1));
-    // (And each stone lies not quite level, settled a little one way or another, so that the sun catches them unevenly.)
-    const id: N = vec2(floor(cx), row), tilt: N = vec2(fract(sin(dot(id, vec2(41.3, 289.1))).mul(43758.5453)), fract(sin(dot(id, vec2(173.9, 61.7))).mul(43758.5453))).sub(0.5).mul(0.07).mul(detail);
-    return select(ex.lessThan(ez), vec3(sx.mul(fall), 0, 1), vec3(0, sz.mul(fall), 1)).add(vec3(tilt, 0));
+  // Where in its paving this point is: `c` along the courses and `a` the way they follow one another, in metres, by which way the
+  // street it belongs to runs (`paveFrameAt`); and the stone it falls on (`stonesAt`), its edges rounded and a little ragged, as
+  // split stone is. Setts are granite of the fields, each stone its own; a street in two of every four is laid in arcs.
+  // (All of the paving is worked out only where there is paving: everywhere else, in every valley, on every island and mountain,
+  // the ground's material would otherwise lay stones it does not show at every point of the picture.)
+  const pave: N = vec3(0, 0, 0).toVar(), paveNormal: N = vec3(0, 0, 1).toVar(), paveRough: N = float(0.9).toVar(), jointLit: N = float(1).toVar();
+  // (The paving's own two ways are in metres, as the ground's are, so how fast they change across the picture is the ground's.)
+  const aa: N = length(fwidth(at0)).mul(1.2).add(0.002).toVar(), byEdge: N = one(smoothstep(0.3, 1.6, paveSd)).toVar();
+  // (Worked out where the ground's colour is, which is the first of what the material is made of: the relief, the roughness and the
+  // sun's shadow in the joints are left in those variables for what is made after it to read.)
+  const paving: N = Fn(() => {
+  pave.assign(vec3(0, 0, 0)); paveNormal.assign(vec3(0, 0, 1)); paveRough.assign(0.9); jointLit.assign(1);
+  If(paved.greaterThan(0), () => {
+    const pf = paveFrameAt(at0);
+    const street: N = step(0.5, pf.id).mul(step(pf.id, 1000)), arcs: N = street.mul(step(0.5, farHash(vec2(pf.id, 2.71)))).mul(one(flagged));
+    const detail: N = one(smoothstep(mix(16, 36, flagged), mix(55, 130, flagged), far)).toVar();
+    // (Setts are bedded in sand, a finger's breadth between them, which feet and rain keep low; flags are laid close.)
+    const jw: N = mix(0.0105, 0.006, flagged);
+    // Near the eye the paving has depth, as bare ground has: the stones stand up out of their joints and hide what is behind them
+    // as the eye moves, the picture slid along the line of sight until the line meets a stone. And the sun is followed a little way
+    // from where the line came down: a joint lies in the shadow of the stone on its sunward side, which is what makes a pavement
+    // read as stones when the sun is low, and a flat picture of them when it is not.
+    const pnear: N = one(smoothstep(7, 13, far)).mul(step(0.01, paved)).mul(one(gravelled)).toVar();
+    const deepM: N = mix(0.024, 0.012, flagged);
+    const heightAt = (q: N): N => stoneHeight(stoneAt(q, flagged, arcs, pf.id, float(1)), flagged, jw);
+    const pq: N = Fn(() => {
+      const q0: N = vec2(pf.c, pf.a), q: N = vec2(q0).toVar();
+      If(pnear.greaterThan(0), () => {
+        const eye: N = normalize(cameraPosition.sub(positionWorld));
+        const w: N = eye.xz.div(max(eye.y, 0.22));
+        const slide: N = vec2(dot(w, pf.e), dot(w, pf.d)).mul(deepM).mul(pnear).toVar();
+        const sunk: N = float(0).toVar(), last: N = float(0).toVar();
+        Loop(8, () => {
+          const h: N = heightAt(q0.sub(slide.mul(sunk)));
+          If(one(h).lessThanEqual(sunk), () => { Break(); });
+          last.assign(sunk);
+          sunk.addAssign(1 / 8);
+        });
+        // (And once more between the last step above the stone and the first in it.)
+        const mid2: N = last.add(sunk).mul(0.5);
+        sunk.assign(select(one(heightAt(q0.sub(slide.mul(mid2)))).lessThanEqual(mid2), mid2, sunk));
+        q.assign(q0.sub(slide.mul(sunk)));
+        const sun: N = paveUniforms.uSun as N;
+        If(sun.y.greaterThan(0.05), () => {
+          const s: N = sun.xz.div(max(sun.y, 0.12));
+          const toSun: N = vec2(dot(s, pf.e), dot(s, pf.d)).mul(deepM).toVar();
+          // (From the stone's true height where the line came down, a little raised: from the height of the step the line had come
+          // down to, which is coarser, a domed flag shaded itself in rings.)
+          const h0: N = heightAt(q).add(0.03).toVar();
+          for (const k of [0.2, 0.45, 0.75, 1]) {
+            const t: N = max(one(h0), 0.05).mul(k);
+            jointLit.assign(min(jointLit, smoothstep(-0.04, 0.06, h0.add(t).sub(heightAt(q.add(toSun.mul(t)))))));
+          }
+          jointLit.assign(mix(1, jointLit, pnear));
+        });
+      });
+      return q;
+    })().toVar();
+    // The stone this point of the picture shows, and the paving where it lies, as the line of sight found it.
+    const st = stoneAt(pq, flagged, arcs, pf.id, detail);
+    const sto = st.sto, edge: N = st.edge, inCorner: N = st.inCorner, rc: N = st.rc, sTone: N = st.tone;
+    const sCast: N = farHash(sto.id.add(vec2(7.3, pf.id.mul(3.7)))).toVar(), sKind: N = farHash(sto.id.add(vec2(1.7, pf.id.add(9.1)))).toVar();
+    const joint: N = one(smoothstep(jw, jw.add(aa), edge)).mul(detail).add(one(detail).mul(0.1)).toVar();
+    // How far from the paving's edge, where it meets a wall or the grass, and from the middle of a street, where wheels and feet go.
+    const trod: N = smoothstep(1.2, 2.8, paveSd).mul(street).toVar();
+    pave.assign(Fn(() => {
+      // Field granite is grey, pink, red-brown, blue-grey and pale by turns, stone by stone; flags from one quarry differ less. (As
+      // shares of the paving's own colour, which is what the paving is drawn as further off, so that it does not change colour there.)
+      const granite: N = select(sKind.lessThan(0.3), vec3(0.96, 0.97, 1.02), select(sKind.lessThan(0.5), vec3(1.12, 0.97, 0.9), select(sKind.lessThan(0.65), vec3(1.0, 0.8, 0.72),
+        select(sKind.lessThan(0.82), vec3(0.74, 0.79, 0.86), vec3(1.2, 1.17, 1.1)))));
+      // (Flags from one quarry and one bed are near one colour, but a bed runs warmer or greyer, and some were brought from elsewhere.)
+      const bed: N = select(sKind.lessThan(0.35), vec3(0.93, 0.96, 1.02), select(sKind.lessThan(0.7), vec3(1.07, 1.0, 0.9), select(sKind.lessThan(0.88), vec3(0.8, 0.8, 0.82), vec3(1.12, 1.08, 1.0))));
+      const kind: N = mix(granite, bed.mul(mix(vec3(0.97, 0.99, 1.02), vec3(1.03, 1.0, 0.97), sCast)), flagged);
+      // (The grain of the stone, laid differently in each: a speckle of crystals and a coarser grain, turned off the lines of the noise
+      // so that they show no squares; a mottle of old wet and lichen on some, scrubbed pale on others; and dirt towards the edges, where
+      // feet and brooms do not reach.)
+      const seed: N = vec2(sTone.mul(37.1), sCast.mul(53.7)), q: N = pq;
+      const fine: N = one(smoothstep(3, 9, far));
+      const speckle: N = smoothstep(0.25, 0.75, farNoise(rot(q.mul(71)).add(seed.yx))).mul(0.6).add(smoothstep(0.3, 0.7, farNoise(rot(q.mul(-43)).add(seed))).mul(0.4));
+      const grain: N = smoothstep(0.25, 0.75, farNoise(rot(q.mul(mix(11, 4.5, flagged))).add(seed)));
+      const mottle: N = smoothstep(0.2, 0.8, farNoise(rot(q.mul(mix(3.1, 1.3, flagged))).add(seed.mul(1.3))));
+      const grime: N = mix(0.8, 1, smoothstep(0.01, mix(0.05, 0.14, flagged), edge));
+      const worn: N = mix(1, mix(0.82, 1.16, speckle), fine.mul(0.8).add(0.2)).mul(mix(0.84, 1.1, grain)).mul(mix(0.8, 1.08, mottle)).mul(grime);
+      // (Where feet go the tops are rubbed paler and clean; by the walls dust lies on them.)
+      const rubbed: N = mix(1, 1.07, trod.mul(smoothstep(0.02, 0.05, edge)));
+      // Old flags carry lichen where few feet go, pale grey-green rosettes and dark spots; and here and there one is cracked across.
+      const still: N = one(trod.mul(0.8)).mul(flagged);
+      const lichen: N = spotsOf(q, 0.13, still.mul(mix(0.18, 0.4, byEdge)), 0.016, 0.048, 11).mul(fine.mul(0.6).add(0.4));
+      const spots: N = spotsOf(q, 0.09, still.mul(0.07), 0.005, 0.014, 27);
+      const ang: N = sCast.mul(3.1416), lp: N = vec2(sto.lx.sub(0.5), sto.lz.sub(0.5));
+      const crackD: N = abs(dot(lp, vec2(cos(ang), sin(ang))).sub(sTone.sub(0.5).mul(0.5)).add(farNoise(rot(q.mul(19))).sub(0.5).mul(0.06)));
+      const crack: N = one(smoothstep(0.003, 0.009, crackD)).mul(step(farHash(sto.id.add(vec2(5.5, 1.3))), 0.09)).mul(flagged).mul(detail).mul(0.7);
+      const stones: N = vertexColor().rgb.mul(mix(vec3(1, 1, 1), kind.mul(mix(mix(0.82, 1.14, sTone), mix(0.76, 1.18, sTone), flagged)).mul(worn).mul(rubbed), detail))
+        .mul(mix(0.9, 1.08, macro)).mul(mix(vec3(1, 1, 1), vec3(1.12, 1.15, 0.98), lichen.mul(0.7))).mul(one(spots.mul(0.35))).mul(one(crack.mul(0.6)));
+      // In the joints, sand and grit; moss and dark earth where feet go least, and towards the edges.
+      const sand: N = mix(vec3(0.2, 0.18, 0.15), vec3(0.4, 0.35, 0.28), farNoise(rot(q.mul(23)))).mul(mix(0.6, 0.85, trod)).mul(mix(0.55, 1, smoothstep(0, jw, edge)));
+      const mossy: N = smoothstep(0.45, 0.75, mid.add(macro.sub(0.5).mul(0.8)).add(byEdge.mul(0.35)).sub(trod.mul(0.4)));
+      const filled: N = mix(mix(sand, stones.mul(vec3(0.32, 0.3, 0.27)), flagged), vec3(0.05, 0.075, 0.03), mossy.mul(0.75));
+      return mix(stones, filled, joint);
+    })());
+    // The stones' relief: each falls away towards its edges over the last few centimetres, setts much more than flags, is a little
+    // domed over its whole face, and lies not quite level, settled a little one way or another, so that the sun catches them unevenly.
+    paveNormal.assign(Fn(() => {
+      const fallW: N = mix(0.026, 0.03, flagged), rise: N = mix(0.013, 0.005, flagged);
+      const t: N = clamp(edge.sub(jw).div(fallW), 0, 1);
+      const fall: N = t.mul(one(t)).mul(6).div(fallW).mul(rise).mul(step(jw, edge)).mul(detail).toVar();
+      // (Which way is out of the stone at its nearest edge, in the paving's own two ways: across, or along, or out of the corner.)
+      const sx: N = select(sto.lx.lessThan(0.5), float(-1), float(1)), sz: N = select(sto.lz.lessThan(0.5), float(-1), float(1));
+      const out: N = select(inCorner, normalize(vec2(sx.mul(rc.sub(sto.ex)), sz.mul(rc.sub(sto.ez))).add(1e-5)), select(sto.ex.lessThan(sto.ez), vec2(sx, 0), vec2(0, sz)));
+      const dome: N = vec2(sto.lx.sub(0.5), sto.lz.sub(0.5)).mul(mix(0.16, 0.035, flagged));
+      const tilt: N = vec2(farHash(sto.id.add(vec2(41.3, 2.9))), farHash(sto.id.add(vec2(3.1, 61.7)))).sub(0.5).mul(mix(0.12, 0.07, flagged));
+      const g: N = out.mul(fall).add(dome.add(tilt).mul(detail).mul(one(joint)));
+      // (From the paving's two ways to the ground's: across is `e`, along is `d`.)
+      return vec3(pf.e.mul(g.x).add(pf.d.mul(g.y)), 1);
+    })());
+    paveRough.assign(mix(mix(mix(0.66, 0.5, trod), 0.95, joint), mix(0.82, 0.6, trod), flagged));
+  });
+  return pave;
   })().toVar();
   // A footpath: one worn line, a forearm's breadth or two, wandering a little either side of where it is laid.
   const footOff: N = abs(f.x.sub(200)).add(wander.mul(0.22)).toVar();
@@ -416,7 +612,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // The bottom of a rut, where wheels have pressed the earth down hard: narrower than the rut.
   const rutFloor: N = one(smoothstep(0, 0.16, abs(off.sub(0.58)).sub(0.08).sub(wander.mul(0.08)))).mul(onTrack).toVar();
   const clump = sin(at0.y.mul(0.9).add(sin(at0.y.mul(0.31)).mul(2.2)));
-  const bareV: N = max(select(f.x.greaterThan(50).and(f.x.lessThan(150)), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z), footBare.mul(0.85)).toVar();
+  const bareV: N = max(select(onTrack.greaterThan(0.5), max(f.z, max(rut, sstep(-0.15, -0.35, clump).mul(one(smoothstep(0.25, 0.5, off))))), f.z), footBare.mul(0.85)).toVar();
   const wetV = max(f.y, rainWet(bk).mul(0.7)), litV = f.w;
   const stony: N = max(smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))), (groundUniforms.uBare as N).w.mul(smoothstep(0.25, 0.6, mid.add(macro.sub(0.5).mul(0.6))).mul(0.6).add(0.4))).toVar();
   // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
@@ -486,10 +682,14 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const lowSpot = lowSpotOf(at0);
   // (In rain more of the low places hold water, on bare ground too, not only in the ruts.)
   const pool: N = uWet.mul(0.09);
-  const puddle: N = smoothstep(float(0.55).sub(pool), float(0.6).sub(pool), lowSpot).mul(max(rutFloor, bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
-  const wetRim: N = smoothstep(0.45, 0.56, lowSpot).mul(rutFloor).toVar();
+  // (Read from the turf's heights blurred, and with a softer edge: read sharp, the water lay in blocky shapes, pixel-edged, like
+  // pieces of blue paint on the earth.)
+  const pudSpot: N = (texture(turf.map, at0.div(6.1).add(0.19)) as N).bias(2.5).a.add(mid.sub(0.5).mul(0.4)).toVar();
+  const puddle: N = smoothstep(float(0.535).sub(pool), float(0.6).sub(pool), pudSpot).mul(max(rutFloor, bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
+  const wetRim: N = smoothstep(0.44, 0.555, pudSpot).mul(rutFloor).toVar();
   ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
-  ground = mix(ground, vec3(0.035, 0.032, 0.026), puddle.mul(0.85));
+  // (Standing water in a rut is muddy, brown more than black, where the eye looks down into it.)
+  ground = mix(ground, vec3(0.055, 0.045, 0.032), puddle.mul(0.85));
   // On a mountain, where all the ground is stones, a path shows as what feet and hooves have made of them: a band a couple of strides
   // broad, trodden fine and darker, with the dust of it paler along its middle.
   const footWorn: N = onFoot.mul(one(smoothstep(0.38, 0.62, footOff.add(mid.sub(0.5).mul(0.12))))).mul((groundUniforms.uBare as N).w).toVar();
@@ -503,10 +703,10 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (Read at nearly twice the shingle's size it was cobbles; and its dark grit between the stones is lightened, as dust fills a walk.)
   const gravelAt: N = at0.mul(4.3).add(0.37), gGravel: N = (texture(shingle.map, gravelAt) as N).bias(blur);
   const gravel: N = mix(gGravel.rgb, vec3(0.5, 0.47, 0.41), 0.35).mul(vec3(1.3, 1.24, 1.1)).mul(mix(0.9, 1.06, macro)).mul(mix(0.82, 1, smoothstep(0, 0.4, paveSd))).toVar();
-  ground = mix(ground, mix(pave, gravel, gravelled), paved);
+  ground = mix(ground, mix(paving, gravel, gravelled), paved);
   ground = mix(ground.mul(mix(1, 0.52, wetV)), mix(vec3(...SNOW).mul(mix(0.94, 1.04, macro)), vec3(0.5, 0.49, 0.47), trodSnow.mul(0.55)), snowy);
   m.colorNode = vec4(ground, 1);
-  m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.04, puddle);
+  m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.09, puddle);
   {
     // Earth and shingle have their own relief; shingle borrows the earth's, laid coarser. Leaves lie flat.
     const gN: N = (texture(turf.normalMap, gUv) as N).bias(blur).xyz.mul(2).sub(1);
@@ -534,9 +734,9 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   }
   // (And here and there a grain of it catches the sun: a glint, near the eye, from a crystal turned just so.)
   const glint: N = step(0.992, fract(sin(dot(floor(positionWorld.mul(26)), vec3(12.9898, 78.233, 37.719))).mul(43758.5453))).mul(one(smoothstep(4, 14, far))).toVar();
-  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(mix(0.82, 0.5, wetV), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
+  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(paveRough.mul(mix(1, 0.6, wetV)), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)).mul(mix(1, jointLit, paved)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.15)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
   return fadesAtNearEdge(m, 'near');
 }
 

@@ -78,6 +78,20 @@ export interface SeaDesc {
   spray?: { x: number; z: number; nx: number; nz: number }[];
 }
 
+/**
+ * Which way a town's paving is laid, on a lattice over its land: at each point, how far along and across what it belongs to the point
+ * is, in metres, the way that runs (an angle from +x towards +z), and what it belongs to (a street by its number from 1, or the
+ * square, the waterfront or the forecourt from 1001); nothing where there is no paving near. The ground's material lays its stones by it.
+ */
+export interface PaveFrame {
+  x0: number;
+  z0: number;
+  cell: number;
+  nx: number;
+  nz: number;
+  data: Float32Array;
+}
+
 export interface SceneDescription {
   /**
    * Geometry, keyed by "group|material". Each key becomes one mesh, so grouping by place lets
@@ -134,6 +148,8 @@ export interface SceneDescription {
   underDeep?: { min: Vector3; max: Vector3 };
   /** Where smoke rises out of doors, from what height, and how high it is drawn. */
   smokes?: { x: number; y: number; z: number; height: number }[];
+  /** Which way a town's paving is laid (see `PaveFrame`). */
+  paving?: PaveFrame;
   /** The lowest open ground of the valley: mist lies no lower than a little under this. */
   groundLow?: number;
   /** The lowest floor there is anywhere, if it is lower than the places' own floors and the halls under the hill: nobody has fallen out of the world who is above it. */

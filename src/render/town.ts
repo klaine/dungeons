@@ -8,7 +8,7 @@ import { alongSheet, carveRock } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
 import { layTerrain, turfColour } from './landscape';
 import { Colour, growConifer, growTree } from './planting';
-import { CardSet } from './scene';
+import { CardSet, PaveFrame } from './scene';
 import { anyAngle, layBoat, layBollard } from './coast';
 import { buildShack } from './shack';
 import { buildBuilding } from './buildings';
@@ -33,6 +33,46 @@ import type { IslandBuild, IslandResult } from './island';
 
 const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
+
+/**
+ * A street's middle line made smooth and cut into lengths of half a metre, each with how far along the street it begins. Read from
+ * the line as it is given, which turns a few degrees at each of its points, how far along the street a point lies jumped where the
+ * nearest length changed: across a broad street, by a third of a metre at a bend, and the courses of its setts broke there. Cut
+ * fine and turned a little at a time, the courses fan round a bend as setts are laid.
+ */
+function centreOf(line: [number, number, number][]): { x: number; z: number; u: number; dx: number; dz: number }[] {
+  let pts = line.map((q) => [q[0], q[1]] as [number, number]);
+  for (let k = 0; k < 3 && pts.length > 2; k++) {
+    const next: [number, number][] = [pts[0]];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+      next.push([ax * 0.75 + bx * 0.25, az * 0.75 + bz * 0.25], [ax * 0.25 + bx * 0.75, az * 0.25 + bz * 0.75]);
+    }
+    next.push(pts[pts.length - 1]);
+    pts = next;
+  }
+  const out: { x: number; z: number; u: number; dx: number; dz: number }[] = [];
+  let run = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1], l = Math.hypot(bx - ax, bz - az);
+    if (l < 1e-6) continue;
+    const n = Math.max(1, Math.ceil(l / 0.5));
+    for (let j = 0; j < n; j++) out.push({ x: ax + ((bx - ax) * j) / n, z: az + ((bz - az) * j) / n, u: run + (l * j) / n, dx: (bx - ax) / l, dz: (bz - az) / l });
+    run += l;
+  }
+  return out;
+}
+/** How far along a street a point is, how far to its left of the middle, and which way the street runs there (an angle from +x towards +z). */
+function alongCentre(c: ReturnType<typeof centreOf>, x: number, z: number): { u: number; v: number; th: number } {
+  let best = Infinity, u = 0, v = 0, th = 0;
+  for (const q of c) {
+    const along = (x - q.x) * q.dx + (z - q.z) * q.dz, across = (z - q.z) * q.dx - (x - q.x) * q.dz;
+    // (The nearest length, counted as the length itself, half a metre of it, and not the line it lies on.)
+    const t = Math.min(0.5, Math.max(0, along)), d = Math.hypot(along - t, across);
+    if (d < best) { best = d; u = q.u + along; v = across; th = Math.atan2(q.dz, q.dx); }
+  }
+  return { u, v, th };
+}
 const shade = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k];
 type P3 = [number, number, number];
 
@@ -41,7 +81,7 @@ const Z = { wild: 0, street: 1, flags: 2, built: 3, yard: 4, track: 5, path: 6, 
 /** What a way of the town is laid with: its own surface, or its kind's usual one (setts for a street or lane, earth for a track, a trodden line for a path). */
 const surfaceOf = (s: Town['streets'][number]) => s.surface ?? (s.kind === 'street' || s.kind === 'lane' ? 'setts' : s.kind === 'track' ? 'dirt' : 'foot');
 
-export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[] } {
+export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[]; paving: PaveFrame } {
   const { site, p, kit, wild } = b;
   const t = site.town!, F = p.floor, sea = t.sea, g = site.grounds!, L = t.land;
   const rng = b.rng.fork('town');
@@ -55,8 +95,14 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   // ---- what the ground is, point by point, on a lattice of a metre
   const ZC = 1, zx0 = L.x0, zz0 = L.z0, znx = Math.round((L.x1 - L.x0) / ZC) + 1, znz = Math.round((L.z1 - L.z0) / ZC) + 1;
   const zone = new Uint8Array(znx * znz), fieldOf = new Int16Array(znx * znz).fill(-1), offWay = new Float32Array(znx * znz).fill(99);
+  // (And which way it is, so that a point of the ground can be told how far it is to one side of that way's middle: see `turfAt`.)
+  const wayOf = new Int16Array(znx * znz).fill(-1), centres = t.streets.map((s) => centreOf(s.line));
   // (And how far in from the paving's edge each point is, less than nothing outside it, and whether it is flags or setts.)
   const pave = new Float32Array(znx * znz).fill(-9), flagsAt = new Uint8Array(znx * znz), trodden = new Uint8Array(znx * znz);
+  // (And for the ground's material, which way the paving at each point is laid, as how far along and across whatever it belongs to
+  // the point is, the way that runs, and which it belongs to: a street by its number, the square, the waterfront or the forecourt.
+  // See `paveFrame` in the ground's material.)
+  const laidBy = new Float32Array(znx * znz * 4);
   {
     const paint = (r: { x0: number; x1: number; z0: number; z1: number }, fn: (k: number, x: number, z: number) => void) => {
       const i0 = Math.max(0, Math.floor((r.x0 - zx0) / ZC)), i1 = Math.min(znx - 1, Math.ceil((r.x1 - zx0) / ZC)), j0 = Math.max(0, Math.floor((r.z0 - zz0) / ZC)), j1 = Math.min(znz - 1, Math.ceil((r.z1 - zz0) / ZC));
@@ -79,7 +125,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         if (n.off > half) return;
         // (What it is laid with decides how it is drawn: stone of any kind, and gravel, as paving; beaten earth as a track, with ruts.)
         const surf = surfaceOf(s), kind = surf === 'foot' ? Z.path : surf === 'dirt' ? Z.track : Z.street;
-        if (kind === Z.street || zone[k] !== Z.street) { zone[k] = kind; offWay[k] = n.off; }
+        if (kind === Z.street || zone[k] !== Z.street) { zone[k] = kind; offWay[k] = n.off; wayOf[k] = t.streets.indexOf(s); }
         // (A street or a lane of beaten earth is trodden bare across its breadth, not two ruts in the grass as a track out in the fields is.)
         if (surf === 'dirt' && s.width > 3 && n.off < half - 0.4) trodden[k] = 1;
       });
@@ -92,15 +138,21 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       const surf = surfaceOf(s);
       if (surf === 'dirt' || surf === 'foot') continue;
       const xs = s.line.map((q) => q[0]), zs = s.line.map((q) => q[1]), half = s.width / 2, kind = surf === 'flags' ? 1 : surf === 'gravel' ? 2 : 0;
+      const id = t.streets.indexOf(s) + 1, centre = centres[id - 1];
       paint({ x0: Math.min(...xs) - half - 3, x1: Math.max(...xs) + half + 3, z0: Math.min(...zs) - half - 3, z1: Math.max(...zs) + half + 3 }, (k, x, z) => {
         const d = half - nearLine(s.line, x, z).off;
-        if (d > pave[k]) { pave[k] = d; flagsAt[k] = kind; }
+        if (d > pave[k]) {
+          pave[k] = d; flagsAt[k] = kind;
+          const f = alongCentre(centre, x, z);
+          laidBy.set([f.u, f.v, f.th, id], k * 4);
+        }
       });
     }
-    for (const r of [t.square, { x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z + 0.6 }, { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 + 0.3 }]) paint({ x0: r.x0 - 3, x1: r.x1 + 3, z0: r.z0 - 3, z1: r.z1 + 3 }, (k, x, z) => {
+    [t.square, { x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z + 0.6 }, { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 + 0.3 }].forEach((r, n) => paint({ x0: r.x0 - 3, x1: r.x1 + 3, z0: r.z0 - 3, z1: r.z1 + 3 }, (k, x, z) => {
       const d = x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1 ? Math.min(x - r.x0, r.x1 - x, z - r.z0, r.z1 - z) : -outsideRect(r, x, z);
-      if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; }
-    });
+      // (Laid square to the place itself, from its corner.)
+      if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; laidBy.set([x - r.x0, z - r.z0, 0, 1001 + n], k * 4); }
+    }));
     for (const bd of t.buildings) { const r = Math.max(bd.w, bd.d) + 14; paint({ x0: bd.x - r, x1: bd.x + r, z0: bd.z - r, z1: bd.z + r }, (k, x, z) => { if (outsideBuilt(bd, x, z) < 0.6) zone[k] = Z.built; }); }
     for (const s of t.shacks) { const r = Math.max(s.w, s.d); paint({ x0: s.x - r, x1: s.x + r, z0: s.z - r, z1: s.z + r }, (k, x, z) => { if (Math.hypot(x - s.x, z - s.z) < r * 0.62) zone[k] = Z.shack; }); }
     // (The storehouses' quays, a band either side of their line: made, not rock; and the outlook's ring, flagged.)
@@ -408,8 +460,13 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // (The garden's flower beds are dug earth between the rows.)
     if (bedAt(x, z)) { lay.bare = 0.95; lay.wet = Math.max(lay.wet, 0.25); return c; }
     if (zn === Z.track || zn === Z.path) {
-      const off = wayOff(x, z);
-      lay.code = zn === Z.track ? 100 + off * (fbm2(x * 0.3, z * 0.3, 2) > 0.5 ? 1 : -1) : 200 + off;
+      // (How far to one side of the way's middle, reckoned here at the point, and signed, as the ground's material wants it. It was
+      // read from the nearest point of a lattice of a metre, and turned to one side or the other by noise; between points of the
+      // sheet turned different ways the material found a rut's floor wherever the two met, and drew a track's ruts in blotches,
+      // which held water, across the whole breadth of a street of earth.)
+      const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC), way = i < 0 || j < 0 || i >= znx || j >= znz ? -1 : wayOf[j * znx + i];
+      const off = way >= 0 ? alongCentre(centres[way], x, z).v : wayOff(x, z);
+      lay.code = zn === Z.track ? 100 + off : 200 + off;
       if (earthAt(x, z)) lay.bare = 0.8 + 0.15 * fbm2(x * 0.25, z * 0.25, 2);
     }
     if (zn === Z.built || zn === Z.shack || zn === Z.yard) lay.bare = zn === Z.yard ? 0.25 + 0.4 * smooth((fbm2(x * 0.2, z * 0.2, 2) - 0.45) / 0.2) : 0.75;
@@ -1581,6 +1638,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   return {
     smokes,
     torches,
+    paving: { x0: zx0, z0: zz0, cell: ZC, nx: znx, nz: znz, data: laidBy },
     spawn: V(sx, lm.y + 1.75, sz),
     yaw: Math.atan2(-look.x, -look.z),
     track: [...(site.track ?? [])].reverse().slice(1, -1) as [number, number][],

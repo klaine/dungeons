@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -381,6 +381,9 @@ async function start(): Promise<void> {
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
   if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
+  // Which way a town's paving is laid, for the ground's material: one more texture it reads, so only where the graphics card allows
+  // well over the sixteen (`?paveframe=0` lays the stones in rows along x everywhere, as before).
+  setPaving(desc.paving, textureRoom >= 20 && num('paveframe', 1) > 0);
   // Where the near ground passes into the far land, on a place that has one land for both (a mountain top on a world's summit); else nowhere.
   nearFarUniforms.uNearRect.value.set(...((desc.nearFar?.slice(0, 4) ?? [0, 0, 0, 0]) as [number, number, number, number]));
   nearFarUniforms.uNearBand.value = desc.nearFar?.[4] ?? 0;
@@ -750,6 +753,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ sun and sky
   const sunDir = desc.sunDir;
+  paveUniforms.uSun.value.copy(sunDir).normalize();
   const sun = new DirectionalLight(SUN_COLOR, SUN_INTENSITY);
   const centre = desc.bounds.min.clone().add(desc.bounds.max).multiplyScalar(0.5);
   const radius = desc.bounds.max.clone().sub(desc.bounds.min).length() / 2;
