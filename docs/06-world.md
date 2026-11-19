@@ -464,8 +464,8 @@ the place lies in the world by its frame (`siteFrame` in `worldLand.ts`: the for
 for an island or a mountain top, the quay's for a town, over the world's point, turned): the ground it takes (a valley's sides
 from the house to the gap, an island's coast, a mountain top's rim; a town's is its streets and buildings), its ways (track and paths, a town's streets,
 quay and moles) and what stands on it (the house's rooms on the ground, buildings, storehouses, shacks, cottages). In the game `M`
-enlarges the plan and then shows the world's ink map about the place (`WorldView` in `app/worldView.ts`; two and a half kilometres
-across at the least): the place's footprint, the footprints of the world's other places built beforehand, and the player, an arrow
+enlarges the plan and then shows the world's ink map about the place (`WorldView` in `app/worldView.ts`; a kilometre and four fifths
+across at the least, kept within the world's edges): the place's footprint, the footprints of the world's other places built beforehand, and the player, an arrow
 the way they face; the map is drawn the first time it is shown, which holds the page a moment. The world page's **Build every
 place** runs `placesWorker.ts`: the world made again as the game's worker makes it, then every place laid out as the game would,
 its tiles of five metres with it, all handed to the page and kept in the browser (`worldStore.ts`), each place's footprint drawn

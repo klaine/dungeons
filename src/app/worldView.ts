@@ -9,7 +9,7 @@ const RED = '#9a2a1c', INK = '#1d1a17';
 /**
  * The world's ink map in the game, for a place built in a world (`M` a second time, from the plan made large): the world about the
  * place, with the place's footprint on it where it lies (`footprintOf`), the footprints of the world's other places that were built
- * beforehand on the world's page, and the player, an arrow the way they face. The map itself is drawn once, the first time it is
+ * beforehand on the world's page, and the player, an arrow the way they face; a kilometre and four fifths across at the least, kept within the world's edges. The map itself is drawn once, the first time it is
  * shown; what is over it, as often as the plan is.
  */
 export class WorldView {
@@ -34,11 +34,14 @@ export class WorldView {
     const c = this.canvas, dpr = Math.min(window.devicePixelRatio || 1, 2), W = Math.max(1, Math.round(c.clientWidth * dpr)), H = Math.max(1, Math.round(c.clientHeight * dpr));
     if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
     const ctx = c.getContext('2d')!, k = this.ink2;
-    // What is taken in: two and a half kilometres about the place at the least, or all of its footprint with room about it.
-    const [cu, cv] = toWorld(this.frame, this.frame.hx, this.frame.hz);
-    let reach = 1250;
-    for (const [x, z] of this.own?.ground ?? []) reach = Math.max(reach, Math.hypot(x - cu, z - cv) * 1.35);
-    const metres = (2 * reach) / Math.min(W, H), at = (x: number, z: number): [number, number] => [W / 2 + (x - cu) / metres, H / 2 + (z - cv) / metres];
+    // What is taken in: a kilometre and four fifths about the place at the least, or all of its footprint with room about it; and
+    // not past the world's edge where it can be helped (near the edge the view ran off the world into the map's key).
+    const [pu, pv] = toWorld(this.frame, this.frame.hx, this.frame.hz), hx = this.map.plan.hx, hz = this.map.plan.hz;
+    let reach = 900;
+    for (const [x, z] of this.own?.ground ?? []) reach = Math.max(reach, Math.hypot(x - pu, z - pv) * 1.35);
+    const metres = (2 * reach) / Math.min(W, H), halfU = (W / 2) * metres, halfV = (H / 2) * metres;
+    const cu = halfU < hx ? Math.min(hx - halfU, Math.max(-hx + halfU, pu)) : 0, cv = halfV < hz ? Math.min(hz - halfV, Math.max(-hz + halfV, pv)) : 0;
+    const at = (x: number, z: number): [number, number] => [W / 2 + (x - cu) / metres, H / 2 + (z - cv) / metres];
     // The map, the piece of it about the place, scaled to the view.
     const sx = k.X(cu - (W / 2) * metres), sy = k.Z(cv - (H / 2) * metres), sw = (W * metres) * k.scale, sh = (H * metres) * k.scale;
     ctx.fillStyle = '#f1eadb';
