@@ -3684,7 +3684,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     scenery.cards.push(...planting.sets);
   };
   // A mountain top in place of a valley: the same, with the mountain's own builder (see `mountain.ts`).
-  let cloudDeck: SceneDescription['deck'], rockSharp: number | undefined;
+  let cloudDeck: SceneDescription['deck'], rockSharp: number | undefined, nearFar: SceneDescription['nearFar'];
   function* buildMountainApproach(p: Place, span: [number, number]): Generator<MeshStage, void, void> {
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
@@ -3697,6 +3697,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     farCover = made.far;
     spawnYaw = made.yaw;
     cloudDeck = made.deck;
+    nearFar = made.nearFar;
     censuses.push(made.planted);
     lookouts.push(made.lookout);
     hallTorches.push(...made.torches);
@@ -4529,6 +4530,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     crossings,
     lookouts,
     far: farCover,
+    ...(nearFar ? { nearFar } : {}),
     sea: islandSea,
     ...(rockSharp !== undefined ? { rockSharp } : {}),
     ...(cloudDeck ? { deck: cloudDeck, snow: site.setting.season === 'winter' ? 1 : 0.24, snowLine: [approach.floor + 22, site.setting.season === 'winter' ? 0 : 0.4] as [number, number] } : {}),

@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -261,7 +261,7 @@ async function start(): Promise<void> {
     // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
     rockSheet: makeRockMaterial(rock, moss, { relief: true }),
     far: makeFarMaterial(),
-    scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true }),
+    scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true, fades: 'near' }),
     // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)
     // Each kind of tree has its own: an oak's ridged, an ash's smooth, a pine's in plates, a spruce's in scales (see `barkRecipe`).
     bark: makeSiteMaterial(bark, moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
@@ -360,6 +360,9 @@ async function start(): Promise<void> {
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
   if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
+  // Where the near ground passes into the far land, on a place that has one land for both (a mountain top on a world's summit); else nowhere.
+  nearFarUniforms.uNearRect.value.set(...((desc.nearFar?.slice(0, 4) ?? [0, 0, 0, 0]) as [number, number, number, number]));
+  nearFarUniforms.uNearBand.value = desc.nearFar?.[4] ?? 0;
   // Snow, on a mountain: all over in winter, and in summer only what is left of it in the hollows.
   snowUniforms.uSnow.value = num('snow', desc.snow ?? 0);
   if (desc.snowLine) snowUniforms.uSnowLine.value.set(desc.snowLine[0], desc.snowLine[1]);

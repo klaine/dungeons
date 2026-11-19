@@ -290,7 +290,8 @@ world is asked for: a world is a mode, `?world=<seed>`, beside the seeds already
    the summit found, turned to its ridge, at this country's scale (its cloud forty to sixty metres under
    the top, the valleys three hundred metres under that, not seven hundred); its country the world's.
    *Done, the near way* (below, *Places built in the world*): the top as the game draws it, laid on the
-   world's summit, its country the world's.
+   world's summit, its country the world's. *Then the land's way* (19 November 2026): the top's land the world's,
+   the house's ground fitted into it, the ridge and the climb laid on what is there (*Places built in the world*).
 5. **One far land, from the world.** From a place, the rest of the world and the land beyond its edge
    (the shape continued, unworn), in place of the three kinds of far sheet each place has now.
 6. **The map leads to the places**, and **more kinds of place** where the world has room (the low
@@ -429,15 +430,31 @@ metre to five high, which is what low islands have. A house is still the site's 
 not the world's; a draft that will not go on the place (its cove will not fit, say) gives way to the next
 best draft of the same seed, and if none will, the place says why rather than quietly being made elsewhere.
 
-A mountain top (`place=mountain`) is the furthest from the land's way round: the game draws its top whole,
-its rim, the precipices under it, the ridge the way comes up and its crest, the summits, and wears that.
-So it is laid on the world rather than read from it. The house's level ground goes where the world found
-the hospice's, turned so that the ridge runs south from it as the drawn ridge does; the first summit is
-the world's, where it is and as high over the forecourt as it is; the top is drawn out along the line from
-the house to the summit, as broad as a top drawn alone, so that the summit stands on it; the cloud lies as
-the game lays it, under where the player arrives at the ridge's foot. Beyond the top the country round
-about is the world's (`countryShape` in `mountain.ts`), not worn again, with the drawn top standing on it
-where it is the higher; no far range is drawn, since the world has its own, and its sea is the water.
+A mountain top (`place=mountain`) is now the world's land, as the islands and the valley heads are. Until
+19 November 2026 the game drew its top whole, an oval plateau with precipices round it, a drawn ridge and a
+drawn summit horn, stretched from the house to the world's summit and set down on the world wherever it stood the
+higher: a platform out of all proportion to the house, and a seam all round it ("the platform where the 'house' is,
+is way too large"; "i want this location to seamlessly fade/blend into the 'real world'"). Now its land is the world's
+(`worldTop` in `mountain.ts`): the house's level ground cut and made up to the forecourt's floor where the world found
+ground for the hospice, and eased back into the land over a bank half again as broad as it is high, as `fit.ts` eases
+a fitted ground; and the summit, its ridges and its flanks as the world has them, with a little finer detail and a
+light wearing on the top's own lattice. What the layout leans on is read from that land rather than drawn: the rim is
+where the ground reached from the top's middle falls more than ten metres under the forecourt, within a band some
+sixty-five metres either side of the line from the house up to the summit; the drops are how far the land falls in the
+thirty metres past it; the ridge the way comes up is the way of least effort over the land (`worldDescent`) from the
+head of the top to the first ground fifty-five to seventy-five metres under the forecourt and a hundred and sixty metres
+off, climbing and steep descents and gullies made dear, so that it keeps to a crest where there is one; and the cloud
+lies over where it arrives, some thirty to forty metres under the house. (The ridge the world found, from the summit
+through the hospice's ground, seldom falls far below the house: followed, it went into a saddle and up the next
+mountain.) The climb to the summit keeps to the land it rises over: of the routes tried, the one whose even grade lies
+nearest the land. Left out, as drawn things on land that is not drawn: the cleft across the ridge with its bridge, the
+lesser drawn summits, and the needles. The rock is carved only where the land is steep, on the top and its ridge and
+twenty-four metres off them; further off it is laid as a sheet. Beyond, the country round about is the world's, read from its
+tiles and its lattice directly (read through a lattice of twenty-four metres, as the drawn country is, the nearest
+mountains were blurred and rounded); and where the near ground ends, over a band of fifty metres inside its edge, it
+breaks up into the far land in patches a couple of metres across, the far land laid under it there (`nearFarCut` in
+`siteMaterial.ts`), so that no straight edge shows. No far range is drawn, since the world has its own, and its sea is
+the water.
 
 A coastal town (`?world=w2&place=town&n=2`; `place=coast`, as the first links said, is the same) is the
 harbour town (`town.ts`), laid on the world's land instead of a coast country of its own: the house on its
@@ -550,7 +567,8 @@ ground near, terraced where it must be, and the plan of the house chosen from se
 landing in the nearest sheltered cove the coast actually has; the way up a ridge the land actually has, or
 round the hill if it has none; the outbuildings where there is room. So a search asks less (ground that
 can be built on, and a way to it) and finds more, and every place is the land's. This is step 3 below, and
-it should come before step 4: the mountain top, which is now drawn whole, is the furthest from it.
+it should come before step 4: the mountain top, which was drawn whole, was the furthest from it. (Since 19 November 2026
+its land is the world's, its house's ground fitted into it, and its ridge the one the land has: below.)
 
 ## Open questions
 

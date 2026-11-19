@@ -56,6 +56,8 @@ export interface MountainResult {
   yaw: number;
   track: [number, number][];
   far: { wood: [number, number, number]; grass: [number, number, number]; sward: [number, number, number]; bare: [number, number, number, number] };
+  /** On a world's summit, where the near ground passes into the far land: its rectangle and the band inside its edge (`nearFarUniforms`). */
+  nearFar?: [number, number, number, number, number];
   /** The sea of cloud: the level of its top, how high its billows stand, how broken it is, and the mountain's shape for its shadow on it. */
   deck: NonNullable<import('./scene').SceneDescription['deck']>;
   /** Where birds wheel: off the precipices, below the rim, and about the summit. */
@@ -192,15 +194,19 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   // (Carved at half a metre, where a valley's rim and an island's cliffs are carved at four tenths: there is twice as much rock
   // here, most of it seen from further off, and at four tenths it took a minute and a half to build.)
   // (Rock carved at four tenths of a metre and the sheet laid at a metre: a notch finer than first made.)
-  const CELL = 0.5, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
+  const CELL = 0.4, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(g.x0 - 90, false), x1: snap(g.x1 + 90, true), z0: snap(g.z0 - 90, false), z1: snap(g.z1 + 90, true) };
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.05; };
+  // (On a world's summit the rim is only where the top is reckoned to end, on the world's own land, and not a precipice: rock is carved
+  // where the land is steep, on the top and its ridge and up to twenty-four metres off them, and not in a band along the rim for its own
+  // sake, which on gentle ground was carving turf. Steep ground further off is laid as a sheet of rock, as on a found island.)
+  const worldly = !!m.terrain?.world, OUT_W = 24;
   const inBand = (x: number, z: number) => {
     const d = inside(m, x, z);
-    if (d < -OUT || plain(x, z) < HIDDEN) return false;
+    if (d < -(worldly ? OUT_W : OUT) || plain(x, z) < HIDDEN) return false;
     // (Wherever a tunnel runs, the rock over it is carved with it, however level the ground above.)
-    return d < IN || steepAt(x, z) || (runs.under.length > 0 && nearUnder(x, z, 6).off < 5) || nearHall(x, z) < 4;
+    return (!worldly && d < IN) || steepAt(x, z) || (runs.under.length > 0 && nearUnder(x, z, 6).off < 5) || nearHall(x, z) < 4;
   };
   const tilesX = Math.round((area.x1 - area.x0) / TILE), tilesZ = Math.round((area.z1 - area.z0) / TILE);
   const tiles = new Uint8Array(tilesX * tilesZ);
@@ -209,7 +215,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     // (A tile wholly far below the top or far out from it has nothing to carve, and is passed over quickly.)
     const cx = area.x0 + (i + 0.5) * TILE, cz = area.z0 + (j + 0.5) * TILE;
     // (But not one by the great hall, whose windows are in the precipice: the face under them was passed over, and holes showed in it.)
-    if (inside(m, cx, cz) < -OUT - TILE && nearHall(cx, cz) > TILE) continue;
+    if (inside(m, cx, cz) < -(worldly ? OUT_W : OUT) - TILE && nearHall(cx, cz) > TILE) continue;
     for (let z = area.z0 + j * TILE + 0.6; z < area.z0 + (j + 1) * TILE && !any; z += SHEET) for (let x = area.x0 + i * TILE + 0.6; x < area.x0 + (i + 1) * TILE && !any; x += SHEET) any = inBand(x, z);
     tiles[j * tilesX + i] = any ? 1 : 0;
   }
@@ -255,8 +261,11 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     land.data[k] = plain(x, z);
   }
   const loose = land.like(), wornBy = land.like();
-  // What has been built or made on the land is not worn: the way, the climb, the cairn's platform.
-  const made = (x: number, z: number) => nearWay(x, z, 5) < 4.5 || nearClimb(x, z, 4) < 3.2 || nearOpen(x, z, 4) < 3.4 || (runs.under.length > 0 && nearUnder(x, z, 5).off < 4.4) || (!!m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7);
+  // What has been built or made on the land is not worn: the way, the climb, the cairn's platform, the shelter's floor and the landings.
+  // (The shelter's and the landings' were worn with the rest: near a precipice the frost ate into them, and the fence that keeps people
+  // off an edge took in the shelter's floor and what lies on it.)
+  const made = (x: number, z: number) => nearWay(x, z, 5) < 4.5 || nearClimb(x, z, 4) < 3.2 || nearOpen(x, z, 4) < 3.4 || (runs.under.length > 0 && nearUnder(x, z, 5).off < 4.4) || (!!m.cairn && Math.hypot(x - m.cairn.x, z - m.cairn.z) < 7)
+    || (!!m.shelter && Math.hypot(x - m.shelter.x, z - m.shelter.z) < 7) || (m.landings ?? []).some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 3);
   {
     const far = new Float32Array(land.data.length), nx = land.nx, nz = land.nz, D1 = CELL, D2 = CELL * Math.SQRT2;
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) far[j * nx + i] = i > 0 && j > 0 && i < nx - 1 && j < nz - 1 && within[j * nx + i] ? 1e6 : 0;
@@ -1379,7 +1388,11 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   yield say('laying the far range and the cloud', 0.92);
   // ---- the other peaks, far off over the cloud, and the mountain's own lower slopes beyond the near ground
   wild.group = 'soft';
-  yield* layRange(wild.mesh('far'), site, F, tint, area, winter, (what, f) => say(what, 0.92 + 0.08 * f));
+  // (On a world's summit the far land is the near ground's own land, and is laid under the band inside the near ground's edge as well,
+  // so that across the band the one is passed into the other (`nearFarUniforms`) and there is no edge to see. Its hole is the near
+  // ground less the band and a little more, so that wherever the near ground may be passed over, the far land is under it.)
+  const BAND = 50, hole = worldly ? { x0: area.x0 + BAND + 8, x1: area.x1 - BAND - 8, z0: area.z0 + BAND + 8, z1: area.z1 - BAND - 8 } : area;
+  yield* layRange(wild.mesh('far'), site, F, tint, hole, winter, (what, f) => say(what, 0.92 + 0.08 * f), worldly ? area : undefined);
   // The sights of the country round about: built larger than life the further off they stand, or they would be specks; each faces the mountain.
   (m.sights ?? []).forEach((sg, i) => {
     const far = Math.hypot(sg.x - m.x, sg.z - m.z);
@@ -1449,6 +1462,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   // (Up the ridge, towards the top.)
   const back = way.length > 14 ? way[way.length - 13] : [m.spur.from[0], m.spur.from[1], F];
   return {
+    ...(worldly ? { nearFar: [area.x0, area.z0, area.x1, area.z1, BAND] as [number, number, number, number, number] } : {}),
     spawn: V(arrive[0], ground(arrive[0], arrive[1]) + 1.75, arrive[1]),
     // (Yaw is measured so that 0 looks towards lesser z.)
     yaw: Math.atan2(-(back[0] - arrive[0]), -(back[1] - arrive[1])),
@@ -1615,7 +1629,7 @@ function* shadeOfRange(site: Site, radii: number[], around: number, X: Float32Ar
   return out;
 }
 
-function* layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean, say: (what: string, f: number) => MeshStage): Generator<MeshStage, void, void> {
+function* layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near: { x0: number; x1: number; z0: number; z1: number }, winter: boolean, say: (what: string, f: number) => MeshStage, under?: { x0: number; x1: number; z0: number; z1: number }): Generator<MeshStage, void, void> {
   const m = site.mountain!, cx = m.x, cz = m.z, deck = m.deck, seed = (m.x * 7.31 + m.z * 3.17) % 97;
   // (A notch finer than first made: half as many points again round each ring. And the rings about as close as the points round
   // them are far apart: twice as far apart, they drew a face looking this way, down which they run, in rows forty metres apart, and
@@ -1634,6 +1648,8 @@ function* layRange(mesh: MeshBuilder, site: Site, F: number, stone: Colour, near
     if (inNear) { H[q] = deck - 400; continue; }
     const land = countryAt(m, F, X[q], Z[q]);
     H[q] = land.y; wet[q] = land.water ? 1 : 0;
+    // (Under the near ground, where the two are passed into one another, a little lower than it: see `nearFarCut`.)
+    if (under && X[q] > under.x0 && X[q] < under.x1 && Z[q] > under.z0 && Z[q] < under.z1) H[q] -= 0.3;
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
   const shade = yield* shadeOfRange(site, radii, around, X, Z, H, deck - 45, (f) => say('shadowing the country round about', 0.6 + 0.3 * f));

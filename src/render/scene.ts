@@ -148,6 +148,8 @@ export interface SceneDescription {
   crossings?: { x: number; z: number; by: 'ford' | 'bridge'; level: number }[];
   /** What the land far off is covered with in this season: the colour of its woods and of its open ground. */
   far?: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number] };
+  /** Where the near ground passes into the far land, for a place whose two are the one land: the near ground's rectangle (x0, z0, x1, z1) and the band inside its edge. */
+  nearFar?: [number, number, number, number, number];
   /** The sea, if the place is an island. */
   sea?: SeaDesc;
   /** What kind of birds wheel at `birds`: gulls off sea cliffs, rooks over woods, choughs off a mountain's precipices. */

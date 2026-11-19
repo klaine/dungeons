@@ -35,6 +35,47 @@ export interface SiteUniforms {
   uFallback: { value: Vector3 };
 }
 
+/**
+ * Where a place's near ground gives way to its far land, for a place whose two are the one land (a mountain top on a world's summit):
+ * the rectangle the near ground is laid over (`x0`, `z0`, `x1`, `z1`), and how broad a band inside its edge the one passes into the
+ * other over. A band of nothing, as for every other place, and nothing is passed over. (Where the near ground ended along a straight
+ * line and the far land's own material began, the place stood in its world as a square set into it.)
+ */
+export const nearFarUniforms: { uNearRect: { value: Vector4 }; uNearBand: { value: number } } = {
+  uNearRect: uniform(new Vector4(0, 0, 0, 0)) as N,
+  uNearBand: uniform(0) as N,
+};
+/**
+ * The near ground's share of a point of the band, 0 at its outer edge to 1 at its inner; and patches on the ground a couple of metres
+ * across, which the two kinds of ground are cut by: the near ground is drawn where a patch is under the share, the far land where it
+ * is not, so that across the band the near ground breaks up into the far land as ground cover thins out. (Cut by the points of the
+ * picture instead, the band was a hatched stripe across the hillside: the two kinds of ground are not alike, and side by side at every
+ * other point of the picture they showed as a weave.) The far land is cut a little short of the near ground and laid a little under
+ * it there (`layRange`), so that where the two surfaces, a few centimetres apart, see a patch's edge differently, both are drawn and
+ * the near ground shows, rather than neither and a hole.
+ */
+function nearFarCut(side: 'near' | 'far'): { opacity: N; test: N } {
+  const r = nearFarUniforms.uNearRect as N, band = nearFarUniforms.uNearBand as N, p: N = positionWorld.xz;
+  const inside: N = min(min(p.x.sub(r.x), r.z.sub(p.x)), min(p.y.sub(r.y), r.w.sub(p.y)));
+  const share: N = min(max(inside.div(max(band, 0.001)), 0), 1);
+  const patch: N = farNoise(p.div(2.4)).mul(0.65).add(farNoise(p.div(0.85).add(7.3)).mul(0.35));
+  // (The patches' values lie mostly between a quarter and three quarters: the share is spread to match, so that the band is used.)
+  // (And none at all past its inner edge, where no far land is laid under it.)
+  const spread: N = select(share.greaterThanEqual(0.999), float(2), share.mul(0.7).add(0.15));
+  const on: N = band.greaterThan(0);
+  // (The near ground is never cut outside its rectangle, where it is not laid: what else is drawn with it there stays.)
+  const near: N = select(on.and(inside.greaterThanEqual(0)).and(patch.greaterThanEqual(spread)), float(0), float(1));
+  const far: N = select(on.and(inside.greaterThanEqual(0)).and(patch.lessThan(spread.sub(0.06))), float(0), float(1));
+  return { opacity: side === 'near' ? near : far, test: float(0.5) };
+}
+/** Lets a ground material be passed over into the far land, or the far land into the near ground, across the band (`nearFarUniforms`). */
+export function fadesAtNearEdge(m: MeshStandardNodeMaterial, side: 'near' | 'far'): MeshStandardNodeMaterial {
+  const cut = nearFarCut(side);
+  (m as N).opacityNode = cut.opacity;
+  (m as N).alphaTestNode = cut.test;
+  return m;
+}
+
 export const siteUniforms: SiteUniforms = {
   uBake: uniform(0) as N,
   uFallback: uniform(new Vector3(0.35, 0.4, 0.5)) as N,
@@ -123,7 +164,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number] } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near' } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -155,7 +196,8 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
-  return m;
+  // (Ground laid with it, the scree, is passed over into the far land at the edge of the near ground, where a place asks for it.)
+  return o.fades ? fadesAtNearEdge(m, o.fades) : m;
 }
 
 /** The same material as `makeSiteMaterial` makes, for a surface with depth (see `deep` there). */
@@ -445,7 +487,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   m.roughnessNode = mix(mix(m.roughnessNode as N, mix(mix(0.82, 0.5, wetV), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
-  return m;
+  return fadesAtNearEdge(m, 'near');
 }
 
 /**
@@ -709,7 +751,8 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // (The sky's light is reckoned for the surface as its grain turns it, not for the smooth surface under the grain: most of a cliff is in
   // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
   lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao).mul(mix(1, sheetCavity, 0.8)), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
-  return m;
+  // (Rock laid as a sheet is ground too, and is passed over into the far land with it; carved rock is not.)
+  return o.relief ? fadesAtNearEdge(m, 'near') : m;
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
@@ -889,5 +932,5 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
   // field other materials use for damp. Sheets that do not reckon it say none.)
   lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
-  return m;
+  return fadesAtNearEdge(m, 'far');
 }
