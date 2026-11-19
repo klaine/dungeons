@@ -1,5 +1,5 @@
 import { HeightField } from '../core/terrain';
-import { drawFootprint, footprintOf } from '../maps/footprint';
+import { drawFootprint, Footprint, footprintOf, placeNear } from '../maps/footprint';
 import { drawInkWorld, drawWorldRelief, inkFrame, WorldMap } from '../maps/inkWorld';
 import { keptSites, KeptSite } from '../app/worldPlace';
 import { worldShelf } from '../app/worldStore';
@@ -39,12 +39,32 @@ function draw(): void {
   if (view === 'ink') { drawInkWorld(canvas, map); drawBuilt(); } else drawWorldRelief(canvas, map);
 }
 
+/** Each built place's footprint, made once. */
+const PRINTS = new WeakMap<KeptSite, Footprint | null>();
+const printOf = (b: KeptSite) => { if (!PRINTS.has(b)) PRINTS.set(b, footprintOf(b.site)); return PRINTS.get(b)!; };
+
 /** Over the ink map, what is built at each place built (all of them, or those given): its ground, its ways and what stands on it, in red (`footprintOf`). */
 function drawBuilt(which: KeptSite[] = built): void {
   if (!map || view !== 'ink' || !which.length) return;
   const ctx = canvas.getContext('2d')!, k = inkFrame(map.plan, canvas.width);
-  for (const b of which) { const fp = footprintOf(b.site); if (fp) drawFootprint(ctx, fp, (x, z) => [k.X(x), k.Z(z)], { ink: '#9a2a1c', scale: 0.9 }); }
+  for (const b of which) { const fp = printOf(b); if (fp) drawFootprint(ctx, fp, (x, z) => [k.X(x), k.Z(z)], { ink: '#9a2a1c', scale: 0.9 }); }
 }
+
+/** The way to a place in the game. (After a `#`, which a page shown inside another keeps where it may not keep a `?`.) */
+const gameHref = (seed: string, q: { kind: string; n: number }) => `${pageOf('game', './index.html')}#${new URLSearchParams({ world: seed, place: q.kind === 'coast' ? 'town' : q.kind, n: String(q.n) })}`;
+
+/**
+ * The place under the pointer on the ink map, for going there by clicking it (asked: "how do jump into any of the locations after
+ * the build all is completed?"): within some twenty pixels of its mark as shown, or inside its footprint if it was built.
+ */
+function placeUnder(e: MouseEvent): WorldMap['places'][number] | null {
+  if (!map || view !== 'ink') return null;
+  const r = canvas.getBoundingClientRect(), k = inkFrame(map.plan, canvas.width), s = canvas.width / r.width;
+  const x = ((e.clientX - r.left) * s - k.edge) / k.scale - map.plan.hx, z = ((e.clientY - r.top) * s - k.head) / k.scale - map.plan.hz;
+  return placeNear(map.places, built.map((b) => ({ kind: b.kind, n: b.n, fp: printOf(b)! })).filter((p) => p.fp), x, z, (22 * s) / k.scale);
+}
+canvas.addEventListener('mousemove', (e) => { const q = placeUnder(e); canvas.style.cursor = q ? 'pointer' : ''; canvas.title = q ? `${q.name}: go there` : ''; });
+canvas.addEventListener('click', (e) => { const q = placeUnder(e); if (q && map) location.href = gameHref(map.plan.seed, q); });
 
 /** The world's size asked for in the address (`?size=8x8`, kilometres east and west by north and south), or none: six by ten. */
 function sizeAsked(): { x: number; z: number } | undefined {
@@ -109,11 +129,11 @@ function listPlaces(seed: string): void {
     const link = (text: string, href: string) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
     // (After a `#`, which a page shown inside another keeps where it may not keep a `?`; both pages read it. Where the game and the walk
     // are, a page may say in its head, as the published copy does, where they are not the usual files.)
-    const game = new URLSearchParams({ world: seed, place: q.kind === 'coast' ? 'town' : q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
+    const walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
     // (Built beforehand, or not to be: said beside its kind.)
     const done = built.some((b) => b.kind === q.kind && b.n === q.n), why = failed.get(`${q.kind}${q.n}`), note = document.createElement('span');
     if (done || why) { note.className = done ? 'built' : 'built failed'; note.textContent = done ? 'built' : 'could not be built'; if (why) note.title = why; }
-    card.append(name, kind, note, document.createElement('br'), link('Build a house here', `${pageOf('game', './index.html')}#${game}`), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
+    card.append(name, kind, note, document.createElement('br'), link('Go there', gameHref(seed, q)), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
     placesEl.append(card);
   }
 }

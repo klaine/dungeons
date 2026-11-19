@@ -48,6 +48,28 @@ export function footprintOf(site: Site): Footprint | null {
   return { ground, solid, ways };
 }
 
+/** Whether a point of the world lies inside a ring of points (crossings of a line run from it east, counted). */
+export function insideRing(ring: [number, number][], x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i], [xj, zj] = ring[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * The place a point of the world points at on a map, for going there by clicking it: the nearest whose mark is within `near` metres,
+ * or else one whose footprint's ground the point is inside.
+ */
+export function placeNear<P extends { kind: string; n: number; x: number; z: number }>(places: P[], prints: { kind: string; n: number; fp: Footprint }[], x: number, z: number, near: number): P | null {
+  let best: P | null = null, bd = near;
+  for (const q of places) { const d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; best = q; } }
+  if (best) return best;
+  for (const p of prints) if (p.fp.ground.length > 2 && insideRing(p.fp.ground, x, z)) return places.find((q) => q.kind === p.kind && q.n === p.n) ?? null;
+  return null;
+}
+
 /**
  * Draws a footprint on a map whose point for a point of the world is `at`: the ground in a wash with a thin edge, the ways as fine
  * lines, what is built in solid ink. `strong` for the place one is in.

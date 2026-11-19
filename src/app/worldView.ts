@@ -1,6 +1,6 @@
 import { Site } from '../core/site';
 import { siteFrame, SiteFrame, toWorld } from '../core/worldLand';
-import { drawFootprint, Footprint, footprintOf } from '../maps/footprint';
+import { drawFootprint, Footprint, footprintOf, placeNear } from '../maps/footprint';
 import { drawInkWorld, inkFrame, WorldMap } from '../maps/inkWorld';
 import { KeptSite } from './worldPlace';
 
@@ -16,14 +16,29 @@ export class WorldView {
   private ink: HTMLCanvasElement | null = null;
   private readonly frame: SiteFrame;
   private readonly own: Footprint | null;
-  private readonly others: Footprint[];
+  private readonly others: { kind: string; n: number; fp: Footprint }[];
   private readonly ink2: ReturnType<typeof inkFrame>;
+  /** How the world was last laid over the view: its middle, metres to a pixel, the pixels to one of the page's. */
+  private last: { cu: number; cv: number; metres: number; dpr: number } | null = null;
 
-  constructor(private readonly canvas: HTMLCanvasElement, private readonly map: WorldMap, site: Site, kept: KeptSite[], here: { kind: string; n: number }) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly map: WorldMap, site: Site, kept: KeptSite[], private readonly here: { kind: string; n: number }) {
     this.frame = siteFrame(site)!;
     this.own = footprintOf(site);
-    this.others = kept.filter((k) => !(k.kind === here.kind && k.n === here.n)).map((k) => footprintOf(k.site)).filter((f): f is Footprint => !!f);
+    this.others = kept.filter((k) => !(k.kind === here.kind && k.n === here.n)).map((k) => ({ kind: k.kind as string, n: k.n, fp: footprintOf(k.site) })).filter((p): p is { kind: string; n: number; fp: Footprint } => !!p.fp);
     this.ink2 = inkFrame(map.plan);
+  }
+
+  /**
+   * The world's other place under a point of the page, for travelling there by clicking it on the map (asked: "how do i return to the
+   * world map page from ingame to choose another location?"): within some twenty pixels of its mark, or inside its footprint if it
+   * was built beforehand. Not the place one is in.
+   */
+  placeAt(clientX: number, clientY: number): WorldMap['places'][number] | null {
+    if (!this.last) return null;
+    const r = this.canvas.getBoundingClientRect(), { cu, cv, metres, dpr } = this.last;
+    const x = cu + ((clientX - r.left) * dpr - (r.width * dpr) / 2) * metres, z = cv + ((clientY - r.top) * dpr - (r.height * dpr) / 2) * metres;
+    const others = this.map.places.filter((q) => !(q.kind === this.here.kind && q.n === this.here.n));
+    return placeNear(others, this.others, x, z, 22 * dpr * metres);
   }
 
   /** Whether the map has been drawn yet: the first drawing holds the page still for a second or two. */
@@ -49,7 +64,8 @@ export class WorldView {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(this.ink, sx, sy, sw, sh, 0, 0, W, H);
     const px = dpr * Math.max(0.8, Math.min(2, 2.2 / metres));
-    for (const f of this.others) drawFootprint(ctx, f, at, { ink: RED, scale: px });
+    for (const o of this.others) drawFootprint(ctx, o.fp, at, { ink: RED, scale: px });
+    this.last = { cu, cv, metres, dpr };
     if (this.own) drawFootprint(ctx, this.own, at, { ink: RED, scale: px, strong: true });
     // The player: an arrow the way they face, turned into the world as the place is.
     const [wx, wz] = toWorld(this.frame, player.x, player.z), [qx, qy] = at(wx, wz);

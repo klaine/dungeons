@@ -466,7 +466,7 @@ from the house to the gap, an island's coast, a mountain top's rim; a town's is 
 quay and moles) and what stands on it (the house's rooms on the ground, buildings, storehouses, shacks, cottages). In the game `M`
 enlarges the plan and then shows the world's ink map about the place (`WorldView` in `app/worldView.ts`; a kilometre and four fifths
 across at the least, kept within the world's edges): the place's footprint, the footprints of the world's other places built beforehand, and the player, an arrow
-the way they face; the map is drawn the first time it is shown, which holds the page a moment. The world page's **Build every
+the way they face; another place clicked on it (near its mark, or inside its footprint if it was built) is gone to, its house its own, and on the world page a place clicked on the ink map, or **Go there** on its card, opens the game on it (asked: "how do jump into any of the locations after the build all is completed? and how do i return to the world map page from ingame to choose another location?"; **World map** in the game's row of buttons opens the world page); the map is drawn the first time it is shown, which holds the page a moment. The world page's **Build every
 place** runs `placesWorker.ts`: the world made again as the game's worker makes it, then every place laid out as the game would,
 its tiles of five metres with it, all handed to the page and kept in the browser (`worldStore.ts`), each place's footprint drawn
 on the map as it comes and its card marked; the game, going to a place whose house was built so, takes its layout from the browser

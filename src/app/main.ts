@@ -413,6 +413,7 @@ async function start(): Promise<void> {
   const worldCanvas = document.getElementById('worldview') as HTMLCanvasElement;
   const worldView = site && inWorld?.map && siteFrame(site) ? new WorldView(worldCanvas, inWorld.map, site, inWorld.sites, { kind: worldKind(place), n: worldN }) : null;
   let worldShown = false;
+  (window as unknown as { __worldView?: WorldView | null }).__worldView = worldView;
   /** The plan small, the plan large, the world's map (in a world), and round again. */
   const nextMap = () => {
     if (worldShown) { worldShown = false; worldCanvas.hidden = true; map.hidden = false; map.classList.remove('big'); return; }
@@ -424,7 +425,19 @@ async function start(): Promise<void> {
     setTimeout(() => worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw }), 30);
   };
   map.addEventListener('click', nextMap);
-  worldCanvas.addEventListener('click', nextMap);
+  // (On the world's map, another place clicked is gone to, its house its own; elsewhere a click goes back to the plan.)
+  worldCanvas.addEventListener('click', (e) => {
+    const q = worldView?.placeAt(e.clientX, e.clientY);
+    if (!q || !worldSeed) { nextMap(); return; }
+    const next = new URLSearchParams(params);
+    next.set('world', worldSeed); next.set('place', q.kind === 'coast' ? 'town' : q.kind); next.set('n', String(q.n));
+    next.delete('seed'); next.delete('at');
+    go(next);
+  });
+  worldCanvas.addEventListener('mousemove', (e) => {
+    const q = worldView?.placeAt(e.clientX, e.clientY);
+    worldCanvas.style.cursor = q ? 'pointer' : ''; worldCanvas.title = q ? `${q.name}: go there` : 'The world about this place. Click, or M, for the plan.';
+  });
   window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyM') nextMap();
   });
