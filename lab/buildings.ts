@@ -59,6 +59,8 @@ interface State {
   cam: number[] | null;
   /** Whether what is drawn over the picture to work with is shown: the grid, outlines, knobs, rings and the brush. Off, the picture alone. */
   overlays: boolean;
+  /** Look mode: the right button held and the mouse moved turns the view where it stands, as in walking, instead of sliding it. */
+  look: boolean;
   /** The season: the green of the leaves, and how dry the grass is. */
   season: Season;
   /** What has been laid with the brushes (see `Painted` in `nature.ts`). */
@@ -71,7 +73,7 @@ const query = new URLSearchParams(location.search);
 const STONES: Stone[] = ['limestone', 'sandstone', 'greystone', 'basalt'];
 const DEFAULTS: State = {
   items: [], next: 1, selected: null, tool: 'move', hour: 'morning', stone: 'greystone', snap: 0.5, turnSnap: 15,
-  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, season: 'summer',
+  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, look: false, season: 'summer',
   paint: { ground: [], plants: [], rock: [] }, brush: { layer: 'ground', ground: 3, plant: 0, dig: false, size: 2 },
 };
 /** What was painted, read from storage or a file, made safe: lists of lists of numbers, and no more of them than can be built. */
@@ -199,8 +201,25 @@ async function start(): Promise<void> {
   // (Nothing is answered until the first buildings are built.)
   let ready = false;
   let handing = false, lastAt: [number, number] = [0, 0];
+  // Look mode: while the right button is held the mouse turns the view about the eye, as in walking (the pointer is held still, so that
+  // it can turn all the way round), and the view keeps looking at a point as far off as before, so that letting go and dragging the
+  // ground turns it about that point as ever.
+  let looking: number | null = null;
+  const turnView = (dx: number, dy: number) => {
+    const d = controls.target.clone().sub(camera.position), far = Math.max(0.5, d.length());
+    let yaw = Math.atan2(d.x, d.z), pitch = Math.asin(Math.max(-1, Math.min(1, d.y / far)));
+    yaw -= dx * 0.0028; pitch = Math.max(-1.45, Math.min(1.45, pitch - dy * 0.0028));
+    controls.target.copy(camera.position).add(new Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(far));
+  };
   canvas.addEventListener('pointerdown', (e) => {
     if (!ready || handing) return;
+    if (state.look && e.button === 2 && e.pointerType === 'mouse') {
+      e.stopImmediatePropagation();
+      looking = e.pointerId;
+      try { canvas.setPointerCapture(e.pointerId); } catch { /* not to be had */ }
+      try { (canvas.requestPointerLock() as unknown as Promise<void> | undefined)?.catch?.(() => {}); } catch { /* not allowed here: the pointer moves, and turns the view as far as the screen's edge */ }
+      return;
+    }
     // With the brush in hand a press lays what it holds; a second finger takes the stroke back and the two are the view's.
     if (state.tool === 'paint' && placing === null) {
       if (stroke && e.pointerType === 'touch' && stroke.pointer !== e.pointerId) {
@@ -245,6 +264,7 @@ async function start(): Promise<void> {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (!ready) return;
+    if (looking !== null) { if (e.pointerId === looking) { turnView(e.movementX, e.movementY); changed(false); } return; }
     if (state.tool === 'paint' && placing === null) {
       if (stroke?.pointer === e.pointerId) lastAt = [e.clientX, e.clientY];
       if (e.pointerType === 'mouse') canvas.style.cursor = 'crosshair';
@@ -274,6 +294,12 @@ async function start(): Promise<void> {
     reflect();
   });
   const release = (e: PointerEvent) => {
+    if (looking !== null && e.pointerId === looking) {
+      looking = null;
+      if (document.pointerLockElement === canvas) document.exitPointerLock();
+      keepCamera();
+      return;
+    }
     if (paintUp(e)) return;
     if (!press || press.pointer !== e.pointerId) return;
     if (press.id !== null) { if (press.moved) commit(); canvas.style.cursor = 'grab'; }
@@ -1593,11 +1619,32 @@ async function start(): Promise<void> {
   choice<number>(panel, sceneRefreshers, 'Move by', [['Freely', 0], ['10 cm', 0.1], ['25 cm', 0.25], ['50 cm', 0.5], ['1 m', 1], ['2 m', 2]], () => state.snap, (v) => { state.snap = v; remember(); });
   choice<number>(panel, sceneRefreshers, 'Turn by', [['Freely', 0], ['5°', 5], ['15°', 15], ['45°', 45], ['90°', 90]], () => state.turnSnap, (v) => { state.turnSnap = v; remember(); }, 'Holding Shift while turning turns freely');
   checks(panel, sceneRefreshers, [
+    ['look', () => state.look, (v) => setLook(v), 'L. Hold the right button and move the mouse to turn the view where it stands, as in walking; W A S D move it'],
     ['overlays', () => state.overlays, (v) => { state.overlays = v; showOverlays(); remember(); }, 'H. The grid, outlines, knobs, rings and the brush: off, the picture alone'],
     ['grid', () => state.grid, (v) => { state.grid = v; showOverlays(); remember(); }, 'A line every metre'],
     ['clay', () => state.clay, (v) => { state.clay = v; dress(); remember(); }, 'C. Everything in one plain grey: the shapes alone'],
     ['air', () => state.air, (v) => { state.air = v; atmosphere.uniforms.uEnabled.value = v ? 1 : 0; remember(); }, 'Haze and the light in the air, as the game draws them'],
   ]);
+  /**
+   * What the mouse's buttons do to the view: the left turns it about what it looks at (with the brush in hand, it paints instead);
+   * the right slides it, or turns it about what it looks at with the brush, or in look mode turns it where it stands; the wheel closes in.
+   */
+  function buttonsFor() {
+    const none = -1 as unknown as MOUSE, paint = state.tool === 'paint';
+    controls.mouseButtons = { LEFT: paint ? none : MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: state.look ? none : paint ? MOUSE.ROTATE : MOUSE.PAN };
+    // (Looking about, the eye may look up as well as down; turning about a point, it stays over the ground.)
+    controls.maxPolarAngle = state.look ? Math.PI * 0.97 : Math.PI * 0.495;
+  }
+  /** Turns look mode on or off. Off, a point looked at above the eye is brought down to the ground along the line of sight, so the view does not jump. */
+  function setLook(on: boolean) {
+    state.look = on;
+    if (!on && controls.target.y > camera.position.y - 0.2) {
+      const d = controls.target.clone().sub(camera.position).normalize(), far = camera.position.distanceTo(controls.target);
+      d.y = Math.min(d.y, -0.15); d.normalize();
+      controls.target.copy(camera.position).addScaledVector(d, Math.max(far, camera.position.y / -d.y));
+    }
+    buttonsFor(); reflectScene(); keepCamera();
+  }
   /** Shows or hides what is drawn over the picture to work with. */
   function showOverlays() {
     grid.visible = state.grid && state.overlays;
@@ -1622,7 +1669,7 @@ async function start(): Promise<void> {
     }
   }
   buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; state.paint = { ground: [], plants: [], rock: [] }; sync(); paintLayers(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
-  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. W A S D, Space and Q fly the view, Shift faster. M move and turn, E extrude, R scale, B paint; [ ] turn a step; arrows nudge; Delete; N next door, Shift N copy beside; Z undo, Shift Z redo; Esc lets go; H hides the grid, outlines and knobs; P hides this panel. All of it is kept in this browser.').className = 'note';
+  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. W A S D, Space and Q fly the view, Shift faster; L look mode, the right button turning the view where it stands. M move and turn, E extrude, R scale, B paint; [ ] turn a step; arrows nudge; Delete; N next door, Shift N copy beside; Z undo, Shift Z redo; Esc lets go; H hides the grid, outlines and knobs; P hides this panel. All of it is kept in this browser.').className = 'note';
 
   // The tools, over the picture.
   const toolButtons: Record<string, HTMLButtonElement> = {};
@@ -1651,7 +1698,7 @@ async function start(): Promise<void> {
   const setTool = (t: Tool) => {
     state.tool = t;
     // (With the brush in hand the left button paints; the right turns the view, the wheel closes in.)
-    controls.mouseButtons = t === 'paint' ? { LEFT: -1 as unknown as MOUSE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.ROTATE } : { LEFT: MOUSE.ROTATE, MIDDLE: MOUSE.DOLLY, RIGHT: MOUSE.PAN };
+    buttonsFor();
     if (t !== 'paint') { brushRing.visible = false; canvas.style.cursor = ''; }
     reflectTools(); renderPaint(); remember();
   };
@@ -1771,6 +1818,7 @@ async function start(): Promise<void> {
     else if (k === 'f') frame(!it);
     else if (k === 'c') { state.clay = !state.clay; dress(); reflectScene(); remember(); }
     else if (k === 'h') { state.overlays = !state.overlays; showOverlays(); reflectScene(); remember(); }
+    else if (k === 'l') setLook(!state.look);
     else if (k === 'p' || k === 'tab') { e.preventDefault(); togglePanel(); }
     else if (!it) return;
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); remove(it.id); }
