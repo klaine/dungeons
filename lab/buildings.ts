@@ -95,6 +95,11 @@ const say = (text: string, kind: 'good' | 'bad' | 'dim' = 'dim', seconds = 8) =>
   window.addEventListener('unhandledrejection', (e) => say(String(e.reason?.message ?? e.reason), 'bad', 30));
 }
 const rad = (deg: number) => (deg * Math.PI) / 180, deg = (r: number) => (r * 180) / Math.PI;
+/** An iPad or an iPhone (an iPad says it is a Mac, but a Mac has no touch screen). */
+const appleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const coarse = matchMedia('(pointer: coarse)').matches;
+/** The page's host, when it is shown as an artifact on claude.ai: what it lets the page do, such as offer a file to save. */
+const host = (window as unknown as { claude?: { use(name: string): Promise<unknown> } }).claude;
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 const frameWait = () => new Promise<void>((done) => requestAnimationFrame(() => setTimeout(done, 0)));
 /** Which way a building's front looks, and which way its breadth runs from its left end to its right as seen from before it, on the ground. */
@@ -111,7 +116,9 @@ function besides(prev: Item, next: Item, gap = 0): void {
 }
 
 async function start(): Promise<void> {
-  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: query.has('webgl') });
+  // (On an iPad or iPhone the picture is drawn with WebGL 2, which is what has been tried there; `?webgpu` asks for WebGPU anyway.)
+  const forceWebGL = query.has('webgl') || (appleTouch && !query.has('webgpu'));
+  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL });
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, Number(query.get('dpr')) || 1.5));
   const narrow = () => window.innerWidth <= 720;
@@ -148,14 +155,28 @@ async function start(): Promise<void> {
   let placing: number | null = null;
   // (Nothing is answered until the first buildings are built.)
   let ready = false;
+  let handing = false, lastAt: [number, number] = [0, 0];
   canvas.addEventListener('pointerdown', (e) => {
-    if (!ready) return;
+    if (!ready || handing) return;
+    if (press && press.id !== null && e.pointerType === 'touch' && press.pointer !== e.pointerId) {
+      // A second finger while one is on a building: the two are a pinch or a slide of the view, not a move. The building goes back to
+      // where it was, and the first finger is handed to the view's controls as if it had come down on the ground, then this one.
+      const it = itemOf(press.id);
+      if (it && press.moved) { it.x = press.from[0]; it.z = press.from[1]; placeItem(it); changed(false); reflect(); }
+      const first = press;
+      press = null;
+      handing = true;
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerId: first.pointer, pointerType: 'touch', isPrimary: true, clientX: lastAt[0], clientY: lastAt[1], button: 0, buttons: 1, bubbles: true }));
+      handing = false;
+      return;
+    }
     if (press) { if (press.id !== null) e.stopImmediatePropagation(); return; }
     if (e.button !== 0) return;
     const ray = rayAt(e.clientX, e.clientY);
     if (placing !== null) { e.stopImmediatePropagation(); placed(); return; }
     const hit = pick(ray);
     press = { pointer: e.pointerId, x: e.clientX, y: e.clientY, id: hit?.id ?? null, moved: false, height: 0, grab: new Vector3(), from: [0, 0] };
+    lastAt = [e.clientX, e.clientY];
     if (!hit) return;
     // A press on a building is the building's: it is chosen, and dragging it moves it over the ground, its point under the pointer.
     e.stopImmediatePropagation();
@@ -173,6 +194,7 @@ async function start(): Promise<void> {
       if (p && it) { it.x = snapped(p.x); it.z = snapped(p.z); placeItem(it); changed(false); reflect(); }
       return;
     }
+    if (press?.pointer === e.pointerId) lastAt = [e.clientX, e.clientY];
     if (!press || press.pointer !== e.pointerId) {
       if (!press && e.pointerType === 'mouse') canvas.style.cursor = pick(rayAt(e.clientX, e.clientY)) ? 'grab' : '';
       return;
@@ -370,7 +392,8 @@ async function start(): Promise<void> {
   const sunDir = new Vector3();
   const sun = new DirectionalLight(0xffffff, 1);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  // (Half as fine on a touch screen, where memory is shorter: some five centimetres a texel over a square of a hundred metres.)
+  sun.shadow.mapSize.setScalar(coarse ? 2048 : 4096);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.02;
   sun.shadow.autoUpdate = false;
@@ -811,11 +834,14 @@ async function start(): Promise<void> {
       wanted.add(k.id);
       let e = knobEls.get(k.id);
       if (!e) {
-        const g = document.createElementNS(NS, 'g'), dot = document.createElementNS(NS, 'circle'), text = document.createElementNS(NS, 'text');
+        const g = document.createElementNS(NS, 'g'), dot = document.createElementNS(NS, 'circle'), text = document.createElementNS(NS, 'text'), reach = document.createElementNS(NS, 'circle');
         g.setAttribute('class', 'knob');
-        dot.setAttribute('r', matchMedia('(pointer: coarse)').matches ? '13' : '8');
+        // (What the finger takes is broader than what is drawn: a clear ring round the knob.)
+        reach.setAttribute('r', coarse ? '26' : '13'); reach.setAttribute('fill', 'transparent');
+        g.appendChild(reach);
+        dot.setAttribute('r', coarse ? '13' : '8');
         dot.setAttribute('stroke', 'rgba(0,0,0,.65)'); dot.setAttribute('stroke-width', '1.5');
-        text.setAttribute('x', '14'); text.setAttribute('y', '4');
+        text.setAttribute('x', coarse ? '18' : '14'); text.setAttribute('y', '4');
         g.append(dot, text);
         knobLayer.appendChild(g);
         e = { g, dot, text, knob: k };
@@ -1073,10 +1099,11 @@ async function start(): Promise<void> {
   el('h3', panel, 'Saved');
   buttons(panel, [
     ['Save file', () => saveFile(), 'Saves what is set out as a file: each building as a site document of the game, with where it stands'],
+    ['Copy', () => copyDoc(), 'Copies the same as text, to paste somewhere else; pasting such text here opens it'],
     ['Open file', () => fileInput.click(), 'Opens a file saved here, in place of what is set out'],
   ]);
   buttons(panel, [['Clear all', () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); }], ['Start again', () => { demo(); sync(); renderSelected(); commit(); frame(); }, 'The buildings the lab starts with']]);
-  el('p', panel, 'Drag a building to move it. Left drag on the ground turns the view, right drag pans, the wheel or a pinch closes in. M move and turn, E extrude, S scale; [ ] turn a step; arrows nudge; Delete; D copy beside, N next door; Z undo, Shift Z redo; Esc lets go; P hides this panel. All of it is kept in this browser.').className = 'note';
+  el('p', panel, 'Drag a building to move it. Drag the ground to turn the view; right drag or two fingers slide it; the wheel or a pinch closes in. M move and turn, E extrude, S scale; [ ] turn a step; arrows nudge; Delete; D copy beside, N next door; Z undo, Shift Z redo; Esc lets go; P hides this panel. All of it is kept in this browser.').className = 'note';
 
   // The tools, over the picture.
   const toolButtons: Record<string, HTMLButtonElement> = {};
@@ -1087,6 +1114,7 @@ async function start(): Promise<void> {
     ['gap', '', () => {}, ''],
     ['undo', 'Undo', undo, 'Z'], ['redo', 'Redo', redo, 'Shift Z'],
     ['gap2', '', () => {}, ''],
+    ['frame', 'Frame', () => frame(!selectedItem()), 'F. Brings the selected building, or all of them, into view'],
     ['panel', 'Panel', () => togglePanel(), 'P'],
   ];
   for (const [id, label, act, title] of toolDef) {
@@ -1128,33 +1156,59 @@ async function start(): Promise<void> {
   }
 
   // ------------------------------------------------------------------ saving and opening
-  const saveFile = () => {
-    const doc = {
-      lab: 'dungeons building lab', version: 1, stone: state.stone, hour: state.hour,
-      note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
-      items: state.items.map((it) => ({ ...it, building: documentOf(it) })),
-    };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(doc, null, 1)], { type: 'application/json' }));
+  const docText = () => JSON.stringify({
+    lab: 'dungeons building lab', version: 1, stone: state.stone, hour: state.hour,
+    note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
+    items: state.items.map((it) => ({ ...it, building: documentOf(it) })),
+  }, null, 1);
+  // (Shown as an artifact, the page may not start a download itself: its host offers the file to the reader, who says yes or no.)
+  type Downloads = { save(o: { filename: string; data: string }): Promise<unknown> };
+  const downloads = host ? (host.use('downloads') as Promise<Downloads | null>).catch(() => null) : null;
+  const saveFile = async () => {
+    const text = docText(), n = state.items.length;
+    if (downloads) {
+      const d = await downloads;
+      if (!d) { say('Saving a file is not offered here. Copy puts the same text on the clipboard.', 'bad', 12); return; }
+      try { await d.save({ filename: 'buildings.json', data: text }); say(`Saved ${n} buildings`, 'good'); }
+      catch (e) { const code = (e as { code?: string }).code; say(code === 'declined' ? 'Not saved' : `Not saved (${code ?? (e as Error).message}). Copy puts the same text on the clipboard.`, code === 'declined' ? 'dim' : 'bad', 10); }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url; a.download = 'buildings.json';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
-    say(`Saved ${state.items.length} buildings`, 'good');
+    say(`Saved ${n} buildings`, 'good');
   };
-  fileInput.addEventListener('change', async () => {
-    const f = fileInput.files?.[0];
-    fileInput.value = '';
-    if (!f) return;
+  const copyDoc = () => {
+    navigator.clipboard.writeText(docText()).then(
+      () => say(`Copied ${state.items.length} buildings. Paste the text here, in any copy of the lab, to open them.`, 'good', 8),
+      () => say('The clipboard was refused here. Save file writes the same text to a file.', 'bad', 10),
+    );
+  };
+  /** Opens what was saved, in place of what is set out. */
+  const openText = (text: string, from: string) => {
     try {
-      const doc = JSON.parse(await f.text()), list = Array.isArray(doc) ? doc : doc.items;
+      const doc = JSON.parse(text), list = Array.isArray(doc) ? doc : doc.items;
       if (!Array.isArray(list)) throw new Error('no buildings in it');
       const items = list.map((o: Partial<Item>) => readItem(o, state.next++)).filter((x): x is Item => !!x);
       if (!items.length) throw new Error('no building in it the lab knows');
       if (STONES.includes(doc.stone)) state.stone = doc.stone;
       state.items = items; state.selected = null;
       lay(); sync(); renderSelected(); reflectScene(); commit(); frame(true);
-      say(`Opened ${items.length} buildings from ${f.name}${items.length < list.length ? `; ${list.length - items.length} could not be read` : ''}`, 'good');
-    } catch (e) { say(`${f.name} could not be opened: ${(e as Error).message}`, 'bad', 15); }
+      say(`Opened ${items.length} buildings from ${from}${items.length < list.length ? `; ${list.length - items.length} could not be read` : ''}. Undo goes back.`, 'good');
+    } catch (e) { say(`${from} could not be opened: ${(e as Error).message}`, 'bad', 15); }
+  };
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files?.[0];
+    fileInput.value = '';
+    if (f) openText(await f.text(), f.name);
+  });
+  // Text pasted anywhere but into a field is opened, if it is what the lab saves.
+  window.addEventListener('paste', (e) => {
+    if (!ready || e.target instanceof HTMLInputElement) return;
+    const text = e.clipboardData?.getData('text') ?? '';
+    if (/"lab"\s*:\s*"dungeons building lab"/.test(text)) { e.preventDefault(); openText(text, 'what was pasted'); }
   });
 
   // ------------------------------------------------------------------ keys
@@ -1202,7 +1256,7 @@ async function start(): Promise<void> {
     screen = { w, h };
     over.setAttribute('width', String(w)); over.setAttribute('height', String(h));
     over.style.width = `${w}px`; over.style.height = `${h}px`;
-    foot.style.bottom = `${window.innerHeight - h + 10}px`;
+    foot.style.bottom = h < window.innerHeight ? `${window.innerHeight - h + 10}px` : 'calc(10px + env(safe-area-inset-bottom, 0px))';
     foot.style.right = `${window.innerWidth - w + 12}px`;
   };
   window.addEventListener('resize', fit);
@@ -1228,9 +1282,10 @@ async function start(): Promise<void> {
   const drawn = { triangles: 0 };
   let wantPicture: ((url: string) => void) | null = null;
   const step = (now: number) => {
-    const dt = Math.min(0.1, (now - last) / 1000);
+    // (The first frames can be stamped a little before the loop began: no frame is shorter than nothing.)
+    const raw = (now - last) / 1000, dt = Math.min(0.1, Math.max(0, raw));
     last = now;
-    fps += (1 / Math.max(dt, 1e-4) - fps) * 0.05;
+    if (raw > 0.001) fps += (1 / raw - fps) * 0.05;
     // What has changed is built again: the selected building first, and as many others as there is time for in a frame.
     if (dirty.size) {
       const begun = performance.now(), order = [...dirty].sort((a, b) => (b === state.selected ? 1 : 0) - (a === state.selected ? 1 : 0));
