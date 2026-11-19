@@ -4,7 +4,7 @@ import { coastHeight, coastland, findTowns, townFrame, TownNeed, TownSpot } from
 import { HeightField, landDetail, leastPath, smoothLine, wornLattice } from './terrain';
 import { classicalArch, classicalVariations, footprintOf, freeAtEnds, planClassical, planTimber } from './building';
 import { brickCountry } from './brick';
-import { dealCanalHouse } from './canal';
+import { dealCanalHouse, planCanal } from './canal';
 
 /**
  * A harbour town, laid out on a coast that was found (`coastland.ts`). The land comes first: a
@@ -820,6 +820,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
             b.plan = planClassical(b, r.fork('plan'));
           }
           else if (b.style === 'timber') { b.door = r.pick([0.24, 0.76]); b.plan = planTimber(b); }
+          // (A canal house is planned once its depth is the lot's; one whose stair would not fit in it stays shut.)
+          else if (b.style === 'canal') { const p = planCanal(b); if (p) b.plan = p; }
           t.buildings.push(b);
           s += spec.w + (canal ? 0.02 : classic ? r.range(0, 0.4) : spec.endDoor! > 0 ? 3 : r.chance(0.15) ? r.range(1.4, 2.6) : r.range(0, 0.25));
         }

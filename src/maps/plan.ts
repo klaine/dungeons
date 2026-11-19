@@ -226,7 +226,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.lineCap = 'butt';
       ctx.fillStyle = FLOOR; rect(town.square.x0, town.square.z0, town.square.x1, town.square.z1); rect(town.quay.x0, town.quay.z - town.quay.apron, town.quay.x1, town.quay.z);
       for (const b of town.buildings) {
-        if (b.plan && (b.style === 'imperial' || b.style === 'timber')) { drawStorey(ctx, b, 0, (u, v) => { const [x, z] = fromBuilding(b, u, v); return [X(x), Z(z)]; }, scale); continue; }
+        if (b.plan) { drawStorey(ctx, b, 0, (u, v) => { const [x, z] = fromBuilding(b, u, v); return [X(x), Z(z)]; }, scale); continue; }
         ctx.fillStyle = INK;
         for (const o of outlineOf(b)) { ctx.beginPath(); o.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.closePath(); ctx.fill(); }
       }

@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -228,6 +228,8 @@ async function start(): Promise<void> {
     // Copper gone green, on the roofs and spires of the brick towns: the patina is matt, and does not mirror the sky as sheet metal does.
     copper: makeSiteMaterial(plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
+    // Clear glass, for the windows of buildings that can be entered, which are seen through both ways.
+    pane: makePaneMaterial(),
     // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
     thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
     lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
@@ -262,6 +264,8 @@ async function start(): Promise<void> {
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
   // (By day a window that would be lit is glass like any other: its points carry the lamp's colour, which the glass must not take.)
   materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+  // (And in a building that can be entered, a lit room shows through its glass as a glow, without hiding the room.)
+  materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
   windowUniforms.uLit.value = lamps;
   let desc: SceneDescription;
   if (site) {
@@ -345,7 +349,8 @@ async function start(): Promise<void> {
     const material = name.split('|')[1];
     const mesh = new Mesh(geometry, materials[material] ?? materials.stone);
     mesh.name = name;
-    mesh.castShadow = true;
+    // (Clear glass throws no shadow, so that the sun comes in at the windows.)
+    mesh.castShadow = material !== 'pane' && material !== 'paneLit';
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
     scene.add(mesh);
@@ -392,7 +397,7 @@ async function start(): Promise<void> {
       mesh.userData.group = group;
       mesh.receiveShadow = true;
       // (Glass throws no shadow: the sun comes in at windows.)
-      mesh.castShadow = material !== 'glass' && material !== 'window';
+      mesh.castShadow = material !== 'glass' && material !== 'window' && material !== 'pane' && material !== 'paneLit';
       mesh.matrixAutoUpdate = false;
       scene.add(mesh);
       scenic.push(mesh);
@@ -525,7 +530,7 @@ async function start(): Promise<void> {
   const fireflies = warm && desc.fireflies?.length ? new Fireflies(desc.fireflies, seed, site.setting.hour === 'night' ? 1.6 : 2.4) : null;
   if (fireflies) scene.add(fireflies.mesh);
   // A haze of light about each lit window, after dark.
-  const windowPanes = lamps ? scenic.filter((m) => m.name === 'scenery:window').map((m) => ({ position: m.geometry.getAttribute('position').array, color: m.geometry.getAttribute('color').array })) : [];
+  const windowPanes = lamps ? scenic.filter((m) => m.name === 'scenery:window' || m.name === 'scenery:paneLit').map((m) => ({ position: m.geometry.getAttribute('position').array, color: m.geometry.getAttribute('color').array })) : [];
   const windowGlow = windowPanes.length ? new WindowGlow(windowPanes, lamps * 0.28) : null;
   if (windowGlow) scene.add(windowGlow.mesh);
   const flocks = desc.flocks?.length ? (() => {
@@ -816,7 +821,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), metal: plaster, copper: plaster, glass: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));

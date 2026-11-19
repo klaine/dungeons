@@ -6,7 +6,7 @@ import { layOutTown as layOutHarbourTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, walkable } from './valley';
 import { classicalFront, classicalVariations, floorOf, footprintOf, planClassical, planTimber } from './building';
-import { brickCountry, dealBrickHouse, dealChurch } from './brick';
+import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
 /**
@@ -995,6 +995,8 @@ function layOutTown(site: Site, meadow: Place, fromTrack: (x: number, z: number)
     }
   }
   if (out.filter((b) => b.brickwork?.kind !== 'church').length < 4) return false;
+  // Each house planned within, now that its depth is settled; one whose stair would not fit stays shut, as the church does.
+  for (const b of out) { const p = planBrick(b); if (p) b.plan = p; }
   site.buildings = out;
   return true;
 }

@@ -243,26 +243,38 @@ export class Player {
     // breadth short of that edge. So the stride tried from higher up is a longer one, long
     // enough to bring the middle of the foot nearly over the edge.
     const reach = Math.max(want, STEP_REACH), k = reach / want;
-    const up = start.clone().add(new Vector3(wx * k, STEP_UP, wz * k));
+    // (Under a low ceiling, as at the foot of a steep stair, a stride a whole step higher strikes it; then one a little over the
+    // highest step there is, which still clears an ordinary stair's riser.)
+    for (const rise of [STEP_UP, 0.25]) if (this.tryStep(start, wx * k, wz * k, rise, reach, want, along)) return;
+  }
+
+  /** Tries the stride from `rise` higher: see `stepUp`. Whether the body was put on what it met. */
+  private tryStep(start: Vector3, dx: number, dz: number, rise: number, reach: number, want: number, along: (p: Vector3) => number): boolean {
+    const up = start.clone().add(new Vector3(dx, rise, dz));
     up.add(this.pushOut(up, start));
-    if (along(up) < reach * 0.8) return;
+    if (along(up) < reach * 0.8) return false;
     // Then it is let down a little at a time until it meets something, so that what it meets is
     // met from above: let down all at once it would be deep in the step's edge, and be pushed
     // back out of its face instead of up onto its top.
     const down = up.clone();
     let lift: Vector3 | null = null;
-    for (let fall = 0; fall < STEP_UP + 0.02 && !lift; fall += 0.04) {
+    // (A graze is not a footing: where the foot only just touches, as it may on the edge of a step when let down by whole
+    // steps of four centimetres, it is let down further, until it meets the step firmly. Taking the graze for the footing, and then
+    // refusing it as too slight to stand on, had made whether a stair could be climbed depend on how its rise fell against those
+    // four centimetres: a body climbed one flight and stood stuck at the second step of the next.)
+    for (let fall = 0; fall < rise + 0.06 && !lift; fall += 0.04) {
       down.y -= 0.04;
       const push = this.pushOut(down, up);
-      if (push.lengthSq() > 1e-10) lift = push;
+      if (push.lengthSq() > 0.004 * 0.004) lift = push;
     }
     // (Onto something that can be stood on: a step, not the edge of a wall.)
-    if (!lift || lift.y < 0.004 || lift.y < Math.hypot(lift.x, lift.z) * 1.5) return;
+    if (!lift || lift.y < 0.004 || lift.y < Math.hypot(lift.x, lift.z) * 1.5) return false;
     down.add(lift);
-    if (down.y < start.y + 0.02 || along(down) < want * 0.5) return;
+    if (down.y < start.y + 0.02 || along(down) < want * 0.5) return false;
     this.position.copy(down);
     this.onGround = true;
     this.velocity.y = 0;
+    return true;
   }
 
   private syncCamera(): void {

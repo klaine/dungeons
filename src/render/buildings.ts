@@ -1171,7 +1171,9 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
   if (b.style === 'canal') { buildCanal(b, base, mesh, rng, stone, tops); return; }
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
-  const noting = (material: string) => { const m = mesh(material); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
+  // (A building that can be entered has glass that can be seen through, both ways; and a room lit after dark glows in it without hiding the room.)
+  const seen = (material: string) => (b.plan && material === 'glass' ? 'pane' : b.plan && material === 'window' ? 'paneLit' : material);
+  const noting = (material: string) => { const m = mesh(seen(material)); if (!begun.has(m)) begun.set(m, m.vertexCount); return m; };
   if (b.style === 'timber') {
     timberHouse(b, base, noting, rng, stone, first, tops);
     // Indoors is whatever is within the walls of the storey it is on: each storey stands further out over the street than the one below.
