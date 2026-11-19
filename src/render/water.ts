@@ -108,6 +108,8 @@ interface Mirror {
   eyeOf: (camera: Camera) => Camera;
   /** What the picture is drawn into, for the eye of the given camera. */
   target: (camera: Camera) => { width: number; height: number; scissor: Vector4; scissorTest: boolean };
+  /** The part of the picture that is painted, as shares of its breadth and height from its top left (left, top, breadth, height); or all of it. See `trim`. */
+  cut: Vector4 | null;
   /**
    * Lines round the water that reads this picture, each its points' x, y and z in turn: the outline of still water, the two
    * edges of running water. Only the part of the picture they can read is drawn (see `trim`).
@@ -125,7 +127,19 @@ function makeMirror(size: number, level: number, x: number, z: number): Mirror {
   const base = picture.reflector, eyeOf = base.getVirtualCamera.bind(base);
   // What is marked as not to be mirrored is kept out of the picture.
   base.getVirtualCamera = (camera: Camera) => { const eye = eyeOf(camera); eye.layers.set(0); return eye; };
-  return { picture, depth: picture.getDepthNode(), at, level, size, unproject: uniform(new Matrix4()), eyeOf: base.getVirtualCamera, target: (camera: Camera) => base.getRenderTarget(base.getVirtualCamera(camera)), readers: [] };
+  const mirror: Mirror = { picture, depth: picture.getDepthNode(), at, level, size, unproject: uniform(new Matrix4()), eyeOf: base.getVirtualCamera, target: (camera: Camera) => base.getRenderTarget(base.getVirtualCamera(camera)), cut: null, readers: [] };
+  // Only the part of the picture that is read is painted (see `trim`). The picture is sized afresh just before it is drawn, every
+  // time, and sizing it opens it all again; so the cut is made after that. (Made before, it was undone every frame, and did nothing.)
+  const resize = base._updateResolution.bind(base);
+  base._updateResolution = (target: { width: number; height: number; scissor: Vector4; scissorTest: boolean }, renderer: unknown) => {
+    resize(target, renderer);
+    const c = mirror.cut;
+    if (!c) { target.scissorTest = false; return; }
+    const w = target.width, h = target.height, left = Math.floor(c.x * w), top = Math.floor(c.y * h);
+    target.scissor.set(left, top, Math.max(1, Math.ceil((c.x + c.z) * w) - left), Math.max(1, Math.ceil((c.y + c.w) * h) - top));
+    target.scissorTest = true;
+  };
+  return mirror;
 }
 
 const toScreen = new Matrix4(), seenAt = new Vector4(), seenFrom = new Vector4();
@@ -487,8 +501,8 @@ export class Water {
    * A mirror is a second drawing of the whole scene, and most of what it draws is never read: the water that reads it is a pond
    * in one corner of the view, or a brook along the bottom of it. So the drawing is cut to the part of the picture the water can
    * read: where its outline or its edges lie in the view, and a little more for the ripples, which bend the reading by up to
-   * about a twentieth of the picture. (The mirror's picture is the view turned half round, so that part is the same rectangle
-   * turned half round.) Things outside it are still sent to be drawn, but nothing of them is painted, which is most of the cost:
+   * about a twentieth of the picture. (The mirror's picture is the view turned about left for right, so that part is the same
+   * rectangle turned about.) Things outside it are still sent to be drawn, but nothing of them is painted, which is most of the cost:
    * by a pond near the eye the mirror's drawing was more than half the cost of the frame.
    * A line that passes behind the eye is cut where it does so: what lies beyond the cut is out of sight, and the cut itself is
    * at the edge of the view, on whichever side the line goes off it.
@@ -496,8 +510,9 @@ export class Water {
   private trim(camera: Camera): void {
     toScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     for (const m of this.mirrors) {
-      const target = m.target(camera);
-      if (!m.readers.length || target.width < 2) { target.scissorTest = false; continue; }
+      const spare = m.cut;
+      m.cut = null;
+      if (!m.readers.length) continue;
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       const take = (v: Vector4) => {
         const sx = v.x / v.w, sy = v.y / v.w;
@@ -518,11 +533,9 @@ export class Water {
       // (From -1 to 1 across the view to 0 to 1, with room for the ripples.)
       const edge = (v: number) => Math.min(1, Math.max(0, v * 0.5 + 0.5));
       const ax = edge(x0 - 0.1), bx = edge(x1 + 0.1), ay = edge(y0 - 0.1), by = edge(y1 + 0.1);
-      const w = target.width, h = target.height;
-      // Turned half round: the left of the view is the right of the picture, and its foot the picture's first row.
-      const left = Math.floor((1 - bx) * w), top = Math.floor(ay * h);
-      target.scissor.set(left, top, Math.max(1, Math.ceil((1 - ax) * w) - left), Math.max(1, Math.ceil(by * h) - top));
-      target.scissorTest = true;
+      // Turned about: the left of the view is the right of the picture. Not upside down: the picture's rows run from the top of the
+      // view, as the view's do (and as the water reads it, at one less the height from the foot; see `inPicture`).
+      m.cut = (spare ?? new Vector4()).set(1 - bx, 1 - by, bx - ax, by - ay);
     }
   }
 }
