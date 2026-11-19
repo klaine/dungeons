@@ -617,23 +617,41 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const stony: N = max(smoothstep(0.2, 0.55, wetV.add(mid.sub(0.5).mul(0.3))), (groundUniforms.uBare as N).w.mul(smoothstep(0.25, 0.6, mid.add(macro.sub(0.5).mul(0.6))).mul(0.6).add(0.4))).toVar();
   // Near the eye, bare ground has depth: the texture is slid along the line of sight until the
   // line meets the height the texture has there, so stones stand up and hide what is behind them.
+  // And a track's ruts are sunk, a hand deep in their middles, their sides sloping up to the strip between them and to the grass:
+  // so the line of sight is slid by the ruts' depth as well, and near the eye a rut's far side hides its floor. (They were drawn
+  // as darker bands on level ground.) How far from the track's middle a point a little way off is, the slide needs; the sheet gives
+  // it only here, so it is carried on from here by how fast it changes across the ground, which is worked out from how fast it
+  // changes across the picture.
   const near = one(smoothstep(6, 14, far));
+  const dPx: N = dFdx(at0), dPy: N = dFdy(at0), dOx: N = dFdx(off), dOy: N = dFdy(off);
+  const det0: N = dPx.x.mul(dPy.y).sub(dPx.y.mul(dPy.x));
+  const det: N = det0.add(select(det0.greaterThanEqual(0), float(1e-12), float(-1e-12)));
+  const gOff0: N = vec2(dOx.mul(dPy.y).sub(dOy.mul(dPx.y)), dPx.x.mul(dOy).sub(dPy.x.mul(dOx))).div(det);
+  // (A distance changes by a metre to the metre, no more: where the picture says otherwise, at the track's middle, it is held to that.)
+  const gOff: N = gOff0.mul(min(1, float(1.2).div(max(length(gOff0), 1e-4)))).toVar();
+  const RUT = 0.07;
+  const rutDeep = (o: N): N => one(smoothstep(0.06, 0.3, abs(o.sub(0.58)).sub(wander.mul(0.1)))).mul(onTrack).mul(RUT);
   const at: N = Fn(() => {
     const p: N = vec2(at0).toVar();
     If(near.greaterThan(0).and(bareV.greaterThan(0.04)), () => {
       const eye: N = normalize(cameraPosition.sub(positionWorld));
-      const slide: N = eye.xz.div(max(eye.y, 0.3)).mul(mix(0.022, 0.05, stony)).mul(near).mul(smoothstep(0.04, 0.4, bareV)).toVar();
+      const texD: N = mix(0.022, 0.05, stony).mul(smoothstep(0.04, 0.4, bareV)).toVar(), deep: N = texD.add(onTrack.mul(RUT)).toVar();
+      const slide: N = eye.xz.div(max(eye.y, 0.3)).mul(deep).mul(near).toVar();
       const sunk: N = float(0).toVar();
-      Loop(6, () => {
+      Loop(8, () => {
         const q = at0.sub(slide.mul(sunk));
         const h = mix((texture(soil.map, q.mul(1.5)) as N).level(0).a, (texture(shingle.map, q.mul(0.62)) as N).level(0).a, stony);
-        If(one(h).lessThanEqual(sunk), () => { Break(); });
-        sunk.addAssign(1 / 6);
+        const below: N = one(h).mul(texD).add(rutDeep(off.add(dot(gOff, q.sub(at0))))).div(max(deep, 1e-4));
+        If(below.lessThanEqual(sunk), () => { Break(); });
+        sunk.addAssign(1 / 8);
       });
       p.subAssign(slide.mul(sunk));
     });
     return p;
   })().toVar();
+  // (The slope of a rut's side where the line of sight came down, for its light and shade.)
+  const offAt: N = off.add(dot(gOff, at.sub(at0))).toVar();
+  const rutTilt: N = gOff.mul(rutDeep(offAt.add(0.02)).sub(rutDeep(offAt.sub(0.02))).div(0.04)).mul(one(smoothstep(30, 80, far))).toVar();
   const gUv = at.mul(scale);
   // The turf is read twice, the second time larger and turned, and the two mixed: neither one's repeat survives the other.
   const gTurf: N = mix((texture(turf.map, gUv) as N).bias(blur), (texture(turf.map, at.yx.mul(0.83).add(0.29)) as N).bias(blur), 0.45).toVar();
@@ -685,7 +703,8 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (Read from the turf's heights blurred, and with a softer edge: read sharp, the water lay in blocky shapes, pixel-edged, like
   // pieces of blue paint on the earth.)
   const pudSpot: N = (texture(turf.map, at0.div(6.1).add(0.19)) as N).bias(2.5).a.add(mid.sub(0.5).mul(0.4)).toVar();
-  const puddle: N = smoothstep(float(0.535).sub(pool), float(0.6).sub(pool), pudSpot).mul(max(rutFloor, bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
+  // (Standing water in a rut after rain, or where the ground is wet; on a dry day only the mud of its low places, darker.)
+  const puddle: N = smoothstep(float(0.535).sub(pool), float(0.6).sub(pool), pudSpot).mul(max(rutFloor.mul(mix(0.25, 1, max(uWet, smoothstep(0.2, 0.6, f.y)))), bare.mul(uWet).mul(0.7))).mul(one(stony)).toVar();
   const wetRim: N = smoothstep(0.44, 0.555, pudSpot).mul(rutFloor).toVar();
   ground = mix(ground, ground.mul(0.6), wetRim.mul(0.6));
   // (Standing water in a rut is muddy, brown more than black, where the eye looks down into it.)
@@ -715,7 +734,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     // (Dead grass has a relief of its own, of strands; standing water has none.)
     const gT: N = (texture(thatch.normalMap, at.mul(1.15)) as N).bias(blur).xyz.mul(2).sub(1);
     const turfN: N = mix(gN.mul(vec3(flat, flat, 1)), gT, dry.mul(0.8));
-    const n: N = mix(turfN, gE, bare);
+    const n: N = mix(turfN, gE, bare).add(vec3(rutTilt.mul(bare), 0));
     const steep = mix(1, stony.mul(1.2).add(1.15), bare).mul(one(puddle));
     // Snow the wind has worked: low ripples across the way it blows, and broader drifts, as light and shade.
     const rip = (k: number, e: number): N => {
