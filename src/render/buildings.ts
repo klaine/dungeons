@@ -4,6 +4,7 @@ import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFron
 import { Building, ClassicalDress } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
+import { chamfered, chamfering } from './geom/chamfer';
 import { turner } from './geom/turned';
 import { buildBrick } from './brick';
 import { buildCanal } from './canal';
@@ -66,13 +67,33 @@ export function buildingTools(b: Building, base: number, mesh: (material: string
     for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
     m.markFace(ids);
   };
-  /** A block between two opposite corners, square to the world. No two are quite the same tone. */
-  const block = (material: string, a: Vector3, c: Vector3, colour: Colour, grain = false) => {
+  /**
+   * A block between two opposite corners, square to the world. No two are quite the same tone. `bevel`, if given, takes its edges
+   * off by that much (`chamfered`): for what stands out to be seen, sills, cornices, steps, whose outline against the light is a
+   * knife's edge if left square.
+   */
+  const block = (material: string, a: Vector3, c: Vector3, colour: Colour, grain = false, bevel = 0) => {
     const x0 = Math.min(a.x, c.x), x1 = Math.max(a.x, c.x), y0 = Math.min(a.y, c.y), y1 = Math.max(a.y, c.y), z0 = Math.min(a.z, c.z), z1 = Math.max(a.z, c.z);
     if (x1 - x0 < 1e-4 || y1 - y0 < 1e-4 || z1 - z0 < 1e-4) return;
     // (Turned before it is shaded, so that the hook knows the colour it was given; `poly` is then given another, and leaves it alone.)
     if (dress?.active) { const r = dress.map(material, colour); if (r) [material, colour] = r; }
     const col = shade(colour, 0.94 + 0.12 * (((count++ * 7919) % 13) / 13)), scale = grain ? 0.9 : 0.5;
+    if (bevel > 0 && chamfering.on) {
+      const m = mesh(material);
+      for (const piece of chamfered([[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], bevel)) {
+        N.set(...piece.out);
+        if (Math.abs(N.y) > 0.95) { U.set(1, 0, 0); V.set(0, 0, 1); } else { U.set(N.z, 0, -N.x).normalize(); V.crossVectors(N, U); if (V.y < 0) V.negate(); }
+        // (Timber's grain along the piece's longer way, as `poly` lays it.)
+        if (grain) {
+          let lu = 0, lv = 0;
+          for (const q of piece.pts) { A.set(q[0] - piece.pts[0][0], q[1] - piece.pts[0][1], q[2] - piece.pts[0][2]); lu = Math.max(lu, Math.abs(A.dot(U))); lv = Math.max(lv, Math.abs(A.dot(V))); }
+          if (lv > lu) { A.copy(U); U.copy(V); V.copy(A); }
+        }
+        const ids = piece.pts.map((q, k) => m.addVertex(q[0], q[1], q[2], piece.normals[k][0], piece.normals[k][1], piece.normals[k][2], (q[0] * U.x + q[1] * U.y + q[2] * U.z) * scale, (q[0] * V.x + q[1] * V.y + q[2] * V.z) * scale, col[0], col[1], col[2]));
+        for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+      }
+      return;
+    }
     const p = (x: number, y: number, z: number) => new Vector3(x, y, z);
     poly(material, [p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1), p(x1, y0, z1)], col, p(1, 0, 0), grain, scale);
     poly(material, [p(x0, y0, z0), p(x0, y1, z0), p(x0, y1, z1), p(x0, y0, z1)], col, p(-1, 0, 0), grain, scale);
@@ -82,9 +103,9 @@ export function buildingTools(b: Building, base: number, mesh: (material: string
     poly(material, [p(x0, y0, z0), p(x1, y0, z0), p(x1, y1, z0), p(x0, y1, z0)], col, p(0, 0, -1), grain, scale);
   };
   /** A block given in the building's own measures. */
-  const box = (material: string, u0: number, u1: number, y0: number, y1: number, v0: number, v1: number, colour: Colour, grain = false) => block(material, at(u0, y0, v0), at(u1, y1, v1), colour, grain);
+  const box = (material: string, u0: number, u1: number, y0: number, y1: number, v0: number, v1: number, colour: Colour, grain = false, bevel = 0) => block(material, at(u0, y0, v0), at(u1, y1, v1), colour, grain, bevel);
   /** A block set in a wall. */
-  const on = (f: Face, material: string, s0: number, s1: number, y0: number, y1: number, t0: number, t1: number, colour: Colour, grain = false) => block(material, f.P(s0, y0, t0), f.P(s1, y1, t1), colour, grain);
+  const on = (f: Face, material: string, s0: number, s1: number, y0: number, y1: number, t0: number, t1: number, colour: Colour, grain = false, bevel = 0) => block(material, f.P(s0, y0, t0), f.P(s1, y1, t1), colour, grain, bevel);
   /** A squared length of timber from one point to another. */
   const stick = (from: Vector3, to: Vector3, thick: number, broad: number, colour: Colour, material = 'wood') => {
     if (dress?.active) { const r = dress.map(material, colour); if (r) [material, colour] = r; }
@@ -479,8 +500,8 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
         const va = st.v0 + i * f.tread, step = y + (i + 1) * f.rise;
         // (The lowest flight is boxed in to the floor. Those above are treads only, boards let into a string at each side: a flight
         // with risers would hang too low over the heads of those coming up the flight beneath it, where the storey is a low one.)
-        if (k === 0) box('wood', st.u0, st.u1, y, step, va, va + f.tread, shade(boards, 0.9), true);
-        else box('wood', st.u0, st.u1, step - 0.05, step, va - 0.02, va + f.tread, shade(boards, 0.9), true);
+        if (k === 0) box('wood', st.u0, st.u1, y, step, va, va + f.tread, shade(boards, 0.9), true, 0.01);
+        else box('wood', st.u0, st.u1, step - 0.05, step, va - 0.02, va + f.tread, shade(boards, 0.9), true, 0.01);
         box('wood', rail - 0.022, rail + 0.022, k === 0 ? step : y, railY(va + f.tread / 2), va + f.tread / 2 - 0.022, va + f.tread / 2 + 0.022, OAK, true);
       }
       if (k > 0) for (const u of [st.u0 + 0.025, st.u1 - 0.025]) stick(at(u, y + f.rise - 0.16, st.v0), at(u, y + up - 0.16, st.v1 - f.tread), 0.05, 0.24, OAK);
@@ -723,7 +744,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
         const flight = flights.find((q) => q[0] === g);
         if (flight) {
           const s0 = flight[0].s0, s1 = flight[flight.length - 1].s1, gr = groundUnder(f, (s0 + s1) / 2), up = stepsUp(PLINTH - gr);
-          for (let step = 0; step < up.steps; step++) on(f, 'stone', s0 - 0.5 - step * up.spread, s1 + 0.5 + step * up.spread, gr - 0.3, PLINTH - step * up.rise, -0.4 - step * up.tread + lead, 0.01 + lead, shade(stone, 0.78));
+          for (let step = 0; step < up.steps; step++) on(f, 'stone', s0 - 0.5 - step * up.spread, s1 + 0.5 + step * up.spread, gr - 0.3, PLINTH - step * up.rise, -0.4 - step * up.tread + lead, 0.01 + lead, shade(stone, 0.78), false, 0.02);
           if (PLINTH - gr > 0.9) for (let step = 0; step < up.steps; step++) for (const [a, e] of [[s0 - 0.95 - step * up.spread, s0 - 0.5 - step * up.spread], [s1 + 0.5 + step * up.spread, s1 + 0.95 + step * up.spread]]) {
             on(f, 'stone', a, e, gr - 0.3, PLINTH - step * up.rise + 0.5, -0.4 - step * up.tread + lead, (step ? -0.4 - (step - 1) * up.tread : 0.01) + lead, granite);
           }
@@ -737,7 +758,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
           if (rich) on(f, 'plaster', (g.s0 + g.s1) / 2 - 0.12, (g.s0 + g.s1) / 2 + 0.12, g.y1 - 0.02, g.y1 + 0.38, -0.07, 0.05, WHITE);
         }
         // (Every sill stands a centimetre over the foot of its opening: level with it, its top lay in one plane with the wall's under the window.)
-        on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.12, g.y0 + 0.01, -0.16, 0.16, granite);
+        on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.12, g.y0 + 0.01, -0.16, 0.16, granite, false, 0.02);
       }
     });
     (N > 1 ? rows[1] ?? [] : rows[0].filter((g) => g.kind === 'window')).forEach((g, n) => {
@@ -750,19 +771,19 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       const round = roundOn(N > 1 ? 1 : 0), spring = round ? g.y1 - (g.s1 - g.s0) / 2 : g.y1 + 0.17;
       if (bare) {
         if (round) roundHead(f, g, 0.02, T, wash);
-        on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE);
+        on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE, false, 0.015);
         return;
       }
       for (const [a, e] of [[g.s0 - 0.17, g.s0], [g.s1, g.s1 + 0.17]]) on(f, 'plaster', a, e, g.y0, spring, -0.045, 0.06, WHITE);
       if (style === 'quoins' && !round) for (const [a, e] of [[g.s0 - 0.29, g.s0 - 0.17], [g.s1 + 0.17, g.s1 + 0.29]]) on(f, 'plaster', a, e, g.y1 - 0.14, g.y1 + 0.17, -0.045, 0.06, WHITE);
       if (round) roundHead(f, g, 0.02, T, wash);
       else on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.17, -0.045, 0.06, WHITE);
-      on(f, 'plaster', g.s0 - 0.24, g.s1 + 0.24, g.y0 - 0.1, g.y0 + 0.01, -0.2, 0.08, WHITE);
+      on(f, 'plaster', g.s0 - 0.24, g.s1 + 0.24, g.y0 - 0.1, g.y0 + 0.01, -0.2, 0.08, WHITE, false, 0.015);
       if (rich) for (const s of [g.s0 - 0.17, g.s1 + 0.05]) on(f, 'plaster', s, s + 0.12, g.y0 - 0.3, g.y0 - 0.1, -0.09, 0.03, WHITE);
       if (heads === 'plain' || !rich) return;
       on(f, 'plaster', g.s0 - 0.17, g.s1 + 0.17, g.y1 + 0.17, g.y1 + 0.37, -0.03, 0.03, WHITE);
       for (const s of [g.s0 - 0.2, g.s1 + 0.07]) on(f, 'plaster', s, s + 0.13, g.y1 + 0.12, g.y1 + 0.4, -0.12, 0.03, WHITE);
-      on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.37, g.y1 + 0.47, -0.2, 0.03, WHITE);
+      on(f, 'plaster', g.s0 - 0.3, g.s1 + 0.3, g.y1 + 0.37, g.y1 + 0.47, -0.2, 0.03, WHITE, false, 0.015);
       if (heads === 'pediments' || (heads === 'alternate' && (n + (bays >> 1)) % 2 === 0)) {
         const into = f.P(0, 0, 0.2).sub(f.P(0, 0, 0));
         wedge(f.P(g.s0 - 0.3, g.y1 + 0.47, -0.17), f.P(g.s1 + 0.3, g.y1 + 0.47, -0.17), f.P((g.s0 + g.s1) / 2, g.y1 + 0.82, -0.17), into, ['plaster', WHITE], ['plaster', WHITE]);
@@ -771,10 +792,10 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     for (const row of rows.slice(2)) for (const g of row) {
       if (g.kind === 'through') continue;
       glazed(f, g, 2, 2, frame);
-      if (bare) { on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE); continue; }
+      if (bare) { on(f, 'plaster', g.s0 - 0.1, g.s1 + 0.1, g.y0 - 0.07, g.y0 + 0.01, -0.1, 0.08, WHITE, false, 0.015); continue; }
       for (const [a, e] of [[g.s0 - 0.15, g.s0], [g.s1, g.s1 + 0.15]]) on(f, 'plaster', a, e, g.y0, g.y1 + 0.15, -0.04, 0.06, WHITE);
       on(f, 'plaster', g.s0, g.s1, g.y1, g.y1 + 0.15, -0.04, 0.06, WHITE);
-      on(f, 'plaster', g.s0 - 0.2, g.s1 + 0.2, g.y0 - 0.09, g.y0 + 0.01, -0.17, 0.08, WHITE);
+      on(f, 'plaster', g.s0 - 0.2, g.s1 + 0.2, g.y0 - 0.09, g.y0 + 0.01, -0.17, 0.08, WHITE, false, 0.015);
     }
     return { pitch, centre, rows };
   };
@@ -788,7 +809,7 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
       on(f, 'plaster', c - 0.05, c + 0.05, y + 0.12, y + 0.78, t + 0.1, t + 0.2, WHITE);
       on(f, 'plaster', c - 0.08, c + 0.08, y + 0.3, y + 0.56, t + 0.07, t + 0.23, WHITE);
     }
-    on(f, 'plaster', s0 - 0.03, s1 + 0.03, y + 0.78, y + 0.9, t - 0.02, t + 0.32, WHITE);
+    on(f, 'plaster', s0 - 0.03, s1 + 0.03, y + 0.78, y + 0.9, t - 0.02, t + 0.32, WHITE, false, 0.015);
   };
   /** A round disc standing across the front, its middle at `u` and `y`, from `v0` to `v1` deep: laid in level slices. */
   const disc = (u: number, y: number, r: number, v0: number, v1: number, colour: Colour) => {
@@ -922,13 +943,15 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
   const round = (y0: number, y3: number, reach: number, colour: Colour) => {
     // (The ends' run only between the front's and the back's, and what stands forward only up to the front's face: laid over one
     // another, their tops lay in one plane and flickered.)
-    for (const f of [front, back]) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, colour);
-    for (const f of [right, left]) on(f, 'plaster', 0.5, f.L - 0.5, y0, y3, -reach, 0.5, colour);
-    if (b.portico) box('plaster', centreLeft - reach, centreRight + reach, y0, y3, -out - COL - reach, -reach, colour);
-    if (fr.pavilions) { box('plaster', -W / 2 - reach, fr.pavL + reach, y0, y3, -PAV - reach, -reach, colour); box('plaster', fr.pavR - reach, W / 2 + reach, y0, y3, -PAV - reach, -reach, colour); }
+    // (Each run with its edges taken off, as a moulding's are: against the sky a square run reads as a plank.)
+    const e = 0.02;
+    for (const f of [front, back]) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, colour, false, e);
+    for (const f of [right, left]) on(f, 'plaster', 0.5, f.L - 0.5, y0, y3, -reach, 0.5, colour, false, e);
+    if (b.portico) box('plaster', centreLeft - reach, centreRight + reach, y0, y3, -out - COL - reach, -reach, colour, false, e);
+    if (fr.pavilions) { box('plaster', -W / 2 - reach, fr.pavL + reach, y0, y3, -PAV - reach, -reach, colour, false, e); box('plaster', fr.pavR - reach, W / 2 + reach, y0, y3, -PAV - reach, -reach, colour, false, e); }
   };
   // (And round the wings, which are finished as the main block is.)
-  const roundWings = (y0: number, y3: number, reach: number) => { for (const f of wingFaces.flat()) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, WHITE); };
+  const roundWings = (y0: number, y3: number, reach: number) => { for (const f of wingFaces.flat()) on(f, 'plaster', -reach, f.L + reach, y0, y3, -reach, 0.5, WHITE, false, 0.02); };
   // (Each style's mouldings, from the frieze up, with how far each stands out: all of them up to the low wall over the cornice.)
   const mouldings: [number, number, number][] = rich ? [[0, 0.42, 0.04], [0.42, 0.52, 0.14], [0.52, 0.62, 0.26], [0.62, 0.78, 0.4]]
     : style === 'lesenes' ? [[0, 0.42, 0.04], [0.42, 0.6, 0.16], [0.6, 0.78, 0.3]] : [[0, 0.5, 0.02], [0.5, 0.64, 0.1], [0.64, 0.78, 0.2]];

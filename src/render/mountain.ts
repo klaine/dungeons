@@ -704,7 +704,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   yield say('raising the hospice, the cairn and the shelter', 0.78);
   // ---- what people have put up here
   wild.group = 'wild';
-  const { solid } = anyAngle((mm) => wild.mesh(mm));
+  const { solid, rounded } = anyAngle((mm) => wild.mesh(mm));
   const stone: Colour = [0.74 * tint[0], 0.72 * tint[1], 0.69 * tint[2]];
   const timber: Colour = [0.52, 0.42, 0.33];
   /** A block standing on end about a point, turned to `yaw`, `w` by `d` and `h` high, its foot at `y`; it may lean a little. */
@@ -725,7 +725,8 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
       const front = ea === nose, inA = front ? q.range(0.05, 0.11) : q.range(0, 0.04), inF = q.range(0.015, 0.06);
       return at(ea * (w / 2 - inA), ef * (d / 2 - inF), h + (front ? -q.range(0.03, 0.07) : q.range(-0.02, 0.02)));
     };
-    solid('rock', [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), top(-1, -1), top(1, -1), top(1, 1), top(-1, 1)], colour);
+    // (Its edges taken off, three centimetres: the outline as well as the light, as on any step trodden for a few hundred years.)
+    rounded('rock', [at(-w / 2, -d / 2, 0), at(w / 2, -d / 2, 0), at(w / 2, d / 2, 0), at(-w / 2, d / 2, 0), top(-1, -1), top(1, -1), top(1, 1), top(-1, 1)], colour, 0.03);
     // In winter the snow lies on it with a depth of its own (`cushion`): painted on by the material alone, a tread was a block with
     // a white top and no snow on it at all.
     if (winter) cushion(x, y + h, z, w, d, yaw, nose, q);

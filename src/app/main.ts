@@ -53,6 +53,7 @@ const TEXTURE_NAMES: Record<string, string> = {
 };
 import { Torch, TorchLights, gatherTorches } from '../render/torch';
 import { SunShadow } from '../render/sunShadow';
+import { chamfering } from '../render/geom/chamfer';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Game } from './game';
 import { Player } from './player';
@@ -240,6 +241,7 @@ async function start(): Promise<void> {
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
   edgeUniforms.uEdges.value = num('edges', 1);
+  chamfering.on = num('edges', 1) > 0;
   // Each surface is painted in turn, with the page given a chance to draw between them.
   const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
   const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 1 : 0);
