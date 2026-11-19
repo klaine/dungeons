@@ -1,5 +1,6 @@
 import { HeightField } from './terrain';
 import { TILE, Tile, World, WorldPlace, worldTile, WORLD_SIZE, worldSteps } from './world';
+import { Site } from './site';
 
 /**
  * A world's land as a place built in it reads it (`docs/06-world.md`, step 3): its tiles of 5 metres
@@ -103,6 +104,41 @@ export function* makeTilesNear(land: WorldLand, x: number, z: number, r: number)
 export function toSite(frame: { u: number; v: number; turn: number }, hx: number, hz: number, x: number, z: number): [number, number] {
   const c = Math.cos(frame.turn), sn = Math.sin(frame.turn), du = x - frame.u, dv = z - frame.v;
   return [hx + c * du + sn * dv, hz - sn * du + c * dv];
+}
+
+/**
+ * How a place built in a world lies in it: the point of its site (`hx`, `hz`) its frame lays over the world's (`u`, `v`), turned by
+ * `turn`, and the height in the world of its ground (`base`), which is its forecourt's floor in the site. That point is the middle of
+ * the forecourt for a valley, the middle of the level ground for an island or a mountain top, and the middle of the quay's edge for a
+ * town. Nothing for a place not built in a world.
+ */
+export interface SiteFrame { world: string; u: number; v: number; turn: number; base: number; hx: number; hz: number; floor: number }
+export function siteFrame(site: Site): SiteFrame | null {
+  const middle = (r: { x0: number; x1: number; z0: number; z1: number }) => [(r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2] as const;
+  const approach = site.places.find((q) => q.role === 'approach');
+  if (!approach) return null;
+  const of = (t: { world?: string; u?: number; v?: number; turn?: number; base?: number } | undefined, at: readonly [number, number]): SiteFrame | null =>
+    t?.world && t.u !== undefined && t.v !== undefined && t.turn !== undefined && t.base !== undefined ? { world: t.world, u: t.u, v: t.v, turn: t.turn, base: t.base, hx: at[0], hz: at[1], floor: approach.floor } : null;
+  if (site.valley?.terrain?.world) return of(site.valley.terrain, middle(approach));
+  if (site.island?.terrain?.world) return of(site.island.terrain, middle(site.island.level));
+  if (site.mountain?.terrain?.world) return of(site.mountain.terrain, middle(site.mountain.level));
+  if (site.town?.terrain.world) return of(site.town.terrain, [(site.town.quay.x0 + site.town.quay.x1) / 2, site.town.quay.z]);
+  return null;
+}
+
+/**
+ * The house each place of a world has, when no other is asked for: its seed is the world's and the place's, so that the same place
+ * is the same house wherever it is gone to from, and a place built beforehand (`placesWorker.ts`) is the one the game builds.
+ * `next` for the place's next house, where its own will not go there (`generateWorldPlace`).
+ */
+export function placeSeed(world: string, kind: WorldPlace['kind'], n: number, next = 0): string {
+  return `${world}-${kind}${n}${next ? `-${next + 1}` : ''}`;
+}
+
+/** A point of a place's site in its world: the frame's own sum (`valleyFrame`, `islandFrame`, `worldFrame`, `townFrame`). */
+export function toWorld(f: SiteFrame, x: number, z: number): [number, number] {
+  const c = Math.cos(f.turn), sn = Math.sin(f.turn), dx = x - f.hx, dz = z - f.hz;
+  return [f.u + c * dx - sn * dz, f.v + sn * dx + c * dz];
 }
 
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };

@@ -1,11 +1,14 @@
 /**
  * Worlds kept in the browser once made, so that going from one place of a world to the next does not
- * make the world again (half a minute) nor its tiles (a second or two each). Kept under the address of
- * the program's own module: in a build its file name carries a hash of its code and of the names of
- * what it loads, the world's worker among them, so a world made by code since changed is never read
- * back. (In development there is no such name, and nothing is kept.) The last three worlds are kept;
- * what cannot be kept (a private window, a full disk) is simply made again.
+ * make the world again (half a minute) nor its tiles (a second or two each); and, where its places were
+ * built beforehand on the world's page, each place's layout, so that it is not laid out again. Kept
+ * under the address of the worker that lays places out (`placesWorker.ts`): in a build its file name
+ * carries a hash of its code, which is the world's and the generator's, so what was made by code since
+ * changed is never read back, and the game and the world's page keep in the same place. (In development
+ * there is no such name, and nothing is kept.) The last three worlds are kept; what cannot be kept (a
+ * private window, a full disk) is simply made again.
  */
+import placesWorker from '../worldmap/placesWorker?worker&url';
 
 const DB = 'dungeons-worlds', KEEP = 3;
 
@@ -49,12 +52,12 @@ export interface WorldShelf {
   set(what: string, value: unknown): Promise<void>;
 }
 
-export async function worldShelf(maker: string, seed: string): Promise<WorldShelf | null> {
+export async function worldShelf(seed: string): Promise<WorldShelf | null> {
   // (Only a build's modules have their code's hash in their names.)
   if (import.meta.env.DEV || typeof indexedDB === 'undefined') return null;
   const db = await open();
   if (!db) return null;
-  const key = `${new URL(maker).pathname}|${seed}`;
+  const key = `${new URL(placesWorker, location.href).pathname}|${seed}`;
   return {
     get: <T>(what: string) => ask<T>(db, what === 'world' ? 'worlds' : 'tiles', `${key}|${what}`),
     async set(what: string, value: unknown) {

@@ -19,7 +19,7 @@ import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
 import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt, valleyLand } from '../core/valley';
-import { toSite, worldLand } from '../core/worldLand';
+import { siteFrame, toSite, worldLand } from '../core/worldLand';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
@@ -4478,20 +4478,17 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   // About a place built in a world, the world's lakes out to three kilometres, at their own levels, drawn plainly (not mirroring):
   // the water shows only where the land lies under it, so each fills its own hollow in the country round about.
   {
-    const centre = (r: { x0: number; x1: number; z0: number; z1: number }) => [(r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2] as const;
-    // (A town's frame lays the middle of its quay's edge on the world's point, as `townFrame` has it.)
-    const town = site.town?.terrain.world ? site.town : undefined;
-    const t = site.valley?.terrain?.world ? site.valley.terrain : site.island?.terrain?.world ? site.island.terrain : site.mountain?.terrain?.world ? site.mountain.terrain : town?.terrain;
-    const anchor = site.valley?.terrain?.world ? centre(approach) : site.island?.terrain?.world ? centre(site.island.level) : site.mountain?.terrain?.world ? centre(site.mountain.level) : town ? [(town.quay.x0 + town.quay.x1) / 2, town.quay.z] as const : undefined;
-    if (t?.world && anchor && t.u !== undefined && t.v !== undefined && t.turn !== undefined && t.base !== undefined) {
-      const frame = { u: t.u, v: t.v, turn: t.turn };
-      for (const lk of worldLand(t.world).lakes ?? []) {
-        const [x, z] = toSite(frame, anchor[0], anchor[1], lk.x, lk.z);
-        if (Math.hypot(x - anchor[0], z - anchor[1]) > 3000) continue;
-        const outline = lk.outline.flatMap(([ox, oz]) => toSite(frame, anchor[0], anchor[1], ox, oz));
+    // (The place's frame in its world, `siteFrame`: a town's lays the middle of its quay on the world's point.)
+    const f = siteFrame(site);
+    if (f) {
+      const frame = { u: f.u, v: f.v, turn: f.turn };
+      for (const lk of worldLand(f.world).lakes ?? []) {
+        const [x, z] = toSite(frame, f.hx, f.hz, lk.x, lk.z);
+        if (Math.hypot(x - f.hx, z - f.hz) > 3000) continue;
+        const outline = lk.outline.flatMap(([ox, oz]) => toSite(frame, f.hx, f.hz, ox, oz));
         let r = 0;
         for (let k = 0; k < outline.length; k += 2) r = Math.max(r, Math.hypot(outline[k] - x, outline[k + 1] - z));
-        waters.push({ x, z, r, level: lk.level - t.base + approach.floor, outline, far: true });
+        waters.push({ x, z, r, level: lk.level - f.base + f.floor, outline, far: true });
       }
     }
   }

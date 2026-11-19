@@ -4,7 +4,7 @@ import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { layOutTown as layOutHarbourTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
-import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
+import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
 import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { brickCountry, dealBrickHouse, dealChurch } from './brick';
@@ -265,6 +265,20 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     }
   }
   return best;
+}
+
+/**
+ * A world's place laid out with its own house (`placeSeed`); where that will not go there (one island of seven hectares had no room
+ * for the ground of one house and a cove, whatever its drafts), the place's next house, and the next: so that every place of a world
+ * is built, and always as the same house.
+ */
+export function generateWorldPlace(world: string, kind: PlaceKind, n: number, settlement?: MakeOptions['settlement']): { seed: string; site: Site } {
+  let why = '';
+  for (let next = 0; next < 6; next++) {
+    const seed = placeSeed(world, kind === 'town' ? 'coast' : kind, n, next);
+    try { return { seed, site: generateSite(seed, kind, { world: { seed: world, n }, settlement }) }; } catch (e) { why = (e as Error).message; }
+  }
+  throw new Error(why);
 }
 
 /**

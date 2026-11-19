@@ -1,5 +1,9 @@
 import { HeightField } from '../core/terrain';
-import { drawInkWorld, drawWorldRelief, WorldMap } from '../maps/inkWorld';
+import { drawFootprint, footprintOf } from '../maps/footprint';
+import { drawInkWorld, drawWorldRelief, inkFrame, WorldMap } from '../maps/inkWorld';
+import { keptSites, KeptSite } from '../app/worldPlace';
+import { worldShelf } from '../app/worldStore';
+import placesWorker from './placesWorker?worker&url';
 
 /**
  * The world page: a world made from its seed (`?world=<seed>`), drawn as an ink map with the places
@@ -24,11 +28,70 @@ const inkTab = document.getElementById('ink') as HTMLButtonElement, reliefTab = 
 let map: WorldMap | null = null, view: 'ink' | 'relief' = params.get('view') === 'relief' ? 'relief' : 'ink', worker: Worker | null = null;
 declare global { interface Window { __worldReady?: boolean; __world?: WorldMap } }
 
+/** The places built: beforehand, now or on an earlier visit (kept in the browser); and those that could not be, with why. */
+let built: KeptSite[] = [];
+const failed = new Map<string, string>();
+let prebuilding: Worker | null = null;
+
 function draw(): void {
   if (!map) return;
   inkTab.setAttribute('aria-pressed', String(view === 'ink')); reliefTab.setAttribute('aria-pressed', String(view === 'relief'));
-  if (view === 'ink') drawInkWorld(canvas, map); else drawWorldRelief(canvas, map);
+  if (view === 'ink') { drawInkWorld(canvas, map); drawBuilt(); } else drawWorldRelief(canvas, map);
 }
+
+/** Over the ink map, what is built at each place built (all of them, or those given): its ground, its ways and what stands on it, in red (`footprintOf`). */
+function drawBuilt(which: KeptSite[] = built): void {
+  if (!map || view !== 'ink' || !which.length) return;
+  const ctx = canvas.getContext('2d')!, k = inkFrame(map.plan, canvas.width);
+  for (const b of which) { const fp = footprintOf(b.site); if (fp) drawFootprint(ctx, fp, (x, z) => [k.X(x), k.Z(z)], { ink: '#9a2a1c', scale: 0.9 }); }
+}
+
+/** The world's size asked for in the address (`?size=8x8`, kilometres east and west by north and south), or none: six by ten. */
+function sizeAsked(): { x: number; z: number } | undefined {
+  const sz = (params.get('size') ?? '').split('x').map(Number);
+  return sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined;
+}
+
+/**
+ * Builds every place of the world beforehand (asked: "on the entry page also add a button that enables the player to prebuild all
+ * the found locations for the world. Then switching between them should be quicker and the ink map could show all the footprints"):
+ * in a worker (`placesWorker.ts`), the world made again as the game makes it, then each place laid out as the game would lay it out,
+ * its house the place's own; all of it kept in this browser (`worldStore.ts`), where the game finds it, and each place's footprint
+ * drawn on the map as it comes. The bar goes through the world's making in about a sixth of it, then a share for each place.
+ */
+async function prebuild(): Promise<void> {
+  if (!map || prebuilding) return;
+  const seed = map.plan.seed, shelf = await worldShelf(seed), button = document.getElementById('prebuild') as HTMLButtonElement;
+  const box = document.getElementById('making')!, bar = box.querySelector<HTMLElement>('.bar')!, fill = bar.querySelector<HTMLElement>('span')!, line = box.querySelector('p')!;
+  const t0 = performance.now(), secs = () => ((performance.now() - t0) / 1000).toFixed(0);
+  let share = 0, text = 'Making the world as the game makes it', keeping: Promise<unknown> = Promise.resolve();
+  const show = () => { fill.style.width = `${(share * 100).toFixed(1)}%`; bar.setAttribute('aria-valuenow', String(Math.round(share * 100))); line.textContent = `${text}… ${secs()} s`; };
+  box.hidden = false; button.disabled = true; status.textContent = '';
+  const timer = setInterval(() => { if (share < 0.15) share = Math.min(0.15, share + 0.0015); show(); }, 250);
+  // (Kept one after another, in the order they come.)
+  const keep = (what: string, value: unknown) => { keeping = keeping.then(() => shelf?.set(what, value)); };
+  const finish = (said: string) => { clearInterval(timer); box.hidden = true; button.disabled = false; prebuilding?.terminate(); prebuilding = null; status.textContent = said; };
+  const worker = (prebuilding = new Worker(placesWorker, { type: 'module' }));
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (map?.plan.seed !== seed) return;
+    if (m.type === 'progress') { text = m.text; if (m.total) share = 0.15 + 0.85 * (m.done / m.total); return; }
+    if (m.type === 'world') { keep('world', m.world); return; }
+    if (m.type === 'tile') { keep(`${m.tile.i},${m.tile.j}`, m.tile); return; }
+    if (m.type === 'site') {
+      keep(`site:${m.kind}${m.n}`, { seed: m.seed, site: m.site });
+      if (m.site) { const b: KeptSite = { kind: m.kind, n: m.n, seed: m.seed, site: m.site }; built = [...built.filter((o) => !(o.kind === m.kind && o.n === m.n)), b]; drawBuilt([b]); } else failed.set(`${m.kind}${m.n}`, m.why);
+      listPlaces(seed);
+      return;
+    }
+    if (m.type === 'done') {
+      void keeping.then(() => finish(`Built ${built.length} places in ${secs()} s${failed.size ? `; ${failed.size} could not be` : ''}${shelf ? ', kept in this browser: going to one now lays nothing out again.' : '. (This browser keeps nothing here, so the game will lay them out again.)'}`));
+    }
+  };
+  worker.onerror = (e) => finish(`The places could not all be built: ${e.message}`);
+  worker.postMessage({ seed, size: sizeAsked() });
+}
+document.getElementById('prebuild')!.addEventListener('click', () => void prebuild());
 
 /** Where another page of the tool is: as the page's head says (`<meta name="dungeons-game" content="…">`), or the usual file. */
 const pageOf = (name: string, usual: string) => document.querySelector<HTMLMetaElement>(`meta[name="dungeons-${name}"]`)?.content || usual;
@@ -47,13 +110,18 @@ function listPlaces(seed: string): void {
     // (After a `#`, which a page shown inside another keeps where it may not keep a `?`; both pages read it. Where the game and the walk
     // are, a page may say in its head, as the published copy does, where they are not the usual files.)
     const game = new URLSearchParams({ world: seed, place: q.kind === 'coast' ? 'town' : q.kind, n: String(q.n) }), walk = new URLSearchParams({ world: seed, at: `${q.kind}${q.n}` });
-    card.append(name, kind, document.createElement('br'), link('Build a house here', `${pageOf('game', './index.html')}#${game}`), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
+    // (Built beforehand, or not to be: said beside its kind.)
+    const done = built.some((b) => b.kind === q.kind && b.n === q.n), why = failed.get(`${q.kind}${q.n}`), note = document.createElement('span');
+    if (done || why) { note.className = done ? 'built' : 'built failed'; note.textContent = done ? 'built' : 'could not be built'; if (why) note.title = why; }
+    card.append(name, kind, note, document.createElement('br'), link('Build a house here', `${pageOf('game', './index.html')}#${game}`), link('Walk the land', `${pageOf('walk', './walk.html')}#${walk}`));
     placesEl.append(card);
   }
 }
 
 function make(seed: string): void {
   placesEl?.replaceChildren();
+  built = []; failed.clear();
+  prebuilding?.terminate(); prebuilding = null;
   input.value = seed;
   const url = new URL(location.href);
   url.searchParams.set('world', seed);
@@ -76,14 +144,15 @@ function make(seed: string): void {
       draw();
       listPlaces(seed);
       progress.done();
+      // (What was built beforehand on an earlier visit, kept in this browser: its footprints drawn, its places marked.)
+      void worldShelf(seed).then((shelf) => keptSites(shelf, map!.places)).then((kept) => { if (map?.plan.seed !== seed || !kept.length) return; built = kept; draw(); listPlaces(seed); });
       status.textContent = `Made in ${((performance.now() - t0) / 1000).toFixed(0)} s: ${found('island')} islands, ${found('valley')} valley heads, ${found('mountain')} mountain tops and ${found('coast')} coastal towns found.`;
       window.__worldReady = true;
     }, 60);
   };
   worker.onerror = (e) => { progress.done(); status.textContent = `The world could not be made: ${e.message}`; };
   // (`?size=8x8` for a world of that many kilometres east and west by north and south; six by ten unless asked.)
-  const sz = (params.get('size') ?? '').split('x').map(Number);
-  worker.postMessage({ seed, size: sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined });
+  worker.postMessage({ seed, size: sizeAsked() });
   status.textContent = '';
 }
 

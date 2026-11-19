@@ -51,16 +51,24 @@ function contour(v: ArrayLike<number>, nx: number, nz: number, x0: number, z0: n
   }
 }
 
+/**
+ * Where the ink map of `pixels` across puts the world: its margin, the room for its title over it, how many pixels a metre is, how
+ * tall the sheet is, and the point on it of a point of the world. (For what is drawn over the map afterwards: places' footprints.)
+ */
+export function inkFrame(plan: { hx: number; hz: number }, pixels = 2400): { edge: number; head: number; scale: number; W: number; H: number; X: (x: number) => number; Z: (z: number) => number } {
+  const W = pixels, u = W / 2400, hx = plan.hx, hz = plan.hz;
+  // (The map as broad as the page, and as tall as the world is deep at that scale.)
+  const edge = 70 * u, head = 190 * u, foot = 470 * u, msx = W - 2 * edge, scale = msx / (2 * hx), msz = 2 * hz * scale;
+  return { edge, head, scale, W, H: Math.round(head + msz + foot), X: (x: number) => edge + (x + hx) * scale, Z: (z: number) => head + (z + hz) * scale };
+}
+
 export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pixels?: number } = {}): number {
   const W = opts.pixels ?? 2400, u = W / 2400;
   const f = w.field, p = w.plan, hx = p.hx, hz = p.hz, nx = f.nx, nz = f.nz, h = f.data;
   const rng = new Rng(`world/${p.seed}`).fork('ink'), seed = Math.floor(rng.next() * 1e6);
-  // (The map as broad as the page, and as tall as the world is deep at that scale.)
-  const edge = 70 * u, head = 190 * u, foot = 470 * u, msx = W - 2 * edge, scale = msx / (2 * hx), msz = 2 * hz * scale;
-  const H = Math.round(head + msz + foot);
+  const { edge, head, scale, H, X, Z } = inkFrame(p, W), msx = W - 2 * edge, msz = 2 * hz * scale;
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d')!;
-  const X = (x: number) => edge + (x + hx) * scale, Z = (z: number) => head + (z + hz) * scale;
   /** The lattice point nearest a point of the world. */
   const cellOf = (x: number, z: number) => Math.min(nz - 1, Math.max(0, Math.round((z - f.z0) / f.cell))) * nx + Math.min(nx - 1, Math.max(0, Math.round((x - f.x0) / f.cell)));
 

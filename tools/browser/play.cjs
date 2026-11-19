@@ -10,7 +10,7 @@ const { chromium } = require('playwright');
     page.on('pageerror', (e) => errs.push(e.message.slice(0, 300)));
     page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
     // (With WORLD=w2, each seed is built on a place of that world: `seed:2` on the second of the kind, the first if no number is given.)
-    const [name, n] = seed.split(':'), inWorld = process.env.WORLD ? `&world=${process.env.WORLD}&n=${n || 1}` : '';
+    const [name, n] = seed.split(':'), inWorld = process.env.WORLD ? `&world=${process.env.WORLD}&n=${n || 1}` : '&world=none';
     await page.goto(`http://localhost:${process.env.PORT || 5173}/?seed=${name}${process.env.PLACE ? `&place=${process.env.PLACE}` : ''}${inWorld}&nobake=1&dpr=1&bloom=0&air=0&nointro`);
     await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: inWorld ? 1500000 : 400000 });
     const walk = await page.evaluate(() => window.__dbg.walkTest());

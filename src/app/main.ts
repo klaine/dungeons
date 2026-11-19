@@ -18,7 +18,7 @@ import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makeP
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
-import { generateSite, MakeOptions } from '../core/generate';
+import { generateSite, generateWorldPlace, MakeOptions } from '../core/generate';
 import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
 import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
@@ -42,6 +42,9 @@ import { drawPlan, placeAt } from '../maps/plan';
 import { meshSiteSteps, VALLEY_GROUND } from '../render/siteMesher';
 import { breathe, fail, finish as finishLoading, share, stage } from './loader';
 import { loadWorldPlace } from './worldPlace';
+import { WorldView } from './worldView';
+import { WorldPlace } from '../core/world';
+import { placeSeed, siteFrame } from '../core/worldLand';
 
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
@@ -93,21 +96,29 @@ function randomSeed(): string {
   return `${pick(a)}-${pick(b)}-${Math.floor(Math.random() * 90 + 10)}`;
 }
 
-// Every place has a seed in its address, so a link reproduces it.
-if (!params.has('seed')) {
-  params.set('seed', randomSeed());
-  keep(params);
-}
-const seed = params.get('seed')!;
 // What kind of place: a valley, unless an island, a mountain top or a harbour town is asked for.
 // (A build may be made to open on one of those when nothing is asked for: `VITE_PLACE=island npm run build`.)
 const asked = params.get('place') ?? import.meta.env.VITE_PLACE;
 // (`place=coast`, as links to a world's coastal towns once said, is the town.)
 const place = asked === 'island' ? 'island' : asked === 'mountain' ? 'mountain' : asked === 'town' || asked === 'coast' ? 'town' : 'valley';
-// Or a place in a world (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds, its land
-// the world's; the house is still the seed's own.
-const worldSeed = /^[A-Za-z0-9-]{1,24}$/.test(params.get('world') ?? '') ? params.get('world')! : null;
+/** The world's own name for a kind of place: a harbour town is built on what a world calls a coastal town. */
+const worldKind = (kind: typeof place): WorldPlace['kind'] => (kind === 'town' ? 'coast' : kind);
+// A place in a world, by default (`docs/06-world.md`): `?world=w2&n=2` builds on the second of the kind asked for that the world holds,
+// its land the world's. Without a world named, the world everyone starts in; `?world=none` for a place of its own, on land of its own.
+// (Places of their own were all there was, until worlds; asked: "'Worlds' should be now the default mode".)
+const DEFAULT_WORLD = 'w2';
+const worldAsked = params.get('world');
+const worldSeed = params.get('scene') === 'test' || worldAsked === 'none' ? null : /^[A-Za-z0-9-]{1,24}$/.test(worldAsked ?? '') ? worldAsked! : DEFAULT_WORLD;
 const worldN = Math.max(1, Math.round(Number(params.get('n')) || 1));
+// Every place has a seed in its address, so a link reproduces it: in a world, its house is the place's own unless another is asked
+// for (`placeSeed`), so that the same place is the same house, and one built beforehand on the world's page is the one built here.
+if (worldSeed && !params.has('world')) params.set('world', worldSeed);
+if (!params.has('seed') && !worldSeed) params.set('seed', randomSeed());
+keep(params);
+const seedAsked = params.has('seed');
+let seed = params.get('seed') ?? placeSeed(worldSeed!, worldKind(place), worldN);
+/** The world's places, once it is made: for going on from one to the next. */
+let worldPlaces: WorldPlace[] | null = null;
 
 const hud = {
   status: document.getElementById('status')!,
@@ -116,9 +127,25 @@ const hud = {
   title: document.getElementById('title')!,
   seed: document.getElementById('seed')!,
 };
+const KINDS = ['valley', 'island', 'mountain', 'town'] as const;
+/** In a world, the first place of the next kind after `kind` that the world holds any of (all, until it is made). */
+const nextKind = (kind: typeof place): typeof place => {
+  for (let k = 1; k <= KINDS.length; k++) {
+    const then = KINDS[(KINDS.indexOf(kind) + k) % KINDS.length];
+    if (!worldPlaces || worldPlaces.some((q) => q.kind === worldKind(then))) return then;
+  }
+  return kind;
+};
+// Another place: of a place of its own, a new house; in a world, the world's next place, of this kind and then the next, each its own house.
 const newPlace = () => {
   const next = new URLSearchParams(params);
-  next.set('seed', randomSeed());
+  if (worldSeed) {
+    next.delete('seed');
+    next.delete('at');
+    const many = worldPlaces ? worldPlaces.filter((q) => q.kind === worldKind(place)).length : 4;
+    if (worldN < many) next.set('n', String(worldN + 1));
+    else { next.set('place', nextKind(place)); next.set('n', '1'); }
+  } else next.set('seed', randomSeed());
   go(next);
 };
 document.getElementById('new')!.addEventListener('click', newPlace);
@@ -133,18 +160,19 @@ document.getElementById('new')!.addEventListener('click', newPlace);
 document.getElementById('again')!.addEventListener('click', newPlace);
 // Another kind of place: from a valley an island, from an island a mountain top, from a mountain a town, from a town a valley; a new one, since the same seed is the same house.
 {
-  // (In a world, a town is built on one of its coastal towns.)
-  const button = document.getElementById('kind')!, then = ({ valley: 'island', island: 'mountain', mountain: 'town', town: 'valley' } as const)[place];
-  button.textContent = { valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[then];
+  // (In a world, a town is built on one of its coastal towns; and a kind the world has none of is passed over.)
+  const button = document.getElementById('kind')!, label = (k: typeof place) => ({ valley: 'A valley', island: 'An island', mountain: 'A mountain', town: 'A town' }[k]);
+  button.textContent = label(nextKind(place));
   button.addEventListener('click', () => {
     const next = new URLSearchParams(params);
-    next.set('seed', randomSeed());
-    next.set('place', then);
+    next.set('place', nextKind(place));
     next.delete('at');
-    // (In a world, the first of the other kind: it may not hold as many.)
+    // (In a world, the first of the other kind, its house its own: the world may not hold as many.)
     next.delete('n');
+    if (worldSeed) next.delete('seed'); else next.set('seed', randomSeed());
     go(next);
   });
+  (window as unknown as { __kindLabel: () => void }).__kindLabel = () => { button.textContent = label(nextKind(place)); };
 }
 
 let toastTimer = 0;
@@ -168,7 +196,7 @@ const TORCH_INTENSITY = 3.2;
 async function start(): Promise<void> {
   // The world, if a place in one is asked for: begun now, in a worker, so that it is made while the surfaces are painted.
   let worldText = 'Lifting the land, and letting the rivers wear it', waitingForWorld = false;
-  const worldComing = worldSeed && params.get('scene') !== 'test' ? loadWorldPlace(worldSeed, place === 'town' ? 'coast' : place, worldN, (text) => {
+  const worldComing = worldSeed ? loadWorldPlace(worldSeed, worldKind(place), worldN, (text) => {
     worldText = text;
     if (waitingForWorld) void stage('Making the world', 0.25, text);
   }) : null;
@@ -267,6 +295,8 @@ async function start(): Promise<void> {
     await stage('Making the world', 0.25, worldText);
     inWorld = await worldComing;
     waitingForWorld = false;
+    worldPlaces = inWorld.land.places;
+    (window as unknown as { __kindLabel?: () => void }).__kindLabel?.();
   }
   await stage(`Designing ${place === 'island' ? 'the island' : place === 'mountain' ? 'the mountain' : place === 'town' ? 'the town and its house' : 'the valley and its house'}`, 0.25, inWorld ? `${inWorld.place.name}, in the world “${worldSeed}”; seed “${seed}”: rooms, doors, locks and keys` : `Seed “${seed}”: rooms, doors, locks and keys`);
   await breathe(true);
@@ -277,9 +307,17 @@ async function start(): Promise<void> {
   if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
   const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
   const settlement = settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined;
-  const site = params.get('scene') === 'test' ? null : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement });
+  // (In a world, the layout the world's page built beforehand, where it is this house's and nothing else is asked of it.)
+  // (Its own house, or the next where its own will not go there, `generateWorldPlace`; unless a seed is asked for.)
+  const kept = inWorld && !settlement ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
+  if (kept) seed = kept.seed;
+  const own = !kept && inWorld && !seedAsked && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
+  if (own) seed = own.seed;
+  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement });
   // (Its name, where the world gave it one.)
   if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
+  // (Whether the layout was one built beforehand, for whoever checks.)
+  (window as unknown as { __keptLayout?: boolean }).__keptLayout = !!kept;
   // The hour and the cloud can be asked for in the address, whatever the seed gave.
   if (site) {
     const hour = params.get('hour') as Hour | null;
@@ -367,9 +405,24 @@ async function start(): Promise<void> {
   }
   const map = document.getElementById('map') as HTMLCanvasElement;
   map.hidden = !site;
-  map.addEventListener('click', () => map.classList.toggle('big'));
+  // In a world, a third step: the world's map about the place, with what is built in it and where one is (`WorldView`).
+  const worldCanvas = document.getElementById('worldview') as HTMLCanvasElement;
+  const worldView = site && inWorld?.map && siteFrame(site) ? new WorldView(worldCanvas, inWorld.map, site, inWorld.sites, { kind: worldKind(place), n: worldN }) : null;
+  let worldShown = false;
+  /** The plan small, the plan large, the world's map (in a world), and round again. */
+  const nextMap = () => {
+    if (worldShown) { worldShown = false; worldCanvas.hidden = true; map.hidden = false; map.classList.remove('big'); return; }
+    if (!map.classList.contains('big')) { map.classList.add('big'); return; }
+    if (!worldView) { map.classList.remove('big'); return; }
+    // (The world's map is drawn the first time it is shown, which holds the page still a moment: said first.)
+    if (!worldView.ready) toast('Drawing the world’s map…');
+    worldShown = true; map.hidden = true; worldCanvas.hidden = false;
+    setTimeout(() => worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw }), 30);
+  };
+  map.addEventListener('click', nextMap);
+  worldCanvas.addEventListener('click', nextMap);
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'KeyM') map.classList.toggle('big');
+    if (e.code === 'KeyM') nextMap();
   });
   hud.seed.textContent = seed;
   const statics: Mesh[] = [];
@@ -1191,9 +1244,10 @@ async function start(): Promise<void> {
     exposure = exposure < 0 ? exposureTarget : exposure + (exposureTarget - exposure) * (1 - Math.exp(-dt * rate));
     renderer.toneMappingExposure = exposure;
 
-    // The plan follows the player, and the readout names the place they are standing in.
+    // The plan follows the player, and the readout names the place they are standing in. (Or the world's map, when it is shown.)
+    if (site && worldShown && worldView?.ready && tick % 6 === 1) worldView.draw({ x: player.position.x, z: player.position.z, yaw: player.yaw });
     if (site && tick % 6 === 1) {
-      drawPlan(map, site, {
+      if (!worldShown) drawPlan(map, site, {
         player: { x: player.position.x, z: player.position.z, yaw: player.yaw },
         labels: map.classList.contains('big'),
         visited: revealAll || !game ? undefined : game.visited,

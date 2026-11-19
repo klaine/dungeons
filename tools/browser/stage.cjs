@@ -29,7 +29,7 @@ const fs = require('fs'), path = require('path');
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => console.log('pageerror', e.message.slice(0, 400)));
   const t0 = Date.now();
-  await page.goto(`http://localhost:${process.env.PORT || 5174}/?seed=${process.env.SEED || 'w3'}&nobake=1&dpr=1&nointro&nogui&tex=${process.env.TEX || 512}&hour=${process.env.HOUR || 'morning'}&cloud=0.2`);
+  await page.goto(`http://localhost:${process.env.PORT || 5174}/?seed=${process.env.SEED || 'w3'}&world=none&nobake=1&dpr=1&nointro&nogui&tex=${process.env.TEX || 512}&hour=${process.env.HOUR || 'morning'}&cloud=0.2`);
   await page.waitForFunction(() => typeof window.__capture === 'function' && (window.__frames ?? 0) > 1, null, { timeout: 1800000, polling: 2000 });
   // (The program's own loop is held, so that the page draws only when a picture is asked for: in a software renderer a frame takes seconds.)
   await page.evaluate(() => window.__film.hold(true));

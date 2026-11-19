@@ -452,6 +452,29 @@ towns without a browser (`WORLD=w2 npx tsx tools/town.ts 4`) were sound, each la
 built in 20 to 34, with 44 to 150 timber-framed houses, 4 to 28 classical, and their quays 20 to 230 metres
 from the world's spots.
 
+**Worlds by default, places built beforehand, and the world's map in the game.** Asked: "'Worlds' should be now the default
+mode"; "Can we show built locations footprint on the ink map also during game? when player is in a location"; and "on the entry
+page also add a button that enables the player to prebuild all the found locations for the world. Then switching between them
+should be quicker and the ink map could show all the footprints". The game now builds on a world's place unless `?world=none`
+asks for a place of its own; with no world named, `w2`'s. In a world each place's house is its own (`placeSeed`: the world's seed
+and the place's kind and number), unless a `seed` is given, so that the same place is the same house wherever it is gone to from;
+**New place** goes on to the world's next place, of the same kind and then of the next, and the button for another kind passes
+over kinds the world has none of. A place's footprint (`footprintOf` in `maps/footprint.ts`) is what was built there, laid where
+the place lies in the world by its frame (`siteFrame` in `worldLand.ts`: the forecourt's middle for a valley, the level ground's
+for an island or a mountain top, the quay's for a town, over the world's point, turned): the ground it takes (a valley's sides
+from the house to the gap, an island's coast, a mountain top's rim; a town's is its streets and buildings), its ways (track and paths, a town's streets,
+quay and moles) and what stands on it (the house's rooms on the ground, buildings, storehouses, shacks, cottages). In the game `M`
+enlarges the plan and then shows the world's ink map about the place (`WorldView` in `app/worldView.ts`; two and a half kilometres
+across at the least): the place's footprint, the footprints of the world's other places built beforehand, and the player, an arrow
+the way they face; the map is drawn the first time it is shown, which holds the page a moment. The world page's **Build every
+place** runs `placesWorker.ts`: the world made again as the game's worker makes it, then every place laid out as the game would,
+its tiles of five metres with it, all handed to the page and kept in the browser (`worldStore.ts`), each place's footprint drawn
+on the map as it comes and its card marked; the game, going to a place whose house was built so, takes its layout from the browser
+and neither makes the world nor its tiles nor lays it out again. The browser's store is kept under the address of that worker,
+whose name in a build carries a hash of its code, the world's and the generator's, so the game and the world page keep in one
+place and nothing made by older code is read back. The world's data handed over and kept now carries what its ink map needs
+(`WorldData` in `worldmap/worldData.ts`), which the game draws too.
+
 **The world's lakes about a place.** A world records each lake as a body of water: a point in it, the level
 of its surface, and its shore as a ring of points where rays from that point first leave it (`World.lakes`).
 About a place built in the world they are drawn out to three kilometres, at their own levels, in the place's

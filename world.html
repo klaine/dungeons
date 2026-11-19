@@ -30,6 +30,8 @@
     .place .kind { opacity: .7; font-size: 12px; letter-spacing: .02em; }
     .place a { display: inline-block; margin: 4px 12px 0 0; color: #e0b070; }
     .place a:focus-visible { outline: 2px solid #e0b070; outline-offset: 2px; }
+    .place .built { color: #e0b070; font-size: 12px; margin-left: 6px; }
+    .place .built.failed { color: #d8806a; }
   </style>
 </head>
 <body>
@@ -44,6 +46,7 @@
     <button id="ink" type="button" aria-pressed="true">Ink map</button>
     <button id="relief" type="button" aria-pressed="false">Relief</button>
     <button id="save" type="button">Save picture</button>
+    <button id="prebuild" type="button" title="Lay out every place of this world now, and keep them in this browser: going to one is quicker, and the map shows what is built at each.">Build every place</button>
     <span id="status"></span>
   </nav>
   <div id="making" hidden>
