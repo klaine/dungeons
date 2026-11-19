@@ -1161,6 +1161,15 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   // ---- the buildings: each made in its own measures by the valley's builder, then turned to its street and set on its ground;
   // with a footing of stone under it, so that where the street falls away along its front no gap shows under its wall
   const chimneys: { x: number; y: number; z: number }[][] = [];
+  // (Which house stands at each point of the lattice of a metre: where houses stand in a row, wall to wall, the face of one's wall
+  // that looks out of it looks into the next, and is indoors.)
+  const houseAt = new Int16Array(znx * znz).fill(-1);
+  t.buildings.forEach((bd, n) => {
+    const r = Math.max(bd.w, bd.d) + 8, i0 = Math.max(0, Math.floor((bd.x - r - zx0) / ZC)), i1 = Math.min(znx - 1, Math.ceil((bd.x + r - zx0) / ZC));
+    const j0 = Math.max(0, Math.floor((bd.z - r - zz0) / ZC)), j1 = Math.min(znz - 1, Math.ceil((bd.z + r - zz0) / ZC));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (outsideBuilt(bd, zx0 + i * ZC, zz0 + j * ZC) === 0) houseAt[j * znx + i] = n;
+  });
+  const houseNear = (x: number, z: number) => { const i = Math.round((x - zx0) / ZC), j = Math.round((z - zz0) / ZC); return i < 0 || j < 0 || i >= znx || j >= znz ? -1 : houseAt[j * znx + i]; };
   t.buildings.forEach((bd, n) => buildTurned(bd, n));
   function buildTurned(bd: Building, n: number) {
     const local = new Map<string, MeshBuilder>(), y = bd.y ?? F, tops: Vector3[] = [];
@@ -1181,14 +1190,41 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       for (const r of fp) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - w, 0, w - r.v1)));
       return best;
     };
+    // And what is inside the house is marked as indoors (a share of sky less than nothing, which the program reads so): whatever lies
+    // well within its outer walls and below their tops, but its glass and its roof's covering. What lies beyond the site is lit by
+    // the open sky wherever it is, and the rooms of a town's houses, which can be walked into, were lit as if they stood out of
+    // doors, every wall and floor in the full blue light of the sky. (What is under the jetties lies outside the walls, and is not.)
+    const wallTop = y + bd.heights.reduce((a, h) => a + h, 0) + 0.6;
+    const inDepth = (x: number, z: number) => {
+      const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
+      let best = -Infinity;
+      for (const r of fp) best = Math.max(best, Math.min(u - r.u0, r.u1 - u, w - r.v0, r.v1 - w));
+      return best;
+    };
     for (const [m, src] of local) {
-      const weathers = m === 'plaster' || m === 'stone' || m === 'brick';
+      const weathers = m === 'plaster' || m === 'stone' || m === 'brick', roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
+      // Which faces are indoors, each judged at its middle, for a face's corners lie on the lines of the walls, where a large one, a
+      // wall the breadth of the house, has no depth inside it at all: a face of a wall that looks into the house (a step along the
+      // way it faces still within the walls), or a floor or a ceiling well within them (a jetty's underside, over the street, is not).
+      const indoors = new Uint8Array(roofOrGlass ? 0 : src.vertexCount);
+      if (!roofOrGlass) src.eachTriangle((a, b, cc, mx, my, mz, nx0, ny0, nz0) => {
+        const wx = bd.x + mx * c - mz * s, wz = bd.z + mx * s + mz * c, wnx = nx0 * c - nz0 * s, wnz = nx0 * s + nz0 * c;
+        if (my > wallTop) return;
+        const inside = Math.abs(ny0) < 0.5 ? outOf(wx + wnx * 0.6, wz + wnz * 0.6) < 0.02 : inDepth(wx, wz) > (ny0 < 0 ? 0.7 : 0.05);
+        if (inside) indoors[a] = indoors[b] = indoors[cc] = 1;
+      });
+      let k = 0;
       mesh(m).append(src, (v) => {
         const x = v.p[0], z = v.p[2], nx = v.n[0], nz = v.n[2];
         v.p[0] = bd.x + x * c - z * s; v.p[2] = bd.z + x * s + z * c;
         v.n[0] = nx * c - nz * s; v.n[2] = nx * s + nz * c;
-        if (!weathers || Math.abs(v.n[1]) > 0.5 || v.p[1] > y + 30) return;
-        if (outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
+        // (But a point of it that lies outside the walls, as the end of a joist that carries a jetty does, is out of doors.)
+        if (indoors[k++] && outOf(v.p[0], v.p[2]) < 0.05) v.open = -1;
+        // Only a wall that looks out of the house: and if it looks into the next house, it is indoors, and has no damp.
+        if (Math.abs(v.n[1]) > 0.5 || outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
+        const next = houseNear(v.p[0] + v.n[0] * 0.8, v.p[2] + v.n[2] * 0.8);
+        if (!roofOrGlass && v.p[1] < wallTop && next >= 0 && next !== n) { v.open = -1; return; }
+        if (!weathers || v.p[1] > y + 30) return;
         v.field[3] = 1000 + footOf(v.p[0] + v.n[0] * 0.3, v.p[2] + v.n[2] * 0.3);
       });
     }

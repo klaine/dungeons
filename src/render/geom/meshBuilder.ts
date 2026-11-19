@@ -140,6 +140,15 @@ export class MeshBuilder {
     }
   }
 
+  /** Calls `fn` for every triangle laid: its three vertices' numbers, where its middle is, and which way its first vertex faces. */
+  eachTriangle(fn: (a: number, b: number, c: number, mx: number, my: number, mz: number, nx: number, ny: number, nz: number) => void): void {
+    const P = this.pos.data, Q = this.nrm.data;
+    for (let t = 0; t < this.idx.length; t += 3) {
+      const a = this.idx[t], b = this.idx[t + 1], c = this.idx[t + 2];
+      fn(a, b, c, (P[a * 3] + P[b * 3] + P[c * 3]) / 3, (P[a * 3 + 1] + P[b * 3 + 1] + P[c * 3 + 1]) / 3, (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3, Q[a * 3], Q[a * 3 + 1], Q[a * 3 + 2]);
+    }
+  }
+
   /** Sets one of the four fields of every point already laid, from where the point is. Where the function gives nothing, the field is left. */
   setField(channel: number, value: (x: number, y: number, z: number) => number | undefined): void {
     for (let i = 0; i < this.vertexCount; i++) {

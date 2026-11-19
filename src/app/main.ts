@@ -530,6 +530,14 @@ async function start(): Promise<void> {
         bk.setXY(i, 0, 0.6 + 0.4 * own[i * 13 + 12]);
         continue;
       }
+      // Indoors (a share of sky less than nothing: the rooms of a town's houses, see `buildTurned`): a dim light come in at the windows,
+      // from the sky and from the sunlit street and walls across the way, about a fifth of what a wall out of doors has in shade, and
+      // as much from every side; and none of the sky's reflections, the rain's wetting or the snow, which go by the share of sky.
+      if (builder.openAt(i) < 0) {
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]), 0, 0, 0);
+        bk.setXY(i, 0.05, 0.6);
+        continue;
+      }
       // Rock knows how much of the sky each of its points can see; everything else sees all of it.
       // Even the deepest crack gets a little light back from the rock about it.
       const open = 0.3 + 0.7 * builder.openAt(i);
