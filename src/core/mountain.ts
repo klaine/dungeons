@@ -2,10 +2,41 @@ import { fbm2, Rng } from './rng';
 import { Mountain, Place, Site } from './site';
 import { turnBetween } from './island';
 import { erodedFbmLod, fbmd, HeightField, landDetail, ridgedFbm, wearByFrost, wearByWater } from './terrain';
-import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
+import { landAt as worldLandAt, makeTilesNear, toSite, worldLand, WORLD_REACH, WorldLand } from './worldLand';
 
 /** Mountains being laid out on a world's summit, whose country is not yet to be read (as `range` is empty until it is laid). */
 const LAYING = new WeakSet<Mountain>();
+/**
+ * On a world's summit, the world the top stands in and how its site lies in it: known from the first, while the top is laid out on
+ * it (`terrain`, which records it in the document, is filled in only once the large shape is decided, as for a drawn top).
+ */
+const ON_WORLD = new WeakMap<Mountain, { land: WorldLand; u: number; v: number; turn: number; base: number }>();
+function onWorldOf(m: Mountain): { land: WorldLand; u: number; v: number; turn: number; base: number } | null {
+  const had = ON_WORLD.get(m);
+  if (had) return had;
+  const t = m.terrain;
+  if (!t?.world || t.u === undefined || t.v === undefined || t.turn === undefined || t.base === undefined) return null;
+  const made = { land: worldLand(t.world), u: t.u, v: t.v, turn: t.turn, base: t.base };
+  ON_WORLD.set(m, made);
+  return made;
+}
+/** The world's land at a point of a top laid on a world's summit, as the site has it: the forecourt's floor at the world's ground. */
+function worldHeight(m: Mountain, floor: number, x: number, z: number): number {
+  const w = onWorldOf(m)!, c = Math.cos(w.turn), sn = Math.sin(w.turn), dx = x - (m.level.x0 + m.level.x1) / 2, dz = z - (m.level.z0 + m.level.z1) / 2;
+  return worldLandAt(w.land, w.u + c * dx - sn * dz, w.v + sn * dx + c * dz) - w.base + floor;
+}
+/**
+ * The top of a world's summit before anything is made on it but the house's ground: the world's own land, with the house's level
+ * ground cut and made up to the forecourt's floor, and eased back into the land round it over a bank half again as broad as the
+ * height it makes up, as `fit.ts` eases a fitted ground. (Drawn, the top was a plateau a few hundred metres across with a precipice
+ * round it, set down on the world where it stood the higher: a platform out of all proportion to the house, and a seam all round.)
+ */
+function worldTop(m: Mountain, floor: number, x: number, z: number): number {
+  const natural = worldHeight(m, floor, x, z), out = outside(m.level, x, z);
+  if (out <= 0) return floor;
+  const bank = Math.min(28, Math.max(6, 1.5 * Math.abs(natural - floor)));
+  return floor + (natural - floor) * smooth(out / bank);
+}
 /** Whether the country round about has been laid out: the range drawn, or the world's, once the top is laid out on it. */
 function hasCountry(m: Mountain): boolean {
   return m.range.length > 0 || (!!m.terrain?.world && !LAYING.has(m));
@@ -225,7 +256,7 @@ function torsAt(m: Mountain, x: number, z: number): number {
     // A tooth (taller than it is broad) is a fin: a blade of rock standing on edge, its crest notched. A tor is a knob. Either stands
     // in beds: its height comes in steps the thickness of a bed, so its sides are ledges and little walls and not a smooth mound.
     const tooth = t.height > t.r * 1.4, turn = (t.x * 12.9898 + t.z * 78.233) % Math.PI, c = Math.cos(turn), s = Math.sin(turn);
-    const along = (x - t.x) * c + (z - t.z) * s, across = -(x - t.x) * s + (z - t.z) * c, e = tooth ? Math.hypot(along / 1.3, across * 1.9) : d;
+    const along = (x - t.x) * c + (z - t.z) * s, across = -(x - t.x) * s + (z - t.z) * c, e = tooth ? Math.hypot(along / 1.15, across * 1.25) : d;
     if (e >= t.r) continue;
     const notch = tooth ? 0.5 + 0.75 * (1 - Math.abs(fbm2(along * 0.55 + t.x, t.z, 2, 47) * 2 - 1)) : 1;
     const raw = t.height * Math.pow(1 - e / t.r, tooth ? 0.42 : 0.5) * (0.65 + 0.7 * fbm2(x / 2.7 + t.x, z / 2.7 - t.z, 2, 19)) * notch;
@@ -290,7 +321,8 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
     y = edge > 60 ? fy : below(x, z) + (fy - below(x, z)) * smooth(edge / 60);
     // (Deep under the cloud, where nothing has been laid out, the mountain's lattice is joined to the country it stands in: else, in
     // the corners of that lattice, it would go down below the valley floors about it.)
-    if (hasCountry(m) && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
+    // (Not on a world's summit, whose lattice and country are the one land.)
+    if (hasCountry(m) && !onWorldOf(m) && y < m.deck - 60) y += (softMax(y, below(x, z), 30) - y) * smooth((m.deck - 60 - y) / 40);
   } else y = below(x, z);
   // The cleft across the ridge: a gap cut clean across it, steep-walled, where a band of weaker rock has gone; the bridge is over it.
   const notch = m.spur.notch;
@@ -302,6 +334,9 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
 
 /** The plain shape of the land, without the cleft and without what is made on it. */
 function baseLand(m: Mountain, floor: number, x: number, z: number): number {
+  // (On a world's summit, the world's own land: its summit, its ridge and its flanks as they are. The ring of the rim, the drops and
+  // the ridge's crest are read from it, for whatever is laid out on it; they do not shape it.)
+  if (onWorldOf(m)) return worldTop(m, floor, x, z);
   // The top: rolling, broken ground, more roughly the higher it stands, with the summits on it;
   // it rounds over a little towards the precipice before it falls.
   const dTop = insideTop(m, x, z);
@@ -552,10 +587,10 @@ function hornRelief(m: Mountain, x: number, z: number, octaves: number, seed: nu
  * and the summits are where the noise puts them.
  */
 function countryShape(m: Mountain, floor: number, x: number, z: number): number {
-  // On a world's summit: the world's land, at its own height under the forecourt's floor, with this top standing on it.
+  // On a world's summit: the world's land, at its own height under the forecourt's floor; the top is that land too.
   if (m.terrain!.world) {
-    const [u, v] = worldFrame(m, x, z), land = worldLandAt(worldLand(m.terrain!.world), u, v) - m.terrain!.base! + floor;
-    return Math.hypot(x - m.x, z - m.z) >= 2600 ? land : softMax(land, baseLand(m, floor, x, z), 20);
+    const [u, v] = worldFrame(m, x, z);
+    return worldLandAt(worldLand(m.terrain!.world), u, v) - m.terrain!.base! + floor;
   }
   const deck = m.deck, seed = m.terrain!.seed, s = (m.x * 7.31 + m.z * 3.17) % 97;
   const fl = deck - 690;
@@ -625,7 +660,9 @@ function nearCountryOf(m: Mountain, floor: number): HeightField {
   if (had && had.sig[0] === m.deck && had.sig[1] === m.range.length && had.sig[2] === floor && had.sig[3] === m.peaks[0]?.height) return had.field;
   const W = NEAR_WEAR, cell = W.cell, n = Math.ceil((2 * W.half) / cell) + 1;
   const f = new HeightField(m.x - W.half, m.z - W.half, cell, n, n);
-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = countryDetailed(m, floor, f.x0 + i * cell, f.z0 + j * cell);
+  // (A world's country is read straight from the world, its tiles of five metres and its lattice of eight: read through the coarse
+  // lattice of twenty-four metres first, as the drawn country is, the nearest mountains came out blurred and rounded.)
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = m.terrain!.world ? countryShape(m, floor, f.x0 + i * cell, f.z0 + j * cell) : countryDetailed(m, floor, f.x0 + i * cell, f.z0 + j * cell);
   // (A world's country is worn already, at its own scale: only read here.)
   if (m.terrain!.world) { NEARS.set(m, { sig: [m.deck, m.range.length, floor, m.peaks[0]?.height], field: f }); return f; }
   const shaped = f.data.slice();
@@ -729,10 +766,86 @@ function levelLine(pts: [number, number][], height: (x: number, z: number) => nu
 }
 
 /**
+ * On a world's summit, the ridge the way comes up by: the way of least effort over the world's land from `from`, the head of the top
+ * below the forecourt, to the first ground `deep` metres under the forecourt and a hundred and sixty metres off at least, so that
+ * there is a walk up out of the cloud; "the way up a ridge
+ * the land actually has, or round the hill if it has none" (`docs/06-world.md`). Climbing costs dear, and so does going down more
+ * steeply than a mule path does, and keeping down in a gully; so it keeps to the crests where there are crests, and goes round where there
+ * are not. Not through the house. Smoothed, so that it bends as a ridge does and not as a lattice does. (Followed a step at a time,
+ * along whatever crest stood highest or towards the foot the world found, it went into a saddle and up the next mountain, or along a
+ * ridge that never went down: on a world's mountains the land under a hospice seldom falls far along the ridge the world chose.)
+ */
+function worldDescent(m: Mountain, floor: number, from: [number, number], deep: number): [number, number][] {
+  const C = 4, R = 420, n = Math.round((2 * R) / C) + 1, x0 = from[0] - R, z0 = from[1] - R, target = floor - deep;
+  const H = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) H[j * n + i] = worldTop(m, floor, x0 + i * C, z0 + j * C);
+  // (How far a point stands over the ground twelve metres about it: more than nothing on a crest, less in a gully.)
+  const S = 3, crest = new Float32Array(n * n);
+  for (let j = S; j < n - S; j++) for (let i = S; i < n - S; i++) { const k = j * n + i; crest[k] = H[k] - (H[k - S] + H[k + S] + H[k - S * n] + H[k + S * n]) / 4; }
+  const lv = m.level, blocked = (x: number, z: number) => x > lv.x0 - 8 && x < lv.x1 + 8 && z > lv.z0 - 8 && z < lv.z1 + 2;
+  const cost = new Float64Array(n * n).fill(Infinity), came = new Int32Array(n * n).fill(-1);
+  const heap: number[] = [], key: number[] = [];
+  const push = (k: number, c: number) => { heap.push(k); key.push(c); for (let i = heap.length - 1; i > 0;) { const p = (i - 1) >> 1; if (key[p] <= key[i]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; [key[p], key[i]] = [key[i], key[p]]; i = p; } };
+  const pop = () => { const top = heap[0], lk = heap.pop()!, lc = key.pop()!; if (heap.length) { heap[0] = lk; key[0] = lc; for (let i = 0; ;) { const l = 2 * i + 1, r = l + 1; let b = i; if (l < heap.length && key[l] < key[b]) b = l; if (r < heap.length && key[r] < key[b]) b = r; if (b === i) break; [heap[b], heap[i]] = [heap[i], heap[b]]; [key[b], key[i]] = [key[i], key[b]]; i = b; } } return top; };
+  const s0 = Math.round((from[1] - z0) / C) * n + Math.round((from[0] - x0) / C);
+  cost[s0] = 0; push(s0, 0);
+  let goal = -1, lowest = s0;
+  while (heap.length) {
+    const k = pop(), i = k % n, j = (k - i) / n;
+    if (H[k] < H[lowest]) lowest = k;
+    if (H[k] <= target && Math.hypot((i * C + x0) - from[0], (j * C + z0) - from[1]) >= 160) { goal = k; break; }
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      const ii = i + di, jj = j + dj;
+      if ((!di && !dj) || ii < 1 || jj < 1 || ii >= n - 1 || jj >= n - 1) continue;
+      const q = jj * n + ii;
+      if (blocked(x0 + ii * C, z0 + jj * C)) continue;
+      const len = C * Math.hypot(di, dj), g = (H[q] - H[k]) / len;
+      // (Going down more steeply than about one in four and a half costs more and more: a mule path comes down a ridge no more steeply,
+      // and laid more steeply than that it was a flight of great steps.)
+      const c = cost[k] + len * (1 + 12 * Math.max(0, g - 0.04) + 9 * Math.max(0, -g - 0.22) + 30 * Math.max(0, -g - 0.5) + 0.25 * Math.max(0, -crest[q]));
+      if (c < cost[q]) { cost[q] = c; came[q] = k; push(q, c); }
+    }
+  }
+  const pts: [number, number][] = [];
+  for (let k = goal >= 0 ? goal : lowest; k >= 0; k = came[k]) pts.unshift([x0 + (k % n) * C, z0 + Math.floor(k / n) * C]);
+  pts[0] = [from[0], from[1]];
+  // (Smoothed, its ends held, and laid out again a step of six metres apart.)
+  let sm = pts;
+  for (let pass = 0; pass < 5; pass++) sm = sm.map((p, k) => { if (k === 0 || k === sm.length - 1) return p; let sx = 0, sz = 0, w = 0; for (let d = -4; d <= 4; d++) { const o = sm[Math.min(sm.length - 1, Math.max(0, k + d))]; sx += o[0]; sz += o[1]; w++; } return [sx / w, sz / w] as [number, number]; });
+  // (Smoothed round a corner of the house's ground, it cut the corner and crossed the yard wall: a point that has come within five metres
+  // of that ground is put back out to five metres off it, at the nearest side.)
+  sm = sm.map((p, k) => {
+    if (k === 0) return p;
+    const [x, z] = p, ex0 = lv.x0 - 5, ex1 = lv.x1 + 5, ez0 = lv.z0 - 5, ez1 = lv.z1 + 5;
+    if (x <= ex0 || x >= ex1 || z <= ez0 || z >= ez1) return p;
+    const to = [x - ex0, ex1 - x, z - ez0, ez1 - z], least = Math.min(...to);
+    return (least === to[0] ? [ex0, z] : least === to[1] ? [ex1, z] : least === to[2] ? [x, ez0] : [x, ez1]) as [number, number];
+  });
+  const out: [number, number][] = [sm[0]];
+  let carry = 0;
+  for (let k = 1; k < sm.length; k++) {
+    const [ax, az] = sm[k - 1], [bx, bz] = sm[k], l = Math.hypot(bx - ax, bz - az);
+    for (let t = 6 - carry; t <= l; t += 6) out.push([ax + ((bx - ax) * t) / l, az + ((bz - az) * t) / l]);
+    carry = (carry + l) % 6;
+  }
+  if (Math.hypot(out[out.length - 1][0] - sm[sm.length - 1][0], out[out.length - 1][1] - sm[sm.length - 1][1]) > 2) out.push(sm[sm.length - 1]);
+  return out;
+}
+
+/** How large the top's outline is drawn, 1 being the first pass: the ground inside the rim, not the ridge, the summits or the precipices. */
+export const MOUNTAIN_SCALE = 0.55;
+/** On a world's summit, how far under the forecourt's floor the top reaches: below that the land is the mountain's flanks. */
+const WORLD_TOP_UNDER = 10;
+
+/**
  * Lays out a mountain top round a house whose forecourt is `meadow` and whose door is at `doorX`
  * in the forecourt's north side. Fills in the site's `mountain`, `grounds`, `track` and `paths`.
  */
 export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }): void {
+  // (How large the top's outline is drawn, against the first pass, which stood a quarter of a kilometre across: too broad a platform
+  // for the house. Only the outline: the ridge keeps its length, so the cloud lies as deep under the top as it did, and the summits and
+  // precipices their size. The house is not scaled, and the rim is grown until it fits.)
+  const S = MOUNTAIN_SCALE;
   const round = (v: number) => Math.round(v * 10) / 10, T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   const house = { x0: Math.min(...others.map((q) => q.x0)) - T, x1: Math.max(...others.map((q) => q.x1)) + T, z0: Math.min(...others.map((q) => q.z0)) - T, z1: meadow.z1 };
@@ -741,19 +854,19 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   const hx = (level.x0 + level.x1) / 2, hz = (level.z0 + level.z1) / 2;
   // On a world's summit (`docs/06-world.md`, step 4): the house's level ground where the world found ground for the hospice, on a
   // shoulder of the ridge below the summit, turned so that the ridge runs south from it; and the summit where it is, in the site.
-  let onWorld: { seed: string; u: number; v: number; turn: number; base: number; summit: { x: number; z: number; height: number } } | null = null;
+  let onWorld: { seed: string; u: number; v: number; turn: number; base: number; summit: { x: number; z: number; height: number }; foot: [number, number] } | null = null;
   if (worn && inWorld) {
     const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'mountain' && o.n === inWorld.n);
     if (!q?.ground) throw new Error(`world ${inWorld.seed} has no mountain top ${inWorld.n}`);
     for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
     const g = q.ground, base = worldLandAt(land, g.x, g.z), c = Math.cos(g.turn), sn = Math.sin(g.turn), du = q.x - g.x, dv = q.z - g.z;
-    onWorld = { seed: inWorld.seed, u: g.x, v: g.z, turn: g.turn, base: round(base), summit: { x: round(hx + c * du + sn * dv), z: round(hz - sn * du + c * dv), height: round(Math.max(20, q.y - base)) } };
+    onWorld = { seed: inWorld.seed, u: g.x, v: g.z, turn: g.turn, base: round(base), summit: { x: round(hx + c * du + sn * dv), z: round(hz - sn * du + c * dv), height: round(Math.max(20, q.y - base)) }, foot: toSite({ u: g.x, v: g.z, turn: g.turn }, hx, hz, ...(q.ridge?.foot ?? [g.x, g.z])) };
   }
 
   // The rim: an oval turned any way, with spurs of the top standing out from it and gullies cut
   // back into it, as a mountain's top is; the precipice under it high in one place and less in the next.
   const shape = rng.fork('rim');
-  let R = shape.range(120, 160), turn = shape.range(0, Math.PI), squash = shape.range(0.68, 0.95);
+  let R = shape.range(120, 160) * S, turn = shape.range(0, Math.PI), squash = shape.range(0.68, 0.95);
   const seed = shape.range(0, 500);
   // (On a world's summit, the top is drawn out along the line from the house to the summit, as broad as a top drawn alone: a
   // summit ridge, with the house at its lower end. Grown all round to reach a summit three hundred metres off, it was twice as
@@ -764,15 +877,15 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     R = Math.max(R, along / 2 + 80);
     squash = Math.min(0.95, Math.max(0.35, wide / R));
   }
-  const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24), wide: shape.range(0.1, 0.22) }));
-  const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15), wide: shape.range(0.04, 0.08) }));
+  const heads = Array.from({ length: shape.int(2, 4) }, () => ({ at: shape.range(0, TAU), out: shape.range(10, 24) * S, wide: shape.range(0.1, 0.22) }));
+  const gullies = Array.from({ length: shape.int(1, 4) }, () => ({ at: shape.range(0, TAU), into: shape.range(6, 15) * S, wide: shape.range(0.04, 0.08) }));
   const rimOf = (scale: number) => Array.from({ length: N }, (_, k) => {
     const a = (k / N) * TAU, c = Math.cos(a - turn), s = Math.sin(a - turn);
     let r = (R / Math.sqrt(c * c + (s * s) / (squash * squash))) * scale;
     r *= 1 + 0.2 * (fbm2(Math.cos(a) * 1.6 + seed, Math.sin(a) * 1.6, 3) - 0.5) + 0.1 * (fbm2(Math.cos(a) * 7 + seed, Math.sin(a) * 7 - seed, 2) - 0.5);
     for (const h of heads) r += h.out * Math.exp(-((turnBetween(h.at, a) / h.wide) ** 2));
     for (const g of gullies) r -= g.into * Math.exp(-((turnBetween(g.at, a) / g.wide) ** 2));
-    return round(Math.max(40, r));
+    return round(Math.max(40 * S, r));
   });
   const dropSeed = shape.range(0, 500);
   // The house stands on a shoulder near the south edge: the middle of the top lies north of it.
@@ -789,11 +902,43 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   // Grown until the house and its level ground lie well inside the rim.
   const corners = [[level.x0, level.z0], [level.x1, level.z0], [level.x0, level.z1], [level.x1, level.z1], [hx, level.z1]];
   const margin = () => Math.min(...corners.map(([x, z]) => insideTop(m, x, z)));
-  for (let grow = 1; grow < 2 && margin() < 16; grow += 0.05) m.rim = rimOf(grow);
-  // (And until the world's summit stands well inside it too.)
-  if (onWorld) for (let grow = 1; grow < 3.5 && (margin() < 16 || insideTop(m, onWorld.summit.x, onWorld.summit.z) < 40); grow += 0.05) m.rim = rimOf(grow);
+  if (!onWorld) for (let grow = 1; grow < 2 && margin() < 16; grow += 0.05) m.rim = rimOf(grow);
+  // On a world's summit the top is not drawn: its land is the world's (`worldTop`), and its rim is read from that land, for whatever is
+  // laid out on it (the climb, the landings, the tors, the shelter, the hall) and for where the builder carves rock. The top is the
+  // ground reached from its middle that stands no lower than a little under the forecourt: the shoulder the house is on and the
+  // summit's dome above it, as far as the house's ground and the summit need and no further. So it is as broad as the mountain's
+  // own top, not an oval drawn round the house and the summit; and the drops under it are what the land does there.
+  if (onWorld) {
+    ON_WORLD.set(m, { land: worldLand(onWorld.seed), u: onWorld.u, v: onWorld.v, turn: onWorld.turn, base: onWorld.base });
+    delete m.ribs;
+    const low = F - WORLD_TOP_UNDER, s = onWorld.summit;
+    // (Each corner of the house's ground well inside, and the summit with room about its cairn.)
+    const needs: [number, number, number][] = [...corners.map(([x, z]) => [x, z, 16] as [number, number, number]), [s.x, s.z, 40]];
+    const far = Math.max(...needs.map(([x, z, extra]) => Math.hypot(x - m.x, z - m.z) + extra)) + 30;
+    // (And within a band some sixty-five metres either side of the line from the house up to the summit: the summit's ridge with the
+    // house at its foot. Taken wherever the land stood high enough, it was the whole massif above the house, two hundred metres and
+    // more every way, and all of it carved.)
+    const BAND = 65, inBand = (x: number, z: number) => { const ax = hx, az = hz, dx = s.x - ax, dz = s.z - az, l2 = dx * dx + dz * dz || 1, t = clamp01(((x - ax) * dx + (z - az) * dz) / l2); return Math.hypot(x - ax - dx * t, z - az - dz * t) < BAND; };
+    const ring = Array.from({ length: N }, (_, k) => {
+      const a = (k / N) * TAU, c = Math.cos(a), sn = Math.sin(a);
+      let r = 6;
+      while (r < far && inBand(m.x + c * r, m.z + sn * r) && worldTop(m, F, m.x + c * r, m.z + sn * r) >= low) r += 2;
+      return r;
+    });
+    for (const [x, z, extra] of needs) {
+      const a = Math.atan2(z - m.z, x - m.x), d = Math.hypot(x - m.x, z - m.z) + extra, k0 = Math.round((a / TAU) * N);
+      for (let dk = -4; dk <= 4; dk++) { const k = (((k0 + dk) % N) + N) % N; ring[k] = Math.max(ring[k], d * (1 - Math.abs(dk) * 0.035)); }
+    }
+    // (Smoothed a little round the ring, so that one bearing that runs out along a spur does not make a spike.)
+    m.rim = ring.map((_, k) => round((ring[(k + N - 1) % N] + 2 * ring[k] + ring[(k + 1) % N]) / 4));
+    m.drop = m.rim.map((r, k) => {
+      const a = (k / N) * TAU, c = Math.cos(a), sn = Math.sin(a), x = m.x + c * r, z = m.z + sn * r;
+      return round(Math.min(60, Math.max(4, worldTop(m, F, x, z) - worldTop(m, F, x + c * 30, z + sn * 30))));
+    });
+  }
 
   // The ridge: out from the rim on the south side, beyond the forecourt, and down.
+  let ridgeFall = 0;
   {
     const q = rng.fork('spur');
     const exitX = doorX, exitZ = level.z1;
@@ -805,7 +950,12 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const plainTop = landAt({ ...m, spur: { ...m.spur, y0: -1e4, y1: -1e4 } }, F, fx, fz, false);
     m.spur.y0 = round(plainTop);
     // (No steeper along its length than the way may go straight down it: a path on a ridge keeps to the crest, and zigzags across a crest would cut it to pieces.)
-    m.spur.y1 = round(plainTop - Math.min(q.range(82, 108), length * 0.26));
+    ridgeFall = Math.min(q.range(82, 108), length * 0.26);
+    m.spur.y1 = round(plainTop - ridgeFall);
+    // (On a world's summit the ridge leaves the forecourt in front of it, through the gap in the yard wall at the door, as on a drawn
+    // top; reckoned from the rim, which on a world's summit hugs the house's ground, its head fell to one side of the forecourt, and
+    // the way ran along inside it and off its edge, down a bank no one could climb.)
+    if (onWorld) m.spur.from = [round(doorX), round(level.z1 + 8)];
   }
   // Summits: the highest behind the house, on the north side; perhaps one or two lesser, anywhere clear of the house and the head of the ridge.
   {
@@ -821,7 +971,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       m.peaks.push({ x: round(x), z: round(z), r: round(r), height: round(height) });
     }
     const more = q.int(0, 2);
-    for (let tries = 0; tries < 300 && m.peaks.length < 1 + more; tries++) {
+    // (Not on a world's summit: the lesser tops round it are the world's, as its land is.)
+    for (let tries = 0; tries < 300 && m.peaks.length < 1 + (onWorld ? 0 : more); tries++) {
       const a = q.range(0, TAU), at = rimAt(m, a) * Math.sqrt(q.next()) * 0.85, x = m.x + Math.cos(a) * at, z = m.z + Math.sin(a) * at;
       const r = q.range(26, 45), height = q.range(14, Math.max(16, m.peaks[0].height * 0.6));
       if (outside(level, x, z) < r * 0.4 + 10 || Math.hypot(x - m.spur.from[0], z - m.spur.from[1]) < r + 20) continue;
@@ -838,7 +989,12 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   {
     const q = rng.fork('crest'), [fx, fz] = m.spur.from, straight = Math.atan2(m.spur.to[1] - fz, m.spur.to[0] - fx), length = Math.hypot(m.spur.to[0] - fx, m.spur.to[1] - fz), STEP = 6;
     let line: [number, number][] = [];
-    for (let tries = 0; tries < 240; tries++) {
+    // On a world's summit, the ridge the way comes up is the one the land has (`worldDescent`): down from the head of the top to where
+    // the cloud is to lie, fifty-five to seventy-five metres under the forecourt, not the eighty to a hundred and ten a drawn ridge falls:
+    // a world's mountains are a third as high as the country the drawn top was made for, and the cloud is to lie forty to sixty metres
+    // under the house.
+    if (onWorld) line = worldDescent(m, F, [fx, fz], Math.min(75, Math.max(55, ridgeFall * 0.7)));
+    for (let tries = 0; tries < 240 && !onWorld; tries++) {
       const pts: [number, number][] = [[fx, fz]];
       let h = straight + q.range(-0.25, 0.25), x = fx, z = fz, gone = 0, sign = q.chance(0.5) ? 1 : -1, ok = true;
       // (Straight out for a little way first, clear of the rim.)
@@ -859,10 +1015,23 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // (Knolls and saddles deep enough that whoever comes up it walks downhill two or three times on the way: into a saddle, with the next rise seen across it.)
     const fallen = (t: number) => Math.pow(t, 1.05) + 0.13 * Math.sin(t * waves * TAU + p1) * Math.sin(Math.PI * t) + 0.02 * Math.sin(t * 9.3 * TAU + p2) * smooth(t / 0.1);
     const end = fallen(1);
-    m.spur.crest = line.map(([x, z], k) => [round(x), round(z), round(m.spur.y0 + (m.spur.y1 - m.spur.y0) * (fallen(k / (line.length - 1)) / end))]);
+    m.spur.crest = line.map(([x, z], k) => [round(x), round(z), round(onWorld ? worldTop(m, F, x, z) : m.spur.y0 + (m.spur.y1 - m.spur.y0) * (fallen(k / (line.length - 1)) / end))]);
     m.spur.to = [m.spur.crest[m.spur.crest.length - 1][0], m.spur.crest[m.spur.crest.length - 1][1]];
+    if (onWorld) {
+      const crest = m.spur.crest;
+      m.spur.y0 = crest[0][2]; m.spur.y1 = crest[crest.length - 1][2];
+      // (As broad as the land has it: how far either side of the crest the ground stays within four metres of it, taken over the ridge.)
+      const halves: number[] = [];
+      for (let k = 2; k < crest.length - 1; k += 3) {
+        const [x, z, y] = crest[k], [x1, z1] = crest[k + 1], hd = Math.atan2(z1 - z, x1 - x), px = -Math.sin(hd), pz = Math.cos(hd);
+        for (const side of [-1, 1]) { let d = 2; while (d < 30 && worldTop(m, F, x + px * side * d, z + pz * side * d) > y - 4) d += 1; halves.push(d); }
+      }
+      halves.sort((p, q2) => p - q2);
+      m.spur.width = round(Math.min(30, Math.max(10, 2 * (halves[Math.floor(halves.length / 2)] ?? 9))));
+    }
     // The cleft across it, on most mountains: in its upper half, where the bridge over it will be above the cloud.
-    if (rng.fork('notch?').chance(0.75)) {
+    // (Not on a world's summit: cut across the world's ridge, it was a straight trench sixty metres long through land that has gaps of its own.)
+    if (rng.fork('notch?').chance(0.75) && !onWorld) {
       const total = line.reduce((sum, pt, k) => (k ? sum + Math.hypot(pt[0] - line[k - 1][0], pt[1] - line[k - 1][1]) : 0), 0);
       // (Where the crest runs most nearly level, on a knoll's top or in a saddle: a bridge wants its two ends at one height.)
       let at = total * 0.36, least = Infinity;
@@ -880,11 +1049,13 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
 
   // The way: from the door across the forecourt, on to the head of the ridge, and down the ridge
   // in zigzags as steep as a mule path may be, to where the player arrives near its end.
-  const track: [number, number][] = [[doorX, meadow.z0], [doorX, meadow.z1 - 4]];
+  // (On a world's summit straight out through the gap in the yard wall first, before it bows away to the head of the ridge: the ridge the
+  // land has may set off to one side, and the bow, drawn from inside the forecourt, met the wall beside the gap.)
+  const track: [number, number][] = [[doorX, meadow.z0], [doorX, meadow.z1 - 4], ...(onWorld ? [[doorX, level.z1 - 0.5], [doorX, level.z1 + 3]] as [number, number][] : [])];
   {
     const q = rng.fork('way'), hd = crestPoint(m, 0.07), ft = crestPoint(m, 0.93);
     const head: [number, number] = [hd.x, hd.z], foot: [number, number] = [ft.x, ft.z];
-    const [sx, sz] = track[1];
+    const [sx, sz] = track[track.length - 1];
     // From the forecourt to the head of the ridge: not ruled straight, but in one easy bow, as a path worn by feet goes.
     const first: [number, number][] = [];
     {
@@ -925,6 +1096,15 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     const cut = m.spur.notch;
     delete m.spur.notch;
     m.way = levelLine(line, plain, F, plain(foot[0], foot[1]), 0.5);
+    // (On a world's summit the land may fall away steeply right in front of the forecourt, where the world's own slope meets the house's
+    // levelled ground. The way keeps the forecourt's level until it is out through the gap in the yard wall, and only then goes down,
+    // no more steeply than one in two, the land made up under it where it falls faster: eased down from inside the forecourt, it left a
+    // step as high as a man between the forecourt's paving and the land outside the gap.)
+    if (onWorld) {
+      const w = m.way;
+      for (const p of w) if (outside(level, p[0], p[1]) <= 0.5) p[2] = F;
+      for (let k = 1; k < w.length; k++) w[k][2] = Math.max(w[k][2], round(w[k - 1][2] - 0.5 * Math.hypot(w[k][0] - w[k - 1][0], w[k][1] - w[k - 1][1])));
+    }
     if (cut) m.spur.notch = cut;
     // The bridge: over the cleft the way does not go down and up, it goes across, straight and level from lip to lip.
     if (m.spur.notch) {
@@ -1019,9 +1199,17 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
       if (q0.chance(0.6)) ctrl.push(pick());
       ctrl.push([endX, endZ]);
       const pts = through(ctrl), len = lengthOf(pts);
-      const sc = Math.abs(len - want) + Math.max(0, want - len) * 2;
+      let sc = Math.abs(len - want) + Math.max(0, want - len) * 2;
       // (Nor may it pass over the summit before it comes up to it.)
       if (sc >= score || tightest(pts) < 35 || !fits(pts) || pts.some(([x, z], k) => k < pts.length - 10 && Math.hypot(x - cx, z - cz) < 18)) continue;
+      // (On a world's summit, whose land is not drawn for the climb, the route that keeps nearest the land as it rises at its even
+      // grade: one that cut straight up a face would be a trench, and one across a hollow an embankment.)
+      if (onWorld) {
+        let dev = 0, n = 0, d = 0;
+        for (let k = 0; k < pts.length; k += 3) { if (k) d += Math.hypot(pts[k][0] - pts[k - 3][0], pts[k][1] - pts[k - 3][1]); dev += Math.abs(plain(pts[k][0], pts[k][1]) - (F + ((top - F) * d) / len)); n++; }
+        sc += (2.5 * dev) / Math.max(1, n);
+        if (sc >= score) continue;
+      }
       // (Where it swings widest, between the points it passes through: the bends' outer sides, for the landings.)
       apexes = [];
       let at = 0;
@@ -1042,7 +1230,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
     // half of it, is a stair in the rock, as steep as a stair may be.)
     const total = along[along.length - 1] || 1, last = total * 0.45, EASY = 0.4, STAIR = 0.6;
     // (A summit higher than even such a route can climb is a little lower: the top is only so broad.)
-    for (let pass = 0; pass < 10 && top - F > (EASY * (total - last) + STAIR * last) * 0.985; pass++) {
+    // (Not a world's summit, which is as high as the world has it: there the stair takes the rest.)
+    for (let pass = 0; pass < 10 && !onWorld && top - F > (EASY * (total - last) + STAIR * last) * 0.985; pass++) {
       m.peaks[0].height = round(m.peaks[0].height * (((EASY * (total - last) + STAIR * last) * 0.97) / (top - F)));
       top = plain(cx, cz);
     }
@@ -1150,7 +1339,7 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
           if (m.shelter && Math.hypot(m.shelter.x - x, m.shelter.z - z) < r + 6) continue;
           if (m.gate && Math.hypot(m.gate.x - x, m.gate.z - z) < r + 7) continue;
           if (m.spur.notch) { const sp = onSpur(m, x, z); if (sp.off < 40 && Math.abs(sp.d - m.spur.notch.at) < m.spur.notch.wide / 2 + r + 5) continue; }
-          m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 2.2 : 1.6, 3.1)) });
+          m.tors!.push({ x: round(x), z: round(z), r: round(r), height: round(r * q.range(gate ? 1.9 : 1.45, 2.4)) });
         }
       }
     };
@@ -1196,7 +1385,8 @@ export function layOutMountain(site: Site, meadow: Place, doorX: number, rng: Rn
   {
     const q = rng.fork('needles');
     m.needles = [];
-    for (let tries = 0, want = q.int(2, 5); tries < 80 && m.needles.length < want; tries++) {
+    // (Not on a world's summit, which has the world's own land round it and no drawn precipices for them to have been cut from.)
+    for (let tries = 0, want = onWorld ? (q.int(2, 5), 0) : q.int(2, 5); tries < 80 && m.needles.length < want; tries++) {
       const a = q.range(0, TAU), r = q.range(8, 17), d = rimAt(m, a) + q.range(30, 95) + r;
       const x = m.x + Math.cos(a) * d, z = m.z + Math.sin(a) * d;
       // (Not off the ridge, where they would stand in the way of the view down it, nor one upon another.)
@@ -1603,6 +1793,9 @@ function wornLand(m: Mountain, floor: number): HeightField {
   const M = 150, cell = t.cell;
   const f = new HeightField(Math.floor((x0 - M) / cell) * cell, Math.floor((z0 - M) / cell) * cell, cell, Math.ceil((x1 - x0 + 2 * M) / cell) + 2, Math.ceil((z1 - z0 + 2 * M) / cell) + 2);
   const plainShape = new Float32Array(f.data.length), detailed = new Float32Array(f.data.length), keep = new Float32Array(f.data.length), pads = new Float32Array(f.data.length);
+  // (A world's land is worn already, at its own scale, and has its own detail: on a world's summit only a little finer detail is laid
+  // on it and it is worn only lightly, so that the place keeps the world's shape and meets it without a seam.)
+  const worldly = !!onWorldOf(m), detailK = worldly ? 0.3 : 1, wearK = worldly ? 0.4 : 1;
   for (let j = 0; j < f.nz; j++) for (let i = 0; i < f.nx; i++) {
     const x = f.x0 + i * cell, z = f.z0 + j * cell, k = j * f.nx + i;
     const y = baseLand(m, floor, x, z), within = inside(m, x, z);
@@ -1614,14 +1807,14 @@ function wornLand(m: Mountain, floor: number): HeightField {
     keep[k] = Math.max(pad, WEAR.spare * smooth((within + 1) / 5));
     // Detail: a few metres on the top, more on the slopes below the rim and the ridge, where the rock is.
     const below = smooth(-within / 22);
-    detailed[k] = y + (WEAR.topDetail + (WEAR.slopeDetail - WEAR.topDetail) * below) * landDetail(x, z, WEAR.detailScale, t.seed) * (1 - pad);
+    detailed[k] = y + (WEAR.topDetail + (WEAR.slopeDetail - WEAR.topDetail) * below) * landDetail(x, z, WEAR.detailScale, t.seed) * (1 - pad) * detailK;
   }
   f.data.set(detailed);
   wearByWater(f, rng.fork('water'), { ...WEAR.water, keep });
   // (However long the water has been at it, it has not cut the mountain away: its depth is bounded, so the shape decided stays;
   // and on the walkable top and the ridge's crest bounded by how far they are spared, so that a gully notches the edge but does not
   // cut back into the top, where the carved rock would stand over it and the fences, laid by the land, would miss the drop.)
-  for (let k = 0; k < f.data.length; k++) { const free = 1 - keep[k]; f.data[k] = Math.max(detailed[k] - WEAR.cut * free, Math.min(detailed[k] + WEAR.fill * free, f.data[k])); }
+  for (let k = 0; k < f.data.length; k++) { const free = (1 - keep[k]) * wearK; f.data[k] = Math.max(detailed[k] - WEAR.cut * free, Math.min(detailed[k] + WEAR.fill * free, f.data[k])); }
   wearByFrost(f, WEAR.frost.passes, WEAR.frost.repose, WEAR.frost.rate, keep);
   for (let k = 0; k < f.data.length; k++) f.data[k] += (plainShape[k] - f.data[k]) * pads[k];
   return f;

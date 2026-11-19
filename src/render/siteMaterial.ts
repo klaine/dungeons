@@ -23,7 +23,7 @@ import { TextureSet } from './textures';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, attribute, cameraPosition, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, length, materialRoughness, max, min, mix,
   normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
@@ -33,6 +33,47 @@ export interface SiteUniforms {
   uBake: { value: number };
   /** Stand-in sky light used until the bake arrives. */
   uFallback: { value: Vector3 };
+}
+
+/**
+ * Where a place's near ground gives way to its far land, for a place whose two are the one land (a mountain top on a world's summit):
+ * the rectangle the near ground is laid over (`x0`, `z0`, `x1`, `z1`), and how broad a band inside its edge the one passes into the
+ * other over. A band of nothing, as for every other place, and nothing is passed over. (Where the near ground ended along a straight
+ * line and the far land's own material began, the place stood in its world as a square set into it.)
+ */
+export const nearFarUniforms: { uNearRect: { value: Vector4 }; uNearBand: { value: number } } = {
+  uNearRect: uniform(new Vector4(0, 0, 0, 0)) as N,
+  uNearBand: uniform(0) as N,
+};
+/**
+ * The near ground's share of a point of the band, 0 at its outer edge to 1 at its inner; and patches on the ground a couple of metres
+ * across, which the two kinds of ground are cut by: the near ground is drawn where a patch is under the share, the far land where it
+ * is not, so that across the band the near ground breaks up into the far land as ground cover thins out. (Cut by the points of the
+ * picture instead, the band was a hatched stripe across the hillside: the two kinds of ground are not alike, and side by side at every
+ * other point of the picture they showed as a weave.) The far land is cut a little short of the near ground and laid a little under
+ * it there (`layRange`), so that where the two surfaces, a few centimetres apart, see a patch's edge differently, both are drawn and
+ * the near ground shows, rather than neither and a hole.
+ */
+function nearFarCut(side: 'near' | 'far'): { opacity: N; test: N } {
+  const r = nearFarUniforms.uNearRect as N, band = nearFarUniforms.uNearBand as N, p: N = positionWorld.xz;
+  const inside: N = min(min(p.x.sub(r.x), r.z.sub(p.x)), min(p.y.sub(r.y), r.w.sub(p.y)));
+  const share: N = min(max(inside.div(max(band, 0.001)), 0), 1);
+  const patch: N = farNoise(p.div(2.4)).mul(0.65).add(farNoise(p.div(0.85).add(7.3)).mul(0.35));
+  // (The patches' values lie mostly between a quarter and three quarters: the share is spread to match, so that the band is used.)
+  // (And none at all past its inner edge, where no far land is laid under it.)
+  const spread: N = select(share.greaterThanEqual(0.999), float(2), share.mul(0.7).add(0.15));
+  const on: N = band.greaterThan(0);
+  // (The near ground is never cut outside its rectangle, where it is not laid: what else is drawn with it there stays.)
+  const near: N = select(on.and(inside.greaterThanEqual(0)).and(patch.greaterThanEqual(spread)), float(0), float(1));
+  const far: N = select(on.and(inside.greaterThanEqual(0)).and(patch.lessThan(spread.sub(0.06))), float(0), float(1));
+  return { opacity: side === 'near' ? near : far, test: float(0.5) };
+}
+/** Lets a ground material be passed over into the far land, or the far land into the near ground, across the band (`nearFarUniforms`). */
+export function fadesAtNearEdge(m: MeshStandardNodeMaterial, side: 'near' | 'far'): MeshStandardNodeMaterial {
+  const cut = nearFarCut(side);
+  (m as N).opacityNode = cut.opacity;
+  (m as N).alphaTestNode = cut.test;
+  return m;
 }
 
 export const siteUniforms: SiteUniforms = {
@@ -60,6 +101,41 @@ const bakeOf = (): N => attribute('aBake', 'vec2');
 const one = (x: N): N => float(1).sub(x);
 /** `smoothstep`, which may also be asked to fall instead of rise (the first edge above the second). */
 const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x)) : smoothstep(a, b, x));
+
+/**
+ * The edges of what is cut square: blocks, steps, sills, cornices, timbers. Nothing cut by hand has an edge as sharp as a box's: a
+ * dressed stone's arris is eased by the mason and then by weather, a step's nose by feet, a beam's by the adze and by years, and the
+ * rounded edge catches a thin line of light where the two faces turn away from each other; there too the stone is chipped and worn
+ * paler. Drawn as plain boxes, a building's mouldings and a stair's treads read as cut card. Modelled, every edge would be some
+ * dozen more triangles, and there are a great many of them; so the rounding is drawn instead (a bevel in the shading only): every
+ * face of such a solid says where its corners are (`markFace`), and here the distance to each of its edges is worked out in metres
+ * (from how the face's own coordinates change across the picture, so that it holds for a face of any shape and any size), and within
+ * `radius` of an edge the surface is turned towards it, a little at first and half way to the next face at the edge itself, as a
+ * rounded arris turns. It fades out where the rounding would be smaller than a point of the picture. Gives the bent normal (from the
+ * one given, in the eye's terms) and how near an edge the point is, 0 to 1, for wear.
+ */
+export const edgeUniforms: { uEdges: { value: number } } = { uEdges: uniform(1) as N };
+const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
+  const e: N = attribute('aEdge', 'vec4');
+  const P: N = positionView, dPx: N = dFdx(P), dPy: N = dFdy(P);
+  const ng: N = normalize(normalViewGeometry);
+  // (The way each of the face's two coordinates rises across it, in metres, from how they change from one point of the picture to the next.)
+  const a: N = cross(dPy, ng), b: N = cross(ng, dPx), d0: N = dot(dPx, a);
+  const det: N = d0.add(select(d0.greaterThanEqual(0), float(1e-14), float(-1e-14)));
+  const rise = (f: N): N => a.mul(dFdx(f)).add(b.mul(dFdy(f))).div(det);
+  const gs: N = rise(e.x).toVar(), gt: N = rise(e.y).toVar(), g3: N = gs.add(gt).toVar();
+  const ls: N = max(length(gs), 1e-4), lt: N = max(length(gt), 1e-4), l3: N = max(length(g3), 1e-4);
+  const quad: N = step(0.25, e.z).mul(step(e.z, 0.75)), tri: N = step(0.75, e.z);
+  // (Not narrower than a point of the picture; and gone where it would be much narrower.)
+  const point: N = max(length(fwidth(P)), 1e-5), r: N = max(float(radius), point), shown: N = smoothstep(0.15, 0.6, float(radius).div(point)).mul(edgeUniforms.uEdges as N);
+  const near = (d: N): N => pow(clamp(float(1).sub(d.div(r)), 0, 1), 2);
+  const s0: N = near(e.x.div(ls)).mul(quad.add(tri)), s1: N = near(float(1).sub(e.x).div(ls)).mul(quad);
+  const t0: N = near(e.y.div(lt)).mul(quad.add(tri)), t1: N = near(float(1).sub(e.y).div(lt)).mul(quad);
+  const u3: N = near(float(1).sub(e.x).sub(e.y).div(l3)).mul(tri);
+  const tilt: N = gs.div(ls).mul(s1.sub(s0)).add(gt.div(lt).mul(t1.sub(t0))).add(g3.div(l3).mul(u3)).mul(shown).toVar();
+  const wear: N = max(max(max(s0, s1), max(t0, t1)), u3).mul(shown);
+  return { bend: (n: N) => normalize(n.add(tilt)), wear };
+};
 
 /** The baked light on a surface facing `wn`. */
 const bakedAt = (wn: N): N => {
@@ -123,7 +199,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number] } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -149,13 +225,20 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // from the bake, which says how much sky each point sees; until it arrives, nothing built has snow on it.
   const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y.add(one(stone.a).mul(0.1))).mul(smoothstep(0.3, 0.55, bk.x)).mul(uBake).toVar();
   colour = mix(colour, vec3(...SNOW), snowy);
+  // The edges of what is cut square, rounded in the shading (`edgeOf`), and a little paler where they are worn.
+  if (o.bevel) {
+    const edge = edgeOf(o.bevel);
+    colour = colour.mul(edge.wear.mul(0.12).add(1));
+    m.normalNode = edge.bend(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
+  }
   m.colorNode = vec4(colour, 1);
   m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: o.matt ? float(0.12) : undefined });
-  return m;
+  // (Ground laid with it, the scree, is passed over into the far land at the edge of the near ground, where a place asks for it.)
+  return o.fades ? fadesAtNearEdge(m, o.fades) : m;
 }
 
 /** The same material as `makeSiteMaterial` makes, for a surface with depth (see `deep` there). */
@@ -445,7 +528,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   m.roughnessNode = mix(mix(m.roughnessNode as N, mix(mix(0.82, 0.5, wetV), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.6)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
-  return m;
+  return fadesAtNearEdge(m, 'near');
 }
 
 /**
@@ -698,7 +781,10 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
     sheetCavity = r.cavity;
     m.colorNode = vec4((m.colorNode as N).xyz.mul(mix(1, sheetCavity, one(snowy))), 1);
   }
-  m.normalNode = transformNormalToView(bent);
+  // (Blocks of it laid by hand, steps, kerbs and cairns, have their edges rounded as dressed stone's are (`edgeOf`); what is carved has none to round.)
+  const rockEdge = edgeOf(0.03);
+  m.normalNode = rockEdge.bend(transformNormalToView(bent));
+  m.colorNode = vec4((m.colorNode as N).xyz.mul(rockEdge.wear.mul(0.1).add(1)), 1);
   // The sun down a shaft, on rock under the hill that was found to stand clear in it (which it
   // carries in the second of its two numbers, above the six tenths all such rock has).
   const inShaft = smoothstep(0.62, 0.95, bk.y).mul(step(bk.x, 0.004)).mul(step(0.001, uShaftTop.w));
@@ -709,7 +795,8 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // (The sky's light is reckoned for the surface as its grain turns it, not for the smooth surface under the grain: most of a cliff is in
   // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
   lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao).mul(mix(1, sheetCavity, 0.8)), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
-  return m;
+  // (Rock laid as a sheet is ground too, and is passed over into the far land with it; carved rock is not.)
+  return o.relief ? fadesAtNearEdge(m, 'near') : m;
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
@@ -747,10 +834,12 @@ const farFbm: N = Fn(([p0]: [N]) => {
  * was smooth between the sheet's points: a cast, not a mountain.)
  */
 const rockRelief = (P: N, n0: N, base: N, grain: N, weight: N, strength = 3.4, dark = 0.55): { normal: N; cavity: N } => {
-  const flatOut: N = vec2(n0.x, n0.z).toVar();
-  const outward: N = flatOut.div(max(length(flatOut), 0.001)).toVar();
-  const alongDir: N = vec2(outward.y.negate(), outward.x).toVar();
-  const sAt: N = dot(P.xz, alongDir).toVar();
+  // (The distance along a face is read off the world's own axes, x for faces that look along z and z for those that look along x,
+  // the two blended where a face turns. It was `dot(P.xz, alongDir)`, with `alongDir` the face's own direction: but P is thousands
+  // of metres from the origin, so the least turn of a curved face, from one point of the picture to the next, swung that distance
+  // by metres, and the relief came out as contour-line moiré over every great wall.)
+  const wz: N = n0.x.mul(n0.x).toVar(), wx: N = n0.z.mul(n0.z).toVar();
+  const wsum: N = max(wx.add(wz), 0.0001).toVar();
   const o1: N = one(smoothstep(2.2, 4.5, grain)).toVar(), o2: N = one(smoothstep(0.9, 1.8, grain)).toVar(), o3: N = one(smoothstep(0.35, 0.7, grain)).toVar();
   const ridgeOf = (q: N): N => { const v = one(abs(farNoise(q).mul(2).sub(1))); return v.mul(v); };
   const reliefAt = (sx: N, y: N): N => {
@@ -767,10 +856,15 @@ const rockRelief = (P: N, n0: N, base: N, grain: N, weight: N, strength = 3.4, d
     const chip = farNoise(vec2(sx.div(2.6), y.div(3.1)).add(3.3)).mul(0.25).mul(o3);
     return gully.add(rib).add(ledge).add(chip);
   };
-  const r0: N = reliefAt(sAt, P.y).toVar();
-  const rs: N = reliefAt(sAt.add(1.2), P.y).sub(r0).div(1.2), ry: N = reliefAt(sAt, P.y.add(1.2)).sub(r0).div(1.2);
+  // Each projection (along x, along z): its value, and its slope along the axis and up.
+  const rx0: N = reliefAt(P.x, P.y).toVar(), rz0: N = reliefAt(P.z, P.y).toVar();
+  const rsx: N = reliefAt(P.x.add(1.2), P.y).sub(rx0).div(1.2), rsz: N = reliefAt(P.z.add(1.2), P.y).sub(rz0).div(1.2);
+  const ryx: N = reliefAt(P.x, P.y.add(1.2)).sub(rx0).div(1.2), ryz: N = reliefAt(P.z, P.y.add(1.2)).sub(rz0).div(1.2);
+  const r0: N = rx0.mul(wx).add(rz0.mul(wz)).div(wsum).toVar();
+  const ry: N = ryx.mul(wx).add(ryz.mul(wz)).div(wsum);
   const upFace: N = normalize(vec3(0, 1, 0).sub(n0.mul(n0.y)).add(vec3(0, 0.0001, 0))).toVar();
-  const normal: N = normalize(base.sub(vec3(alongDir.x, 0, alongDir.y).mul(rs).add(upFace.mul(ry.mul(upFace.y))).mul(strength).mul(weight))).toVar();
+  const along: N = vec3(rsx.mul(wx), 0, rsz.mul(wz)).div(wsum);
+  const normal: N = normalize(base.sub(along.add(upFace.mul(ry.mul(upFace.y))).mul(strength).mul(weight))).toVar();
   // (Darker down in the gullies and cracks, paler on the ribs; the sky's light reaches less far into them, so a face in the shade,
   // which has no sun to model it, still shows its rock.)
   const cavity: N = mix(1, mix(dark, 1.18, smoothstep(0.05, 1.1, r0)), weight.mul(0.9)).toVar();
@@ -882,5 +976,5 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
   // field other materials use for damp. Sheets that do not reckon it say none.)
   lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
-  return m;
+  return fadesAtNearEdge(m, 'far');
 }

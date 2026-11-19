@@ -1,5 +1,5 @@
 import {
-  ACESFilmicToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, AgXToneMapping, NeutralToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
   Material, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, Matrix4, Quaternion,
@@ -14,7 +14,7 @@ import { Atmosphere } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { farUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -51,7 +51,8 @@ const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
   barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
 };
-import { Torch, TorchLights } from '../render/torch';
+import { Torch, TorchLights, gatherTorches } from '../render/torch';
+import { SunShadow } from '../render/sunShadow';
 import { buildCourtyardHall } from '../scenes/courtyardHall';
 import { Game } from './game';
 import { Player } from './player';
@@ -78,9 +79,13 @@ const num = (key: string, fallback: number) => (params.has(key) ? Number(params.
  * their graphics modest.
  */
 const QUALITY = {
-  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0 },
-  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 512 },
-  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1024 },
+  // (`ao`: whether the hollows of what is seen darken it, see `occlusion` in `post.ts`. `mirror`: how many points high still water's
+  // picture is at most, see `Water.update`; it was as high as the view, and is now at most half a common screen's at high.)
+  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0, ao: 0 },
+  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 384, ao: 1 },
+  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 512, ao: 1 },
+  // As high, with surfaces painted at 2048: four times the painting time and about a gigabyte of video memory, for desktops with room to spare.
+  ultra: { dpr: 1.5, tex: 2048, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1080, ao: 1 },
 };
 const coarse = window.matchMedia('(pointer: coarse)').matches;
 const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
@@ -204,13 +209,26 @@ async function start(): Promise<void> {
   worldComing?.catch(() => undefined);
   const canvas = document.getElementById('view') as HTMLCanvasElement;
   // Drawn with WebGPU where the browser has it, and with WebGL 2 where it has not (or when `?webgl` asks for it): the same programs serve both.
-  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
+  // (A program may read sixteen textures at once unless more are asked for. The ground's material reads sixteen already, with the
+  // sun's shadow, the torches' and the sky's picture; the sun's shadow in a large place needs one more (`SunShadow`). Most graphics
+  // cards allow far more, if asked when the device is made.)
+  const textureRoom = await (async () => {
+    if (params.has('webgl')) return 16;
+    try { return (await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' }))?.limits.maxSampledTexturesPerShaderStage ?? 16; } catch { return 16; }
+  })();
+  const renderer = new WebGPURenderer({
+    canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl'),
+    ...(textureRoom > 16 ? { requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(textureRoom, 32) } } : {}),
+  });
   await stage('Starting the renderer', 0.01, params.has('webgl') ? 'WebGL 2' : 'WebGPU, or WebGL 2 where there is none');
   await renderer.init();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = SRGBColorSpace;
-  renderer.toneMapping = ACESFilmicToneMapping;
+  // How the light of the scene is brought into what a screen can show: the film-like curve by default; `?tone=agx` for one that
+  // keeps bright colours from running to yellow and lets them pale towards white, as film does, and `?tone=neutral` for one that
+  // keeps colours as they are. (Offered to be compared by eye; the default is unchanged.)
+  renderer.toneMapping = params.get('tone') === 'agx' ? AgXToneMapping : params.get('tone') === 'neutral' ? NeutralToneMapping : ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFShadowMap;
 
@@ -221,6 +239,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ materials
   const texSize = num('tex', quality.tex);
+  edgeUniforms.uEdges.value = num('edges', 1);
   // Each surface is painted in turn, with the page given a chance to draw between them.
   const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
   const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 1 : 0);
@@ -251,15 +270,17 @@ async function start(): Promise<void> {
   const talus = place === 'mountain' ? await paint('talus', texSize, 71) : null;
   doneGenerating();
   const materials: Record<string, Material> = {
-    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0 }),
+    // (Stone and timber cut square have their edges rounded in the shading: see `edgeOf`.)
+    // (`?edges=0` draws them sharp, as they were.)
+    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02 }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0 }),
+    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012 }),
     rock: makeRockMaterial(rock, moss),
     // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
     rockSheet: makeRockMaterial(rock, moss, { relief: true }),
     far: makeFarMaterial(),
-    scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true }),
+    scree: makeSiteMaterial(talus ?? scree, moss, { normalScale: 1.6, matt: true, fades: 'near' }),
     // (Bark is matt. With the sheen every smooth thing has at a glancing angle, a round trunk mirrored the sky down both its sides and stood pale blue.)
     // Each kind of tree has its own: an oak's ridged, an ash's smooth, a pine's in plates, a spruce's in scales (see `barkRecipe`).
     bark: makeSiteMaterial(bark, moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
@@ -358,6 +379,9 @@ async function start(): Promise<void> {
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
   if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
+  // Where the near ground passes into the far land, on a place that has one land for both (a mountain top on a world's summit); else nowhere.
+  nearFarUniforms.uNearRect.value.set(...((desc.nearFar?.slice(0, 4) ?? [0, 0, 0, 0]) as [number, number, number, number]));
+  nearFarUniforms.uNearBand.value = desc.nearFar?.[4] ?? 0;
   // Snow, on a mountain: all over in winter, and in summer only what is left of it in the hollows.
   snowUniforms.uSnow.value = num('snow', desc.snow ?? 0);
   if (desc.snowLine) snowUniforms.uSnowLine.value.set(desc.snowLine[0], desc.snowLine[1]);
@@ -390,7 +414,7 @@ async function start(): Promise<void> {
       try { localStorage.setItem('dungeons.quality', select.value); } catch { /* private browsing: the choice lasts for this visit only */ }
       const next = new URLSearchParams(params);
       next.delete('quality');
-      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror');
+      next.delete('dpr'); next.delete('tex'); next.delete('rays'); next.delete('grass'); next.delete('bloom'); next.delete('leaves'); next.delete('clouds'); next.delete('mirror'); next.delete('ao');
       go(next);
     });
     document.getElementById('begin')!.addEventListener('click', () => {
@@ -738,6 +762,7 @@ async function start(): Promise<void> {
   sun.shadow.needsUpdate = true;
   scene.add(sun, sun.target);
 
+
   const cloudSteps = Math.round(num('clouds', quality.clouds));
   const makeSky = (disc: boolean) => {
     const sky = new SkyMesh();
@@ -766,7 +791,8 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ torches
   const torches = desc.torches.map((t, i) => new Torch(t.position, t.out, i * 0.37 + 0.1, t.fire, t.flames));
-  for (const t of torches) scene.add(t.group);
+  // (All of them drawn as three things: their brands, their iron and their flames.)
+  scene.add(gatherTorches(torches));
   // Four real lights serve however many torches there are; see TorchLights.
   const torchLights = new TorchLights(torches, 4, TORCH_INTENSITY);
   for (const l of torchLights.lights) scene.add(l);
@@ -787,7 +813,7 @@ async function start(): Promise<void> {
   // The picture is made in steps: the scene; the air put into it; the glow of what is very bright
   // added; and last the eye's adjustment to light and the screen's colours, which the pipeline does itself.
   const pipeline = new RenderPipeline(renderer);
-  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps));
+  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps), { occlusion: num('ao', quality.ao) > 0 });
   {
     // (The air is drawn once into a picture of its own, which the glow then reads; otherwise it would be worked out twice.)
     const aired = rtt(atmosphere.node);
@@ -905,7 +931,23 @@ async function start(): Promise<void> {
   }
   atmosphere.uniforms.uDensity.value = num('fog', 0.0018);
   atmosphere.uniforms.uIndoorDensity.value = num('dust', 14);
-  atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max);
+  // The sun's map of its shadow is drawn finely about the eye, wherever the eye goes, and beyond that the shadow is read from the
+  // air's picture from the sun (`SunShadow`): a town's whole map was a quarter of a metre to a point, and outside the place's box,
+  // where the climb up a mountain top lies, there was none. (Only with WebGPU, and where the graphics card lets the ground read one
+  // more texture; `?nearshadow=0` leaves it out, and the one map over the box is used as before.)
+  const gpu = (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend === true;
+  const sunShadow = gpu && textureRoom > 17 && num('nearshadow', 1) > 0
+    ? new SunShadow(sun, camera, { reach: 64, size: 2048, radius, far: { ...atmosphere.sunMap, deep: 2 * radius + 0.5, point: (2 * radius) / (atmosphere.sunMap.depth.image.width ?? 2048), gpu } })
+    : null;
+  if (sunShadow) (sun.shadow as unknown as { shadowNode: unknown }).shadowNode = sunShadow;
+  // (And into the sun's map alone, what else throws a shadow: the land, its rock, what is built on it and what grows, the crowns
+  // drawn with their own materials so that the sun comes through their gaps. Not water, nor glass, nor the sprigs, which are drawn
+  // only near the eye.)
+  const drawAirMaps = () => atmosphere.updateStatic([...statics, ...occluders], sunDir, desc.bounds.min, desc.bounds.max, {
+    sun: scenic.filter((m) => m.castShadow && !(m as InstancedMesh).isInstancedMesh && m.name !== 'water' && m !== sea?.mesh),
+    own: cardMeshes.filter((m) => m.castShadow),
+  });
+  drawAirMaps();
   if (params.get('air') === '0') atmosphere.uniforms.uEnabled.value = 0;
 
   // ------------------------------------------------------------------ player
@@ -1144,7 +1186,7 @@ async function start(): Promise<void> {
   let exposureTarget = 0.5;
   let tick = 0;
   let metering = false;
-  const glow = new Vector3();
+  const glow = new Vector3(), drawn2 = new Vector2();
   let lastPlace = -1;
   const lastStep = { x: 0, z: 0 };
   // How near water is, for the ear: running water, a fall, and whether the player is standing in a stream.
@@ -1227,7 +1269,7 @@ async function start(): Promise<void> {
       sound.update(dt, time, open ? 1 : 0, moved < 1 ? moved : 0, player.grounded, player.running, surface, hearing);
     }
     cullCards(cardMeshes, camera.position);
-    water.update(time, camera);
+    water.update(time, camera, renderer.getDrawingBufferSize(drawn2).y);
     sea?.update(time);
     for (const f of floats) {
       // (Tilted with the water's slope, but less: a hull spans the smaller waves. The cove is taken as deep.)
@@ -1303,6 +1345,9 @@ async function start(): Promise<void> {
     // shadow. At an evening hour that was the hills' long shadow over a whole town. So it is drawn again every thirty frames over
     // the first six hundred, by when all of it is ready.)
     if (++drawn <= 600 && drawn % 30 === 2) sun.shadow.needsUpdate = true;
+    // (The air's pictures likewise, a few times: they are the far sun's shadow in a large place, and whatever was not ready the first
+    // time, the crowns drawn with their own materials above all, was missing from them.)
+    if (drawn === 40 || drawn === 200 || drawn === 600) drawAirMaps();
     if (now - fpsAt > 500) {
       document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
       frames = 0;
@@ -1334,7 +1379,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { sound, groundAt, materials, renderer, pipeline, atmosphere, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { edgeUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

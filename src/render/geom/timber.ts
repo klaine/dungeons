@@ -34,6 +34,7 @@ export function layBeam(
     });
     mesh.addTriangle(ids[0], ids[1], ids[2]);
     mesh.addTriangle(ids[0], ids[2], ids[3]);
+    mesh.markFace(ids);
   };
   U.copy(T);
   face(U, [[0, -1, 1], [1, -1, 1], [1, 1, 1], [0, 1, 1]], length, width);

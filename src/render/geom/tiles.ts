@@ -39,7 +39,8 @@ export function tileGeometry(g: BufferGeometry, size: number, least = 3000): Buf
     });
     const piece = new BufferGeometry();
     for (const [name, at] of plain) {
-      const n = at.itemSize, from = at.array as Float32Array, to = new Float32Array(used.length * n);
+      // (Each in its own kind of array: the edges of faces are bytes, read as shares of 255.)
+      const n = at.itemSize, from = at.array as Float32Array, to = new (from.constructor as Float32ArrayConstructor)(used.length * n);
       used.forEach((v, k) => { for (let c = 0; c < n; c++) to[k * n + c] = from[v * n + c]; });
       piece.setAttribute(name, new BufferAttribute(to, n, at.normalized));
     }

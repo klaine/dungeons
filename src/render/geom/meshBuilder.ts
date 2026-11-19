@@ -42,6 +42,13 @@ export class MeshBuilder {
   private bakeScale: number[] = [];
   /** For geometry that is not baked: the share of the sky each vertex can see, where the builder knows it. */
   private sky: number[] = [];
+  /**
+   * Where each point lies on the face it belongs to, for faces that say so (`markFace`): four bytes, the first two how far across
+   * the face and how far up it (0 or 255 at a corner), the third what the face is (0 none, 128 four-cornered, 255 three-cornered).
+   * The materials read it to round the face's edges (see `edgeOf` in `siteMaterial.ts`). (Held in an object, so that a builder made
+   * from another, as a burnt house's is, writes into the same one.)
+   */
+  private readonly edges = { data: new Uint8Array(0) };
   vertexCount = 0;
 
   addVertex(
@@ -156,11 +163,47 @@ export class MeshBuilder {
       const id = this.addVertex(v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], src.uv.data[i * 2], src.uv.data[i * 2 + 1], v.colour[0], v.colour[1], v.colour[2], v.field[0], v.field[1], v.field[2], v.field[3]);
       this.setOpen(id, v.open);
     }
+    // (Where the faces copied said where their corners were, so do the copies.)
+    const se = src.edges.data;
+    if (se.length) {
+      const top = Math.min(src.vertexCount, se.length >> 2);
+      for (let i = 0; i < top; i++) if (se[i * 4 + 2]) this.markCopied(base + i, se[i * 4], se[i * 4 + 1], se[i * 4 + 2]);
+    }
     for (let t = 0; t < src.idx.length; t += 3) this.addTriangle(src.idx[t] + base, src.idx[t + 1] + base, src.idx[t + 2] + base);
+  }
+
+  /**
+   * Says that the points given, three or four in order round one flat face, are its corners: so that its edges can be told from its
+   * middle, and drawn rounded (see `edges`). A face of more corners is left as it is.
+   */
+  markFace(ids: number[]): void {
+    if (ids.length !== 3 && ids.length !== 4) return;
+    const e = this.edges, need = (Math.max(...ids) + 1) * 4;
+    if (e.data.length < need) {
+      let cap = Math.max(1024, e.data.length);
+      while (cap < need) cap *= 2;
+      const next = new Uint8Array(cap);
+      next.set(e.data);
+      e.data = next;
+    }
+    const corners = ids.length === 4 ? [[0, 0], [255, 0], [255, 255], [0, 255]] : [[0, 0], [255, 0], [0, 255]], kind = ids.length === 4 ? 128 : 255;
+    ids.forEach((id, k) => { e.data[id * 4] = corners[k][0]; e.data[id * 4 + 1] = corners[k][1]; e.data[id * 4 + 2] = kind; });
   }
 
   addTriangle(a: number, b: number, c: number): void {
     this.idx.push(a, b, c);
+  }
+
+  private markCopied(id: number, s: number, t: number, kind: number): void {
+    const e = this.edges, need = (id + 1) * 4;
+    if (e.data.length < need) {
+      let cap = Math.max(1024, e.data.length);
+      while (cap < need) cap *= 2;
+      const next = new Uint8Array(cap);
+      next.set(e.data);
+      e.data = next;
+    }
+    e.data[id * 4] = s; e.data[id * 4 + 1] = t; e.data[id * 4 + 2] = kind;
   }
 
   get triangleCount(): number {
@@ -183,6 +226,10 @@ export class MeshBuilder {
     g.setAttribute('aSHg', new InterleavedBufferAttribute(light, 4, 4));
     g.setAttribute('aSHb', new InterleavedBufferAttribute(light, 4, 8));
     g.setAttribute('aBake', new InterleavedBufferAttribute(light, 2, 12));
+    // (Every mesh has it, read or not, so that a material that reads it finds it on whatever it is given: nothing for what was not marked.)
+    const edge = new Uint8Array(n * 4);
+    edge.set(this.edges.data.subarray(0, Math.min(this.edges.data.length, n * 4)));
+    g.setAttribute('aEdge', new BufferAttribute(edge, 4, true));
     g.setIndex(new BufferAttribute(new Uint32Array(this.idx), 1));
     g.computeBoundingBox();
     g.computeBoundingSphere();

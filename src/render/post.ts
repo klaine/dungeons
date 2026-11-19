@@ -4,6 +4,7 @@ import {
 } from 'three';
 import { NodeMaterial, QuadMesh, RenderTarget, WebGPURenderer } from 'three/webgpu';
 import * as TSL from 'three/tsl';
+import { ao as gtao } from 'three/addons/tsl/display/GTAONode.js';
 
 /**
  * Draws the scene, then follows each line of sight through the air to add fog that is lit by the
@@ -35,8 +36,9 @@ import * as TSL from 'three/tsl';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getViewPosition, length, log2, max, min, mix, normalize, pass, pow,
-  screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform, uniformArray, uv, vec2, vec3, vec4,
+  Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getViewPosition, length, log2, max, min, mix, normalize, pass,
+  perspectiveDepthToViewZ, pow, reference, screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform,
+  uniformArray, uv, vec2, vec3, vec4,
 } = TSL as N;
 
 const MAX_LIGHTS = 4;
@@ -213,7 +215,10 @@ export class Atmosphere {
   private meterTarget = new RenderTarget(16, 9, { type: UnsignedByteType, depthBuffer: false });
   private meterQuad: QuadMesh;
 
-  constructor(private scene: Scene, private camera: PerspectiveCamera, private renderer: WebGPURenderer, cloudSteps = 28) {
+  /**
+   * `occlusion`: whether the light from all round is taken from what lies in the hollows of what is seen (see below); on unless asked not to.
+   */
+  constructor(private scene: Scene, private camera: PerspectiveCamera, private renderer: WebGPURenderer, cloudSteps = 28, o: { occlusion?: boolean } = {}) {
     // (Four samples to a point of the picture, so that edges are smooth and leaves can be cut out by coverage.)
     this.scenePass = pass(scene, camera, { samples: 4 });
     this.sunDepth = depthTarget(2048);
@@ -286,6 +291,8 @@ export class Atmosphere {
       // The ridge the way comes up out of the cloud by (x, z of one end and of the other), over which no heaps of cloud stand.
       uDeckSpur: uniform(new Vector4(0, 0, 0, 0)),
       uDeckAir: uniform(new Vector3(0.6, 0.7, 0.8)),
+      // How much of the light from all round the hollows of what is seen take away, 0 to 1 (see `occlusion` below).
+      uAo: uniform(o.occlusion === false ? 0 : 1),
     });
     const sky = (this.sky = skyParts(u, cloudSteps));
     const colourOf: N = this.scenePass.getTextureNode('output'), depthOf: N = this.scenePass.getTextureNode('depth');
@@ -302,6 +309,44 @@ export class Atmosphere {
       return select(inside, step(deep.sub(bias), (texture(map, at) as N).level(0)), 1);
     };
     const ign = (p: N): N => fract(fract(dot(p, vec2(0.06711056, 0.00583715))).mul(52.9829189));
+
+    /**
+     * The hollows of what is seen. Light comes from all round, and less of it gets in among the blades of a meadow, under a
+     * crown, into the crease where a wall stands on the ground or a boulder lies on it, than onto what stands open: without that
+     * a meadow is a green sheet and a stone sits on the grass as if laid there after. The bake gives the house its hollows, and
+     * rock its pits from its texture; nothing gave them to what grows, to the ground about what stands on it, or to anything not
+     * baked. So how much of the sky each point of the picture sees past what is next to it is reckoned from the picture's depths
+     * (horizon-based occlusion, `GTAONode`), over a couple of metres about it, at half the picture's size; and smoothed over a few
+     * of those points, only among points at about the same depth, so that a blade of grass against the meadow behind it does not
+     * take the meadow's shade, nor the meadow the blade's. On the GPU it costs next to nothing (some 0.03 ms at 1024 by 768).
+     * It takes away from all the light, not only that from the sky, as it is laid on the finished picture: in the sun's light,
+     * where most of a point's light comes straight from the sun, it is taken at a little over half its strength.
+     */
+    const occlusion = o.occlusion !== false;
+    const occlusionAt: N = (() => {
+      if (!occlusion) return () => float(1);
+      const hollows: N = (gtao as N)(depthOf, null, camera);
+      hollows.resolutionScale = 0.5;
+      hollows.radius.value = 2;
+      hollows.thickness.value = 3;
+      hollows.scale.value = 1.5;
+      hollows.samples.value = 12;
+      const shade: N = hollows.getTextureNode();
+      const near: N = reference('near', 'float', camera), far: N = reference('far', 'float', camera);
+      const deep = (at: N): N => perspectiveDepthToViewZ(depthOf.sample(at).x, near, far).negate();
+      return (): N => {
+        const step2: N = vec2(2).div(screenSize).toVar(), z0: N = deep(screenUV).toVar();
+        // (What matches no point about it at its own depth, a blade one point wide against what is behind it, is taken as open.)
+        const sum: N = float(0.15).toVar(), weight: N = float(0.15).toVar();
+        for (const [dx, dy, w0] of [[-1, -1, 1], [1, -1, 1], [-1, 1, 1], [1, 1, 1], [0, 0, 0.5]]) {
+          const at: N = screenUV.add(step2.mul(vec2(dx, dy))).toVar();
+          const w: N = exp(abs(deep(at).sub(z0)).div(z0.mul(0.03).add(0.03)).negate()).mul(w0);
+          sum.addAssign(shade.sample(at).r.mul(w));
+          weight.addAssign(w);
+        }
+        return sum.div(weight);
+      };
+    })();
     // How thick the mist is at a point near the eye. It lies in drifts, not evenly.
     const mistAt = (p: N): N => {
       const d = u.uMist.x.mul(exp(max(p.y.sub(u.uMist.z).div(u.uMist.y), -1).negate()));
@@ -466,6 +511,13 @@ export class Atmosphere {
         const rd: N = wp.sub(u.uCamPos).div(dist).toVar();
         const open: N = depth.greaterThan(0.999999).toVar();
         const dither: N = ign(screenCoordinate.xy).toVar();
+        // The hollows of what is seen (`occlusionAt`), before any air is put in front of them: less in the sun's light.
+        if (occlusion) {
+          If(open.not().and(u.uAo.greaterThan(0)), () => {
+            const sunlit = seen(this.sunDepth.depthTexture!, u.uSunVP, wp.sub(rd.mul(0.08)), 0.0025);
+            col.mulAssign(mix(1, occlusionAt(), u.uAo.mul(mix(1, 0.55, sunlit))));
+          });
+        }
         If(open, () => {
           // Open sky. After sunset it has a faint light of its own, a glow where the sun went down,
           // and stars; then the moon; then the clouds in front of all of them.
@@ -600,6 +652,11 @@ export class Atmosphere {
     this.meterQuad = new QuadMesh(meter);
   }
 
+  /** The picture of the place from the sun (`updateStatic`): its depths, and from a point of the world to where it is in it. */
+  get sunMap(): { depth: DepthTexture; vp: N } {
+    return { depth: this.sunDepth.depthTexture!, vp: this.uniforms.uSunVP };
+  }
+
   /** To be called before each picture is drawn: where the eye is. */
   update(): void {
     const u = this.uniforms;
@@ -634,24 +691,39 @@ export class Atmosphere {
     return Math.pow(2, (sum / wsum) * 16 - 12);
   }
 
-  /** Draws the two static depth maps. Call again if the site or the sun changes. */
-  updateStatic(statics: Object3D[], sunDir: Vector3, min: Vector3, max: Vector3): void {
+  /**
+   * Draws the two static depth maps. Call again if the site or the sun changes.
+   *
+   * `statics` are drawn into both: the house and the solids behind its skin. What else throws a shadow out of doors goes into the
+   * sun's alone (`more.sun`: the land, its rock, what is built on it, trunks and boughs; and `more.own`, drawn with their own
+   * materials so that what is cut out of a card is cut out of its shadow too: the crowns of trees). Without them the air was lit by
+   * the sun in the shadow of every cliff, building and tree, and mist in the morning lay as bright under a wood as over a meadow;
+   * with them it is dark there, and where the sun comes in between trunks and through gaps in the crowns the mist is lit in shafts.
+   * (Nor did the shadow of a cloud know where the land was already in shade, and darkened it twice.) The map of what is under open
+   * sky is left as it was: from above, a crown is not a roof, and mist lies under trees as it does in the open.
+   */
+  updateStatic(statics: Object3D[], sunDir: Vector3, min: Vector3, max: Vector3, more: { sun?: Object3D[]; own?: Object3D[] } = {}): void {
     const renderer = this.renderer;
     const centre = min.clone().add(max).multiplyScalar(0.5);
     const radius = max.clone().sub(min).length() / 2;
     const override = new MeshBasicMaterial({ side: DoubleSide });
+    const sun = more.sun ?? [], own = more.own ?? [];
+    const keep = new Set<Object3D>([...statics, ...sun, ...own]);
     const hidden: Object3D[] = [];
     this.scene.traverse((o) => {
-      if (o !== this.scene && o.visible && !o.children.length && !statics.includes(o)) {
+      if (o !== this.scene && o.visible && !o.children.length && !keep.has(o)) {
         o.visible = false;
         hidden.push(o);
       }
     });
+    // (Each set shown only while it is being drawn, and left as it was found.)
+    const was = new Map<Object3D, boolean>([...keep].map((o) => [o, o.visible]));
+    const show = (list: Object3D[], on: boolean) => { for (const o of list) o.visible = on && was.get(o)!; };
     const prevBg = this.scene.background;
     this.scene.background = null;
     this.scene.overrideMaterial = override;
 
-    const shoot = (target: RenderTarget, dir: Vector3, up: Vector3, vp: Matrix4) => {
+    const shoot = (target: RenderTarget, dir: Vector3, up: Vector3, vp: Matrix4, then?: (cam: OrthographicCamera) => void) => {
       const cam = new OrthographicCamera(-radius, radius, radius, -radius, 0.5, radius * 2 + 1);
       cam.position.copy(centre).addScaledVector(dir, radius + 0.5);
       cam.up.copy(up);
@@ -661,12 +733,24 @@ export class Atmosphere {
       renderer.setRenderTarget(target);
       renderer.clear();
       renderer.render(this.scene, cam);
+      then?.(cam);
       // (Taken after the drawing: the renderer sets the camera to its own graphics interface's way of reckoning depth.)
       vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
     };
-    const shadowsWere = renderer.shadowMap.enabled;
+    const shadowsWere = renderer.shadowMap.enabled, clearWas = renderer.autoClear;
     renderer.shadowMap.enabled = false;
-    shoot(this.sunDepth, sunDir, new Vector3(0, 1, 0), this.uniforms.uSunVP.value);
+    show(own, false);
+    shoot(this.sunDepth, sunDir, new Vector3(0, 1, 0), this.uniforms.uSunVP.value, own.length ? (cam) => {
+      // The crowns, each with its own material, over what is already drawn.
+      show(statics, false); show(sun, false); show(own, true);
+      this.scene.overrideMaterial = null;
+      renderer.autoClear = false;
+      renderer.render(this.scene, cam);
+      renderer.autoClear = clearWas;
+      this.scene.overrideMaterial = override;
+      show(own, false); show(statics, true);
+    } : undefined);
+    show(sun, false);
     shoot(this.skyDepth, new Vector3(0, 1, 0), new Vector3(0, 0, -1), this.uniforms.uSkyVP.value);
     renderer.shadowMap.enabled = shadowsWere;
     renderer.setRenderTarget(null);
@@ -674,6 +758,7 @@ export class Atmosphere {
     this.scene.overrideMaterial = null;
     this.scene.background = prevBg;
     for (const o of hidden) o.visible = true;
+    show(statics, true); show(sun, true); show(own, true);
     override.dispose();
     this.uniforms.uSunDir.value.copy(sunDir);
   }
