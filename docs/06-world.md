@@ -154,7 +154,9 @@ place asks for it.
   a cart would: round a hill rather than over it, along a slope rather than up it, across a river
   where it must, onto a way already made where one goes the right way.
 - **Names** (`names.ts`): the world, its sea, its bay, its upland and its range, the great peaks, every
-  town, every place.
+  town, every place. Each drawn from a stream of its own keyed by what it names and where it is, to fifty
+  metres, so that a place keeps its name whatever else the world finds or loses (drawn one after another,
+  as they first were, every name after a place gained or lost was another).
 
 ## The ink map
 
@@ -409,7 +411,7 @@ Measured, November 2026, in the cloud container of four cores: the four valley h
 (`WORLD=w2 npx tsx tools/land.ts 4`) with nothing wrong, laid out in 0.1 to 6 seconds (the tiles about it
 made first) and built in 18 to 23, with 730,000 to 950,000 triangles of rock; its first island laid out in
 8 and built in 38, 513,000 of rock; its second found room for a cove on the third draft of its house. In the
-browser, drawing in software, the game built the house at Strath Cal from the world in some ten minutes, of
+browser, drawing in software, the game built the house at the first valley head of `w2` from the world in some ten minutes, of
 which the world was about one. Its four mountain tops built without fault, laid out in 13 to 23 seconds
 and built in 63 to 102, with 2.5 to 3.8 million triangles of rock, the summits 50 to 60 metres over the
 forecourts, and 19 on the one whose only ground for a hospice is on its summit's dome (the same seed's top

@@ -564,14 +564,16 @@ export function* worldSteps(seed: string, size: { x: number; z: number } = WORLD
   yield 'Laying roads';
   w.ways = layWays(w);
   lap('ways');
-  // ---- names, in a fixed order, so that a world's names stay as they are while its places do
+  // ---- names, each from a stream keyed by what it names, so that a world's names stay as they are while its places do
   const namer = new Namer(rng.fork('names'));
   w.name = namer.name('world');
   w.regions = { sea: namer.name('sea'), bay: namer.name('bay'), upland: namer.name('upland'), range: namer.name('range') };
   w.peaks = highestSummits(w, 3);
-  w.peakNames = w.peaks.map(() => namer.name('peak'));
-  for (const t of w.towns) t.name = namer.name(t.kind);
-  for (const q of w.places) q.name = namer.name(q.kind);
+  // (Each keyed by what it names and where, to fifty metres, so that it keeps its name whatever else is found or lost.)
+  const at = (x: number, z: number) => `${Math.round(x / 50)},${Math.round(z / 50)}`;
+  w.peakNames = w.peaks.map((q) => namer.name('peak', `peak ${at(q.x, q.z)}`));
+  for (const t of w.towns) t.name = namer.name(t.kind, `${t.kind} ${at(t.x, t.z)}`);
+  for (const q of w.places) q.name = namer.name(q.kind, `${q.kind} ${at(q.x, q.z)}`);
   WORLDS.set(key, w);
   return w;
 }

@@ -22,18 +22,22 @@ function root(rng: Rng): string {
 
 export type NameKind = 'world' | 'sea' | 'bay' | 'upland' | 'range' | 'peak' | 'harbour' | 'town' | 'village' | 'island' | 'valley' | 'mountain';
 
-/** Hands out names for one world, none twice. */
+/**
+ * Hands out names for one world, none twice. Each name is drawn from a stream of its own, keyed by
+ * what it names (`key`: its kind and where it is), so that a place keeps its name whatever else the
+ * world finds or loses: drawn one after another, every name after a place gained or lost was another.
+ */
 export class Namer {
   private used = new Set<string>();
   constructor(private rng: Rng) {}
-  name(kind: NameKind): string {
+  name(kind: NameKind, key: string = kind): string {
     for (let tries = 0; ; tries++) {
-      const n = this.make(kind);
+      const n = this.make(kind, this.rng.fork(tries ? `${key}/${tries}` : key));
       if (!this.used.has(n) || tries > 40) { this.used.add(n); return n; }
     }
   }
-  private make(kind: NameKind): string {
-    const r = this.rng, x = root(r);
+  private make(kind: NameKind, r: Rng): string {
+    const x = root(r);
     switch (kind) {
       case 'world': return x;
       case 'sea': return r.pick([`The ${x} Sound`, `The Sea of ${x}`, `The ${x} Firth`]);
