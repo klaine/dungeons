@@ -862,11 +862,22 @@ async function start(): Promise<void> {
     if (desc.deck) { u.uMist.value.x = 0; u.uMistFar.value.x = 0; }
     // The haze is alight towards the sun only while the sun is up.
     if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze) * (1 - 0.8 * r));
-    // The more cloud there is the lower it hangs, and heavy cloud sits on the peaks. In flat
-    // banks it is a thin layer; heaped, it towers.
-    u.uCloudBase.value = floor + 310 - 150 * w.cloud;
-    u.uCloudTop.value = u.uCloudBase.value + (layered ? 150 : 360);
+    // In flat banks cloud is a thin layer, low, and the more of it there is the lower it hangs. Heaped, it stands high and tall:
+    // fair-weather cloud has its flat base some eight hundred metres up and heaps a kilometre or two over it, the most when the sky
+    // is half covered and more, when the heaps have the warmth and the room to tower; as the sky closes over they hang lower. (It
+    // was a layer three hundred and sixty metres deep two or three hundred metres up, whatever the day: small soft heaps, hanging
+    // low over the roofs like smoke, never the towers of a summer's afternoon.)
+    const c = w.cloud, sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    if (layered) {
+      u.uCloudBase.value = floor + 310 - 150 * c;
+      u.uCloudTop.value = u.uCloudBase.value + 150;
+    } else {
+      u.uCloudBase.value = floor + 600 + 350 * (1 - c) - 250 * r;
+      u.uCloudTop.value = u.uCloudBase.value + 700 + 1400 * sm(0.2, 0.55, c) * (1 - 0.5 * sm(0.75, 1, c));
+    }
     u.uCloudFlat.value = layered ? 1 : 0;
+    // And far over it, when the weather is fair or changing, thin streaks of ice cloud.
+    u.uCirrus.value = r > 0 ? 0 : (layered ? 0.25 : 0.6) * sm(0.08, 0.35, c) * (1 - sm(0.7, 0.92, c));
   };
   const night = desc.sun?.night ?? 0;
   // (The sanctum's coloured glass glows with the day through it: dim at dusk, nearly dark at night.)
