@@ -18,10 +18,10 @@
       "runtimeArgs": [
         "vite",
         "--port",
-        "5178",
+        "5179",
         "--strictPort"
       ],
-      "port": 5178
+      "port": 5179
     },
     {
       "name": "dist",

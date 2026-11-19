@@ -2,8 +2,7 @@
 // is laid with a brush: grass, flowers, ferns, reeds and woods; masses of rock, raised or dug; and the ground itself, from the
 // square's flags to turf, bare earth, mud, shingle, a cart track, a footpath, setts and gravel. All of it is made by the game's own
 // planting, carving and ground material, and carries what the game's geometry carries, so that it looks here as it does in a
-// valley or a town. Only the arrangement is the lab's. (The material lab's stage, `specimens.ts`, makes the same things on land of
-// its own; this is the same making on the lab's level square.)
+// valley or a town. Only the arrangement is the lab's.
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../src/core/rng';
 import { Stone } from '../src/core/site';

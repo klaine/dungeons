@@ -1,5 +1,5 @@
 // The building lab: a plain square, apart from the game, where buildings of every kind the game
-// builds can be set out, moved, turned, scaled and reshaped. Open /lab/buildings.html on the dev
+// builds can be set out, moved, turned, scaled and reshaped. Open /lab/ on the dev
 // server (`npm run buildings`), or on the published site.
 //
 // Every building is made by the game's own builders from a site document (see `buildingKinds.ts`),

@@ -13,8 +13,7 @@
 // A row is a street front of houses side by side along z from `z`, of the brick of the country of `stone`; each house is dealt
 // from its `seed` as the town deals one (`kind` is `gabled`, `eaves`, `store` or `church`; `room` for a church), and `set` and `b`
 // overwrite what was dealt, in `brickwork` and in the building. A house with `"style": "canal"` is a canal house instead
-// (`src/core/canal.ts`), dealt with whatever `want` fixes of it (`{ "gable": "bell", "bays": 3, "ornament": 2 }`, as the building
-// lab's address does); `set` then overwrites its `canalwork`. A pose is x, y, z, yaw and pitch, measured from the stage's first
+// (`src/core/canal.ts`), dealt with whatever `want` fixes of it (`{ "gable": "bell", "bays": 3, "ornament": 2 }`); `set` then overwrites its `canalwork`. A pose is x, y, z, yaw and pitch, measured from the stage's first
 // front: a yaw of 1.57 looks along -x, at fronts facing `e`. Without `plain` the valley is left as it is, and a paving is laid.
 //
 // Against a development server with hot reloading off, so that saving a file does not reload the page while it works: for one,

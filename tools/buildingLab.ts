@@ -1,4 +1,4 @@
-// Builds every kind of building the building lab offers (`lab/buildings.html`) with its measures
+// Builds every kind of building the building lab offers (`lab/index.html`) with its measures
 // pushed about at random, out past the ends of their ranges, and brought back by the lab's own rules
 // (`normalise` in `lab/buildingKinds.ts`), as a person dragging sliders and handles would. Reports a
 // building that fails to build, has points that are not numbers, or is built nowhere near where it

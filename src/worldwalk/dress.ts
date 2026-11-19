@@ -20,11 +20,11 @@ import { ROCK } from '../render/geom/rockForms';
 
 /**
  * How the walk over a world looks: the game's own textures, materials, sky, air and planting, set
- * up as the game and the material lab set them up (`src/app/main.ts`, `lab/materials.ts`), for land
- * streamed in rather than a site built whole. What is drawn here is what a place will show when it
- * stands on this land: ground and rock by the game's materials, from what lies at each point; grass
- * and flowers about the walker; trees where the world has woods, whole near by and as single painted
- * cards beyond, as the valley's far hillsides are; the sky, the sun and its shadows, and the haze.
+ * up as the game sets them up (`src/app/main.ts`), for land streamed in rather than a site built
+ * whole. What is drawn here is what a place will show when it stands on this land: ground and rock
+ * by the game's materials, from what lies at each point; grass and flowers about the walker; trees
+ * where the world has woods, whole near by and as single painted cards beyond, as the valley's far
+ * hillsides are; the sky, the sun and its shadows, and the haze.
  */
 
 export type Season = 'spring' | 'summer' | 'autumn';

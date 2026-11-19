@@ -1,4 +1,4 @@
-// The building lab (`lab/buildings.html`) as one HTML file with everything in it: its program, the game's builders and
+// The building lab (`lab/index.html`) as one HTML file with everything in it: its program, the game's builders and
 // materials, and three.js, as a single inline script. For putting it where only one page can go, such as an artifact on
 // claude.ai, which also wraps the page in a document of its own: so with `--fragment` the file is only what goes inside
 // the body (its title, its styles, its elements and its script), as such a page is written.
@@ -20,10 +20,10 @@ try {
     build: {
       outDir: tmp, emptyOutDir: true, target: 'es2022', modulePreload: false, assetsInlineLimit: 1e9, cssCodeSplit: false,
       // (One input and its imports in one chunk: there is nowhere to fetch a second from.)
-      rollupOptions: { input: { lab: join(root, 'lab/buildings.html') }, output: { inlineDynamicImports: true } },
+      rollupOptions: { input: { lab: join(root, 'lab/index.html') }, output: { inlineDynamicImports: true } },
     },
   });
-  let html = readFileSync(join(tmp, 'lab/buildings.html'), 'utf8');
+  let html = readFileSync(join(tmp, 'lab/index.html'), 'utf8');
   html = html.replace(/<link rel="modulepreload"[^>]*>\s*/g, '');
   const scripts = [...html.matchAll(/<script type="module" crossorigin src="([^"]+)"><\/script>/g)];
   if (scripts.length !== 1) throw new Error(`expected one script in the built page, found ${scripts.length}`);

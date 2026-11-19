@@ -4,8 +4,8 @@
   "description": "Generate and explore places for adventure",
   "scripts": {
     "dev": "vite",
-    "lab": "vite --port 5178 --strictPort --open /lab/materials.html",
-    "buildings": "vite --port 5179 --strictPort --open /lab/buildings.html",
+    "lab": "vite --port 5179 --strictPort --open /lab/",
+    "buildings": "vite --port 5179 --strictPort --open /lab/",
     "buildings:page": "node tools/buildingLabPage.mjs",
     "build": "vite build",
     "preview": "vite preview",
