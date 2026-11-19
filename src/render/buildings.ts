@@ -113,7 +113,9 @@ export function buildingTools(b: Building, base: number, mesh: (material: string
         if (to - from > 0.03) on(f, material, c0, c1, from, to, t0, t0 + 0.045, colour);
       }
     };
-    const sorted = gaps.filter((g) => g.s1 > s0 && g.s0 < s1).sort((a, c) => a.s0 - c.s0);
+    // (Only the openings within its height: each cuts the stretch it stands in into what is beside it, under it and over it, so two
+    // standing one over the other, as on two storeys, would each be covered by the other's wall over or under it.)
+    const sorted = gaps.filter((g) => g.s1 > s0 && g.s0 < s1 && g.y1 > y0 && g.y0 < y1).sort((a, c) => a.s0 - c.s0);
     let s = s0;
     for (const g of sorted) {
       piece(s, g.s0, y0, y1);
@@ -1294,7 +1296,8 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
     for (const g of cellar) { glazed(f, g, 2, 1, [0.25, 0.22, 0.2], 0.1); on(f, 'stone', g.s0 - 0.08, g.s1 + 0.08, g.y0 - 0.08, g.y0, -0.12, 0.1, granite(0.6)); }
     // The water table over it, then the wall: a dark backing, and over it the weatherboards, each laid a little proud of the joint over it.
     on(f, 'wood', -0.1, f.L + 0.1, Bm - 0.06, Bm + 0.12, -0.11, 0.04, white, true);
-    pierced(f, 'wood', 0, f.L, Bm + 0.12, top, 0, T, backing, all);
+    // (The backing storey by storey: two storeys' windows stand one over the other, and one stretch of wall cut for both covered both.)
+    for (let st = 0; st < N; st++) pierced(f, 'wood', 0, f.L, st ? floorY(st) : Bm + 0.12, st === N - 1 ? top : floorY(st + 1), 0, T, backing, openings[st]);
     for (let y = Bm + 0.12; y < top - 0.42; y += 0.155) pierced(f, 'wood', 0.2, f.L - 0.2, y, Math.min(top - 0.42, y + 0.142), -0.03, 0, shade(paint, 0.93 + 0.12 * Math.sin(y * 37.7 + f.L)), all);
     // Corner boards with their caps; a band at each floor; the frieze under the eaves.
     for (const [a, e] of [[-0.06, 0.32], [f.L - 0.32, f.L + 0.06]]) { on(f, 'wood', a, e, Bm + 0.1, top - 0.4, -0.07, 0.02, white, true); on(f, 'wood', a - 0.04, e + 0.04, top - 0.55, top - 0.4, -0.1, 0.02, white); }
