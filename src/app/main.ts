@@ -272,10 +272,12 @@ async function start(): Promise<void> {
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
   const talus = place === 'mountain' ? await paint('talus', texSize, 71) : null;
   doneGenerating();
+  // (Whether what is built shows its age: render come away, brick flaked, stone chipped, rain streaked. `?chips=0` builds it all new.)
+  const weathered = num('chips', 1) > 0;
   const materials: Record<string, Material> = {
     // (Stone and timber cut square have their edges rounded in the shading: see `edgeOf`.)
     // (`?edges=0` draws them sharp, as they were.)
-    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02 }),
+    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered }),
     floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
     slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
     wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012 }),
@@ -295,12 +297,12 @@ async function start(): Promise<void> {
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
-    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8, render: num('chips', 1) > 0 }),
+    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8, render: weathered, weather: weathered }),
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
-    ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3 }) } : {}),
+    ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }) } : {}),
     // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
-    redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2 }),
-    buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2 }),
+    redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
+    buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
     metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
     // Copper gone green, on the roofs and spires of the brick towns: the patina is matt, and does not mirror the sky as sheet metal does.
     copper: makeSiteMaterial(plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
@@ -1413,7 +1415,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { edgeUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { edgeUniforms, renderUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

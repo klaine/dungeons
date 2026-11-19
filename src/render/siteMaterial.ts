@@ -118,7 +118,12 @@ const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x
 /** How much of a rendered wall has come away (`render` in `makeSiteMaterial`): 1 as it is, 0 for none (`?chips=0`). */
 export const renderUniforms: { uChips: { value: number } } = { uChips: uniform(1) as N };
 export const edgeUniforms: { uEdges: { value: number } } = { uEdges: uniform(1) as N };
-const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
+/**
+ * (`chips`, for dressed stone: its arrises are not worn evenly round. Here and there along an edge a piece has been knocked off, a
+ * few centimetres of it: a broken facet, flat and turned half way to the next face, ending at a line, and paler, as fresh stone is.
+ * Where along an edge is taken from noise read through the world three ways, so that it changes along an edge whichever way it runs.)
+ */
+const edgeOf = (radius: number, chips = false): { bend: (n: N) => N; wear: N; chip: N } => {
   const e: N = attribute('aEdge', 'vec4');
   const P: N = positionView, dPx: N = dFdx(P), dPy: N = dFdy(P);
   const ng: N = normalize(normalViewGeometry);
@@ -130,8 +135,12 @@ const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
   const ls: N = max(length(gs), 1e-4), lt: N = max(length(gt), 1e-4), l3: N = max(length(g3), 1e-4);
   const quad: N = step(0.25, e.z).mul(step(e.z, 0.75)), tri: N = step(0.75, e.z);
   // (Not narrower than a point of the picture; and gone where it would be much narrower.)
-  const point: N = max(length(fwidth(P)), 1e-5), r: N = max(float(radius), point), shown: N = smoothstep(0.15, 0.6, float(radius).div(point)).mul(edgeUniforms.uEdges as N);
-  const near = (d: N): N => pow(clamp(float(1).sub(d.div(r)), 0, 1), 2);
+  const W: N = positionWorld;
+  const chip: N = chips ? smoothstep(0.6, 0.78, farNoise(vec2(W.x.mul(6.1).add(W.z.mul(4.7)), W.y.mul(6.3).add(W.x.mul(1.9)))).mul(0.6).add(farNoise(vec2(W.z.mul(5.3).sub(W.y.mul(2.9)), W.x.mul(5.9).add(W.y.mul(4.1)))).mul(0.4))).mul(renderUniforms.uChips as N).toVar() : float(0);
+  const rad: N = float(radius).add(chip.mul(0.04)).toVar();
+  const point: N = max(length(fwidth(P)), 1e-5), r: N = max(rad, point), shown: N = smoothstep(0.15, 0.6, rad.div(point)).mul(edgeUniforms.uEdges as N);
+  // (Rounded where worn, as a quarter of a curve; where a piece is knocked off, a flat facet that ends at a line.)
+  const near = (d: N): N => mix(pow(clamp(float(1).sub(d.div(r)), 0, 1), 2), smoothstep(r, r.mul(0.82), d).mul(0.62), chip);
   const s0: N = near(e.x.div(ls)).mul(quad.add(tri)), s1: N = near(float(1).sub(e.x).div(ls)).mul(quad);
   const t0: N = near(e.y.div(lt)).mul(quad.add(tri)), t1: N = near(float(1).sub(e.y).div(lt)).mul(quad);
   const u3: N = near(float(1).sub(e.x).sub(e.y).div(l3)).mul(tri);
@@ -146,7 +155,7 @@ const edgeOf = (radius: number): { bend: (n: N) => N; wear: N } => {
     const m: N = normalize(n.add(tilt)).toVar();
     return normalize(m.add(eye.mul(max(float(0.2).sub(dot(m, eye)), 0))));
   };
-  return { bend, wear };
+  return { bend, wear, chip: chip.mul(step(0.001, wear)).mul(shown) };
 };
 
 /** The baked light on a surface facing `wn`. */
@@ -211,7 +220,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean; chips?: boolean; weather?: boolean; bond?: 'wendish' | 'running' } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -245,12 +254,13 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // and the hole lies a centimetre and a half below the face, with its lip catching the light on one side and in shadow on the other.
   // (Before, every rendered wall was as smooth and whole as if it had been finished that morning and painted.)
   let chipNormal: N = null;
+  // (Where on a wall: along it, level, and up it, so that courses are level whichever way the wall faces; and how worn this part of
+  // the town is, from a noise some seventeen metres across, so that some houses are older than others.)
+  const P: N = positionWorld, nG: N = normalize(normalWorldGeometry);
+  const tH: N = normalize(vec2(nG.z.negate(), nG.x).add(vec2(1e-4, 0)));
+  const q: N = vec2(dot(P.xz, tH), P.y).toVar();
+  const worn: N = smoothstep(0.35, 0.8, farNoise(P.xz.div(17).add(5.3))).toVar();
   if (o.render) {
-    const P: N = positionWorld, nG: N = normalize(normalWorldGeometry);
-    // (Where on the wall: along it, level, and up it; so that the brick's courses are level whichever way the wall faces.)
-    const tH: N = normalize(vec2(nG.z.negate(), nG.x).add(vec2(1e-4, 0)));
-    const q: N = vec2(dot(P.xz, tH), P.y).toVar();
-    const worn: N = smoothstep(0.35, 0.8, farNoise(P.xz.div(17).add(5.3))).toVar();
     const share: N = worn.mul(0.09).add(0.012).add(one(smoothstep(0.25, 1.4, above)).mul(0.12)).mul(renderUniforms.uChips as N).mul(hasFoot).toVar();
     // (Blots a few hand-breadths across, ragged with smaller ones, their edges torn finer still.)
     // (The finest tearing only where a point of the picture is small enough to show it: further off it speckled the edges.)
@@ -294,6 +304,44 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     const grad: N = grad0.mul(min(1, abs(det).div(max(length(grad0), 1e-12))));
     chipNormal = (n: N): N => normalize(n.mul(max(abs(det), 1e-12)).sub(grad).div(max(abs(det), 1e-12)));
   }
+  // Brick that has stood out in the weather (`bond`, the bond its picture is laid in, so that each brick can be told from the next):
+  // here and there a brick's fired skin has flaked from its face, frost having got in, showing the softer, paler clay within, its
+  // edge a little dark; the mortar has crumbled from the joints in patches, raked out deep and dark, more about the foot of the wall;
+  // and where the damp rises, salt has come out of the wall and dried white on it.
+  if (o.bond) {
+    const t: N = uv();
+    let row: N, xb: N, idx: N, fx: N, fy: N;
+    if (o.bond === 'wendish') {
+      // (As the picture lays them, `brickRecipe`: fifteen headers across, twenty courses up, a stretcher two headers long.)
+      row = floor(t.y.mul(20)); fy = fract(t.y.mul(20));
+      const x: N = t.x.mul(15).add(row.mul(3).mod(5)), pp: N = x.mod(5);
+      const start: N = select(pp.lessThan(2), float(0), select(pp.lessThan(4), float(2), float(4))), len: N = select(pp.lessThan(4), float(2), float(1));
+      xb = floor(x.div(5)).mul(5).add(start); fx = pp.sub(start).div(len);
+    } else {
+      row = floor(t.y.mul(26)); fy = fract(t.y.mul(26));
+      const x: N = t.x.mul(9).add(row.mod(2).mul(0.5));
+      xb = floor(x); fx = fract(x);
+    }
+    idx = vec2(xb, row);
+    const out: N = hasFoot.mul(renderUniforms.uChips as N).toVar();
+    const faceB: N = smoothstep(0.38, 0.5, stone.a).toVar(), joint: N = one(faceB);
+    const flaky: N = step(farHash(idx.add(vec2(3.3, 7.1))), worn.mul(0.07).add(0.03).add(one(smoothstep(0.3, 1.6, above)).mul(0.1))).mul(out);
+    const fv: N = farNoise(vec2(fx.mul(3.1), fy.mul(1.3)).add(farHash(idx).mul(17))).toVar();
+    const flake: N = smoothstep(0.4, 0.46, fv).mul(flaky).mul(faceB).toVar();
+    const flakeRim: N = smoothstep(0.38, 0.4, fv).mul(one(smoothstep(0.4, 0.43, fv))).mul(flaky).mul(faceB);
+    colour = mix(colour, colour.mul(vec3(1.5, 1.2, 0.92)).mul(mix(0.8, 1.1, farNoise(t.mul(220)))), flake.mul(0.9)).mul(one(flakeRim.mul(0.5)));
+    const raked: N = smoothstep(0.58, 0.74, farNoise(rot(q.mul(2.3)).add(6.1)).add(worn.mul(0.12)).add(one(smoothstep(0.2, 1.2, above)).mul(0.2))).mul(out).toVar();
+    colour = colour.mul(one(joint.mul(raked).mul(0.62)));
+    // (In a crust that is thick in the joints and thin over the brick, broken up finely: laid as an even veil it was white paint.)
+    const salt: N = one(smoothstep(0.2, 0.85, above.add(farNoise(rot(q.mul(4.1))).sub(0.5).mul(0.35)))).mul(smoothstep(0.55, 0.75, farNoise(rot(q.mul(3.3)).add(2.2))))
+      .mul(smoothstep(0.3, 0.7, farNoise(rot(q.mul(27)).add(5.5)))).mul(out);
+    colour = mix(colour, vec3(0.74, 0.72, 0.68).mul(mix(0.85, 1, stone.a)), salt.mul(mix(0.12, 0.5, joint)));
+  }
+  // Rain has run down the outer walls, in long streaks of grime from what stands out over them, darker in some places than others.
+  if (o.weather) {
+    const streak: N = smoothstep(0.52, 0.8, farNoise(vec2(q.x.mul(2.4), q.y.mul(0.16)).add(1.3)).mul(0.75).add(farNoise(vec2(q.x.mul(9.1), q.y.mul(0.5)).add(4.4)).mul(0.25)));
+    colour = colour.mul(one(streak.mul(worn.mul(0.14).add(0.12)).mul(hasFoot).mul(renderUniforms.uChips as N)));
+  }
   const mark: N = farNoise(vec2(along.mul(0.9), 3.1)).mul(0.6).add(farNoise(vec2(along.mul(4.3), positionWorld.y.mul(0.7))).mul(0.2)).add(0.42).toVar();
   // (Its edge is taken through the wall's own texture as well, so that it is blotched as damp is, and not a drawn wave.)
   const edgeAt: N = above.sub(mark).add(stone.a.sub(0.5).mul(0.22)).toVar();
@@ -308,8 +356,8 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   colour = mix(colour, vec3(...SNOW), snowy);
   // The edges of what is cut square, rounded in the shading (`edgeOf`), and a little paler where they are worn.
   if (o.bevel) {
-    const edge = edgeOf(o.bevel);
-    colour = colour.mul(edge.wear.mul(0.12).add(1));
+    const edge = edgeOf(o.bevel, !!o.chips);
+    colour = colour.mul(edge.wear.mul(0.12).add(1)).mul(edge.chip.mul(0.16).add(1));
     m.normalNode = edge.bend(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   }
   if (chipNormal) m.normalNode = chipNormal(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));

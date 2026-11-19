@@ -20,7 +20,7 @@ import { MeshBuilder } from './geom/meshBuilder';
  * (Nothing had marked where walls meet the ground, and every house stood clean, as if set down that morning.) It is drawn by the
  * material, which needs to know how high the ground at the wall's foot is: a wall of plaster is one face from its footing to its
  * beam, and damp marked at its corners was smeared over the whole of it with no line to it. So each point of a wall of plaster,
- * stone or brick that looks out of the house carries the height of the ground at its foot, plus a thousand, in the fourth number
+ * stone or brick of any clay that looks out of the house carries the height of the ground at its foot, plus a thousand, in the fourth number
  * of its field (see `makeSiteMaterial`).
  */
 export function placeHouse(
@@ -44,7 +44,7 @@ export function placeHouse(
   };
   const wallTop = y + bd.heights.reduce((a, h) => a + h, 0) + (bd.basement ?? 0) + 1.2;
   for (const [m, src] of local) {
-    const weathers = m === 'plaster' || m === 'stone' || m === 'brick', roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
+    const weathers = m === 'plaster' || m === 'stone' || /brick/i.test(m), roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
     const indoors = new Uint8Array(roofOrGlass ? 0 : src.vertexCount);
     if (!roofOrGlass) src.eachTriangle((a, b, cc, mx, my, mz, nx0, ny0, nz0) => {
       if (my > wallTop) return;
@@ -61,7 +61,8 @@ export function placeHouse(
       // Only a wall that looks out of the house: and if it looks into the next house, it is indoors, and has no damp.
       if (Math.abs(v.n[1]) > 0.5 || outOf(v.p[0] + v.n[0] * 0.4, v.p[2] + v.n[2] * 0.4) < 0.2) return;
       if (!roofOrGlass && v.p[1] < wallTop && o.neighbour?.(v.p[0] + v.n[0] * 0.8, v.p[2] + v.n[2] * 0.8)) { v.open = -1; return; }
-      if (!weathers || v.p[1] > y + 30) return;
+      // (A church's tower is weathered to its top as its walls are.)
+      if (!weathers || v.p[1] > y + 120) return;
       v.field[3] = 1000 + o.foot(v.p[0] + v.n[0] * 0.3, v.p[2] + v.n[2] * 0.3);
     });
   }
