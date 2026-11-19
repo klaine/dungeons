@@ -40,7 +40,7 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
-    // Three pages: the tool itself, the gallery of candidates, and the small example that reads what it exports.
-    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', viewer: 'examples/viewer/index.html' } },
+    // Four pages: the tool itself, the gallery of candidates, the small example that reads what it exports, and the building lab.
+    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', viewer: 'examples/viewer/index.html', buildings: 'lab/buildings.html' } },
   },
 });

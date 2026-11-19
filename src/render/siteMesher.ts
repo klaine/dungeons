@@ -17,7 +17,7 @@ import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
 import { buildLandmark } from './landmarks';
-import { footprintOf, groundOf } from '../core/building';
+import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
 import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt, valleyLand } from '../core/valley';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
@@ -891,10 +891,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
       return b.rects.some((r) => u > r.u0 && u < r.u1 && v > r.v0 && v < r.v1);
     };
-    // (With room about it: half a metre, and before a classical building's door the depth of its steps.)
+    // (With room about it: half a metre, and before a classical building's door the depth of its steps. A dressed one's steps stand
+    // before whatever stands forward, its middle or its pavilions, and are as deep as its plinth is high.)
     const outside = (b: (typeof houses)[number], x: number, z: number) => {
       const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
-      return Math.min(...b.rects.map((r, i) => Math.max(r.u0 - u, u - r.u1, (i === 0 && b.style === 'imperial' ? r.v0 - 1.45 : r.v0) - v, v - r.v1))) - 0.55;
+      const run = b.dress ? Math.max(1.45, stepsUp(plinthOf(b)).run + 0.1) : 1.45;
+      return Math.min(...b.rects.map((r, i) => Math.max(r.u0 - u, u - r.u1, (b.style === 'imperial' && (i === 0 || (b.dress && r.v1 <= 0)) ? r.v0 - run : r.v0) - v, v - r.v1))) - 0.55;
     };
     // What is open to the sky in the hill above the house: courts, rooms that have lost their roofs, and the mouths of shafts.
     const openings = [...house.filter((q) => q.roof === 'sky').map((q) => ({ x0: q.x0, x1: q.x1, z0: q.z0, z1: q.z1 })), ...skylights];
@@ -1262,7 +1264,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
         // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
-        const d = outside(b, x, z), sunk = b.sunk ?? 0, v = (b.faces === 'w' ? 1 : -1) * (x - b.x) + b.d / 2;
+        const d = outside(b, x, z), sunk = b.sunk ?? 0, v = (b.faces === 'w' ? 1 : -1) * (x - b.x) + b.d / 2, u = (b.faces === 'w' ? 1 : -1) * (z - b.z);
         let k: number;
         if (!sunk) {
           if (d > 4.5) continue;
@@ -1274,7 +1276,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           if (v < -9 || aside > 14 || v > b.d + 38) continue;
           k = v < 0 ? 1 - smooth((Math.max(aside, -v - 2.4) - 0.9) / 3.2) : (1 - smooth((aside - 1.2) / 11)) * (1 - smooth((v - b.d - 22) / 16));
         }
-        y += (b.base + groundOf(b, v) - y) * k;
+        y += (b.base + groundOf(b, v, u) - y) * k;
         even = Math.min(even, 1 - k);
       }
       for (const t of towers) {

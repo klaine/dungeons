@@ -324,6 +324,60 @@ export interface BrickWork {
 }
 
 /**
+ * How a classical building (style `imperial`) is dressed, from a plain block to a palace on a sloping square: what stands forward
+ * and what carries it, the heads of its windows, its ornament, and how it meets the ground. A building without it is dressed as the
+ * first of them were: the middle three bays standing forward under pilasters where there is a portico, a rusticated ground storey
+ * with flat arches over its windows, a cornice over every window of the principal storey and a pediment over every other, a small
+ * window in the pediment, one door, and a plinth of half a metre on level ground.
+ */
+export interface ClassicalDress {
+  /** How many bays of the middle stand forward, where there is a portico: three, five, seven or nine. */
+  centre: number;
+  /**
+   * What carries the middle's pediment: pilasters against its wall, or columns standing clear of it through the storeys over the
+   * ground storey, on the ground storey of the middle brought forward as their base, its doors and windows deep in it.
+   */
+  order: 'pilasters' | 'columns';
+  /** How many bays at each end stand forward as pavilions, under pilasters of their own: none, or one to three. */
+  pavilions: number;
+  /** Which storeys have windows with round heads: none, the ground storey, or it and the one over it. */
+  arches: 0 | 1 | 2;
+  /** Over the windows of the principal storey: the surround alone; a cornice; a cornice, and a pediment over every other; or a pediment over every one. */
+  heads: 'plain' | 'cornice' | 'alternate' | 'pediments';
+  /** The render of the ground storey cut in courses. */
+  rusticated: boolean;
+  /** Wreaths along the frieze under the cornice, one over each window. */
+  frieze: boolean;
+  /** A balustrade along the top of the cornice, before the roof. */
+  balustrade: boolean;
+  /** In the pediment: a small window, a round one, a clock, or nothing. */
+  tympanum: 'window' | 'oculus' | 'clock' | 'plain';
+  /** A flagpole over the middle. */
+  flag: boolean;
+  /** What the roof is covered with: sheet metal of the tone dealt, or grey, green, red-brown or black; copper gone green; red clay tiles, or dark ones. */
+  roof: 'dealt' | 'grey' | 'green' | 'red' | 'black' | 'copper' | 'tiles' | 'dark';
+  /**
+   * How richly its walls are dressed. `empire`: strips at the corners over the ground storey, surrounds to the windows with sills on
+   * blocks and heads as `heads` says, three bands over the ground storey, a deep cornice on blocks. `quoins`: as the Renaissance did,
+   * stones laid long and short up the corners in place of the strips, and the surrounds eared at their tops. `lesenes`: plainer, as
+   * Nordic classicism was: flat strips up the corners from the plinth, plain frames to the windows with no heads, one band, a lighter
+   * cornice with no blocks, and the order of the middle flat strips too. `bare`: nothing but the openings, their sills, one band and a
+   * slim cornice.
+   */
+  style: 'empire' | 'quoins' | 'lesenes' | 'bare';
+  /** Doors in the middle: one, or three side by side into the one hall (where the middle is three bays broad or more). */
+  doors: 1 | 3;
+  /** How high the floor of the ground storey stands over the ground before the door: half a metre of plinth, or more, a basement with small windows of its own. */
+  plinth: number;
+  /**
+   * How much lower the ground stands at the right end of the front than at the left, as one stands before it (less than nothing
+   * where the left is lower). The building stands level, and the granite of its base shows the more the further the ground falls
+   * away. Never more than the plinth allows: the ground at the upper end stays under the floor.
+   */
+  fall: number;
+}
+
+/**
  * The plan of a building's rooms: alike on every storey, except where a room or a door names the
  * one `storey` it is on (a timber house is planned storey by storey). Everything is in the building's own
  * measures: `u` across the front from its middle, to the right as seen from outside; `v` back
@@ -393,6 +447,14 @@ export interface Building {
   dormers?: number;
   /** Of a classical building whose middle stands forward: false if no pediment stands over that middle, the cornice running straight across it. */
   pediment?: boolean;
+  /** Of a classical building: how it is dressed, from a plain block to a palace on a sloping square (see `ClassicalDress`). Without it, as the first of them were. */
+  dress?: ClassicalDress;
+  /**
+   * What stands close about the building, in its own measures (across its front, and back from it): the outline of each such thing,
+   * and how high its walls rise over the ground before this one's door. A window that would look into one from nearer than a few
+   * metres, and under its top, is left out and the wall is blank there, as it is where houses stand against one another.
+   */
+  near?: { at: [number, number][]; top: number }[];
   /**
    * Of a classical building: walls of bare brown brick instead of a wash. `stucco`: its dressings (cornices, bands, surrounds,
    * pilasters, corner strips) stay stuccoed white, and its ground storey is stucco the colour of stone, rusticated; `bare`: all of it
