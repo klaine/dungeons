@@ -24,7 +24,7 @@ import type { PaveFrame } from './scene';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cos, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, ivec2, length, materialRoughness, max, min, mix,
+  Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cos, cross, dFdx, dFdy, dot, exp, float, floor, fract, fwidth, ivec2, length, materialRoughness, max, min, mix,
   normalMap, normalView, normalViewGeometry, normalWorld, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
@@ -69,6 +69,35 @@ function nearFarCut(side: 'near' | 'far'): { opacity: N; test: N } {
   const far: N = select(on.and(inside.greaterThanEqual(0)).and(patch.lessThan(spread.sub(0.06))), float(0), float(1));
   return { opacity: side === 'near' ? near : far, test: float(0.5) };
 }
+/**
+ * Rings spreading on standing water where rain falls on it: puddles, wet paving's hollows, ponds, the harbour. Drops fall in a
+ * lattice of small cells (two, of 55 and 33 centimetres), each at a time and a place of its own, a new place each time; how many
+ * cells have a drop goes with how hard it rains (`amount`, 0 to 1). Each drop's ring spreads to about a cell across in two thirds
+ * of a second or so, a crest with a trough inside it, fading as it goes. Given back as how much the rings tilt the water across x and
+ * z. Left out where a cell is smaller than a few points of the picture (they would only speckle), and where there is no rain.
+ */
+export const rainRings: N = Fn(([p, amount]: [N, N]) => {
+  const slope: N = vec2(0, 0).toVar();
+  const near: N = one(smoothstep(0.015, 0.05, length(fwidth(p))));
+  const a: N = amount.mul(near).toVar();
+  If(a.greaterThan(0.01), () => {
+    for (const [cell, rate, seed] of [[0.55, 1.3, 1.7], [0.33, 1.7, 8.9]]) {
+      const base: N = floor(p.div(cell)).toVar();
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+        const id: N = base.add(vec2(i, j)).toVar();
+        const clock: N = time.mul(rate).add(farHash(id.add(vec2(seed, seed * 1.3)))).toVar();
+        const life: N = fract(clock), round: N = floor(clock).mul(0.731).toVar();
+        const centre: N = id.add(vec2(farHash(id.add(vec2(round, seed + 3.1))), farHash(id.add(vec2(seed + 5.3, round)))).mul(0.8).add(0.1)).mul(cell);
+        const on: N = step(farHash(id.add(vec2(round.add(seed + 7.7), round))), a.mul(1.4));
+        const v: N = p.sub(centre), d: N = max(length(v), 1e-3);
+        const x: N = d.sub(life.mul(cell * 1.1)).div(cell * 0.11);
+        const ring: N = sin(x.mul(2.4)).mul(exp(x.mul(x).negate())).mul(one(life).mul(one(life)));
+        slope.addAssign(v.div(d).mul(ring).mul(on).mul(0.42));
+      }
+    }
+  });
+  return slope;
+});
 /**
  * What a material says of how nearly a mirror it is, beside its colour (`userData.mirror`, read by `mirrored` in `post.ts`): the way
  * it faces in the view, as long as it is nearly a mirror, 0 to 1. (So written, and wholly opaque, it is laid over what is under it
@@ -1039,7 +1068,9 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     // more texture took this material to seventeen, past the sixteen a stage may sample under WebGPU, which then drew none of the ground.)
     const ge = 0.003, gh: N = (texture(shingle.map, gravelAt) as N).bias(blur).a;
     const gG: N = vec3(gh.sub((texture(shingle.map, gravelAt.add(vec2(ge, 0))) as N).bias(blur).a).mul(4), gh.sub((texture(shingle.map, gravelAt.add(vec2(0, ge))) as N).bias(blur).a).mul(4), 1);
-    const laid: N = mix(vec3(n.xy.mul(steep), n.z), mix(mix(paveNormal, vec3(0, 0, 1), paveWater), gG, gravelled), paved);
+    const laid0: N = mix(vec3(n.xy.mul(steep), n.z), mix(mix(paveNormal, vec3(0, 0, 1), paveWater), gG, gravelled), paved);
+    // (Where water stands in the rain, the drops' rings on it.)
+    const laid: N = vec3(laid0.xy.add(rainRings(positionWorld.xz, uWet.mul(max(puddle, paveWater)))), laid0.z);
     m.normalNode = normalMap(vec3(laid.xy.mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), laid.z).mul(0.5).add(0.5));
   }
   // (And here and there a grain of it catches the sun: a glint, near the eye, from a crystal turned just so.)

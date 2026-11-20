@@ -4,6 +4,7 @@ import * as TSL from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Atmosphere, skyParts } from './post';
 import { Rng } from '../core/rng';
+import { rainRings, weatherUniforms } from './siteMaterial';
 
 /**
  * Water, still and running. Still water is a level sheet over a hollow in the ground: dark, nearly a mirror, and thin enough
@@ -453,7 +454,8 @@ export class Water {
         // Two sets of ripples crossing, of different sizes, drifting different ways.
         const a: N = texture(this.ripples, P.xz.mul(0.21).add(vec2(0.013, 0.008).mul(t))).xy.mul(2).sub(1);
         const b: N = texture(this.ripples, P.zx.mul(0.057).sub(vec2(0.006, 0.004).mul(t))).xy.mul(2).sub(1);
-        const ripple: N = a.mul(0.03).add(b.mul(0.028)).toVar();
+        // (And in rain, the drops' rings on it.)
+        const ripple: N = a.mul(0.03).add(b.mul(0.028)).add(rainRings(P.xz, weatherUniforms.uWet as N)).toVar();
         const normal: N = normalize(vec3(ripple.x, 1, ripple.y)).toVar();
         const view: N = normalize(cameraPosition.sub(P)).toVar();
         // Water mirrors nearly everything at a glancing angle and very little looked straight down on.
@@ -475,7 +477,8 @@ export class Water {
         const b: N = ripplesAt(flow.x.mul(0.19).add(0.4), flow.y.mul(0.1).sub(t.mul(0.105))).xy.mul(2).sub(1).toVar();
         // Quiet where the bed is nearly level, broken where it falls.
         // Quieter still where it comes to rest: in the pool it rises in, and where it meets a lake.
-        const ripple: N = a.mul(0.6).add(b.mul(0.5)).mul(fall.mul(0.1).add(0.07)).mul(one(calm.mul(0.6))).toVar();
+        // (In rain, the drops' rings as well, though a current carries them off and breaks them: fewer where it runs fast.)
+        const ripple: N = a.mul(0.6).add(b.mul(0.5)).mul(fall.mul(0.1).add(0.07)).mul(one(calm.mul(0.6))).add(rainRings(P.xz, (weatherUniforms.uWet as N).mul(one(fall.mul(0.7))))).toVar();
         const along: N = normalize(vec3(way.x, 0, way.y)).toVar();
         const normal: N = normalize(vec3(0, 1, 0).add(vec3(along.z.negate(), 0, along.x).mul(ripple.x)).add(along.mul(ripple.y))).toVar();
         const view: N = normalize(cameraPosition.sub(P)).toVar();

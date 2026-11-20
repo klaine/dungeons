@@ -3,7 +3,7 @@ import { NodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { Atmosphere, skyParts } from './post';
 import { rippleMap } from './water';
-import { mirrorAs } from './siteMaterial';
+import { mirrorAs, rainRings, weatherUniforms } from './siteMaterial';
 import { SeaDesc } from './scene';
 
 /**
@@ -206,6 +206,8 @@ export class Sea {
         lost = lost.add(one(seen).mul(weight * weight * 0.18));
       }
       slope = slope.mul(calm);
+      // And in rain, the drops' rings, plainest where the water is calm (a harbour, a cove), lost among the waves out at sea.
+      slope = slope.add(rainRings(P.xz, (weatherUniforms.uWet as N).mul(one(smoothstep(4, 14, d)).mul(0.6).add(0.4))));
       return {
         normal: normalize(vec3(slope.x.negate(), 1, slope.y.negate())).toVar(),
         rough: lost.mul(calm).toVar(),
