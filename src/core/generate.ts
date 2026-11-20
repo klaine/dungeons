@@ -322,7 +322,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   // it, rather than on the valley's floor at its head on a hill made for it; and a larger play area, if that is what fits them.)
   let seated = false, extra = 0;
   if (found) {
-    const cx0 = Math.min(house.x0, meadow.x0), cx1 = Math.max(house.x1, meadow.x1), reach = Math.max(cx1 - cx0, meadow.z1 - back) / 2 + 11;
+    const cx0 = Math.min(house.x0, meadow.x0), cx1 = Math.max(house.x1, meadow.x1), reach = Math.max(cx1 - cx0, meadow.z1 - back) / 2 + 14;
     const seat = findSeat(found, reach, (meadow.x0 + meadow.x1) / 2 - (cx0 + cx1) / 2, (meadow.z0 + meadow.z1) / 2 - (back + meadow.z1) / 2, rng.fork('seat'));
     if (seat) { found = { ...found, spot: seat.spot }; seated = true; extra = seat.extra; }
   }
@@ -1292,7 +1292,8 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   };
   // From where the road is clear of the castle's hill's steepest, to the end of the village's stretch.
   let s0 = 0;
-  while (s0 < lengths[lengths.length - 1] && castleOff(castle, along(s0)[0], along(s0)[1]) < 11) s0 += 1;
+  // (Twenty metres from its wall: the castle stands over its village, which does not crowd up to its gate.)
+  while (s0 < lengths[lengths.length - 1] && castleOff(castle, along(s0)[0], along(s0)[1]) < 20) s0 += 1;
   let s1 = s0;
   while (s1 < lengths[lengths.length - 1] && along(s1)[1] < zone[1]) s1 += 1;
   if (s1 - s0 < 24) return false;
@@ -1313,7 +1314,7 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
     }
     return false;
   };
-  const clearGround = (ring: Oblong, fromRoad: number) => ring.every(([x, z]) => walkable(v, x, z, 5) && fromTrack(x, z) >= fromRoad && roomAt(site, x, z, 0.8) && castleOff(castle, x, z) >= 7);
+  const clearGround = (ring: Oblong, fromRoad: number) => ring.every(([x, z]) => walkable(v, x, z, 5) && fromTrack(x, z) >= fromRoad && roomAt(site, x, z, 0.8) && castleOff(castle, x, z) >= 14);
   const free = (ring: Oblong) => kept.every((q) => parted(ring, q));
   /** A house of the village: larger nearer the gate (`near`, 1 there and 0 at the village's foot). */
   const house = (k: number, near: number) => {

@@ -66,7 +66,10 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
   const fromHouse = (x: number, z: number) => Math.hypot(Math.max(hx0 - x, 0, x - hx1), Math.max(hz0 - z, 0, z - hz1));
   const n = rng.int(8, 11), phase = rng.range(0, (Math.PI * 2) / n);
   const jitter = Array.from({ length: n }, () => [rng.range(-0.2, 0.2), rng.range(-0.08, 0.16)]);
-  let margin = rng.range(9, 12);
+  // (Larger than it was, nine to twelve metres off the house, with walls seven or eight metres high: asked, the roofs of the village
+  // below nearly reached the top of its wall. A castle's bailey holds its stables, stores and yards besides its hall, and its curtain
+  // stands ten metres and more over the ground outside, its towers higher again and its keep over all.)
+  let margin = rng.range(12, 15);
   let wall: [number, number][] = [];
   for (let attempt = 0; attempt < 10; attempt++, margin *= 0.88) {
     const ax = (hx1 - hx0) / 2 + margin, az = (hz1 - hz0) / 2 + margin * 0.85;
@@ -77,7 +80,7 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
       let r = (1 / Math.hypot(c / ax, s / az)) * (1 + jitter[k][1]);
       while (fromHouse(cx + c * r, cz + s * r) < 7) r += 0.5;
       // (Further out behind the house, where the keep stands between it and the wall.)
-      if (cz + s * r < hz0 + 2) r += 5;
+      if (cz + s * r < hz0 + 2) r += 7;
       wall.push([round(cx + c * r), round(cz + s * r)]);
     }
     // (Within the valley, with room to walk round it.)
@@ -114,7 +117,7 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
     const kind = kinds[(towers.length + rng.int(0, 3)) % 4];
     const [x, z] = wall[k];
     towers.push({
-      x, z, kind, r: round(kind === 'square' ? rng.range(2.2, 2.9) : rng.range(2.4, 3.3)), over: round(rng.range(2.5, 6.5)),
+      x, z, kind, r: round(kind === 'square' ? rng.range(3.0, 3.8) : rng.range(3.3, 4.4)), over: round(rng.range(4.5, 9)),
       roof: kind === 'square' ? (rng.chance(0.5) ? 'cone' : 'battlement') : rng.chance(0.6) ? 'cone' : 'battlement',
       out: Math.round(Math.atan2(z - cz, x - cx) * 1000) / 1000,
     });
@@ -123,8 +126,8 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
   // The keep: tall and slender, at the back of the bailey, where the wall is furthest from the gate, on the bailey's side of it and
   // clear of the house. Its door faces the bailey's middle. (A tower that can be gone into and climbed, as the old lone tower could.)
   const back = wall.map((p, k) => ({ p, k })).sort((a, b) => Math.hypot(b.p[0] - gate.x, b.p[1] - gate.z) - Math.hypot(a.p[0] - gate.x, a.p[1] - gate.z));
-  // (Six or seven storeys: it should stand over everything else, as a keep does over its castle.)
-  const half = round(rng.range(2.7, 3.1)), storeys = rng.int(6, 7);
+  // (Eight or nine storeys, some twenty-five metres: it should stand over everything else, its towers too, as a keep does over its castle.)
+  const half = round(rng.range(3.2, 3.7)), storeys = rng.int(8, 9);
   for (const { p } of back) {
     const dx = cx - p[0], dz = cz - p[1], l = Math.hypot(dx, dz) || 1, inset = half + 0.9 + 1.0 + 0.6;
     const kx = round(p[0] + (dx / l) * inset), kz = round(p[1] + (dz / l) * inset);
@@ -132,5 +135,5 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
     site.towers = [...(site.towers ?? []).filter((t) => !t.castle), { x: kx, z: kz, half, storeys, door: kx < cx ? 'e' : 'w', castle: true }];
     break;
   }
-  return { wall, height: round(rng.range(6.5, 8)), thick: 2, gate, towers, rise: round(rng.range(7, 10)) };
+  return { wall, height: round(rng.range(10, 12.5)), thick: 2.4, gate, towers, rise: round(rng.range(7, 10)) };
 }

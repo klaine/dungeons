@@ -42,19 +42,24 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
   let triangles = 0;
   const e = Math.min(1, cell * 0.5);
   const P = [0, 0, 0, 0].map(() => ({ x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 }));
-  const corner = (k: number, x: number, z: number) => {
-    const q = P[k];
-    if (o.warp) [x, z] = o.warp(x, z);
-    q.x = x; q.z = z;
-    q.y = height(x, z);
-    const dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e);
-    const l = Math.hypot(dx, 2 * e, dz);
-    q.nx = -dx / l; q.ny = (2 * e) / l; q.nz = -dz / l;
+  // (Each point of the lattice is reckoned once, and kept for the four cells about it: reckoned for each cell, the height function,
+  // which may be slow, was asked twenty times a cell where five do.)
+  const row = nx + 1, kept = new Float64Array((nx + 1) * (nz + 1) * 6), done = new Uint8Array((nx + 1) * (nz + 1));
+  const corner = (k: number, i: number, j: number) => {
+    const q = P[k], o6 = (j * row + i) * 6;
+    if (!done[j * row + i]) {
+      let x = area.x0 + i * cell, z = area.z0 + j * cell;
+      if (o.warp) [x, z] = o.warp(x, z);
+      const y = height(x, z), dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e), l = Math.hypot(dx, 2 * e, dz);
+      kept[o6] = x; kept[o6 + 1] = y; kept[o6 + 2] = z; kept[o6 + 3] = -dx / l; kept[o6 + 4] = (2 * e) / l; kept[o6 + 5] = -dz / l;
+      done[j * row + i] = 1;
+    }
+    q.x = kept[o6]; q.y = kept[o6 + 1]; q.z = kept[o6 + 2]; q.nx = kept[o6 + 3]; q.ny = kept[o6 + 4]; q.nz = kept[o6 + 5];
   };
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x0 = area.x0 + i * cell, z0 = area.z0 + j * cell;
     if (o.skip({ x0, x1: x0 + cell, z0, z1: z0 + cell })) continue;
-    corner(0, x0, z0); corner(1, x0 + cell, z0); corner(2, x0 + cell, z0 + cell); corner(3, x0, z0 + cell);
+    corner(0, i, j); corner(1, i + 1, j); corner(2, i + 1, j + 1); corner(3, i, j + 1);
     // Split along the diagonal that makes the flatter pair, which keeps ridges from saw-toothing.
     const split = Math.abs(P[0].y - P[2].y) < Math.abs(P[1].y - P[3].y) ? [[0, 3, 2], [0, 2, 1]] : [[0, 3, 1], [1, 3, 2]];
     for (const [a, b, c] of split) {
