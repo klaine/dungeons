@@ -1,9 +1,9 @@
-import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
+import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector2, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { Hour, SKIES } from '../core/site';
-import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor } from '../core/stream';
+import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor, wayThroughHoles } from '../core/stream';
 import { HeightField } from '../core/terrain';
-import { WORLD_SIZE, WorldPlace } from '../core/world';
+import { COVER, WORLD_SIZE, WorldPlace } from '../core/world';
 import { MeshBuilder } from '../render/geom/meshBuilder';
 import { layTerrain } from '../render/landscape';
 import { squareBuilders } from '../render/streamMesh';
@@ -12,6 +12,7 @@ import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMater
 import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { Player } from '../app/player';
 import { WorldColliders } from './body';
+import { WorldPlaces } from './places';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
 
@@ -118,6 +119,9 @@ async function start(): Promise<void> {
   const look: typeof plainLook = { ...plainLook, turf: (x, z, y, slope) => { const c = plainLook.turf(x, z, y, slope); if (trackAt) c[3] = trackAt(x, z); return c; } };
   // (What grows reads what lies at a point through these: on the route page, nothing grows on the way, nor trees close beside it.)
   let growCover = coverAt, treeCover = coverAt;
+  // (And nothing of the world's grows inside a place standing in it, which has its own: `placesBuilt`, below.)
+  const growHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : growCover(x, z));
+  const treesHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : treeCover(x, z));
   // The sea: one sheet at its level, out beyond the world's edge, smooth enough to show the sky.
   const water = new MeshStandardNodeMaterial({ color: 0x0b2430, roughness: 0.07, metalness: 0 });
   const sea = new Mesh(new PlaneGeometry(grid.hx * 2 + 24000, grid.hz * 2 + 24000), water);
@@ -182,7 +186,7 @@ async function start(): Promise<void> {
     const need = tilesFor(grid, i, j), data = await Promise.all(need.map(([a, b]) => tile(a, b)));
     const send = data.filter((t) => !worker.has.has(`${t.i},${t.j}`));
     for (const t of send) worker.has.add(`${t.i},${t.j}`);
-    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways });
+    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways, holes: placesBuilt.holes() });
   };
   /** Asks a worker to split a square into four at half a metre, from its own heights. */
   const requestFine = (sq: Sq) => {
@@ -228,7 +232,7 @@ async function start(): Promise<void> {
       if (sq && (sq.meshes || sq.fineShown)) continue;
       const [x0, z0] = squareOrigin(grid, i, j);
       layTerrain(turf, rock, low, {
-        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, skip: () => false, seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
+        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, skip: (c) => placesBuilt.inside((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
         colour: (x, z) => look.turf(x, z, field.smoothAt(x, z), Math.hypot(field.smoothAt(x + 8, z) - field.smoothAt(x - 8, z), field.smoothAt(x, z + 8) - field.smoothAt(x, z - 8)) / 16),
         rock: (tone) => { const c = look.rock(0, 0, 0); return [c[0] * tone * 1.6, c[1] * tone * 1.6, c[2] * tone * 1.6]; },
       });
@@ -247,16 +251,16 @@ async function start(): Promise<void> {
   const depthAt = woodDepth(W.cover, field.nx, field.nz, field.x0, field.z0, field.cell);
   let counts = { tufts: 0, trees: 0, farTrees: 0 };
   const lowBlock = (bx: number, bz: number) => {
-    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growCover, W.plan.n % 997, season), meshes = cardsOf(sets);
+    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growHere, W.plan.n % 997, season), meshes = cardsOf(sets);
     for (const m of meshes) scene.add(m);
     lows.set(`${bx},${bz}`, meshes);
     counts.tufts += sets.reduce((s, q) => s + q.matrices.length / 16, 0);
   };
   /** A block's trees grown whole (with the bramble, bushes and young trees of any wood's edge in it), or simply. */
   const treeBlock = (bx: number, bz: number, simply = false) => {
-    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treeCover, heightAt, W.plan.n, depthAt), out: (Mesh | InstancedMesh)[] = [];
+    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treesHere, heightAt, W.plan.n, depthAt), out: (Mesh | InstancedMesh)[] = [];
     const level = simply ? 'simple' : 'whole';
-    const { wood, sets, owners } = growTrees(trees, heightAt, season, simply, simply ? undefined : { x0, z0, size: LOW, coverAt: treeCover, depthAt, seed: W.plan.n });
+    const { wood, sets, owners } = growTrees(trees, heightAt, season, simply, simply ? undefined : { x0, z0, size: LOW, coverAt: treesHere, depthAt, seed: W.plan.n });
     for (const [name, b] of wood) {
       if (!b.triangleCount) continue;
       // (Each point of wood says which tree it is, for the level it is drawn at: `aTree`.)
@@ -276,7 +280,7 @@ async function start(): Promise<void> {
   /** Painted trees in a square's ground: all of them, each drawn so only beyond where it is drawn simply (`treeShare`). Made once. */
   const farTreeBlock = (i: number, j: number) => {
     const [x0, z0] = squareOrigin(grid, i, j), key = `${i},${j}`, at = me.clone();
-    const trees = treesIn(x0, z0, SQUARE.size, treeCover, heightAt, W.plan.n, depthAt);
+    const trees = treesIn(x0, z0, SQUARE.size, treesHere, heightAt, W.plan.n, depthAt);
     const meshes = cardsOf(farTrees(trees, heightAt, season), 'painted');
     for (const m of meshes) { m.castShadow = false; scene.add(m); }
     fars.set(key, { at, meshes });
@@ -294,7 +298,34 @@ async function start(): Promise<void> {
   // by the trunks of trees (`WorldColliders`: a patch of ground about it, made again as it goes). The first step of the world becoming
   // the game (`docs/06-world.md`, *The world as the game*); the walk had been a camera slid over the ground.
   let landVersion = 0;
-  const colliders = new WorldColliders(heightAt, (x0, z0, x1) => treesIn(x0, z0, x1 - x0, treeCover, heightAt, W.plan.n, depthAt).map((t) => ({ x: t.x, z: t.z, r: Math.max(0.2, t.girth * 1.1) })));
+  const colliders = new WorldColliders(heightAt, (x0, z0, x1) => treesIn(x0, z0, x1 - x0, treesHere, heightAt, W.plan.n, depthAt).map((t) => ({ x: t.x, z: t.z, r: Math.max(0.2, t.girth * 1.1) })), (x, z) => placesBuilt.inside(x, z, 0.5));
+  // Places built into the world as one comes to them (`WorldPlaces`, step 2): valley heads, so far. `?places=0` builds none.
+  const placesBuilt = new WorldPlaces({ seed, size, scene, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: Number(params.get('tex')) || 1024, turf: materials.turf, sunDir: light.sunDir });
+  /** Where a square's triangles are left out, under a place standing in the world: only for a square that reaches into one. */
+  const underPlace = (x0: number, z0: number, size: number) => {
+    const near = placesBuilt.holes().some((h) => Math.hypot(Math.max(0, x0 - h.cx, h.cx - x0 - size), Math.max(0, z0 - h.cz, h.cz - z0 - size)) < Math.hypot(h.hx, h.hz));
+    return near ? (x: number, z: number) => placesBuilt.inside(x, z, 2.5) : undefined;
+  };
+  const drawn = new Vector2();
+  // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
+  // let be), the far land, what grows (none inside a place), and the body's ground.
+  placesBuilt.onHoles = (h) => {
+    const r = Math.hypot(h.hx, h.hz) + 160, cx = h.cx, cz = h.cz, near = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - cx, cx - x0 - s), Math.max(0, z0 - cz, cz - z0 - s)) < r;
+    for (const [k, sq] of squares) if (near(sq.x0, sq.z0, SQUARE.size)) {
+      drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []);
+      squares.delete(k); farDirty.add(blockOf(sq.i, sq.j));
+    }
+    for (const [k, meshes] of [...lows, ...nears, ...mids]) {
+      const [i, j] = k.split(',').map(Number);
+      if (!near(i * LOW, j * LOW, LOW)) continue;
+      drop(meshes); lows.delete(k); if (nears.delete(k)) grownMap.set(i, j, 'whole', 0); if (mids.delete(k)) grownMap.set(i, j, 'simple', 0);
+    }
+    for (const [k, f] of fars) { const [i, j] = k.split(',').map(Number), [x0, z0] = squareOrigin(grid, i, j); if (near(x0, z0, SQUARE.size)) { drop(f.meshes); fars.delete(k); } }
+    for (let bj = 0; bj < Math.ceil(SZ / BLOCK); bj++) for (let bi = 0; bi < Math.ceil(SX / BLOCK); bi++) { const [x0, z0] = squareOrigin(grid, bi * BLOCK, bj * BLOCK); if (near(x0, z0, SQUARE.size * BLOCK)) farDirty.add(`${bi},${bj}`); }
+    // (The way graded again on the land as the places now leave it, so that it comes through the band about one as a way.)
+    if (route) ways[0] = wayThroughHoles(route.way, placesBuilt.holes());
+    landVersion++;
+  };
   const player = new Player(camera, canvas, colliders);
   player.flySpeed = [40, 160];
   player.fallTo = -1e4;
@@ -310,6 +341,8 @@ async function start(): Promise<void> {
   let dryX = startAt.x, dryZ = startAt.z;
   player.constrain = (p) => {
     p.x = Math.max(-grid.hx, Math.min(grid.hx, p.x)); p.z = Math.max(-grid.hz, Math.min(grid.hz, p.z));
+    // (Inside a place standing in the world its own ground and walls hold the body, and the way's corridor gives way to the place.)
+    if (placesBuilt.inside(p.x, p.z)) { dryX = p.x; dryZ = p.z; return; }
     if (route) route.keepIn(p);
     const ground = heightAt(p.x, p.z);
     if (player.flying) { p.y = Math.max(p.y, Math.max(ground, 0) + 0.3); return; }
@@ -437,6 +470,8 @@ async function start(): Promise<void> {
   };
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
+    /** The places standing in the world, and how they came in. */
+    places: () => ({ status: placesBuilt.status, built: placesBuilt.report() }),
     /** On the route page: opens or closes the ink map of the stretch. */
     ink: (open?: boolean) => route?.toggleInk(open),
     /** On the route page: how far along the way, its length, whether arrived, and how the places ahead are being laid out. */
@@ -466,7 +501,8 @@ async function start(): Promise<void> {
     if (touch.shownFlying !== player.flying) touch.flying(player.flying);
     // (The two places laid out for the game ahead, once the squares about the start are in, or after twenty seconds: not before, so
     // that the worker that does it, making the world again, does not slow the first squares.)
-    if (route && !layingAhead && (now - begun > 20000 || (squares.size >= 6 && pending.size === 0))) { layingAhead = true; void route.layOutAhead(); }
+    if (route && !layingAhead && (now - begun > 20000 || (squares.size >= 6 && pending.size === 0))) { layingAhead = true; route.layOutAhead(placesBuilt); }
+    placesBuilt.update(me, now, camera, renderer.getDrawingBufferSize(drawn).y);
     const groundY = heightAt(me.x, me.z);
     // Streaming: ask for what is near and missing, nearest first; let go of what is far.
     const wanted = [...squaresWanted()].map((k) => { const [i, j] = k.split(',').map(Number); return { k, i, j, d: distTo(i, j) }; }).sort((a, b) => a.d - b.d);
@@ -493,7 +529,7 @@ async function start(): Promise<void> {
         for (const p of sq.fine) {
           const level = levelFor(distRect(p.x0, p.z0, FINE.size));
           if (level === p.level || budget <= 0) continue;
-          const m = squareBuilders(p.x0, p.z0, p.heights, p.errors, LEVELS[level], look, 0.72, FINE.cell);
+          const m = squareBuilders(p.x0, p.z0, p.heights, p.errors, LEVELS[level], look, 0.72, FINE.cell, underPlace(p.x0, p.z0, FINE.size));
           const meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
           drop(p.meshes ?? []);
           if (sq.fineShown) for (const mesh of meshes) scene.add(mesh);
@@ -513,7 +549,7 @@ async function start(): Promise<void> {
       // At a metre: made again when it is wanted at another distance, or back from half a metre.
       const level = levelFor(q.d);
       if (level !== sq.level || !sq.meshes) {
-        const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look);
+        const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look, 0.72, 1, underPlace(sq.x0, sq.z0, SQUARE.size));
         if (sq.meshes) drop(sq.meshes); else if (!sq.fineShown) farDirty.add(blockOf(sq.i, sq.j));
         sq.meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
         for (const mesh of sq.meshes) scene.add(mesh);
@@ -560,7 +596,7 @@ async function start(): Promise<void> {
     grownMap.flush();
     vegetationUniforms.uTime.value = now / 1000;
     const cards = [...[...lows.values()].flat(), ...[...nears.values(), ...mids.values()].flat().filter((m): m is InstancedMesh => (m as InstancedMesh).isInstancedMesh)];
-    cullCards(cards, camera.position);
+    cullCards([...cards, ...placesBuilt.cards()], camera.position);
     light.follow(me, groundY);
     light.atmosphere.update();
     light.pipeline.render();
@@ -575,7 +611,7 @@ async function start(): Promise<void> {
       shown = now;
       const st = stats();
       if (route) { route.drawMap(me, player.yaw); route.markArrival(); route.drawInkWalker(me, player.yaw); }
-      hud.textContent = (route ? `${route.lines().join('\n')}\n\n` : '') + `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
+      hud.textContent = (route ? `${route.lines().join('\n')}\n` : '') + (placesBuilt.status ? `${placesBuilt.status}\n` : '') + (route ? '\n' : '') + `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
         `frame ${st.frameMs.toFixed(1)} ms · drawn ${st.drawnTriangles.toLocaleString()} triangles\n` +
         `squares ${st.squares} (${st.pending} coming), ${st.squareTriangles.toLocaleString()} triangles; a square ${st.squareMsMiddle.toFixed(0)} ms in a worker (${cores} at work)\n` +
         (fineOn ? `at half a metre ${st.fine} (${st.finePending} coming), ${st.fineTriangles.toLocaleString()} triangles; four ${st.fineMsMiddle.toFixed(0)} ms\n` : '') +

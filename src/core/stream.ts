@@ -1,7 +1,66 @@
 import { Rng } from './rng';
 import { fbmd, HeightField, landDetail, wearByFrost, wearByWater } from './terrain';
 import { Ground, groundsOpen, withGrounds } from './fit';
-import { Way, WAY, WayIndex, withWay } from './way';
+import { gradeHeights, Way, WAY, WayIndex, withWay } from './way';
+
+/**
+ * A place built into the world over a square of its land (`PlaceHole` in `render/placePack.ts`, where it is made): its square's middle,
+ * turn and half-breadths, and the height of the place's land all round the square's edge, every `step` metres. Here only as numbers,
+ * so that the workers making squares need nothing of the place's but this.
+ */
+export interface Hole { cx: number; cz: number; turn: number; hx: number; hz: number; step: number; profile: Float32Array; gap?: Float32Array }
+
+/**
+ * How far outside a hole's square a point lies (less than nothing inside), the place's land at the nearest point of its edge, and how far
+ * that stands from the world's own land there (`gap`, as the place's worker measured it; nothing if not given).
+ */
+export function holeAt(h: Hole, x: number, z: number): { out: number; edge: number; gap: number } {
+  const c = Math.cos(h.turn), s = Math.sin(h.turn), dx = x - h.cx, dz = z - h.cz;
+  // (Into the square's own two ways: the inverse of the place's turn.)
+  const lx = c * dx + s * dz, lz = -s * dx + c * dz;
+  const ox = Math.abs(lx) - h.hx, oz = Math.abs(lz) - h.hz;
+  const out = ox > 0 || oz > 0 ? Math.hypot(Math.max(0, ox), Math.max(0, oz)) : Math.max(ox, oz);
+  // The nearest point of the edge, and how far round from the corner at the square's own least x and z it lies.
+  let ex = Math.min(h.hx, Math.max(-h.hx, lx)), ez = Math.min(h.hz, Math.max(-h.hz, lz));
+  if (out < 0) { if (ox > oz) ex = Math.sign(lx) * h.hx; else ez = Math.sign(lz) * h.hz; }
+  const w = 2 * h.hx, d = 2 * h.hz;
+  const round = ez <= -h.hz + 1e-6 ? ex + h.hx : ex >= h.hx - 1e-6 ? w + (ez + h.hz) : ez >= h.hz - 1e-6 ? w + d + (h.hx - ex) : 2 * w + d + (h.hz - ez);
+  const n = h.profile.length, f = round / h.step, i = Math.floor(f), t = f - i, a = ((i % n) + n) % n, b = (((i + 1) % n) + n) % n;
+  return { out, edge: h.profile[a] * (1 - t) + h.profile[b] * t, gap: h.gap ? h.gap[a] * (1 - t) + h.gap[b] * t : 0 };
+}
+
+/**
+ * The land at a point with a place's land met (`holeAt`): outside its square, brought to the place's height at the edge over a band
+ * the broader the more the place's land stands off the world's there (thirty metres, and three times that more: behind a valley's head
+ * the place's land stands some tens of metres over the world's, and brought down over thirty metres it was a cliff); inside, a little
+ * under the place's own land, which is drawn there instead (the squares are cut away inside: `squareBuilders`'s `skip`), so that where
+ * the two overlap at the edge the place's is seen. The band's breadth goes by where along the edge a point is, not by the point's own
+ * height: by that, a way's bed and the grass beside it, a metre apart, were brought in by different shares, and the way stood up out of
+ * the land as a causeway. A function of where the point lies and of the land there alone, so squares still meet.
+ */
+export function withHole(h: Hole, x: number, z: number, natural: number): number {
+  const { out, edge, gap } = holeAt(h, x, z);
+  if (out <= 0) return edge - 0.25 * smooth(-out / 1.5);
+  const band = 30 + 3 * Math.abs(gap);
+  return out >= band ? natural : edge + (natural - edge) * smooth(out / band);
+}
+
+/**
+ * A way graded again on the land as it lies with places standing in the world (`withHole`): where it comes through the band about a
+ * place, the land there is brought to the place's, and a bed graded on the land as it was stood off it, tilted across or buried. So
+ * the land under each of its points is taken as the place leaves it and the bed drawn out smooth again (`gradeHeights`); the squares
+ * meet the places first and cut the way into that (`makeSquare`).
+ */
+export function wayThroughHoles(way: Way, holes: Hole[]): Way {
+  if (!holes.length) return way;
+  const land = way.heights.map((y, k) => holes.reduce((v, h) => withHole(h, way.points[k][0], way.points[k][1], v), y)), drawn = gradeHeights(land);
+  // (Near a place's edge the bed is the land's own, the smoothing coming back over forty metres out: drawn out smooth across the edge,
+  // it fell short of the place's land where it came in, by metres, and the body met a step.)
+  return { ...way, heights: land.map((y, k) => {
+    const out = Math.min(...holes.map((h) => holeAt(h, way.points[k][0], way.points[k][1]).out));
+    return Math.round((y + (drawn[k] - y) * smooth(out / 40)) * 1000) / 1000;
+  }) };
+}
 
 /**
  * The world's land at a metre, made a square at a time where it is wanted (`docs/06-world.md`,
@@ -94,7 +153,7 @@ export interface Square { i: number; j: number; x0: number; z0: number; heights:
  * `ways` are ways' beds (`way.ts`), cut and filled into the land after the wear and before the
  * grounds, alike in every square they pass through.
  */
-export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number, grounds: Ground[] = [], ways: Way[] = []): Square {
+export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number, grounds: Ground[] = [], ways: Way[] = [], holes: Hole[] = []): Square {
   const t0 = performance.now();
   const [x0, z0] = squareOrigin(g, i, j), n = SQUARE.n + 2 * APRON;
   const read = tiles.map((t) => { const f = new HeightField(t.x0, t.z0, t.cell, t.nx, t.nz); f.data.set(t.data); return { t, f }; });
@@ -117,6 +176,14 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
     const k = (jj + APRON) * n + ii + APRON, edge = Math.min(ii, jj, SQUARE.n - 1 - ii, SQUARE.n - 1 - jj);
     out[jj * SQUARE.n + ii] = shaped[k] + (f.data[k] - shaped[k]) * smooth(edge / FADE);
   }
+  // Places built into the world: the land brought to meet each place's at the edge of its square (`withHole`), before the ways are cut
+  // into it (a way through the band is graded again on the land as the place leaves it: `wayThroughHoles`). (A band of up to some
+  // hundreds of metres reaches out from a square half a kilometre across.)
+  const nearHoles = holes.filter((h) => { const r = Math.hypot(h.hx, h.hz) + 600; return Math.abs(x0 + SQUARE.size / 2 - h.cx) < r + SQUARE.size && Math.abs(z0 + SQUARE.size / 2 - h.cz) < r + SQUARE.size; });
+  if (nearHoles.length) for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
+    const k = jj * SQUARE.n + ii;
+    for (const h of nearHoles) out[k] = withHole(h, x0 + ii, z0 + jj, out[k]);
+  }
   // The ways through it, their beds cut and filled into the land (`withWay`): before the houses' grounds, which a way comes onto as
   // they lie. Each point of a way's bed and a strip either side is kept in every mesh near enough to see its track (`keep`): the
   // ground's material reads the track from a number that changes by a metre to the metre across it, and a triangle broader than the
@@ -128,8 +195,11 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
     const strip = WAY.half + WAY.shoulder + 4;
     for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
       const k = jj * SQUARE.n + ii, x = x0 + ii, z = z0 + jj;
+      // (A way's bed fades out over the last twenty-five metres before a place's edge, where the place's land is met as it lies: cut
+      // level across there, the bed stood off the place's land, which can fall away steeply across a way's breadth, by metres.)
+      const edge = nearHoles.length ? Math.min(...nearHoles.map((h) => smooth(holeAt(h, x, z).out / 25))) : 1;
       for (const ix of near) {
-        out[k] = withWay(ix, x, z, out[k]);
+        out[k] = edge >= 1 ? withWay(ix, x, z, out[k]) : out[k] + (withWay(ix, x, z, out[k]) - out[k]) * edge;
         const n = ix.near(x, z);
         if (n && n.d < strip) keep[k] = WAY_KEEP;
       }

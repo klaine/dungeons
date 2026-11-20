@@ -407,6 +407,18 @@ The machine this is developed on now has a graphics card, and tablets were repor
     crossed back, no trunk entered, never under the ground); the route page in headless Chromium at 480 by 270 (see below). The game
     itself is unchanged: its body still asks its one mesh.
 
+52. **Places built into the world as one comes to them** (step 2 of item 51; asked: "proceed"). *Done, for valley heads:* the walk
+    and route pages build a valley head into the world within 1.5 kilometres of it: laid out, meshed as the game meshes it and made ready
+    in a worker (`packPlace`: its far land left out, everything turned into the world's coordinates, its solid part and its tree of bounds,
+    the height of its land round its square), put in a few meshes a frame with the game's materials, its grass, leaves and water, its
+    house's light baked as the game bakes it; the world's land cut away under it and brought to meet it at its edge (`withHole`); the body
+    walks on it. See [document 6](06-world.md), *The world as the game*. *Checked:* `npm run typecheck`, `npm run build`;
+    `tools/places.ts w0` (the join and the body's walk in, figures in document 6); `tools/body.ts`, `tools/route.ts` unchanged; the
+    route page in headless Chromium at 480 by 270 (see below). *Not yet:* islands, towns and mountain tops; the place's doors, keys and
+    mission (the game's rules); its torches and lamps as lights, smoke, birds and sheep; and the build's own frames are not yet timed on a
+    graphics card. What stands about the house comes cut into tiles of 64 metres, cut in the worker (`tilePacked`), as the game cuts it,
+    so that what is out of view is not drawn; the page puts in some six milliseconds' worth of them a frame.
+
 ## Risks
 
 | Risk | Mitigation |

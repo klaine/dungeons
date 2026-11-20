@@ -41,7 +41,12 @@ export function evenly(line: [number, number][], step: number): [number, number]
  * it and filled up to it about (`withWay`). The ends are the land's own, so that a way comes onto a house's ground as the ground lies.
  */
 export function gradeWay(line: [number, number][], landAt: (x: number, z: number) => number): Way {
-  const land = line.map(([x, z]) => landAt(x, z)), r = Math.max(1, Math.round(WAY.smooth / WAY.step));
+  return { points: line, heights: gradeHeights(line.map(([x, z]) => landAt(x, z))), half: WAY.half };
+}
+
+/** A way's bed from the land's heights under its points, drawn out smooth along it, its ends the land's own (`gradeWay`). */
+export function gradeHeights(land: number[]): number[] {
+  const r = Math.max(1, Math.round(WAY.smooth / WAY.step));
   let h = land.slice();
   // (Twice over, a running mean each time: the second takes the corners off where the first leaves them.)
   for (let pass = 0; pass < 2; pass++) {
@@ -54,7 +59,7 @@ export function gradeWay(line: [number, number][], landAt: (x: number, z: number
     h = next;
   }
   for (let k = 0; k < h.length; k++) { const t = smooth(Math.min(k, h.length - 1 - k) / r); h[k] = land[k] + (h[k] - land[k]) * t; }
-  return { points: line, heights: h.map((v) => Math.round(v * 1000) / 1000), half: WAY.half };
+  return h.map((v) => Math.round(v * 1000) / 1000);
 }
 
 /**
