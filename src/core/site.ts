@@ -545,9 +545,16 @@ export interface Building {
    * For a building set into rising ground: how much higher the ground stands at its back than
    * before its door. Its lowest storey is then half a basement, open to the front and buried at
    * the back, and it has a second door in the back wall, at `backDoor` across it, onto the ground there.
+   * Of a timber house, a village's on its hillside: its stone ground storey is the half basement, its windows to the street alone, and
+   * its first framed storey has the second door, in the middle bay of its back wall, onto a yard levelled there.
    */
   sunk?: number;
   backDoor?: number;
+  /**
+   * Of a timber house on a hillside that falls away behind it: a cellar under it, as deep as this below its floor, its walls of rough
+   * stone, open to the ground behind the house by a door and a barred window in its back wall, onto a yard levelled there.
+   */
+  cellar?: number;
   /**
    * Wings reaching back from the ends of the main block, making the building an L (one) or a U
    * (two) about a court behind it. `side` is -1 for the left end as one stands before it and 1

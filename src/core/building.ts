@@ -459,15 +459,24 @@ export function timberWindows(b: Building, storey: number): [number, number][][]
   };
   if (storey === 0) {
     const door = W * (b.door ?? 0.24);
-    return ([[0.2, 0.5, 0.8].filter((c) => Math.abs(c * W - door) > 1.5).map((c): [number, number] => [c * W - 0.55, c * W + 0.55]), [[D / 2 - 0.4, D / 2 + 0.4]], [[W / 2 - 0.4, W / 2 + 0.4]], [[D / 2 - 0.4, D / 2 + 0.4]]] as [number, number][][]).map((wall, i) => wall.filter(open(i)));
+    // (A half basement, buried behind and at its sides, has windows to the street alone.)
+    return ([[0.2, 0.5, 0.8].filter((c) => Math.abs(c * W - door) > 1.5).map((c): [number, number] => [c * W - 0.55, c * W + 0.55]), ...(b.sunk ? [[], [], []] : [[[D / 2 - 0.4, D / 2 + 0.4]], [[W / 2 - 0.4, W / 2 + 0.4]], [[D / 2 - 0.4, D / 2 + 0.4]]])] as [number, number][][]).map((wall, i) => wall.filter(open(i)));
   }
   return [W, D, W, D].map((L, i) => {
     const bays = timberBays(L), pitch = L / bays, lit = new Set<number>();
     if (i === 0) for (let n = 0; n < b.bays; n++) lit.add(Math.min(bays - 1, Math.floor(((n + 0.5) * bays) / b.bays)));
-    else if (i === 2) lit.add(Math.floor(bays / 2));
+    // (Over a half basement, the middle bay of the first storey's back wall is its back door: `timberBackDoor`.)
+    else if (i === 2) { if (!(b.sunk && storey === 1)) lit.add(Math.floor(bays / 2)); }
     else for (let n = 1; n < bays; n += 2) lit.add(n);
     return [...lit].sort((p, q) => p - q).map((n): [number, number] => [n * pitch + 0.2, (n + 1) * pitch - 0.2]).filter(open(i));
   });
+}
+
+/** The back door of a timber house over a half basement: the bay of its first storey's back wall it fills, from the wall's left end as seen from outside. */
+export function timberBackDoor(b: Building): { bay: number; s0: number; s1: number } | null {
+  if (!b.sunk || b.storeys < 2) return null;
+  const bays = timberBays(b.w), pitch = b.w / bays, bay = Math.floor(bays / 2);
+  return { bay, s0: bay * pitch + 0.16, s1: (bay + 1) * pitch - 0.16 };
 }
 
 /**

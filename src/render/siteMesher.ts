@@ -1004,6 +1004,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const setIn = (b: Building) => b.turn !== undefined && b.style === 'timber';
     const sitOf = (b: Building) => {
       const at = (u: number, v: number) => { const [x, z] = fromFront(b, u, v); return swells(x, z); };
+      // (Over a half basement or a cellar, at the road before its door, whatever lies behind: that is what they are for.)
+      if (b.sunk || b.cellar) return at(0, -1.5);
       let high = -Infinity;
       for (const [u, v] of [[-b.w / 2, b.d + 0.3], [0, b.d + 0.3], [b.w / 2, b.d + 0.3], [-b.w / 2 - 0.3, b.d / 2], [b.w / 2 + 0.3, b.d / 2]]) high = Math.max(high, at(u, v));
       return Math.max(at(0, -1.5), high - 1.0);
@@ -1425,10 +1427,16 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
         // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
-        if (!b.sunk && Math.abs(x - b.x) + Math.abs(z - b.z) > (b.reach + 4.6) * 1.415) continue;
+        if ((!b.sunk || b.set) && Math.abs(x - b.x) + Math.abs(z - b.z) > (b.reach + (b.set ? 7.5 : 4.6)) * 1.415) continue;
         const d = outside(b, x, z), sunk = b.sunk ?? 0, { u, v } = frontOf2(b, x, z);
         let k: number;
-        if (b.set) {
+        if (b.set && (b.sunk || b.cellar)) {
+          // Over a half basement or a cellar: level with its floor before its door, rising (or falling) along its sides to the height
+          // of its back door, and a yard at that height behind it, some three metres deep, before the land.
+          const before = Math.max(0, -v), aside = Math.max(0, Math.abs(u) - b.w / 2), behind = Math.max(0, v - b.d);
+          if (before > 4.5 || aside > 3.5 || behind > 7) continue;
+          k = (1 - smooth((before - 1.4) / 2.6)) * (1 - smooth((aside - 0.6) / 2.4)) * (1 - smooth((behind - 3.2) / 3.2));
+        } else if (b.set) {
           const before = Math.max(0, -v), aside = Math.max(0, Math.abs(u) - b.w / 2), back = Math.max(0, v - 0.6);
           if (before > 4.5 || aside > 3) continue;
           k = (1 - smooth((before - 1.4) / 2.6)) * (1 - smooth((aside - 0.4) / 2.2)) * (1 - smooth(back / 2.2));
@@ -1442,7 +1450,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           if (v < -9 || aside > 14 || v > b.d + 38) continue;
           k = v < 0 ? 1 - smooth((Math.max(aside, -v - 2.4) - 0.9) / 3.2) : (1 - smooth((aside - 1.2) / 11)) * (1 - smooth((v - b.d - 22) / 16));
         }
-        if (!lay || k > lay.k + 1e-6 || (k > lay.k - 1e-6 && d < lay.d)) lay = { k, d, y: b.base + groundOf(b, v, u) };
+        // (A cellar's ground falls from the front to the back as a half basement's rises.)
+        const to = b.cellar ? -b.cellar * smooth(v / b.d) : groundOf(b, v, u);
+        if (!lay || k > lay.k + 1e-6 || (k > lay.k - 1e-6 && d < lay.d)) lay = { k, d, y: b.base + to };
       }
       if (lay) { y += (lay.y - y) * lay.k; even = Math.min(even, 1 - lay.k); }
       for (const t of towers) {
@@ -3659,7 +3669,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           const [x, z] = fromFront(b, u, v);
           low = Math.min(low, ground(x, z));
         }
-        if (low < b.base - 0.05) {
+        // (Not under a cellar, whose walls its builder raises.)
+        if (low < b.base - 0.05 && !b.cellar) {
           const { box } = buildingTools(own, b.base, into), tone: Colour = [stone[0] * 0.85, stone[1] * 0.85, stone[2] * 0.85];
           for (const r of b.rects) box('stone', r.u0 - 0.05, r.u1 + 0.05, low - b.base - 0.6, 0.02, r.v0 - 0.05, r.v1 + 0.05, tone);
         }

@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
-import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, groundOf, plinthOf, stepsUp, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, groundOf, plinthOf, stepsUp, TIMBER, timberFloor, timberFront, timberBackDoor, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building, ClassicalDress } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
@@ -285,6 +285,10 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
       // Which bays have windows: on the street as many as the house has, spread evenly; elsewhere every other bay, or one.
       const lit = new Set<number>(timberWindows(b, storey)[i].map(([s0]) => Math.round((s0 - 0.2) / pitch)));
       const gaps: Gap[] = [...lit].map((n) => ({ s0: n * pitch + 0.2, s1: (n + 1) * pitch - 0.2, y0: sill + 0.14, y1: head }));
+      // Over a half basement, a door in the back wall onto the ground there, which stands at this storey's floor: a bay of the frame,
+      // its sill the sill beam's top.
+      const bd = storey === 1 && i === 2 ? timberBackDoor(b) : null, back: Gap | null = bd ? { s0: bd.s0, s1: bd.s1, y0: y0 + 0.2, y1: Math.min(y0 + 2.15, y1 - 0.3) } : null;
+      if (back) gaps.push(back);
       // (Each layer of the frame stands at its own depth, a centimetre and more from the next, so that no two faces lie in one plane and
       // flicker against each other: posts and beams in front, rails and studs behind them, the braces behind those, the plaster at the back.)
       pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, PANEL, T, b.colour, gaps);
@@ -297,9 +301,18 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
         const half = n === 0 || n === bays ? 0.11 : 0.085, s = Math.min(f.L - half, Math.max(half, n * pitch));
         on(f, 'wood', s - half, s + half, y0 + 0.2, y1 - 0.2, 0, 0.18, OAK, true);
       }
-      on(f, 'wood', 0.1, f.L - 0.1, sill, sill + 0.14, RAIL, 0.17, OAK, true);
+      for (const [ra, rb] of back ? [[0.1, back.s0], [back.s1, f.L - 0.1]] : [[0.1, f.L - 0.1]]) on(f, 'wood', ra, rb, sill, sill + 0.14, RAIL, 0.17, OAK, true);
       for (let n = 0; n < bays; n++) {
         const a = n * pitch + 0.09, c = (n + 1) * pitch - 0.09;
+        if (back && n === bd!.bay) {
+          // The door: upright boards in the colour of the shutters, two iron straps, a ring, and a head of oak over it.
+          const tones = [0.95, 1.05, 0.92, 1.08, 1.0], wide = (back.s1 - back.s0) / 5;
+          for (let m = 0; m < 5; m++) on(f, 'wood', back.s0 + m * wide, back.s0 + (m + 1) * wide - 0.008, back.y0, back.y1, 0.1, 0.16, shade(paint, tones[m]), true);
+          for (const y of [back.y0 + 0.3, back.y1 - 0.45]) on(f, 'metal', back.s0 + 0.05, back.s1 - 0.05, y, y + 0.07, 0.08, 0.1, [0.05, 0.05, 0.055]);
+          on(f, 'metal', back.s1 - 0.24, back.s1 - 0.17, back.y0 + 0.9, back.y0 + 1.05, 0.05, 0.1, [0.06, 0.06, 0.06]);
+          on(f, 'wood', a, c, back.y1, back.y1 + 0.14, RAIL, 0.17, OAK, true);
+          continue;
+        }
         if (lit.has(n)) {
           const g = gaps.find((q) => Math.abs(q.s0 - (n * pitch + 0.2)) < 0.01)!;
           on(f, 'wood', a, c, head, head + 0.13, RAIL, 0.17, OAK, true);
@@ -391,6 +404,22 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     box('stone', u - 0.42, u + 0.42, ridge + 0.75, ridge + 0.85, v - 0.38, v + 0.38, shade(stone, 0.6));
     for (const side of [-1, 1]) box('tile', u + side * 0.17 - 0.09, u + side * 0.17 + 0.09, ridge + 0.85, ridge + 1.12, v - 0.09, v + 0.09, [0.9, 0.8, 0.75]);
     tops?.push(at(u, ridge + 1.12, v));
+  }
+  // A cellar under it, where the land falls away behind it: walls of rough stone from under its floor down to the cellar's, a little
+  // proud of the walls over them, and in the back wall a door of boards in a frame of oak under a stone lintel, and a small window
+  // with iron bars beside it.
+  if (b.cellar) {
+    const C = b.cellar, under = shade(stone, 0.74), floor = -C;
+    box('stone', -W / 2 - 0.1, W / 2 + 0.1, floor - 0.35, 0.02, -0.1, D + 0.1, under);
+    const side = (b.door ?? 0.24) < 0.5 ? 1 : -1, du = side * W * 0.22, half = 0.5, top = floor + 1.9, dark: Colour = [0.03, 0.03, 0.035];
+    box('wood', du - half, du + half, floor, top, D + 0.1, D + 0.16, shade(paint, 0.9), true);
+    for (const e of [du - half - 0.12, du + half]) box('wood', e, e + 0.12, floor, top + 0.06, D + 0.1, D + 0.2, OAK, true);
+    for (const y of [floor + 0.35, top - 0.4]) box('metal', du - half + 0.05, du + half - 0.05, y, y + 0.07, D + 0.16, D + 0.18, [0.05, 0.05, 0.055]);
+    box('stone', du - half - 0.3, du + half + 0.3, top + 0.06, top + 0.32, D + 0.1, D + 0.24, shade(stone, 0.9));
+    const wu = du - side * 1.6;
+    box('metal', wu - 0.35, wu + 0.35, floor + 1.05, floor + 1.55, D + 0.1, D + 0.12, dark);
+    for (let m = -1; m <= 1; m++) box('metal', wu + m * 0.18 - 0.02, wu + m * 0.18 + 0.02, floor + 1.05, floor + 1.55, D + 0.12, D + 0.16, [0.05, 0.05, 0.055]);
+    box('stone', wu - 0.45, wu + 0.45, floor + 0.95, floor + 1.05, D + 0.1, D + 0.22, shade(stone, 0.9));
   }
   // ------------------------------------------------------------------ inside
   // The rooms are as the site document plans them. A hall along one side with the stair in it,

@@ -7,7 +7,7 @@ import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { castleOff, layOutCastle } from './castle';
 import { armRise, armsOf, edgeAt, findSeat, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
-import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber } from './building';
+import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -1431,6 +1431,21 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   // The inn is the house nearest the gate.
   out.sort((p, q) => Math.hypot(p.x - castle.gate.x, p.z - castle.gate.z) - Math.hypot(q.x - castle.gate.x, q.z - castle.gate.z));
   for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
+  // Houses on the hillside take the hillside into them, as such houses do (asked for: half basements). Where the land behind a house
+  // stands a storey over the road before it, its stone ground storey is a half basement, open to the road and buried behind, and its
+  // first storey has a door at the back onto the ground there; where the land falls away behind it, there is a cellar under it, open
+  // at the back. (Read off the land the valley was found in; the mesher levels a yard behind either, at its door.)
+  if (v.terrain) {
+    const ap = site.places.find((q) => q.role === 'approach')!, land = (x: number, z: number) => valleyLand(v, ap.floor, ap, x, z);
+    for (const b of out) {
+      const th = b.turn!, c = Math.cos(th), sn = Math.sin(th), at = (u: number, w: number) => land(b.x + u * sn + (b.d / 2 - w) * c, b.z - u * c + (b.d / 2 - w) * sn);
+      const rise = (at(-b.w / 2, b.d + 1) + at(0, b.d + 1) + at(b.w / 2, b.d + 1)) / 3 - at(0, -1.5);
+      // (From a rise of a metre and a half, the yard behind made up to the back door, as hillside villages terrace theirs; from a fall
+      // of a metre and a quarter, the cellar's yard dug out behind.)
+      if (rise >= 1.4 && b.storeys >= 2) b.sunk = round(timberFloor(b, 1) - 0.2);
+      else if (rise <= -1.2) b.cellar = round(Math.min(2.6, Math.max(2.1, -rise)));
+    }
+  }
   site.buildings = out;
   site.village = { ...(square ? { square, well } : {}), plots };
   return true;
