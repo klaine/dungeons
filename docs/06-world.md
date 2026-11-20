@@ -343,16 +343,34 @@ over 160 metres about the walker, the game's sky, its air (`Atmosphere`, with ha
 since here the eye sees ten kilometres) and its pipeline, the eye adjusting to the picture. What grows:
 grass, flowers, ferns and reeds grown about the walker out to 90 metres, in blocks of 32 (as the lab's meadow
 is grown: thick in pasture, tall and pale in hay, short and brown or purple on heath, sparse in woods, none
-on rock, shingle or water); trees where the world has woods (one to a cell of seven metres there, a few in
-pasture and heath; oak and ash low down, spruce and pine higher, pine alone near the treeline; the same trees
-whoever asks, `treesIn`), grown whole out to 120 metres as the valley's are, grown more simply out to 320 (a
-trunk and its main limbs, with a sixth as many leaf sprays, each larger; asked: "the trees change too near to
-very low detail fillers ... there needs to be something between"), and beyond as single painted cards out to
-1.8 kilometres, as the valley's far hillsides have them. A block of 32 metres stands whole or simply, never
-both, and the painted cards leave out every tree in a block that stands either way, painted again when one of
-their blocks changes. `?hour=`, `?season=`, `?haze=`, `?tex=`.
-Not yet: water but the sea (lakes and rivers are not drawn), snow, tracks and roads on the ground, the
-places' houses.
+on rock, shingle or water; flowers by kind in drifts of their own that overlap, grass in seed where it stands
+long, and bracken in stands on the dry banks of the pasture and the heath, as the game's meadows have them); trees
+where the world has woods (`treesIn`: one to a cell of seven metres, close in a wood's heart, with now and then
+a second in the cell, and thinning tree by tree towards its edge, from some 200 a hectare in the heart to 70 in
+its last ten metres; past the edge single trees in the pasture and on the heath, some 40 a hectare in the first
+ten metres out and fewer further, and a few anywhere in the open; how far inside a wood a point lies worked out
+once for the whole world from its cover, `woodDepth`; the trees at an edge a little shorter; oak and ash low
+down, spruce and pine higher, pine alone near the treeline; the same trees whoever asks), with bramble, bushes
+and young trees in a belt along every wood's edge near by. Trees are drawn three ways: whole as the valley's are,
+grown more simply (a trunk and its main limbs, with a sixth as many leaf sprays, each larger; asked: "the trees
+change too near to very low detail fillers ... there needs to be something between"), and as single painted
+cards out to 1.8 kilometres, as the valley's far hillsides have them. Each tree gives way from whole to simple
+at a distance of its own between 110 and 150 metres, and from simple to painted between 300 and 360 (`treeLevels`
+in `vegetation.ts`), its cards shrinking to nothing where they stand over four metres either way as the next
+way's grow from nothing in the same place, and its wood changing once at the middle; every way of a tree reads
+the tree's own foot and number (`aTree`, given to its cards and to every point of its wood), so the two ways of
+a tree always add up to one tree. Each way's blocks are grown a little past where it is seen, both ways standing
+in a block within a band, and the painted cards are made once a square, for every tree in it. The shader is told
+which blocks are grown each way (`treeGrownMap`, a texture of the world in blocks of 32 metres): a tree whose
+nearer way is not grown yet is drawn the next way out until it is, so that nothing is missing at the start, after
+going somewhere at once, or flying fast (in the first try without it, a wood seen from above was bare ground past
+the whole trees until its simpler blocks came in), and a block just grown comes in over some 0.6 seconds. (A block of 32
+metres used to stand whole or simply, never both, changing whole at once at 120 and 320 metres, a block a frame,
+and the painted squares were painted again whenever one of their blocks changed: asked, "the pop in of more
+detailed trees is too evident!") `?hour=`, `?season=`, `?haze=`, `?tex=`.
+Not yet: water but the sea (lakes and rivers are not drawn), snow, roads on the ground but the route page's
+way, the places' houses; nor the game's far material (`makeFarMaterial`), which paints its own woods from the lie
+of the land rather than the world's, so the far land here is the near ground's material laid every 32 metres.
 
 **At half a metre** (asked: "add touch controls and maybe a toggle to build with higher 0.5m
 resolution?"). The page's box **Half-metre ground** (`?fine`, `?fine=0`; the browser remembers it) splits

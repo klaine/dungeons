@@ -55,6 +55,12 @@ export interface CardSet {
   matrices: number[];
   colours: number[];
   centres: number[];
+  /**
+   * Per card, where some draw trees in levels (the walk page: whole near by, more simply further off, one painted card beyond): the
+   * foot of the tree it belongs to and a number of the tree's own, 0 to 1, four to a card. With them `makeCards` lets the levels give
+   * way to one another tree by tree (`treeShare`). Not given, nothing changes.
+   */
+  trees?: number[];
 }
 
 /** What surrounds the site and is only looked at: far ground, mountains, and everything that grows. */

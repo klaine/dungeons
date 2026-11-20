@@ -546,3 +546,12 @@ Before much generation is built on top, a hand-assembled test scene has to show 
 4. Fog with visible shafts of light.
 5. Span grid to mesh for both built and natural geometry, with no visible grid.
 6. The same scenes drawn as a plan map and a rendered map.
+
+**Trees on the walk and route pages** (20 November 2026, asked: "the pop in of more detailed trees is too evident!", and the forest
+improved there too). The walk page (`walk.html`, and `lab/route.html`, which is the same page) draws the world's woods with its own
+planting (`src/worldwalk/dress.ts`), not the game's: trees whole near by, more simply further off, as single painted cards beyond. Each
+tree now changes from one to the next at a distance of its own within a band (110 to 150 metres, and 300 to 360), its cards shrinking
+where they stand as the next way's grow from nothing in the same place, so no ring of trees changes at once (`treeLevels` in
+`vegetation.ts`; see document 6, *The land at a metre*). Its woods are built as the game's are now: close in their hearts, thinning tree
+by tree to their edges, with single trees out in the pasture past them and bramble, bushes and young trees along the edge; its meadows
+have flowers by kind in drifts, grass in seed and bracken on the dry banks.

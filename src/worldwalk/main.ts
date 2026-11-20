@@ -1,14 +1,14 @@
-import { InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
+import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { Hour, SKIES } from '../core/site';
 import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor } from '../core/stream';
 import { HeightField } from '../core/terrain';
-import { WorldPlace } from '../core/world';
+import { WORLD_SIZE, WorldPlace } from '../core/world';
 import { MeshBuilder } from '../render/geom/meshBuilder';
 import { layTerrain } from '../render/landscape';
 import { squareBuilders } from '../render/streamMesh';
-import { cullCards, vegetationUniforms } from '../render/vegetation';
-import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn } from './dress';
+import { cullCards, treeGrownMap, treeLevels, vegetationUniforms } from '../render/vegetation';
+import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn, woodDepth } from './dress';
 import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
@@ -50,11 +50,17 @@ const levelFor = (d: number) => { const want = Math.max(0.02, d * 0.0016); const
 /** How near the walker squares are split into four at half a metre, and how far off they are let go of again. */
 const FINE_NEAR = 150, FINE_DROP = 230;
 /**
- * How far about the walker grass grows (in blocks of `LOW`), whole trees stand (in blocks of `LOW`), trees grown more simply stand
- * (`MID`, in the same blocks), and painted trees (in blocks of a square). (The painted cards came in at 120 metres, too near for one
- * card a tree; the trees between are grown as the near ones are, with a trunk, its main limbs and fewer, larger sprays.)
+ * How far about the walker grass grows (in blocks of `LOW`), and painted trees stand (in blocks of a square). Trees are drawn three ways
+ * (whole, grown more simply with a trunk, its main limbs and fewer, larger sprays, and as one painted card), each tree giving way from
+ * one to the next at a distance of its own within the bands `treeLevels` sets (`vegetation.ts`): 110 to 150 metres from whole to simple,
+ * 300 to 360 from simple to painted. So the blocks of each way are grown out a little past where it can be seen, and both ways stand
+ * in a block within a band, the shader drawing each tree one way or the other (`WHOLE`, `SIMPLE_FROM`, `MID`: how near a block must
+ * lie to be grown whole, and how far from and how near to be grown simply). (Each block had changed whole at once, at 120 and 320
+ * metres, and painted squares were painted again whenever a block changed: the more detailed trees came in a block a frame, where one
+ * could see them come.)
  */
-const LOW = 32, GRASS = 90, TREES = 120, MID = 320, FAR_TREES = 1800;
+const LOW = 32, GRASS = 90, FAR_TREES = 1800, BEYOND = 6;
+const WHOLE = treeLevels.uNear.value.y + treeLevels.uSoft.value + BEYOND, SIMPLE_FROM = treeLevels.uNear.value.x - treeLevels.uSoft.value - BEYOND, MID = treeLevels.uFar.value.y + treeLevels.uSoft.value + BEYOND;
 const hour: Hour = (params.get('hour') as Hour) in SKIES ? (params.get('hour') as Hour) : 'morning';
 const season: Season = (['spring', 'summer', 'autumn'] as const).find((s) => s === params.get('season')) ?? 'summer';
 
@@ -95,6 +101,8 @@ async function start(): Promise<void> {
     };
     worldWorker.postMessage({ type: 'world', seed, size });
   });
+  // Which blocks of trees are grown, whole and simply, for the shader (`treeGrownMap`): made before any material that draws trees.
+  const grownMap = treeGrownMap((size ?? WORLD_SIZE).x / 2, (size ?? WORLD_SIZE).z / 2, LOW);
   const materials: Record<string, Material> = makeMaterials(Number(params.get('tex')) || 1024);
   const W = await coming;
   const worldMs = performance.now() - t0, { field, grid } = W, [SX, SZ] = squareCount(grid);
@@ -229,13 +237,11 @@ async function start(): Promise<void> {
     farMeshes.set(key, made);
   };
 
-  // ---- what grows: about the walker, grass, flowers and whole trees; beyond, painted trees
+  // ---- what grows: about the walker, grass, flowers and whole trees; further, trees grown simply; beyond, painted trees
   const lows = new Map<string, InstancedMesh[]>(), nears = new Map<string, (Mesh | InstancedMesh)[]>(), mids = new Map<string, (Mesh | InstancedMesh)[]>(), fars = new Map<string, { at: Vector3; meshes: InstancedMesh[] }>();
-  // (A block of trees stands whole or grown simply, never both; the painted squares leave out every tree whose block stands either
-  // way, and are painted again when one of their blocks changes, so that no tree is drawn twice or not at all.)
-  const treesDirty = new Set<string>();
-  const squareOfBlock = (bx: number, bz: number) => `${Math.floor(((bx + 0.5) * LOW + grid.hx) / SQUARE.size)},${Math.floor(((bz + 0.5) * LOW + grid.hz) / SQUARE.size)}`;
-  const standing = (x: number, z: number) => { const k = `${Math.floor(x / LOW)},${Math.floor(z / LOW)}`; return nears.has(k) || mids.has(k); };
+  // How far inside the world's woods each point lies: a wood is close in its heart and thins to its edge, with single trees past it
+  // and bramble, bushes and young trees along it (`treesIn`, `growTrees`).
+  const depthAt = woodDepth(W.cover, field.nx, field.nz, field.x0, field.z0, field.cell);
   let counts = { tufts: 0, trees: 0, farTrees: 0 };
   const lowBlock = (bx: number, bz: number) => {
     const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growCover, W.plan.n % 997, season), meshes = cardsOf(sets);
@@ -243,29 +249,32 @@ async function start(): Promise<void> {
     lows.set(`${bx},${bz}`, meshes);
     counts.tufts += sets.reduce((s, q) => s + q.matrices.length / 16, 0);
   };
+  /** A block's trees grown whole (with the bramble, bushes and young trees of any wood's edge in it), or simply. */
   const treeBlock = (bx: number, bz: number, simply = false) => {
-    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treeCover, heightAt, W.plan.n), out: (Mesh | InstancedMesh)[] = [];
-    if (trees.length) {
-      const { wood, sets } = growTrees(trees, heightAt, season, simply);
-      for (const [name, b] of wood) if (b.triangleCount) out.push(meshOf(b, materials[name], hour));
-      out.push(...cardsOf(sets));
-      // (Those grown simply are beyond the sun's shadows about the walker, and cast none.)
-      for (const m of out) { if (simply) m.castShadow = false; scene.add(m); }
-      if (!simply) counts.trees += trees.length;
+    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treeCover, heightAt, W.plan.n, depthAt), out: (Mesh | InstancedMesh)[] = [];
+    const level = simply ? 'simple' : 'whole';
+    const { wood, sets, owners } = growTrees(trees, heightAt, season, simply, simply ? undefined : { x0, z0, size: LOW, coverAt: treeCover, depthAt, seed: W.plan.n });
+    for (const [name, b] of wood) {
+      if (!b.triangleCount) continue;
+      // (Each point of wood says which tree it is, for the level it is drawn at: `aTree`.)
+      const m = meshOf(b, materials[`${name}:${level}`], hour);
+      m.geometry.setAttribute('aTree', new BufferAttribute(owners.get(name)!, 4));
+      out.push(m);
     }
-    if (simply) { mids.set(key, out); if (trees.length) treesDirty.add(squareOfBlock(bx, bz)); return; }
-    // (Whole where it was simple: the simple trees go.)
-    const was = mids.get(key);
-    if (was) { drop(was); mids.delete(key); }
-    nears.set(key, out);
-    light.redraw();
+    out.push(...cardsOf(sets, level));
+    // (Those grown simply are beyond the sun's shadows about the walker, and cast none.)
+    for (const m of out) { if (simply) m.castShadow = false; scene.add(m); }
+    if (!simply) { counts.trees += trees.length; nears.set(key, out); light.redraw(); } else mids.set(key, out);
+    rising.set(`${level}:${key}`, { bi: bx, bj: bz, level, t0: performance.now() });
   };
-  /** Painted trees in a square's ground, all but those near enough to stand whole. */
+  /** Blocks of trees just grown, coming in over `RISE` milliseconds (`treeGrownMap`); and one let go of, gone at once. */
+  const RISE = 600, rising = new Map<string, { bi: number; bj: number; level: 'whole' | 'simple'; t0: number }>();
+  const letGo = (bi: number, bj: number, level: 'whole' | 'simple') => { rising.delete(`${level}:${bi},${bj}`); grownMap.set(bi, bj, level, 0); };
+  /** Painted trees in a square's ground: all of them, each drawn so only beyond where it is drawn simply (`treeShare`). Made once. */
   const farTreeBlock = (i: number, j: number) => {
     const [x0, z0] = squareOrigin(grid, i, j), key = `${i},${j}`, at = me.clone();
-    const trees = treesIn(x0, z0, SQUARE.size, treeCover, heightAt, W.plan.n).filter((t) => !standing(t.x, t.z));
-    drop(fars.get(key)?.meshes ?? []);
-    const meshes = cardsOf(farTrees(trees, heightAt, season));
+    const trees = treesIn(x0, z0, SQUARE.size, treeCover, heightAt, W.plan.n, depthAt);
+    const meshes = cardsOf(farTrees(trees, heightAt, season), 'painted');
     for (const m of meshes) { m.castShadow = false; scene.add(m); }
     fars.set(key, { at, meshes });
   };
@@ -326,7 +335,7 @@ async function start(): Promise<void> {
     try { localStorage.setItem('walk.fine', on ? '1' : '0'); } catch { /* (not kept: a private window, or a page shown inside another) */ }
     for (const meshes of [...lows.values(), ...nears.values(), ...mids.values()]) drop(meshes);
     for (const f of fars.values()) drop(f.meshes);
-    lows.clear(); nears.clear(); mids.clear(); fars.clear(); treesDirty.clear();
+    lows.clear(); nears.clear(); mids.clear(); fars.clear(); rising.clear(); grownMap.clear();
     counts = { tufts: 0, trees: 0, farTrees: 0 };
   };
   {
@@ -393,8 +402,16 @@ async function start(): Promise<void> {
     return { frameMs: ms, squares: squares.size, pending: pending.size, tiles: tiles.size, squareTriangles: tris + fineTriangles, fineOn, fine, finePending: finePending.size, fineTriangles, fineMsMiddle: fineSorted[Math.floor(fineSorted.length / 2)] ?? 0, drawnTriangles: renderer.info.render.triangles, levels, squareMsMiddle: sorted[Math.floor(sorted.length / 2)] ?? 0, worldMs, rebuilt, x: me.x, z: me.z, y: camera.position.y, yaw, pitch, flying, lowBlocks: lows.size, treeBlocks: nears.size, midBlocks: mids.size, farTreeCards: farCount, ...counts };
   };
   const wantedLow = () => blocksNear(GRASS).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
-  const wantedTrees = () => blocksNear(TREES).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
-  const wantedMids = () => blocksNear(MID).filter(([i, j]) => !nears.has(`${i},${j}`) && squaresUnder(i * LOW, j * LOW, LOW));
+  /** How far the furthest corner of a block lies from where one stands, on the level. */
+  const blockFar = (i: number, j: number) => Math.hypot(Math.max(Math.abs(i * LOW - me.x), Math.abs((i + 1) * LOW - me.x)), Math.max(Math.abs(j * LOW - me.z), Math.abs((j + 1) * LOW - me.z)));
+  const wantedTrees = () => blocksNear(WHOLE).filter(([i, j]) => squaresUnder(i * LOW, j * LOW, LOW));
+  const wantedMids = () => blocksNear(MID).filter(([i, j]) => blockFar(i, j) > SIMPLE_FROM && squaresUnder(i * LOW, j * LOW, LOW));
+  /** The squares that want painted trees, and have none yet. */
+  const paintedMissing = () => {
+    const out: [number, number][] = [], ci = Math.floor((me.x + grid.hx) / SQUARE.size), cj = Math.floor((me.z + grid.hz) / SQUARE.size), r = Math.ceil(FAR_TREES / SQUARE.size);
+    for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) if (i >= 0 && j >= 0 && i < SX && j < SZ && distTo(i, j) <= FAR_TREES && !fars.has(`${i},${j}`)) out.push([i, j]);
+    return out;
+  };
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
     /** On the route page: opens or closes the ink map of the stretch. */
@@ -407,8 +424,8 @@ async function start(): Promise<void> {
     to: (spec: string) => { const p = place(spec); me.set(p.x, 0, p.z); },
     goto: (x: number, z: number, y?: number, yawTo?: number, pitchTo?: number, fly?: boolean) => { me.set(x, 0, z); if (yawTo !== undefined) yaw = yawTo; if (pitchTo !== undefined) pitch = pitchTo; if (fly !== undefined) flying = fly; if (y !== undefined) lift = y; },
     /** What is not yet in, of what `settled` waits for (for scripts that find it waiting). */
-    unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: treesDirty.size, far: farDirty.size }),
-    settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && treesDirty.size === 0 && farDirty.size === 0,
+    unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: paintedMissing().length, far: farDirty.size }),
+    settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && paintedMissing().length === 0 && farDirty.size === 0,
   };
   const frame = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -494,24 +511,28 @@ async function start(): Promise<void> {
       for (const [i, j] of wantedMids()) if (!mids.has(`${i},${j}`)) { treeBlock(i, j, true); if (--midBudget <= 0) break; }
     }
     for (const [k, meshes] of lows) { const [i, j] = k.split(',').map(Number); if (Math.hypot((i + 0.5) * LOW - me.x, (j + 0.5) * LOW - me.z) > GRASS + 60) { drop(meshes); lows.delete(k); } }
-    // (Whole trees gone far enough are grown simply again at once, so that the block is never bare.)
-    for (const [k, meshes] of nears) { const [i, j] = k.split(',').map(Number); if (Math.hypot((i + 0.5) * LOW - me.x, (j + 0.5) * LOW - me.z) > TREES + 60) { drop(meshes); nears.delete(k); treeBlock(i, j, true); } }
-    for (const [k, meshes] of mids) { const [i, j] = k.split(',').map(Number); if (Math.hypot((i + 0.5) * LOW - me.x, (j + 0.5) * LOW - me.z) > MID + 60) { drop(meshes); mids.delete(k); treesDirty.add(squareOfBlock(i, j)); } }
+    // Trees: each level let go of well past where it is drawn, and, while kept, not drawn at all where every tree in the block is
+    // drawn the other way (the shader would draw it into nothing, at the cost of its points).
+    const blockNear = (i: number, j: number) => Math.hypot(Math.max(0, i * LOW - me.x, me.x - (i + 1) * LOW), Math.max(0, j * LOW - me.z, me.z - (j + 1) * LOW));
+    for (const [k, meshes] of nears) {
+      const [i, j] = k.split(',').map(Number), d = blockNear(i, j);
+      if (d > WHOLE + 40) { drop(meshes); nears.delete(k); letGo(i, j, 'whole'); continue; }
+      for (const m of meshes) m.visible = d < WHOLE - BEYOND;
+    }
+    for (const [k, meshes] of mids) {
+      const [i, j] = k.split(',').map(Number), d = blockNear(i, j), far = blockFar(i, j);
+      if (d > MID + 50 || far < SIMPLE_FROM - 20) { drop(meshes); mids.delete(k); letGo(i, j, 'simple'); continue; }
+      for (const m of meshes) m.visible = far > SIMPLE_FROM + BEYOND && d < MID - BEYOND;
+    }
     {
       let farTreeBudget = 2;
-      for (const key of treesDirty) {
-        if (farTreeBudget <= 0) break;
-        treesDirty.delete(key);
-        const [i, j] = key.split(',').map(Number);
-        if (fars.has(key) || (i >= 0 && j >= 0 && i < SX && j < SZ && distTo(i, j) <= FAR_TREES)) { farTreeBlock(i, j); farTreeBudget--; }
-      }
-      const ci = Math.floor((me.x + grid.hx) / SQUARE.size), cj = Math.floor((me.z + grid.hz) / SQUARE.size), r = Math.ceil(FAR_TREES / SQUARE.size);
-      for (let j = cj - r; j <= cj + r && farTreeBudget > 0; j++) for (let i = ci - r; i <= ci + r && farTreeBudget > 0; i++) {
-        if (i < 0 || j < 0 || i >= SX || j >= SZ || distTo(i, j) > FAR_TREES || fars.has(`${i},${j}`)) continue;
-        farTreeBlock(i, j); farTreeBudget--;
-      }
+      for (const [i, j] of paintedMissing()) { farTreeBlock(i, j); if (--farTreeBudget <= 0) break; }
+      // (Painted trees are drawn however near, where no nearer way is grown yet: see `treeGrownMap`.)
       for (const [k, f] of fars) { const [i, j] = k.split(',').map(Number); if (distTo(i, j) > FAR_TREES + 300) { drop(f.meshes); fars.delete(k); } }
     }
+    // Blocks of trees just grown come in, and the shader is told.
+    for (const [k, r] of rising) { const t = (now - r.t0) / RISE; grownMap.set(r.bi, r.bj, r.level, t); if (t >= 1) rising.delete(k); }
+    grownMap.flush();
     vegetationUniforms.uTime.value = now / 1000;
     const cards = [...[...lows.values()].flat(), ...[...nears.values(), ...mids.values()].flat().filter((m): m is InstancedMesh => (m as InstancedMesh).isInstancedMesh)];
     cullCards(cards, camera.position);

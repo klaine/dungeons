@@ -380,6 +380,24 @@ The machine this is developed on now has a graphics card, and tablets were repor
     themselves (only their grounds), building the next place while walking (it is laid out, not built), a mark of the corridor's edge on
     the ground, bridges, the half metre on this page, and ways other than town to valley head walked. Not tried on a graphics card.
 
+50. **Trees on the walk and route pages: no pop, and woods as the game's.** Asked, of the route page: "looks fine, but the pop in
+    of more detailed trees is too evident! is this using already the 'far terrain' improvements for further drawn parts that were done
+    in the realism improvement session?", then "and overall the forest building maybe improved there". It was not: the walk page
+    dresses the world with its own planting (`src/worldwalk/dress.ts`), and the realism work is in the game's places (`siteMesher.ts`,
+    `makeFarMaterial`). *Done:* each tree now gives way from whole to simple and from simple to painted at a distance of its own within
+    a band, its cards shrinking where they stand as the next way's grow, and its wood changing once, every way reading the tree's own
+    foot and number (`treeLevels`, `treeShare` and `CardSet.trees` in `vegetation.ts`; bark materials by level in `dress.ts`); both
+    ways stand in a block within a band, and painted cards are made once a square. Woods are close in their hearts and thin tree by
+    tree to their edges, with single trees standing out past them (`woodDepth`, `treesIn`), and bramble, bushes and young trees along
+    their edges near by; meadows have flowers by kind in drifts, grass in seed and bracken on dry banks, as the game's. See
+    [document 6](06-world.md), *The land at a metre*. *Checked:* `npm run typecheck`, `npm run build`; tree counts without a browser
+    over four square kilometres about Halhaven (`w0`): 12% more trees in all, some 200 a hectare in a wood's heart against 157,
+    70 in its last ten metres against 154, 41 in the first ten metres out against 11; the route page in headless Chromium, drawing in
+    software: no fault reported, but from above, the woods past the whole trees were bare until their simpler blocks came in, which in
+    software is minutes; so the shader is now told which blocks are grown (`treeGrownMap`), and a tree not yet grown nearer is drawn
+    the next way out. *Not checked:* how the hand-over looks in motion, which only a
+    graphics card can show; the game's far material is not used, since it paints woods of its own rather than the world's.
+
 ## Risks
 
 | Risk | Mitigation |
