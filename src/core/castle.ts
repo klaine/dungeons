@@ -23,6 +23,15 @@ export interface Castle {
   towers: CastleTower[];
   /** How far the castle's ground stands over the land about its foot: the hill it is on. */
   rise: number;
+  /**
+   * What stands in the bailey (asked: the bailey was bare, and the castle looked artificial): ranges of lean-to buildings against the
+   * inner face of the curtain, each from `a` to `b` along that face and `depth` into the bailey, its front wall `height` high, as
+   * stables, stores and a smithy were built; a stair of stone up the inner face to the wall-walk, rising from `a` on the bailey's
+   * floor to `b` at the walk, `width` broad; and a well.
+   */
+  ranges?: { a: [number, number]; b: [number, number]; depth: number; height: number; kind: 'stable' | 'store' | 'smithy' }[];
+  stair?: { a: [number, number]; b: [number, number]; width: number };
+  well?: [number, number];
 }
 
 export interface CastleTower {
@@ -136,5 +145,80 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
     site.towers = [...(site.towers ?? []).filter((t) => !t.castle), { x: kx, z: kz, half, storeys, door: kx < cx ? 'e' : 'w', castle: true }];
     break;
   }
-  return { wall, height: round(rng.range(10, 12.5)), thick: 2.4, gate, towers, rise: round(rng.range(7, 10)) };
+  const castle: Castle = { wall, height: round(rng.range(10, 12.5)), thick: 2.4, gate, towers, rise: round(rng.range(7, 10)) };
+  layOutBailey(castle, site, { x0: hx0, x1: hx1, z0: hz0, z1: hz1 }, doorX, meadow.z0, rng.fork('bailey'));
+  return castle;
+}
+
+/**
+ * What stands in the bailey: the stair up to the wall-walk on the inner face of one length of the curtain, ranges against two or three
+ * others, and a well. Each kept clear of the house and its forecourt (`house`), the keep, the towers, the gate and the way from the
+ * door to it.
+ */
+function layOutBailey(c: Castle, site: Site, house: { x0: number; x1: number; z0: number; z1: number }, doorX: number, doorZ: number, rng: Rng): void {
+  /** A list in an order drawn from `rng`. */
+  const shuffled = <V>(list: V[]): V[] => { const out = [...list]; for (let i = out.length - 1; i > 0; i--) { const j = rng.int(0, i); [out[i], out[j]] = [out[j], out[i]]; } return out; };
+  const round = (x: number) => Math.round(x * 10) / 10, n = c.wall.length, T = c.thick;
+  const cx = c.wall.reduce((s, p) => s + p[0], 0) / n, cz = c.wall.reduce((s, p) => s + p[1], 0) / n;
+  const keep = (site.towers ?? []).find((t) => t.castle), g = c.gate;
+  const seg = (x: number, z: number, ax: number, az: number, bx: number, bz: number) => {
+    const l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1, t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+    return Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t);
+  };
+  const taken: [number, number][][] = [];
+  const inRing = (ring: [number, number][], x: number, z: number) => {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) if ((ring[i][1] > z) !== (ring[j][1] > z) && x < ((ring[j][0] - ring[i][0]) * (z - ring[i][1])) / (ring[j][1] - ring[i][1] || 1e-9) + ring[i][0]) inside = !inside;
+    return inside;
+  };
+  const clear = (x: number, z: number, m: number) =>
+    Math.max(house.x0 - x, x - house.x1, house.z0 - z, z - house.z1) > m && (!keep || Math.max(Math.abs(x - keep.x), Math.abs(z - keep.z)) > keep.half + 0.9 + m)
+    && c.towers.every((t) => Math.hypot(t.x - x, t.z - z) > t.r + m) && seg(x, z, doorX, doorZ, g.x, g.z) > 2.6 + m && Math.hypot(x - g.x, z - g.z) > 6 + m
+    && !taken.some((q) => inRing(q, x, z));
+  // Each length of the curtain, its inner face, and how much of it is free between the towers at its ends.
+  const lengths = c.wall.map((a, i) => {
+    const b = c.wall[(i + 1) % n], len = Math.hypot(b[0] - a[0], b[1] - a[1]), dx = (b[0] - a[0]) / len, dz = (b[1] - a[1]) / len;
+    let ix = -dz, iz = dx;
+    if (ix * (cx - (a[0] + b[0]) / 2) + iz * (cz - (a[1] + b[1]) / 2) < 0) { ix = -ix; iz = -iz; }
+    const tA = c.towers.find((t) => Math.hypot(t.x - a[0], t.z - a[1]) < 0.5), tB = c.towers.find((t) => Math.hypot(t.x - b[0], t.z - b[1]) < 0.5);
+    const at = (u: number, inward: number): [number, number] => [a[0] + dx * u + ix * (T / 2 + inward), a[1] + dz * u + iz * (T / 2 + inward)];
+    return { i, len, at, u0: (tA ? tA.r : 0) + 1.6, u1: len - (tB ? tB.r : 0) - 1.6 };
+  });
+  /** Whether an oblong along a length's inner face, from `u0` to `u1` and `deep` into the bailey, is clear. */
+  const free = (l: (typeof lengths)[number], u0: number, u1: number, deep: number, m: number) => {
+    for (let u = u0; u <= u1 + 0.01; u += Math.max(0.5, (u1 - u0) / Math.ceil((u1 - u0) / 1.5))) for (const d of [0.2, deep / 2, deep]) { const [x, z] = l.at(u, d); if (!clear(x, z, m)) return false; }
+    return true;
+  };
+  // The stair: straight up the inner face, a step of twenty-two centimetres for each twenty-six along, to the walk.
+  {
+    const run = round((c.height / 0.22) * 0.26), width = 1.3;
+    for (const l of shuffled(lengths)) {
+      if (l.u1 - l.u0 < run + 1) continue;
+      const u0 = l.u0 + rng.range(0, l.u1 - l.u0 - run), u1 = u0 + run;
+      if (!free(l, u0 - 0.5, u1 + 0.5, width + 1.5, 0.3)) continue;
+      const head = rng.chance(0.5);
+      c.stair = { a: l.at(head ? u0 : u1, 0).map(round) as [number, number], b: l.at(head ? u1 : u0, 0).map(round) as [number, number], width };
+      taken.push([l.at(u0 - 0.5, 0), l.at(u1 + 0.5, 0), l.at(u1 + 0.5, width + 1.5), l.at(u0 - 0.5, width + 1.5)]);
+      break;
+    }
+  }
+  // The ranges: two or three, seven to fourteen metres long and four to five and a half deep.
+  const ranges: NonNullable<Castle['ranges']> = [], kinds: ('stable' | 'store' | 'smithy')[] = ['stable', 'store', 'smithy'];
+  for (const l of shuffled(lengths)) {
+    if (ranges.length >= 3) break;
+    const long = Math.min(l.u1 - l.u0, rng.range(7, 14)), deep = round(rng.range(4, 5.5));
+    if (long < 6) continue;
+    const u0 = l.u0 + rng.range(0, l.u1 - l.u0 - long), u1 = u0 + long;
+    if (!free(l, u0, u1, deep, 0.6)) continue;
+    ranges.push({ a: l.at(u0, 0).map(round) as [number, number], b: l.at(u1, 0).map(round) as [number, number], depth: deep, height: round(rng.range(2.6, 3.3)), kind: kinds[ranges.length] });
+    taken.push([l.at(u0, -0.2), l.at(u1, -0.2), l.at(u1, deep + 0.6), l.at(u0, deep + 0.6)]);
+  }
+  if (ranges.length) c.ranges = ranges;
+  // The well: in the open bailey, clear of everything by a few strides.
+  for (let tries = 0; tries < 60; tries++) {
+    const x = cx + rng.range(-1, 1) * 30, z = cz + rng.range(-1, 1) * 30;
+    if (castleOff(c, x, z) > -(T / 2 + 3.5) || !clear(x, z, 2.8)) continue;
+    c.well = [round(x), round(z)];
+    break;
+  }
 }

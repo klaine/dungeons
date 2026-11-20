@@ -1,3 +1,4 @@
+import { castleOff } from '../core/castle';
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { acrossWater, beachness, coastAt, inland, landAt, onStair } from '../core/island';
@@ -468,6 +469,9 @@ export function buildIsland(b: IslandBuild): IslandResult {
     let bare = Math.max(loose.holds(x, z) ? smooth(loose.at(x, z) / 0.28) * 0.45 : 0, 1 - smooth((above - 0.9 - 0.9 * beach) / 0.7));
     bare = Math.max(bare, beach * (1 - smooth((above - 1.6) / 0.8)));
     if (cave && caveAir!(x, caveFloor + 0.5, z) > -0.5) bare = 1;
+    // (The castle's bailey is trodden earth, worn bare, and greener along the foot of its walls.)
+    // (Less bare than a valley's: bare ground on an island is drawn as its beaches' sand, and a bailey all of it was a beach.)
+    if (site.castle) { const off = castleOff(site.castle, x, z); if (off < 0) bare = Math.max(bare, (0.3 + 0.32 * smooth((fbm2(x * 0.3 + 3.1, z * 0.3, 2) - 0.35) / 0.3)) * smooth((-off - site.castle.thick / 2 - 0.6) / 2.2)); }
     const wet = 1 - smooth((above - 0.15) / 0.5);
     lay.bare = bare; lay.wet = wet * 0.85;
     const off = trackOff(x, z), f = offFoot(x, z);

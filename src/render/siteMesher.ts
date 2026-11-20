@@ -1980,6 +1980,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (On a footpath, how far from its middle plus two hundred: the material for ground tells the one from the other.)
       const foot = offFoot(x, z);
       lay.track = Math.abs(off) < 6 ? 100 + off : foot < 3 ? 200 + foot : 0;
+      // The castle's bailey is trodden earth, worn bare where people and carts go and greener along the foot of its walls.
+      if (site.castle) {
+        const off = castleOff(site.castle, x, z);
+        if (off < 0) lay.bare = Math.max(lay.bare, (0.62 + 0.3 * fbm2(x * 0.35 + 3.1, z * 0.35, 2)) * smooth((-off - site.castle.thick / 2 - 0.6) / 2.2));
+      }
       // The village's square is trodden earth; half its plots are gardens, in beds of dug earth with paths between.
       const vl = site.village;
       if (vl?.square && inPolygon(vl.square, x, z)) { lay.bare = Math.max(lay.bare, 0.75 + 0.15 * fbm2(x * 0.4, z * 0.4, 2)); return turfColour(x, z, s1); }
@@ -2229,8 +2234,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // Nothing wild grows in the fields: their crops are planted by themselves, below. In a pasture, its grass only.
     let cropping = false;
     const vlg = site.village;
-    if (fieldList.length || vlg) planting.keepOut = (set, x, z) => {
+    if (fieldList.length || vlg || site.castle) planting.keepOut = (set, x, z) => {
       if (cropping) return false;
+      // (In the bailey, trodden as it is, no flowers, ferns or herbs; grass only along the foot of the walls, where nobody walks.)
+      if (site.castle) { const off = castleOff(site.castle, x, z); if (off < 0) return set !== planting.grass || off < -(site.castle.thick / 2 + 1.6); }
       if (vlg?.square && inPolygon(vlg.square, x, z)) return true;
       if (vlg) for (const [n, pl] of vlg.plots.entries()) if (n % 2 === 0 && inPolygon(pl, x, z)) return set !== planting.herbs || Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7) > 0.2;
       const k = fieldList.length ? fieldAt(x, z) : -1;
@@ -2266,6 +2273,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     let grown = 0;
     const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8];
     let planted = 0;
+    // (Within a castle's bailey, one: an old tree in a castle's yard is as it should be, and five were an orchard. Each is still dealt
+    // from the stream, into nothing, so that all after it stands where it stood.)
+    const meadowTrees = site.castle ? 1 : 5;
     for (let tries = 0; tries < 60 && planted < 5; tries++) {
       const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 3);
       if (Math.abs(x - pathAt(z)) < 3.6) continue;
@@ -2273,10 +2283,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const base = ground(x, z);
       const height = r.range(5.2, 7.6), girth = r.range(0.19, 0.28);
       const tall = height * 1.25, oak = grown % 3 !== 1;
-      kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
+      if (planted < meadowTrees) kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
       const green = leafOf(plant.pick(greens));
       spent.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, green, plant, 0.72);
-      growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 60 : 0) : 1500, cardSize: 0.74, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true), bare: winter }, rng.fork(`tree${grown++}`));
+      if (planted < meadowTrees) growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 60 : 0) : 1500, cardSize: 0.74, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true), bare: winter }, rng.fork(`tree${grown++}`));
+      else grown++;
       trees.push([x, z]);
       planted++;
     }
@@ -4863,6 +4874,20 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.box('stone', V(x0, site.top - 0.02, z0), V(x1, y, z1), coping, coping, 'plate');
       kit.box('tile', alongX ? V(r0.x - 0.05, y + rise - 0.06, cz - 0.13) : V(cx - 0.13, y + rise - 0.06, r0.z - 0.05), alongX ? V(r1.x + 0.05, y + rise + 0.1, cz + 0.13) : V(cx + 0.13, y + rise + 0.1, r1.z + 0.05), coping, coping, 'ridge');
       ridgeOf.set(q.id, { y: y + rise, alongX, a: alongX ? r0.x : r0.z, b: alongX ? r1.x : r1.z, c: alongX ? cz : cx });
+      // A castle's chapel shows as one from outside: a bell-cote on its ridge, two piers of dressed stone with the bell hung between
+      // them under a capping, and a cross of iron over it. (Asked for: a chapel that shows as one from outside.)
+      if (site.castle && /chapel/.test(q.name)) {
+        const bx = alongX ? r1.x : cx, bz = alongX ? cz : r1.z, top = y + rise + 0.05;
+        for (const off of [-0.5, 0.5]) {
+          const px = alongX ? bx : bx + off, pz = alongX ? bz + off : bz;
+          kit.box('stone', V(px - 0.16, top - 0.3, pz - 0.16), V(px + 0.16, top + 1.2, pz + 0.16), dressed, coping, 'chapelcote');
+        }
+        kit.box('stone', V(bx - 0.75, top + 1.2, bz - 0.75), V(bx + 0.75, top + 1.36, bz + 0.75), coping, coping, 'chapelcap');
+        kit.box('stone', V(bx - 0.42, top + 1.36, bz - 0.42), V(bx + 0.42, top + 1.62, bz + 0.42), coping, coping, 'chapeltop');
+        kit.box('metal', V(bx - 0.19, top + 0.5, bz - 0.19), V(bx + 0.19, top + 0.98, bz + 0.19), coping, coping, 'chapelbell');
+        kit.box('metal', V(bx - 0.035, top + 1.62, bz - 0.035), V(bx + 0.035, top + 2.5, bz + 0.035), coping, coping, 'chapelcross');
+        kit.box('metal', alongX ? V(bx - 0.035, top + 2.12, bz - 0.28) : V(bx - 0.28, top + 2.12, bz - 0.035), alongX ? V(bx + 0.035, top + 2.2, bz + 0.28) : V(bx + 0.28, top + 2.2, bz + 0.035), coping, coping, 'chapelarm');
+      }
       if (sanctum) {
         // The gables: walls of ashlar up under the roof, in courses that step in as the roof narrows; and a bell-cote on the one nearer the front.
         for (const end of [0, 1]) {

@@ -1,5 +1,7 @@
+import { Vector3 } from 'three';
 import type { Castle, CastleTower } from '../core/castle';
 import { MeshBuilder } from './geom/meshBuilder';
+import { outdoorFieldAt } from './fields';
 
 type Colour = [number, number, number];
 type P3 = [number, number, number];
@@ -30,13 +32,30 @@ export function buildCastle(b: CastleBuild): void {
   let count = 0;
   const tone = (k = 1): Colour => { const t = (0.93 + 0.14 * (((count++ * 7919) % 13) / 13)) * k; return [stone[0] * t, stone[1] * t, stone[2] * t]; };
   const slate: Colour = [0.24, 0.25, 0.29], dark: Colour = [0.04, 0.04, 0.045], iron: Colour = [0.13, 0.12, 0.11];
+  const P = new Vector3(), N = new Vector3(), F = new Float32Array(4);
+  // (The ground at a point's foot, kept on a lattice of a metre: asked for at every corner of every stone of the wall.)
+  const feet = new Map<number, number>();
+  const footOf = (x: number, z: number) => { const k = Math.round(x) * 100003 + Math.round(z); let y = feet.get(k); if (y === undefined) { y = ground(Math.round(x), Math.round(z)); feet.set(k, y); } return y; };
 
   /**
    * One flat face through its corners, facing away from `inside`. Its texture is laid along it: across a face that stands up, from
    * where along the wall it is (`u`, if given for each corner, else along the face's own line) and how high; on one that lies flat,
    * from where it is. So courses run level and blocks keep their size at any bearing.
    */
-  const face = (material: string, pts: P3[], colour: Colour, inside: P3, us?: number[]) => {
+  const face = (material: string, pts: P3[], colour: Colour, inside: P3, us?: number[], cell = false): void => {
+    // (A large face that stands up, a length of the curtain or a tower's side, is cut into cells of a metre and a half or so, so that its
+    // weathering, which is reckoned at its corners, varies over it: moss and damp at its foot here and not there, a darker patch, a
+    // lighter one. Reckoned only at its four corners, a length of wall was one smooth wash from end to end.)
+    if (!cell && pts.length === 4 && !us) {
+      const [a, b, c2, d] = pts, wide = Math.hypot(b[0] - a[0], b[2] - a[2]), high = Math.max(Math.abs(d[1] - a[1]), Math.abs(c2[1] - b[1]));
+      const level = Math.abs(a[1] - b[1]) < 0.01 && Math.abs(c2[1] - d[1]) < 0.01 && Math.hypot(d[0] - a[0], d[2] - a[2]) < 0.01;
+      if (level && wide * high > 6) {
+        const nu = Math.max(1, Math.round(wide / 1.6)), nv = Math.max(1, Math.round(high / 1.6));
+        const at = (i: number, j: number): P3 => { const f = i / nu, g = j / nv, lo: P3 = [a[0] + (b[0] - a[0]) * f, a[1], a[2] + (b[2] - a[2]) * f]; return [lo[0], a[1] + (d[1] - a[1]) * g, lo[2]]; };
+        for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) face(material, [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)], colour, inside, undefined, true);
+        return;
+      }
+    }
     const m = mesh(material);
     const [p0, p1, p2] = pts;
     let nx = (p1[1] - p0[1]) * (p2[2] - p0[2]) - (p1[2] - p0[2]) * (p2[1] - p0[1]);
@@ -49,10 +68,17 @@ export function buildCastle(b: CastleBuild): void {
     const order = pts.map((_, k) => k);
     if (flip) { order.reverse(); nx = -nx; ny = -ny; nz = -nz; }
     const flat = Math.abs(ny) > 0.8, hl = Math.hypot(nx, nz) || 1, ux = nz / hl, uz = -nx / hl;
+    N.set(nx, ny, nz);
     const ids = order.map((k) => {
       const q = pts[k];
       const u = flat ? q[0] * 0.5 : (us ? us[k] : q[0] * ux + q[2] * uz) * 0.5, v = flat ? q[2] * 0.5 : q[1] * 0.5;
-      return m.addVertex(q[0], q[1], q[2], nx, ny, nz, u, v, colour[0], colour[1], colour[2]);
+      // Weathered as the walls of the houses are: moss low on a wall and on what lies level, damp, and a tone that varies over the
+      // wall (`outdoorFieldAt`, from the ground at its foot); and a face that stands up says how high that ground is, so that the
+      // material raises damp in it to a ragged line, splashes its foot with dirt and runs rain down it in streaks. (Without, it was
+      // all of one clean grey from its foot to its battlements, as if built that morning.)
+      const foot = flat ? Math.min(q[1], floor) : Math.min(q[1], footOf(q[0], q[2]));
+      const t = outdoorFieldAt(foot, 1.25)(P.set(q[0], q[1], q[2]), N, F);
+      return m.addVertex(q[0], q[1], q[2], nx, ny, nz, u, v, colour[0] * t, colour[1] * t, colour[2] * t, F[0], F[1], F[2], flat || ny < -0.5 ? 0 : 1000 + foot);
     });
     for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
   };
@@ -105,6 +131,16 @@ export function buildCastle(b: CastleBuild): void {
         along('castle', p0x, p0z, p1x, p1z, ox, oz, -T / 2, T / 2, foot, top, tone());
         prism('castle', [[p0x + ox * T / 2, p0z + oz * T / 2], [p1x + ox * T / 2, p1z + oz * T / 2], [p1x + ox * (T / 2 + 0.7), p1z + oz * (T / 2 + 0.7)], [p0x + ox * (T / 2 + 0.7), p0z + oz * (T / 2 + 0.7)]], foot, floor + 0.6, tone(0.95));
         battlement(p0x + ox * T / 2, p0z + oz * T / 2, p1x + ox * T / 2, p1z + oz * T / 2, -ox, -oz, top);
+        // Put-log holes in both faces, where the builders' scaffold was carried: rows of small square sockets a metre and a third apart,
+        // a stride and a half along, not every one of them there, nor all quite in line.
+        const lenP = Math.hypot(p1x - p0x, p1z - p0z);
+        for (const side of [1, -1]) for (let y = floor + 1.7; y < top - 1.2; y += 1.33) for (let u = 0.8; u < lenP - 0.6; u += 1.55) {
+          const h = Math.sin(u * 12.9898 + y * 78.233 + i * 37.7 + k * 11.1 + side * 3.3) * 43758.5453, r1 = h - Math.floor(h);
+          if (r1 < 0.35) continue;
+          const f = u / lenP, bx2 = p0x + (p1x - p0x) * f, bz2 = p0z + (p1z - p0z) * f, yy = y + (r1 - 0.5) * 0.12, s2 = 0.1;
+          const fx = ox * side, fz = oz * side, wx = bx2 + fx * (T / 2 + 0.012), wz = bz2 + fz * (T / 2 + 0.012), ax2 = -fz, az2 = fx;
+          face('metal', [[wx - ax2 * s2, yy - s2, wz - az2 * s2], [wx + ax2 * s2, yy - s2, wz + az2 * s2], [wx + ax2 * s2, yy + s2, wz + az2 * s2], [wx - ax2 * s2, yy + s2, wz - az2 * s2]], dark, [bx2, yy, bz2]);
+        }
       }
     }
   }
@@ -205,6 +241,97 @@ export function buildCastle(b: CastleBuild): void {
     for (const y of [spring - 0.7, spring - 0.2]) iron3(-half + 0.1, half - 0.1, D / 2 - 0.42, D / 2 - 0.28, y - 0.045, y + 0.045);
     // Slits either side of the arch, over it.
     for (const a of [-G * 0.62, G * 0.62]) { const [x, z] = P(a, D / 2); slit(x, z, ox, oz, crown + 0.8); }
+  }
+
+  // ---- the bailey: ranges against the curtain, the stair up to the walk, the well, and what lies about
+  const wood: Colour = [0.3, 0.21, 0.14], oak: Colour = [0.36, 0.26, 0.17], roofRed: Colour = [1.1, 1.02, 0.96];
+  /** From a point on the curtain's inner face and a direction along it, the way into the bailey. */
+  const inward = (ax: number, az: number, bx: number, bz: number) => {
+    const len = Math.hypot(bx - ax, bz - az) || 1, dx = (bx - ax) / len, dz = (bz - az) / len;
+    let ix = -dz, iz = dx;
+    if (ix * (cx - (ax + bx) / 2) + iz * (cz - (az + bz) / 2) < 0) { ix = -ix; iz = -iz; }
+    return { len, dx, dz, ix, iz };
+  };
+  /** A dark opening in a wall that faces (`fx`, `fz`): a door or a window, `u0` to `u1` along it from (`x0`, `z0`), `y0` to `y1` high. */
+  const opening = (x0: number, z0: number, dx: number, dz: number, fx: number, fz: number, u0: number, u1: number, y0: number, y1: number, door: boolean) => {
+    const at = (u: number, t: number): [number, number] => [x0 + dx * u + fx * t, z0 + dz * u + fz * t];
+    const [ax, az] = at(u0, 0.02), [bx, bz] = at(u1, 0.02), inside: P3 = [x0 - fx, y0, z0 - fz];
+    face(door ? 'wood' : 'metal', [[ax, y0, az], [bx, y0, bz], [bx, y1, bz], [ax, y1, az]], door ? oak : dark, inside);
+    // (A frame of oak round it, a hand broad and standing out a little.)
+    for (const [p0, p1] of [[u0 - 0.12, u0], [u1, u1 + 0.12]]) prism('wood', [at(p0, -0.02), at(p1, -0.02), at(p1, 0.08), at(p0, 0.08)], y0, y1 + 0.1, wood);
+    prism('wood', [at(u0 - 0.12, -0.02), at(u1 + 0.12, -0.02), at(u1 + 0.12, 0.08), at(u0 - 0.12, 0.08)], y1, y1 + 0.14, wood);
+  };
+  // The ranges: lean-to buildings against the curtain, stone walls, a single slope of tiles falling from the curtain to the front.
+  for (const [k, r] of (c.ranges ?? []).entries()) {
+    const { len, dx, dz, ix, iz } = inward(r.a[0], r.a[1], r.b[0], r.b[1]), D = r.depth, fh = r.height, bh = fh + D * 0.45;
+    const at = (u: number, d: number): [number, number] => [r.a[0] + dx * u + ix * d, r.a[1] + dz * u + iz * d];
+    const y0 = floor - 0.4, base = floor;
+    // Its front wall and its two ends, half a metre thick; the ends rise with the roof towards the curtain.
+    prism('castle', [at(0, D - 0.5), at(len, D - 0.5), at(len, D), at(0, D)], y0, base + fh, tone(0.97));
+    for (const u of [0, len - 0.5]) {
+      prism('castle', [at(u, 0), at(u + 0.5, 0), at(u + 0.5, D - 0.5), at(u, D - 0.5)], y0, base + fh, tone(0.97));
+      const [p0x, p0z] = at(u, 0), [p1x, p1z] = at(u, D), [q0x, q0z] = at(u + 0.5, 0), [q1x, q1z] = at(u + 0.5, D);
+      const mid: P3 = [(p0x + q1x) / 2, base + fh, (p0z + q1z) / 2];
+      for (const [ax2, az2, bx2, bz2] of [[p0x, p0z, p1x, p1z], [q0x, q0z, q1x, q1z]]) face('castle', [[ax2, base + fh, az2], [bx2, base + fh, bz2], [ax2, base + bh, az2]], tone(0.97), [mid[0] + (ax2 === p0x ? 1 : -1) * dx * 3, mid[1], mid[2] + (ax2 === p0x ? 1 : -1) * dz * 3]);
+      face('castle', [[p0x, base + bh, p0z], [p1x, base + fh, p1z], [q1x, base + fh, q1z], [q0x, base + bh, q0z]], tone(0.97), [mid[0], base, mid[2]]);
+    }
+    // The roof: a slope of tiles a quarter of a metre thick, out over the front by half a metre.
+    const e0 = at(-0.3, -0.05), e1 = at(len + 0.3, -0.05), f0 = at(-0.3, D + 0.5), f1 = at(len + 0.3, D + 0.5);
+    const yb = base + bh + 0.12, yf = base + fh - 0.12;
+    const topQ: P3[] = [[e0[0], yb, e0[1]], [e1[0], yb, e1[1]], [f1[0], yf, f1[1]], [f0[0], yf, f0[1]]];
+    const low: P3[] = topQ.map(([x, y, z]) => [x, y - 0.22, z]);
+    const centre: P3 = [(e0[0] + f1[0]) / 2, (yb + yf) / 2 - 2, (e0[1] + f1[1]) / 2];
+    face('tile', topQ, k % 2 ? [0.42, 0.44, 0.5] : roofRed, centre);
+    face('wood', low, wood, [centre[0], centre[1] + 4, centre[2]]);
+    for (let j = 0; j < 4; j++) { const a2 = topQ[j], b2 = topQ[(j + 1) % 4]; face('wood', [a2, b2, low[(j + 1) % 4], low[j]], wood, [centre[0], (yb + yf) / 2 - 0.11, centre[2]]); }
+    // Its doors and windows in the front: a stable's broad doors, a store's narrow ones, a smithy's wide opening; small windows between.
+    const [fx0, fz0] = at(0, D), wide = r.kind === 'stable' ? 1.6 : r.kind === 'smithy' ? 2.4 : 1.1, every = r.kind === 'stable' ? 3.2 : 4.2;
+    for (let u = 1.2; u + wide < len - 0.8; u += every) {
+      opening(fx0, fz0, dx, dz, ix, iz, u, u + wide, base, base + Math.min(fh - 0.45, r.kind === 'smithy' ? 2.4 : 2.1), true);
+      if (u + wide + 1.6 < len - 0.8) opening(fx0, fz0, dx, dz, ix, iz, u + wide + 0.6, u + wide + 1.2, base + 1.3, base + 1.9, false);
+    }
+    // About it: barrels by its front, and wood stacked against an end.
+    for (let j = 0; j < 3; j++) {
+      const [bx2, bz2] = at(len * (0.25 + 0.22 * j) + (k % 2) * 0.6, D + 0.8 + 0.25 * (j % 2));
+      barrel(bx2, bz2);
+    }
+    const [wx, wz] = at(len + 0.2, D * 0.45), sx = dx, sz = dz;
+    for (let row = 0; row < 4; row++) for (let j = 0; j < 6 - row; j++) {
+      const off = (j - (5 - row) / 2) * 0.24, y = base + 0.13 + row * 0.22, px = wx + ix * off + sx * 0.4, pz = wz + iz * off + sz * 0.4;
+      log(px, y, pz, sx, sz, 1.1);
+    }
+  }
+  /** A barrel standing on the ground: twelve staves round, two hoops. */
+  function barrel(x: number, z: number) {
+    const y = footOf(x, z), ring = Array.from({ length: 10 }, (_, i) => [x + Math.cos((i / 10) * Math.PI * 2) * 0.32, z + Math.sin((i / 10) * Math.PI * 2) * 0.32] as [number, number]);
+    prism('wood', ring, y, y + 0.45, wood, 1.12);
+    prism('wood', ring.map(([px, pz]) => [x + (px - x) * 1.12, z + (pz - z) * 1.12] as [number, number]), y + 0.45, y + 0.9, wood, 1 / 1.12);
+    for (const h of [0.15, 0.78]) prism('metal', ring.map(([px, pz]) => [x + (px - x) * (h < 0.5 ? 1.06 : 1.06), z + (pz - z) * 1.06] as [number, number]), y + h, y + h + 0.05, iron);
+  }
+  /** A log lying along (`dx`, `dz`), `long` long. */
+  function log(x: number, y: number, z: number, dx: number, dz: number, long: number) {
+    const r = 0.11, px = -dz, pz = dx, ring: [number, number, number][] = Array.from({ length: 6 }, (_, i) => { const a = (i / 6) * Math.PI * 2; return [px * Math.cos(a) * r, Math.sin(a) * r, pz * Math.cos(a) * r]; });
+    const end0 = ring.map(([a, b, cc]) => [x + a - dx * long / 2, y + b, z + cc - dz * long / 2] as P3), end1 = ring.map(([a, b, cc]) => [x + a + dx * long / 2, y + b, z + cc + dz * long / 2] as P3), mid: P3 = [x, y, z];
+    for (let i = 0; i < 6; i++) face('wood', [end0[i], end0[(i + 1) % 6], end1[(i + 1) % 6], end1[i]], wood, mid);
+    face('wood', end0, [0.55, 0.42, 0.28], mid); face('wood', end1, [0.55, 0.42, 0.28], mid);
+  }
+  // The stair up to the walk: steps of stone against the curtain's inner face, each a block down to the ground, so that it is solid.
+  if (c.stair) {
+    const st = c.stair, { len, dx, dz, ix, iz } = inward(st.a[0], st.a[1], st.b[0], st.b[1]), steps = Math.ceil((top - floor) / 0.22), rise = (top - floor) / steps, tread = len / steps;
+    for (let k = 0; k < steps; k++) {
+      const u0 = k * tread, u1 = (k + 1) * tread + (k === steps - 1 ? 0.05 : 0);
+      const ring: [number, number][] = [[st.a[0] + dx * u0, st.a[1] + dz * u0], [st.a[0] + dx * u1, st.a[1] + dz * u1], [st.a[0] + dx * u1 + ix * st.width, st.a[1] + dz * u1 + iz * st.width], [st.a[0] + dx * u0 + ix * st.width, st.a[1] + dz * u0 + iz * st.width]];
+      prism('castle', ring, Math.max(floor - 0.4, floor + k * rise - 1.6), floor + (k + 1) * rise, tone(1.02));
+    }
+  }
+  // The well: a ring of stone a little over knee high, dark water in it, two posts of oak with a beam and a little roof of tiles.
+  if (c.well) {
+    const [x, z] = c.well, y = footOf(x, z), R = 1.05, ring = Array.from({ length: 14 }, (_, i) => [x + Math.cos((i / 14) * Math.PI * 2) * R, z + Math.sin((i / 14) * Math.PI * 2) * R] as [number, number]);
+    prism('castle', ring, y - 0.3, y + 0.85, tone(1.04));
+    face('metal', ring.map(([px, pz]) => [x + (px - x) * 0.78, y + 0.86, z + (pz - z) * 0.78] as P3), [0.02, 0.03, 0.035], [x, y, z]);
+    for (const s2 of [-1, 1]) prism('wood', [[x + s2 * 0.95 - 0.07, z - 0.07], [x + s2 * 0.95 + 0.07, z - 0.07], [x + s2 * 0.95 + 0.07, z + 0.07], [x + s2 * 0.95 - 0.07, z + 0.07]], y + 0.8, y + 2.4, oak);
+    prism('wood', [[x - 1.1, z - 0.06], [x + 1.1, z - 0.06], [x + 1.1, z + 0.06], [x - 1.1, z + 0.06]], y + 2.2, y + 2.32, oak);
+    for (const s2 of [-1, 1]) face('tile', [[x - 1.3, y + 2.3, z], [x + 1.3, y + 2.3, z], [x + 1.3, y + 2.0, z + s2 * 0.9], [x - 1.3, y + 2.0, z + s2 * 0.9]], roofRed, [x, y, z]);
   }
 }
 
