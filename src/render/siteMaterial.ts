@@ -997,6 +997,21 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   const swardFar: N = smoothstep((groundUniforms.uGrassRange as N).mul(0.55), (groundUniforms.uGrassRange as N).mul(2.2), far).toVar();
   const sward = vertexColor().rgb.mul(groundUniforms.uSward as N).mul(1.68).mul(mix(0.9, 1.1, mid)).mul(mix(0.86, 1.12, macro));
   turfed = mix(turfed, sward, swardFar.mul(0.85)).toVar();
+  // Nor is it one green over a hillside, any more than the far land's pasture is (`makeFarMaterial`): yellower on dry slopes that face
+  // the sun (greater z) and in drifts a field or two across, darker and lusher where the ground is damp, with stands of olive-brown
+  // bracken on the dry slopes. Only where the tufts no longer stand on it; where they do, they are what is seen.
+  // (The hills just beyond a valley are laid with this material, not the far land's, and stayed one bright green, a golf course.)
+  {
+    const nG: N = normalize(normalWorldGeometry), fDrift: N = farNoise(at0.mul(0.045).add(3.3)).toVar();
+    const dryLie: N = smoothstep(0.15, 0.75, nG.z.mul(0.5).add(0.25).add(fDrift.sub(0.5).mul(0.7)).sub(wetV.mul(0.5))).toVar();
+    const lush: N = smoothstep(0.5, 0.85, farNoise(at0.mul(0.021).add(7.9)).add(wetV.mul(0.4))).toVar();
+    const bracken: N = smoothstep(0.6, 0.7, farNoise(at0.mul(0.017).add(11.1)).mul(0.7).add(fDrift.mul(0.3))).mul(dryLie).mul(smoothstep(0.02, 0.12, one(nG.y))).toVar();
+    let hill: N = turfed.mul(fDrift.mul(0.24).add(0.88));
+    hill = mix(hill, hill.mul(vec3(0.74, 0.88, 0.72)), lush.mul(0.6));
+    hill = mix(hill, hill.mul(vec3(1.2, 1.08, 0.78)).add(vec3(0.016, 0.01, 0)), dryLie.mul(0.5));
+    hill = mix(hill, vec3(0.16, 0.14, 0.06).mul(mix(0.85, 1.1, macro)), bracken.mul(0.65));
+    turfed = mix(turfed, hill, swardFar).toVar();
+  }
   // And moss, low and dark, where it is damp or shaded.
   const gMoss: N = (texture(moss.map, at.mul(0.9)) as N).bias(blur);
   const mossy: N = smoothstep(0.55, 0.78, (texture(turf.map, at0.div(7.3).add(0.53)) as N).a.add(wetV.mul(0.45)).add(litV.mul(0.25)).sub(dry.mul(0.4))).mul(one(leafy)).toVar();
@@ -1482,10 +1497,28 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   const gullied = run.mul(1.5).mul(sloping).add(1);
   // Scree: pale and even, on slopes below the faces that are neither steep nor level.
   land = mix(land, vec3(0.33, 0.32, 0.31).mul(fine.mul(0.3).add(0.85)), smoothstep(0.3, 0.5, high.add(ragged.mul(0.2))).mul(one(steep)).mul(sstep(0.93, 0.83, n0.y)).mul(0.65));
-  // Pasture above the trees, on what is not too steep.
-  land = mix(land, uGrass.mul(broad.mul(0.45).add(0.8)), smoothstep(0, 0.07, float(0.62).sub(high).add(ragged.mul(0.3))).mul(one(steep)).mul(0.9));
+  // Pasture above the trees, on what is not too steep. Not one green: lusher and darker where water gathers, in hollows and down the
+  // gullies; paler and yellower on dry crests and on slopes that face the sun (south, which is greater z); in patches a field or two
+  // across; with stands of bracken, olive-brown, on the dry slopes, and dark heather on the higher ground. (From any height the hills
+  // were a golf course: smooth bright green to the tree line.)
+  const wetLie: N = clamp(max(hollow, 0).mul(1.4).sub(run.mul(1.6).mul(sloping)), 0, 1).toVar();
+  const drift: N = farNoise(fp.mul(0.045).add(3.3)).toVar();
+  const dryLie: N = smoothstep(0.15, 0.75, n0.z.mul(0.5).add(0.25).add(wetLie.negate().mul(0.5)).add(drift.sub(0.5).mul(0.7)).add(max(hollow.negate(), 0).mul(0.6))).toVar();
+  let pasture: N = uGrass.mul(broad.mul(0.45).add(0.8)).mul(drift.mul(0.24).add(0.88));
+  pasture = mix(pasture, pasture.mul(vec3(0.74, 0.88, 0.72)), wetLie.mul(0.7));
+  pasture = mix(pasture, pasture.mul(vec3(1.22, 1.1, 0.78)).add(vec3(0.018, 0.012, 0)), dryLie.mul(0.55));
+  const bracken: N = smoothstep(0.6, 0.7, farNoise(fp.mul(0.017).add(11.1)).mul(0.7).add(drift.mul(0.3))).mul(dryLie).mul(sloping.mul(0.6).add(0.4)).toVar();
+  pasture = mix(pasture, vec3(0.16, 0.14, 0.06).mul(fine.mul(0.3).add(0.85)), bracken.mul(0.7));
+  const heath: N = smoothstep(0.62, 0.72, farNoise(fp.mul(0.013).add(23.7)).mul(0.7).add(fine.mul(0.3))).mul(smoothstep(0.32, 0.5, high)).toVar();
+  pasture = mix(pasture, vec3(0.115, 0.075, 0.08).mul(fine.mul(0.3).add(0.85)), heath.mul(0.6));
+  const grazed: N = smoothstep(0, 0.07, float(0.62).sub(high).add(ragged.mul(0.3))).mul(one(steep)).mul(0.9).toVar();
+  land = mix(land, pasture, grazed);
   // Woods low down, reaching higher up the gullies than on the spurs between them.
-  const wood: N = smoothstep(0, 0.05, float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42))).mul(one(steep.mul(0.85))).toVar();
+  const woodLine: N = float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42)).toVar();
+  const wood: N = smoothstep(0, 0.05, woodLine).mul(one(steep.mul(0.85))).toVar();
+  // (And past the wood's edge it thins out into single trees and bushes standing in the pasture, fewer the further out: the wood
+  // stopped at a line, as if fenced.)
+  const scattered: N = smoothstep(-0.14, 0.02, woodLine).mul(one(steep.mul(0.85))).toVar();
   // Two kinds of tree, in stands: the smaller and darker are firs.
   const firs: N = smoothstep(0.42, 0.58, farNoise(fp.mul(0.011).add(5)).add(high.sub(0.2).mul(0.5))).toVar();
   const size = mix(3.7, 2.6, firs);
@@ -1497,11 +1530,12 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   const green: N = uWood.mul(mix(vec3(1), vec3(0.62, 0.74, 0.82), firs)).mul(fine.mul(0.2).add(0.9));
   // Under the trees it is dark, whatever the ground is.
   land = mix(land, green.mul(0.45), wood.mul(0.9));
-  // A wood thins out a tree at a time, not all together: each tree stands or does not.
-  const standing: N = step(fract(crown.w.mul(91.3)), wood.mul(1.05)).mul(smoothstep(0, 0.3, crown.x)).toVar();
+  // A wood thins out a tree at a time, not all together: each tree stands or does not; and beyond it, one in many.
+  const standing: N = step(fract(crown.w.mul(91.3)), max(wood.mul(1.05), scattered.mul(0.22))).mul(smoothstep(0, 0.3, crown.x)).toVar();
   const tone = crown.x.mul(0.36).add(0.74).mul(crown.w.mul(0.4).add(0.8));
-  land = mix(land, green.mul(mix(0.84, tone, seen)).mul(mix(0.6, 1, smoothstep(0.3, 0.7, n0.y))), mix(max(wood, one(smoothstep(0.3, 0.6, n0.y)).mul(step(high, 0.5)).mul(0.9)), standing, seen).mul(step(0.0001, wood)));
-  const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(step(0.0001, wood)))).toVar();
+  const treed: N = max(step(0.0001, wood), step(0.0001, scattered).mul(seen)).toVar();
+  land = mix(land, green.mul(mix(0.84, tone, seen)).mul(mix(0.6, 1, smoothstep(0.3, 0.7, n0.y))), mix(max(wood, one(smoothstep(0.3, 0.6, n0.y)).mul(step(high, 0.5)).mul(0.9)), standing, seen).mul(treed));
+  const farN: N = normalize(n0.sub(vec3(crown.y, 0, crown.z).mul(0.3).mul(seen).mul(standing).mul(treed))).toVar();
   // The rock of a steep face, finer than the sheet can hold: gullies some twenty metres apart and ribs some seven, running down the
   // face and wandering; the ledges where its beds come out across it, every ten metres or so; and the chips and edges of the rock.
   // As light and shade, and as where snow can lie. Each size is let go only when it is smaller than a point of the picture, so a

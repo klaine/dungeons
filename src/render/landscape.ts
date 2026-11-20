@@ -264,7 +264,12 @@ export function layMountains(
         const hollow = Math.min(1, Math.max(-1, (((H[at(ri, k + 2)] + H[at(ri, k - 1)] + H[at(ri + 2, k)] + H[at(ri - 1, k)]) / 4 - y) / (radii[ri + 1] - radii[ri])) * 4));
         const patch = fbm2(x * 0.03 + seed, z * 0.03 - seed, 2) - 0.5;
         const wooded = 0.37 - (y - base) / 190 + 0.13 * hollow + 0.42 * patch;
-        if (wooded < 0.02 * own(a * 7 + j, 4) || fall > 1.7) continue;
+        // (Past the wood's edge, a tree here and there in the pasture, fewer the further out, as the far material paints them: a wood
+        // that stops at a line looks fenced.)
+        // (In loose groups more than one by one: spread evenly, as first done, they were a plantation of young firs on a lawn.)
+        const grouped = fbm2(x * 0.025 + seed * 3, z * 0.025 - seed, 2) > 0.56 ? 1 : 0.12;
+        const lone = wooded > -0.12 && own(a * 7 + j, 6) < 0.06 * grouped * Math.max(0, 1 + wooded / 0.12);
+        if ((wooded < 0.02 * own(a * 7 + j, 4) && !lone) || fall > 1.7) continue;
         if (sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r * 1.4)) continue;
         tree(x, y, z, fbm2(x * 0.011 + 5, z * 0.011 + 5, 1) + ((y - base) / 190 - 0.2) * 0.5 > 0.5, own(a * 7 + j, 5));
       }

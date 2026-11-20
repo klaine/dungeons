@@ -1260,6 +1260,9 @@ async function start(): Promise<void> {
   let frames = 0, fpsAt = last, drawn = 0;
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
 
+  // (How far a point is outside the place the player may walk, once that is known: see `__dbg.beyond` below.)
+  let beyondPlay: ((x: number, z: number) => number) | null = null;
+  const lastInside = player.position.clone();
   const frame = (now: number) => {
     // A window that had no size when the program started has one by now.
     if (canvas.width === 0 && window.innerWidth > 0) window.dispatchEvent(new Event('resize'));
@@ -1267,6 +1270,14 @@ async function start(): Promise<void> {
     last = now;
     const time = fixedTime ?? now / 1000;
     player.update(dt);
+    // The place is kept by walls that are not seen (the fences along a valley's sides, where its own land rises and nothing stands to
+    // stop anyone); should the player get past them all the same, they are put back where they last stood within it.
+    // (A valley's alone: an island's, a town's and a mountain's ways of saying where one may walk were not made for this.)
+    if (beyondPlay && !player.flying && site?.valley && !site.island && !site.town && !site.mountain) {
+      const out = beyondPlay(player.position.x, player.position.z);
+      if (out < -0.5) lastInside.copy(player.position);
+      else if (out > 4) player.position.copy(lastInside);
+    }
     // (The eye's matrix brought up to date at once: what reads where the eye is below this, the water's mirror, the facing of falling
     // snow and of fireflies, would otherwise read where it was a frame ago.)
     camera.updateMatrixWorld();
@@ -1594,7 +1605,7 @@ async function start(): Promise<void> {
   // It goes straight at each and steps round nothing, so that whatever stops it shows. Says how far it got.
   // How far a point is outside the valley that can be walked (less than nothing inside it): for the tests that try to get out.
   // (A cave or a hall in the valley's side runs in under the hill beyond its edge, and whoever is in one has not got out.)
-  (window as any).__dbg.beyond = (x: number, z: number) => {
+  beyondPlay = (window as any).__dbg.beyond = (x: number, z: number) => {
     if (site?.island) return -inland(site.island, x, z);
     if (site?.mountain) return -onMountain(site.mountain, x, z);
     // (A town's country is the box its land was made over, less the strip at its edges that is fenced.)

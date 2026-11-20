@@ -1251,6 +1251,37 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       return high;
     };
     const campBase = site.camp ? swells(site.camp.x, site.camp.z) : 0;
+    /**
+     * How much of a crag a found valley's side has at a point, 0 to 1. Its sides were a crag all the way round, six to twenty metres
+     * of rock raised along the line where the land had risen four metres over the stream, and on the land beyond, a rise of its own:
+     * every valley a quarry cut into the country, its walls nothing the land had made (asked for: let the found land stand, and keep
+     * the player in by walls that are not seen). Now the land the valley was found in is its sides, and rock stands only where
+     * something needs a face of rock: a cave or a hall cut into the side, the passage behind it to the cavern, a stream coming over
+     * the rim in a fall, a terrace built against the wall, and the head of the valley about the house, whose ridge and arms are the
+     * valley's own. It dies away over some twenty metres from each. Read along each side, a metre at a time, once.
+     */
+    const cragOn = vale?.terrain ? (() => {
+      const zA = Math.floor(vale.z0 - 60), n = Math.ceil(vale.mouth + 120 - zA) + 1, on = { w: new Float32Array(n), e: new Float32Array(n) };
+      const near = (side: 'w' | 'e', z0: number, z1: number) => {
+        for (let i = 0; i < n; i++) {
+          const z = zA + i, d = Math.max(0, z0 - z, z - z1);
+          on[side][i] = Math.max(on[side][i], 1 - smooth((d - 2) / 18));
+        }
+      };
+      for (let i = 0; i < n; i++) on.w[i] = on.e[i] = 1 - smooth((zA + i - frontZ - 10) / 22);
+      for (const q of grottoes) { const reach = q.hall ? q.hall.width / 2 + 6 : q.r * 1.3 + 5; near(q.side, q.z - reach, q.z + reach); }
+      for (const t of terraces) near(t.side, Math.min(t.z0, t.z1) - t.run - 3, Math.max(t.z0, t.z1) + t.run + 3);
+      for (const st of site.streams ?? []) if (st.from === 'fall' && st.course.length) {
+        const [fx, fz] = st.course[0];
+        near(fx < (sideAt('w', fz) + sideAt('e', fz)) / 2 ? 'w' : 'e', fz - 6, fz + 6);
+      }
+      const dp = site.backWay?.deep, cave = site.grottoes?.[0];
+      if (dp?.join && cave) { const zs = joinLine(vale, cave, dp).map(([, z]) => z); near(cave.side, Math.min(...zs) - 4, Math.max(...zs) + 4); }
+      return (x: number, z: number) => {
+        const side = x < (sideAt('w', z) + sideAt('e', z)) / 2 ? 'w' : 'e', f = Math.min(n - 1.001, Math.max(0, z - zA)), i = Math.floor(f), t = f - i;
+        return on[side][i] * (1 - t) + on[side][i + 1] * t;
+      };
+    })() : null;
     const groundBase = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       const rough = Math.min(1, fromPath / 2.5) * Math.min(1, Math.max(0, z - p.z0) / 2.5);
@@ -1372,7 +1403,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // North of the house front everything is side, but for the house and its hill.
         // (Not so round a house that stands free, which has the valley all round it.)
         const ins = z < frontZ && !ridge && !free ? Math.min(inside, 2.9 + z - frontZ) : inside;
-        y += high * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (free ? 1 : z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
+        // (In a valley that was found, only where something needs the rock: see `cragOn`.)
+        const crag = cragOn ? cragOn(x, z) : 1;
+        y += high * crag * (1 - smooth((ins - 4.7 + spread + wobble) / spread)) * (free ? 1 : z < frontZ ? 1 - ownHill : smooth((z - (frontZ - 0.3)) / 2.2) + (1 - smooth((z - (frontZ - 0.3)) / 2.2)) * (1 - ownHill));
         // Behind the crags the land does not lie flat, as round a quarry: it goes on up, as a hillside, more on some sides
         // than on others. (North of the house front the hills keep the distance they always kept from it.)
         const out = Math.max(0, -inside), north = Math.max(0, aside - 3), t = smooth((z - (frontZ - 2)) / 14), beyond = ridge ? (z < ridge.z && x > ridge.x0 && x < ridge.x1 ? 0 : out) : free ? out : north + (out - north) * t;
@@ -1380,7 +1413,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // (A valley that was found has the land it was found in beyond its sides, rising behind the crags: not hills made up.)
         // (Behind its crags too the ground goes on up, as behind a drawn valley's, a little less; under that the land it was found in.
         // Where that land rose less than the crag stood, the top of the crag was left as a level shelf: the rim of a quarry.)
-        if (vale.terrain) { y += smooth((beyond - 2) / 90) * 15 * stands; if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6)); }
+        if (vale.terrain) { y += smooth((beyond - 2) / 90) * 15 * stands * crag; if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6) * crag); }
         else y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
       // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
@@ -2062,6 +2095,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
     const parched = season === 'autumn' ? 0.55 : season === 'summer' ? 0.25 : 0;
     const inFlower = season === 'spring' ? 1 : season === 'summer' ? 0.6 : 0.15;
+    // (A number between 0 and 1 of a point's own, for choices that must not take from `plant`, which would reshuffle all that follows.)
+    const own01 = (x: number, z: number, salt: number) => { const v = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453; return v - Math.floor(v); };
     const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
     const blossom: Colour = [0.85, 0.2, 0.38];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
@@ -2523,15 +2558,27 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
     };
+    // (A wood is close in its heart and thins out tree by tree towards its edge. Laid one to a cell wherever a patch said wood, with
+    // the cells ten metres apart beyond the valley, the hills round about were planted as an orchard: young firs evenly spaced on a
+    // lawn. Now a tree stands less often the nearer the patch's edge, and in its heart, now and then a second in the cell.)
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
-        const x = gx + plant.range(0.1, 0.9) * step, z = gz + plant.range(0.1, 0.9) * step;
-        if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
-        if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
-        if (fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
-        // Full detail anywhere the player can stand; less with distance beyond the rim.
-        const out = vale ? Math.max(0, -insideAt(x, z), g.z0 - z, z - vale.mouth - 8) : Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
-        tree(x, z, f(x, z), Math.max(0, 1 - out / 50));
+        const x0 = gx + plant.range(0.1, 0.9) * step, z0 = gz + plant.range(0.1, 0.9) * step;
+        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3);
+        const pair = step > 8 && thick > 0.6 && own01(x0, z0, 51) < 0.5 ? 2 : 1;
+        for (let k = 0; k < pair; k++) {
+          const x = k ? gx + own01(x0, z0, 52) * step : x0, z = k ? gz + own01(x0, z0, 53) * step : z0;
+          if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
+          if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
+          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) : thick;
+          if (here < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
+          if (step > 8 && own01(x, z, 54) < 0.85 * (1 - smooth((here - 0.46) / 0.12))) continue;
+          // Full detail anywhere the player can stand, and for a stone's throw beyond, so that the wood the valley lies in goes on as
+          // a wood past where one may walk (asked for: it had turned to rough trees within a few strides of the edge); less with
+          // distance beyond that.
+          const out = vale ? Math.max(0, -insideAt(x, z), g.z0 - z, z - vale.mouth - 8) : Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
+          tree(x, z, f(x, z), 1 - smooth((out - 25) / 90));
+        }
       }
     };
     // (Where the woods beyond the valley begin: the fine sheet's area as it lies for a cell of 1.2, whatever the cell, so that a finer
@@ -2626,9 +2673,28 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     };
     const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
     const hueAt = (x: number, z: number) => flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
+    // Flowers by kind, each in drifts of its own that overlap: buttercups nearly everywhere, white ox-eye and cow parsley taller and in
+    // broad drifts, pink-purple knapweed and campion, blue harebells and cornflowers fewer, and red here and there. (A meadow was one
+    // colour over fifty metres at a time: the arrival in one seed was all pink spikes.) Where two would grow, the one whose drift is
+    // thicker there.
+    const FLOWERS: { hue: Colour; size: number; at: number; bar: number }[] = [
+      { hue: [1.5, 1.1, 0.2], size: 0.8, at: 0.11, bar: 0.52 },
+      { hue: [1.3, 1.3, 1.2], size: 1.2, at: 0.06, bar: 0.6 },
+      { hue: [1.4, 0.4, 0.8], size: 1.0, at: 0.09, bar: 0.65 },
+      { hue: [0.25, 0.5, 1.5], size: 0.85, at: 0.13, bar: 0.69 },
+      { hue: [1.5, 0.3, 0.12], size: 0.9, at: 0.1, bar: 0.75 },
+    ];
+    const HERBS: Colour[] = [[1.35, 0.42, 0.85], [1.3, 1.25, 1.0], [1.45, 1.15, 0.25], [0.85, 0.3, 1.1]];
     const flowerAt = (x: number, z: number, y: number, size: number) => {
-      if (fbm2(x * 0.13 + s1 * 3, z * 0.13 + s2, 2) < 0.64 || !plant.chance(0.45 * inFlower)) return;
-      planting.tuft(planting.flowers, x, y - 0.02, z, size, size * plant.range(0.9, 1.3), plant.range(0, Math.PI), hueAt(x, z));
+      if (!plant.chance(0.4 * inFlower)) return;
+      let best = -1, k = -1;
+      for (let i = 0; i < FLOWERS.length; i++) {
+        const f = FLOWERS[i], d = fbm2(x * f.at + s1 * (i + 3), z * f.at - s2 * (i + 1) + 7.3 * i, 2) - f.bar + own01(x, z, i) * 0.05;
+        if (d > best) { best = d; k = i; }
+      }
+      if (best < 0) return;
+      const f = FLOWERS[k], t = 0.85 + 0.25 * own01(x, z, 9), sz = size * f.size;
+      planting.tuft(planting.flowers, x, y - 0.02, z, sz, sz * plant.range(0.9, 1.3), plant.range(0, Math.PI), [f.hue[0] * t, f.hue[1] * t, f.hue[2] * t]);
     };
     // Grass. How tall it stands is worked out, not scattered: long where the ground is moist and
     // open and nobody walks, short where it is trodden or the soil is thin, and sparse under trees.
@@ -2658,6 +2724,17 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wearAt(x, z, true)) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2));
         const w = plant.range(0.4, 0.7) * (0.75 + 0.35 * tall) * scale, h = plant.range(0.2, 0.34) * (0.35 + 1.25 * tall) * Math.sqrt(scale);
         planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z, wet));
+        // Grass in seed, where it stands long and nobody treads it: heads over the sward, paler, the colour of ripe seed (less of it
+        // in spring). And rushes in the wettest ground short of standing water, dark, stiff and in clumps. (The sward was one even
+        // green, the same height everywhere at once: a lawn.)
+        const r1 = own01(x, z, 21);
+        if (tall > 0.8 && wear < 0.2 && shade < 0.4 && r1 < (season === 'spring' ? 0.08 : 0.22)) {
+          const ripe = 0.75 + 0.35 * own01(x, z, 22);
+          planting.tuft(planting.grass, x + 0.07, y - 0.05, z - 0.05, w * 0.6, h * 1.45, r1 * 40, [0.36 * ripe, 0.34 * ripe, 0.16 * ripe]);
+        } else if (wet > 0.72 && wear < 0.15 && shade < 0.6 && r1 < 0.35 * smooth((wet - 0.72) / 0.15)) {
+          const dark = 0.75 + 0.35 * own01(x, z, 23);
+          planting.tuft(planting.reeds, x, y - 0.05, z, w * 0.8, h * 1.2 + 0.25, r1 * 40, [0.07 * dark, 0.16 * dark, 0.035 * dark]);
+        }
         // Flowers want sun, some moisture, and to be left alone.
         if (shade < 0.35 && wear < 0.4 && wet > 0.25 && plant.chance(0.14 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
       }
@@ -2800,7 +2877,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // The other plants, each where it would grow.
     const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
     const open = (x: number, z: number) => inGrounds(x, z, 0.5) && !inHouse(x, z, 0.8) && offTrack(x, z) > 1.6 && offFoot(x, z) > 0.75 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
-    const census = { ferns: 0, herbs: 0, nettles: 0, heather: 0, thicket: 0, saplings: 0, scree: screeLaid };
+    const census = { ferns: 0, bracken: 0, herbs: 0, nettles: 0, heather: 0, bramble: 0, thicket: 0, saplings: 0, scree: screeLaid };
     for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
       const x = gx + plant.range(0, 0.95), z = gz + plant.range(0, 0.95);
       if (!open(x, z) || inMeadow(x, z, -1.5) && offTrack(x, z) < 4) continue;
@@ -2817,9 +2894,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // Tall herbs: in drifts on moist open ground that nothing grazes or treads.
       if (shade < 0.3 && wet > 0.52 && thin < 0.4 && fbm2(x * 0.09 - s1, z * 0.09 + s2 * 2, 2) > 0.52 && plant.chance(0.4)) {
         const size = plant.range(0.5, 0.85);
-        const hue = season === 'autumn' ? [0.4, 0.3, 0.16] as Colour : hueAt(x + 40, z);
+        // (By kind, in drifts that overlap, as the meadow's flowers are: rosebay's pink, meadowsweet's cream, loosestrife's yellow and
+        // purple. They were one colour over fifty metres: a whole bank of pink spikes.)
+        let pick = 0, most = -9;
+        for (let i = 0; i < HERBS.length; i++) { const d = fbm2(x * 0.07 + s2 * (i + 2), z * 0.07 - s1 * (i + 5) + 4.1 * i, 2) + own01(x, z, 40 + i) * 0.06; if (d > most) { most = d; pick = i; } }
+        const hue = season === 'autumn' ? [0.4, 0.3, 0.16] as Colour : HERBS[pick];
         planting.tuft(planting.herbs, x, y - 0.03, z, size, plant.range(0.95, 1.5), plant.range(0, Math.PI), hue);
         census.herbs++;
+        continue;
+      }
+      // Bracken on the dry banks, in stands: broad fronds to the knee and higher, green in spring and summer, russet in autumn. (The
+      // valley's slopes were turf like its floor; bracken is what takes a dry hillside nobody grazes hard.)
+      if (shade < 0.5 && wet < 0.45 && thin > 0.12 && thin < 0.65 && fbm2(x * 0.055 + s2 * 3, z * 0.055 - s1, 2) > 0.56 && plant.chance(0.45)) {
+        const size = plant.range(1.0, 1.6), t = plant.range(0.8, 1.15), c: Colour = season === 'autumn' ? [0.46, 0.24, 0.08] : season === 'summer' ? [0.16, 0.27, 0.06] : [0.2, 0.32, 0.07];
+        planting.tuft(planting.ferns, x, y - 0.04, z, size, size * plant.range(0.6, 0.85), plant.range(0, Math.PI), [c[0] * t, c[1] * t, c[2] * t]);
+        census.bracken++;
         continue;
       }
       // Heather and its like: low mounds on thin dry soil in the sun, against rock.
@@ -2829,8 +2918,17 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         census.heather++;
         continue;
       }
+      // Bramble where wood meets open ground: low dark mounds a stride or two across, which the edge of a wood is fringed with.
+      // (Trees stood straight up out of the grass, the wood ending at its last trunk.)
+      if (shade > 0.15 && shade < 0.55 && thin < 0.5 && own01(x, z, 31) < 0.045) {
+        const size = 0.5 + 0.6 * own01(x, z, 32);
+        planting.crown(x, y + size * 0.28, z, size, size * 0.45, 26, size * 0.75, leafOf(season === 'autumn' ? [0.2, 0.12, 0.05] : [0.07, 0.15, 0.04]), plant);
+        census.bramble++;
+        continue;
+      }
       // Thicket: bushes where wood meets open ground, which is where the light and the shelter both are.
-      if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.035)) {
+      // (Twice as thick as it was: a wood's edge is mostly bushes and young trees, not a line of trunks.)
+      if (shade > 0.18 && shade < 0.5 && thin < 0.5 && plant.chance(0.07)) {
         const size = plant.range(0.7, 1.35);
         // A bush: several stems from the ground, branching, with its leaves on its twigs.
         const green = leafOf(plant.pick(greens));
@@ -2839,7 +2937,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         growTree(planting, softBark, x, y - 0.05, z, size * 2.4, 0.03 + 0.02 * size, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, leaf: green, bark: oakBark, shaded: true }, rng.fork(`bush${census.thicket}`));
         census.thicket++;
         // And now and then a young tree coming up among them.
-        if (plant.chance(0.22)) {
+        if (plant.chance(0.3)) {
           const sx = x + plant.range(-1.2, 1.2), sz = z + plant.range(-1.2, 1.2);
           if (open(sx, sz)) {
             const height = plant.range(2.2, 3.6);

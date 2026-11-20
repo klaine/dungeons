@@ -44,9 +44,12 @@ const { chromium } = require('playwright');
         out.maxClimb = Math.max(out.maxClimb, p.y - startY);
         const where = `run ${run}: from (${sx.toFixed(0)}, ${sz.toFixed(0)}) to (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)})`;
         // (On an island the beach may be waded a few strides out from the waterline; out of the water's depth is out.)
-        if (beyond > (site.island ? 9 : 0.5)) out.escaped.push(where);
-        // (On an island the ground goes down to the sea: fallen is below the water.)
-        if (p.y < (site.island ? site.island.sea - 0.6 : a.floor - 4)) out.fell.push(where);
+        // (A valley that was found has its own land for sides, walked up to the fences that run a little behind them, which stop
+        // whoever reaches them a metre or so past the side's line: out is past that.)
+        if (beyond > (site.island ? 9 : site.valley?.terrain ? 1.5 : 0.5)) out.escaped.push(where);
+        // (On an island the ground goes down to the sea: fallen is below the water. In a found valley the floor goes down with the land
+        // towards its foot, some metres below the forecourt: fallen is below the ground where one ends.)
+        if (p.y < (site.island ? site.island.sea - 0.6 : site.valley?.terrain ? groundAt(p.x, p.z) - 2 : a.floor - 4)) out.fell.push(where);
         if (p.y - 1.75 > groundAt(p.x, p.z) + 3 ) out.stuckHigh.push(where);
       }
       // Each thing left in the valley: walk to it from a few metres off, on the side of the track, and see it taken.
