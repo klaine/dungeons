@@ -367,7 +367,7 @@ footer.site a { margin: 0 6px; }
   <span class="sec-num">03</span>
   <h2>The house: rooms in loops</h2>
   <div class="prose">
-    <p class="lead-in">At the heart of every place is a walled house: a priory, abbey, charterhouse, hospice or preceptory, of limestone, sandstone, greystone or basalt, kept, damp or forsaken. Its plan is built from <strong>loops</strong>, not from a tree of rooms with loops added afterwards.</p>
+    <p class="lead-in">At the heart of every place is a walled house: in a valley the hall and keep of a castle, elsewhere a priory, abbey, charterhouse, hospice or preceptory; of limestone, sandstone, greystone or basalt; kept, damp or forsaken. Its plan is built from <strong>loops</strong>, not from a tree of rooms with loops added afterwards.</p>
     <p>That follows Joris Dormans' cyclic generation, the approach behind the game <em>Unexplored</em>: a place is interesting when there are two ways between things, and the relationship between the two ways is the game. A locked door seen early, with its key round the long way; a door you can only open from the far side, which turns a long walk into a shortcut on the way back.</p>
     <p>The house is laid on a grid of up to six columns by five rows, a metre-thick wall between cells. Passages are 3 to 3.6 metres across, rooms 5.6 to 7.6. One of four loop plans is chosen, sometimes round a cloister court open to the sky:</p>
   </div>
@@ -381,8 +381,8 @@ footer.site a { margin: 0 6px; }
       <li><b>Rooms and ways.</b> Some neighbouring cells merge into long halls. Rooms are joined by doors, or by wide arches where they open on a court. The first room is the gatehall; the sanctum is added beside the room furthest from it.</li>
       <li><b>Side chambers and secrets.</b> Up to four dead ends are added, some through an antechamber to a strongroom, reliquary or oubliette. In about three houses in five, one chamber hides behind a stretch of wall that is really a door.</li>
       <li><b>Caves.</b> In about one house in three a roomy dead end becomes a natural cave, and most caves run on through one to three more chambers by clefts in the rock, each 1.3 to 2.3 metres lower than the last, lit by a hole to the sky or by growths that glow.</li>
-      <li><b>Roofs, uses and light.</b> Rooms get a stone vault or a timber ceiling, and a use by their size: refectory, dormitory or chapter house for the large ones; kitchen, store, workshop or scriptorium for the rest. A forsaken house has lost a roof. Some rooms are left dark, never two in a row.</li>
-      <li><b>Floors and storeys.</b> Floors rise and fall from room to room, never by more than three steps of 17 centimetres at a doorway. In about half the houses some rooms have a room above or a cellar below, reached by a stone stair of eighteen steps.</li>
+      <li><b>Roofs, uses and light.</b> Rooms get a stone vault or a timber ceiling, and a use by their size: refectory, dormitory or chapter house for the large ones; kitchen, store, workshop or scriptorium for the rest. A castle's first great room is its chapel. A forsaken house has lost a roof. Some rooms are left dark, never two in a row.</li>
+      <li><b>Floors and storeys.</b> Floors rise and fall from room to room, never by more than three steps of 17 centimetres at a doorway. In about half the houses some rooms have a room above or a cellar below, reached by a stone stair of eighteen steps; a castle always has a dungeon under it.</li>
       <li><b>Locks and keys</b>, and the proof that the house can be finished (next section).</li>
     </ol>
     <p>Six drafts are made from six forks of the seed and each is scored: for loops, for how much longer the real route is than the straight one, for keys, bars, levers and secrets, for a court, a cave or a few dark rooms, and against straying from a target size picked for the place. Without that target, the comment in the code notes, "choosing the richest draft always chooses the largest". Only the winner is built.</p>
@@ -432,7 +432,7 @@ footer.site a { margin: 0 6px; }
     <p>The same house, from the same seed, can stand in four kinds of setting. The setting is laid out after the house, each by a function of its own (<code>layOutValley</code>, <code>layOutIsland</code>, <code>layOutMountain</code>, <code>layOutHarbourTown</code>), and everything it puts down goes into the document too.</p>
   </div>
   <div class="cards">
-    <div class="card"><span class="tag">Default</span><h4>A valley head</h4><p>You arrive at the far end of a valley and walk up through woods to the meadow below the house, which is built into the end of a ridge, stands free in the valley, or is hardly a house at all, its rooms turned into caves under the hill. The valley is shut in by a rim of rock and may hold a village, hamlet, manor or a street of brick houses, decided first; then standing stones, a pond with a landing stage, a ruin, a tower, a mill, a charcoal burners' camp or a mine.</p></div>
+    <div class="card"><span class="tag">Default</span><h4>A valley head</h4><p>You arrive at the foot of a valley, in a forest, and walk up past walled fields and a pasture with sheep, through a small village, to a castle at its head: a curtain wall with its gate between two towers, a tower or two more at the back, and inside it the house as the castle's hall and keep. Two or three of standing stones, a pond with a landing stage and a ruin lie along the way, and perhaps a mill, a charcoal burners' camp or a mine. (<code>?settle=</code> still asks for a hamlet, a manor or a street of brick houses.)</p></div>
     <div class="card"><span class="tag"><code>?place=island</code></span><h4>An island</h4><p>The house on high ground over sea cliffs. You arrive at a cove with a jetty, below a fishing hamlet, with a lighthouse whose stair you can climb and now and then a castle; the mainland lies across the water.</p></div>
     <div class="card"><span class="tag"><code>?place=mountain</code></span><h4>A mountain top</h4><p>The house as a hospice in a saddle under the summit, above a sea of cloud. You come up a ridge out of the cloud, and a path winds on up to the summit's cairn. Summer or winter, even odds.</p></div>
     <div class="card"><span class="tag"><code>?place=town</code></span><h4>A harbour town</h4><p>The house on a terrace at the head of the market square. You arrive at the harbour, with its quay, moles and light; streets of classical, timber-framed and wooden houses, shacks and red storehouses along the shore, then fields, woods and an outlook on the headland.</p></div>
@@ -554,7 +554,7 @@ footer.site a { margin: 0 6px; }
     <p>A carver then turns that function into triangles (<code>geom/rock.ts</code>), and there are two:</p>
     <ul>
       <li><strong>Marching cubes</strong> for caves and the house's chambers, in cells of 0.28 metres. It is smooth, never leaves a hole, and suits rock worn by water.</li>
-      <li><strong>An edge-keeping carver</strong> (dual contouring) for rock in the open: each cell gets one point, put where the surfaces through it come closest to meeting, so a split face keeps a sharp edge instead of being rounded off. The valley's rim is carved this way in cells of 0.3 metres.</li>
+      <li><strong>An edge-keeping carver</strong> (dual contouring) for rock in the open: each cell gets one point, put where the surfaces through it come closest to meeting, so a split face keeps a sharp edge instead of being rounded off. Rock in a valley is carved this way, in cells of 0.3 metres.</li>
     </ul>
   </div>
   <figure>
@@ -673,9 +673,9 @@ footer.site a { margin: 0 6px; }
     </tbody>
   </table></div>
   <div class="stats">
-    <div class="stat"><b>≈ 10 ms</b><span>a frame with a lake in view, measured on a desktop graphics card (RX 6800) at 1252 × 737</span></div>
-    <div class="stat"><b>≈ 13 ms</b><span>looking down the track, the same machine</span></div>
-    <div class="stat"><b>≈ 1 million</b><span>triangles in a valley site, half of them rock</span></div>
+    <div class="stat"><b>≈ 14 ms</b><span>a frame at 1024 × 768 where you arrive in a castle's valley, in the forest</span></div>
+    <div class="stat"><b>9.5–10 ms</b><span>the same, looking at the castle or standing in the village</span></div>
+    <div class="stat"><b>≈ 800,000</b><span>triangles of ground in a castle's valley, against 440,000 before valleys grew to hold one</span></div>
     <div class="stat"><b>≈ 1 GB</b><span>of video memory at ultra, whose textures take four times the painting</span></div>
   </div>
 </section>
@@ -702,7 +702,7 @@ footer.site a { margin: 0 6px; }
   <div class="stats">
     <div class="stat"><b>20–35 s</b><span>to make a world in its worker, in a headless browser</span></div>
     <div class="stat"><b>1–2 s</b><span>for each 5-metre tile of a world about the place</span></div>
-    <div class="stat"><b>18–23 s</b><span>to build a world valley head without a browser, on four cores</span></div>
+    <div class="stat"><b>39–44 s</b><span>to build a castle's valley without a browser, measured on three</span></div>
     <div class="stat"><b>33–36 s</b><span>to bake the light, measured in the browser on an island and a mountain top</span></div>
   </div>
 </section>
@@ -839,6 +839,7 @@ footer.site a { margin: 0 6px; }
       <tr><td>Rooms of any shape</td><td>Every room is a rectangle; caves are irregular hollows inside one</td></tr>
       <tr><td>Furniture recorded in the document</td><td>Furniture is chosen when the place is built, from each room's use, the one exception to "everything is decided in <code>src/core</code>"</td></tr>
       <tr><td>Furnished brick and canal houses; the sea cave in an island's mission</td><td>Their rooms are built, and empty; the sea cave can be explored but holds nothing needed</td></tr>
+      <tr><td>A keep that stands taller than the rest of the castle, stairs up to its wall-walk, a chapel that shows as one from outside, a dungeon furnished as one</td><td>The curtain wall, gate and towers; the chapel and the dungeon are rooms of the house</td></tr>
       <tr><td>Sound that has been listened to</td><td>Levels measured in a headless browser</td></tr>
       <tr><td>Frames timed everywhere</td><td>Valleys and towns timed on a desktop graphics card; an island only seen running at the browser's cap in one person's browser; the WebGL 2 fallback not timed; an iPad not tried since the cliffs, trees, clouds and water went in</td></tr>
       <tr><td>The world as the game</td><td>Steps 1 and 2 of 6 (section 13); places are still entered one page at a time</td></tr>
@@ -1413,7 +1414,7 @@ function svgPoint(svg, ev) {
     ["box", "The air", "mist, haze, clouds", "and their shadows"],
     ["box", "Smoothing", "blended over", "jittered frames"],
     ["box", "Eye and curve", "bloom, exposure,", "ACES tone curve"],
-    ["box-acc", "The screen", "10–13 ms a frame", "on a desktop card"]
+    ["box-acc", "The screen", "9.5–14 ms a frame", "in a valley"]
   ];
   var w = 134, gap = 11;
   steps.forEach(function (s, i) {
