@@ -1551,7 +1551,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   if (garden.beds.length) planted['garden beds'] = garden.beds.length;
   function plantTown(): Record<string, number> {
     const counts: Record<string, number> = {}, count = (k: string, n = 1) => { counts[k] = (counts[k] ?? 0) + n; };
-    const pl = b.planting, qq = rng.fork('plants'), dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : 0;
+    const pl = b.planting, qq = rng.fork('plants'), dried = season === 'autumn' ? 0.6 : season === 'summer' ? 0.3 : season === 'winter' ? 0.85 : 0;
     const centre = { x: (q.x0 + q.x1) / 2, z: q.z - 60 };
     const crops = new Map<string, CardSet>();
     const cropSet = (kind: CardSet['kind']) => { let c = crops.get(kind); if (!c) { c = { kind, shape: 'tuft', shadow: false, matrices: [], colours: [], centres: [] }; crops.set(kind, c); } return c; };
@@ -1570,12 +1570,13 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         const f = t.fields[fieldAt(px, pz)];
         if (!f) continue;
         if (f.crop === 'wheat' || f.crop === 'barley' || f.crop === 'oats') {
-          const tc = cropTint(f.crop), tall = (f.crop === 'oats' ? 0.75 : 0.85) * (season === 'spring' ? 0.45 : 1) * qq.range(0.85, 1.1);
+          // (In winter the fields are stubble under the snow: a crop's tufts stand short and straw-coloured.)
+          const tc = cropTint(f.crop), tall = (f.crop === 'oats' ? 0.75 : 0.85) * (season === 'spring' ? 0.45 : season === 'winter' ? 0.22 : 1) * qq.range(0.85, 1.1);
           pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.5, 0.7), tall, yaw, [0.3 * tc[0], 0.3 * tc[1], 0.12 * tc[2]]);
           count('crop');
         } else if (f.crop === 'pasture' || f.crop === 'orchard') {
-          pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), qq.range(0.18, 0.32), yaw, [0.17 + 0.1 * dried, 0.3, 0.06]);
-          if (fine > 0.62 && qq.chance(0.3)) { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.3, qq.range(0.2, 0.32), yaw, qq.pick([[0.62, 0.62, 0.58], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
+          pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), qq.range(0.18, 0.32), yaw, season === 'winter' ? [0.46, 0.36, 0.15] : [0.17 + 0.1 * dried, 0.3, 0.06]);
+          if (fine > 0.62 && qq.chance(0.3) && season !== 'winter') { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.3, qq.range(0.2, 0.32), yaw, qq.pick([[0.62, 0.62, 0.58], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
           count('grass');
         } else if (f.crop === 'roots' || f.crop === 'vines') {
           const row = Math.abs(((px * 0.6 + pz * 0.08) % 1.6 + 1.6) % 1.6 - 0.8);
@@ -1585,14 +1586,15 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       }
       // Under the woods: ferns and bracken; on the shore, marram; elsewhere grass, longer the further from the town, and flowers in it.
       const wood = woodAt(px, pz);
-      if (wood > 0.5) { if (qq.chance(0.5)) { pl.tuft(pl.ferns, px, y - 0.05, pz, qq.range(0.7, 1.2), qq.range(0.6, 1.0), yaw, season === 'autumn' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('ferns'); } continue; }
+      if (wood > 0.5) { if (qq.chance(0.5)) { pl.tuft(pl.ferns, px, y - 0.05, pz, qq.range(0.7, 1.2), qq.range(0.6, 1.0), yaw, season === 'autumn' || season === 'winter' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('ferns'); } continue; }
       if (above < 3 && dist > 60) { if (fine > 0.45) { pl.tuft(cropSet('marram'), px, y - 0.05, pz, qq.range(0.7, 1.1), qq.range(0.5, 0.85), yaw, [0.33, 0.33, 0.2]); count('marram'); } continue; }
       const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(outsideRect(t.square, px, pz), ...t.blocks.map((r) => outsideBlock(r, px, pz))) - 5) / 30);
       if (zn === Z.yard && fine < 0.45) continue;
-      const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25) * (mown ? 0.45 : 1), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
-      pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), tall, yaw, [(0.17 + 0.16 * dried) * c[0] * tone, 0.3 * c[1] * tone, (0.05 + 0.05 * dried) * c[2] * tone]);
+      const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25) * (mown ? 0.45 : 1) * (season === 'winter' ? 0.5 : 1), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
+      // (In winter, dead and the colour of straw.)
+      pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), tall, yaw, season === 'winter' ? [0.46 * tone, 0.36 * tone, 0.15 * tone] : [(0.17 + 0.16 * dried) * c[0] * tone, 0.3 * c[1] * tone, (0.05 + 0.05 * dried) * c[2] * tone]);
       count('grass');
-      if (fine > 0.6 && qq.chance(0.25) && season !== 'autumn' && !mown) { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.32, qq.range(0.2, 0.34), yaw, qq.pick([[0.62, 0.62, 0.58], [0.55, 0.2, 0.45], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
+      if (fine > 0.6 && qq.chance(0.25) && season !== 'autumn' && season !== 'winter' && !mown) { pl.tuft(pl.flowers, px, y - 0.03, pz, 0.32, qq.range(0.2, 0.34), yaw, qq.pick([[0.62, 0.62, 0.58], [0.55, 0.2, 0.45], [0.7, 0.6, 0.1]] as Colour[])); count('flowers'); }
     }
     // Trees: the woods, from the edge of the fields up into the hills; fruit trees in rows in the orchards; a few in the yards.
     const wood = wild.mesh('bark');
@@ -1600,7 +1602,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     const soft = wild.mesh('bark'), softPine = wild.mesh('barkPine');
     wild.group = 'wild';
     const pineWood = wild.mesh('barkPine');
-    const leafTint: Colour = season === 'autumn' ? [0.55, 0.38, 0.12] : season === 'summer' ? [0.17, 0.28, 0.08] : [0.24, 0.38, 0.1];
+    const leafTint: Colour = season === 'autumn' ? [0.55, 0.38, 0.12] : season === 'summer' ? [0.17, 0.28, 0.08] : season === 'winter' ? [0.26, 0.16, 0.08] : [0.24, 0.38, 0.1];
+    // In winter the broadleaf trees are bare (an oak keeps a few dead leaves), and snow lies on the conifers' boughs.
+    const winter = season === 'winter', SNOWED: Colour = [0.74, 0.77, 0.82];
+    const needleTint = (base: Colour) => (r: Rng): Colour => (winter && r.chance(0.4) ? shade(SNOWED, r.range(0.85, 1.1)) : shade(base, r.range(0.8, 1.2)));
     const leaf = (r: Rng): Colour => shade(leafTint, r.range(0.75, 1.2));
     const tr = rng.fork('trees');
     const grown: [number, number, number][] = [];
@@ -1609,8 +1614,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // thick in the same woods, so that the town is bordered by forest as far as the eye goes. (Grown, a wood that size would be millions
     // of leaves; painted, it is a few thousand cards.)
     const greens: Colour[] = season === 'autumn' ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
-      : season === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
-    const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+      : season === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : winter ? [[0.19, 0.16, 0.15], [0.16, 0.14, 0.13], [0.21, 0.18, 0.16]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    const firs: Colour[] = winter ? [[0.3, 0.37, 0.33], [0.32, 0.39, 0.34], [0.28, 0.34, 0.32]] : [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
     const conifer = (x: number, z: number, above: number) => above > 45 + 20 * fbm2(x * 0.02, z * 0.02, 2) || fbm2(x * 0.013 + 5, z * 0.013 + 5, 2) > 0.62;
     const steep = (x: number, z: number) => Math.hypot(ground(x + 3, z) - ground(x - 3, z), ground(x, z + 3) - ground(x, z - 3)) / 6;
     for (let tries = 0; tries < 9000 && grown.length < 230; tries++) {
@@ -1622,8 +1627,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       if ((rocky.holds(x, z) && rocky.at(x, z) > 0.3) || steep(x, z) > 0.7) continue;
       const pine = conifer(x, z, above) || tr.chance(0.12);
       if (!roomFor(x, z, pine ? 2.6 : 3.6)) continue;
-      if (pine) growConifer(pl, pineWood, x, y - 0.05, z, tr.range(9, 17), tr.range(1.6, 2.6), tr.range(0.16, 0.28), { kind: tr.chance(0.5) ? 'spruce' : 'pine', detail: 1, needle: (r) => shade([0.06, 0.13, 0.06], r.range(0.8, 1.2)), bark: [0.8, 0.6, 0.48], soft: softPine }, tr.fork(`c${grown.length}`));
-      else growTree(pl, wood, x, y - 0.05, z, tr.range(7, 12), tr.range(0.22, 0.36), { kind: tr.chance(0.55) ? 'oak' : 'ash', detail: 1, cards: 620, cardSize: 0.7, leaf, bark: [0.42, 0.4, 0.36], soft }, tr.fork(`t${grown.length}`));
+      if (pine) growConifer(pl, pineWood, x, y - 0.05, z, tr.range(9, 17), tr.range(1.6, 2.6), tr.range(0.16, 0.28), { kind: tr.chance(0.5) ? 'spruce' : 'pine', detail: 1, needle: needleTint([0.06, 0.13, 0.06]), bark: [0.8, 0.6, 0.48], soft: softPine }, tr.fork(`c${grown.length}`));
+      else { const tall = tr.range(7, 12), girth = tr.range(0.22, 0.36), oak = tr.chance(0.55); growTree(pl, wood, x, y - 0.05, z, tall, girth, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 25 : 0) : 620, cardSize: 0.7, leaf, bark: [0.42, 0.4, 0.36], soft, bare: winter }, tr.fork(`t${grown.length}`)); }
       grown.push([x, z, pine ? 2.6 : 3.6]);
     }
     let painted = 0;
@@ -1649,7 +1654,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     const keepOutOf = (list: Building[]) => (pnt: Vector3) => list.some((bd) => outsideBuilt(bd, pnt.x, pnt.z) < 0.4 && pnt.y < (bd.y ?? F) + 30);
     const lime = (x: number, z: number, tall: number, k: string) => {
       const y = ground(x, z), list = nearBuildings(x, z, 8);
-      growTree(pl, wood, x, y - 0.05, z, tall, tall * 0.028, { kind: 'oak', detail: 1, cards: 760, cardSize: 0.62, leaf: (r) => shade(season === 'autumn' ? [0.62, 0.48, 0.12] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.36, 0.34, 0.31], soft, wide: 0.8, keepOut: keepOutOf(list) }, tr.fork(k));
+      growTree(pl, wood, x, y - 0.05, z, tall, tall * 0.028, { kind: 'oak', detail: 1, cards: winter ? 0 : 760, cardSize: 0.62, leaf: (r) => shade(season === 'autumn' ? [0.62, 0.48, 0.12] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.36, 0.34, 0.31], soft, wide: 0.8, keepOut: keepOutOf(list), bare: winter }, tr.fork(k));
       grown.push([x, z, 3]);
     };
     let townTrees = 0;
@@ -1677,7 +1682,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       for (let tries = 0, made = 0; tries < 30 && made < (blk.kind === 'timber' ? 2 : 1); tries++) {
         const x = yq.range(blk.x0 + 5, blk.x1 - 5), z = yq.range(blk.z0 + 5, blk.z1 - 5);
         if (!free(x, z, 3.2) || !roomFor(x, z, 3)) continue;
-        growTree(pl, wood, x, ground(x, z) - 0.05, z, yq.range(3.6, 5.5), yq.range(0.11, 0.16), { kind: yq.chance(0.6) ? 'oak' : 'ash', detail: 1, cards: 300, cardSize: 0.5, leaf: (r) => shade(season === 'autumn' ? [0.48, 0.42, 0.12] : season === 'spring' && yq.chance(0.5) ? [0.62, 0.5, 0.48] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.34, 0.3, 0.27], soft, wide: 1.2, keepOut: keepOutOf(list) }, yq.fork(`fruit${made}`));
+        growTree(pl, wood, x, ground(x, z) - 0.05, z, yq.range(3.6, 5.5), yq.range(0.11, 0.16), { kind: yq.chance(0.6) ? 'oak' : 'ash', detail: 1, cards: winter ? 0 : 300, bare: winter, cardSize: 0.5, leaf: (r) => shade(season === 'autumn' ? [0.48, 0.42, 0.12] : season === 'spring' && yq.chance(0.5) ? [0.62, 0.5, 0.48] : [0.2, 0.34, 0.09], r.range(0.8, 1.15)), bark: [0.34, 0.3, 0.27], soft, wide: 1.2, keepOut: keepOutOf(list) }, yq.fork(`fruit${made}`));
         grown.push([x, z, 2.8]);
         made++; fruitInYards++;
       }
@@ -1699,7 +1704,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       for (let u = 0.12; u < 0.95; u += 0.16) for (let v = 0.12; v < 0.95; v += 0.18) {
         const x = ax + (bx - ax) * u + (dx - ax) * v, z = az + (bz - az) * u + (dz - az) * v;
         if (fruit > 70 || zoneAt(x, z) !== Z.field) continue;
-        growTree(pl, wood, x, ground(x, z) - 0.05, z, tr.range(3.2, 4.4), tr.range(0.1, 0.15), { kind: 'oak', detail: 1, cards: 220, cardSize: 0.5, leaf: (r) => shade(season === 'autumn' ? [0.45, 0.4, 0.12] : [0.22, 0.36, 0.1], r.range(0.8, 1.15)), bark: [0.36, 0.32, 0.28], soft, wide: 1.2 }, tr.fork(`f${fruit}`));
+        growTree(pl, wood, x, ground(x, z) - 0.05, z, tr.range(3.2, 4.4), tr.range(0.1, 0.15), { kind: 'oak', detail: 1, cards: winter ? 0 : 220, bare: winter, cardSize: 0.5, leaf: (r) => shade(season === 'autumn' ? [0.45, 0.4, 0.12] : [0.22, 0.36, 0.1], r.range(0.8, 1.15)), bark: [0.36, 0.32, 0.28], soft, wide: 1.2 }, tr.fork(`f${fruit}`));
         fruit++;
       }
     }
@@ -1754,8 +1759,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   {
     const season2 = site.setting.season ?? 'spring';
     const greens: Colour[] = season2 === 'autumn' ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
-      : season2 === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
-    const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+      : season2 === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : season2 === 'winter' ? [[0.19, 0.16, 0.15], [0.16, 0.14, 0.13], [0.21, 0.18, 0.16]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
+    const firs: Colour[] = season2 === 'winter' ? [[0.3, 0.37, 0.33], [0.32, 0.39, 0.34], [0.28, 0.34, 0.32]] : [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
     let far = 0;
     const lakeLevel = lakeLevelAt(site);
     layCountry(mesh('far'), t, F, tint, (x, y, z, fir, own) => {
@@ -1782,7 +1787,9 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // (Each from one of the chimneys its builder put on it: smoke rising from the middle of a roof, where no chimney stood, was wrong.)
     t.buildings.forEach((bd, n) => {
       const from = chimneys[n];
-      if (!from?.length || !h.chance(bd.style === 'imperial' ? 0.12 : 0.18) || smokes.length > 26) return;
+      // (In winter, most hearths are lit.)
+      const lit = (bd.style === 'imperial' ? 0.12 : 0.18) * (site.setting.season === 'winter' ? 3 : 1);
+      if (!from?.length || !h.chance(lit) || smokes.length > (site.setting.season === 'winter' ? 48 : 26)) return;
       const top = h.pick(from);
       smokes.push({ x: top.x, y: top.y + 0.1, z: top.z, height: h.range(6, 12) });
     });
@@ -1796,9 +1803,19 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     spawn: V(sx, lm.y + 1.75, sz),
     yaw: Math.atan2(-look.x, -look.z),
     track: [...(site.track ?? [])].reverse().slice(1, -1) as [number, number][],
-    far: { wood: [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.24, 0.21, 0.1] : season === 'summer' ? [0.17, 0.21, 0.08] : [0.15, 0.22, 0.08], bare: [0.7, 0.62, 0.52, 0] },
+    far: { wood: season === 'winter' ? [0.08, 0.07, 0.06] : [0.05, 0.08, 0.035], grass: season === 'autumn' ? [0.24, 0.21, 0.1] : season === 'summer' ? [0.17, 0.21, 0.08] : season === 'winter' ? [0.3, 0.27, 0.2] : [0.15, 0.22, 0.08], bare: [0.7, 0.62, 0.52, 0] },
     sea: {
       level: sea, x: (q.x0 + q.x1) / 2, z: q.z + 60, bed,
+      // (In winter the harbour and the sea before the town are frozen, with a lane broken through the ice from the quay out between
+      // the moles' heads and on out to open water, for the ships; asked for.)
+      ...(season === 'winter' ? { ice: (() => {
+        const from: [number, number] = [(q.x0 + q.x1) / 2, q.z + 6];
+        const heads = t.moles.map((m) => m.line[m.line.length - 1]);
+        const mouth: [number, number] = heads.length >= 2 ? [(heads[0][0] + heads[1][0]) / 2, (heads[0][1] + heads[1][1]) / 2] : heads.length ? [heads[0][0] + 12, heads[0][1] + 6] : [from[0], from[1] + 120];
+        const dx = mouth[0] - from[0], dz = mouth[1] - from[1], l = Math.hypot(dx, dz) || 1;
+        const out: [number, number] = [mouth[0] + (dx / l) * 140, mouth[1] + (dz / l) * 140 + 40], open: [number, number] = [out[0] + (dx / l) * 200, out[1] + 420];
+        return { from, reach: 300, lane: [from, mouth, out, open], half: 9 };
+      })() } : {}),
       // Where the swell breaks: at the foot of the cliffs along the coast, and against the moles' seaward sides.
       spray: (() => {
         const out: { x: number; z: number; nx: number; nz: number }[] = [];

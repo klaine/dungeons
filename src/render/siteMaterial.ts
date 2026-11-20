@@ -1048,7 +1048,8 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   ground = mix(ground, ground.mul(vec3(0.66, 0.64, 0.62)).add(gSoil.rgb.mul(0.1)), footWorn.mul(0.85));
   ground = mix(ground, ground.mul(1.22), footWorn.mul(one(smoothstep(0.05, 0.2, footOff))).mul(0.5));
   // Snow over all of it; trodden on the track and the paths, where it is packed and dirtied.
-  const trodSnow: N = max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare).toVar();
+  // (And a town's streets and its square, trodden all over but along their edges, by the wall, where it lies clean.)
+  const trodSnow: N = max(max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare), paved.mul(smoothstep(0.5, 1.8, paveSd)).mul(0.9)).toVar();
   // (In summer, what is left of the snow does not lie on a path that is walked every day; in winter it is only thinner there.)
   const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(mix(1, 0.25, smoothstep(0.4, 0.9, snowUniforms.uSnow as N))))).toVar();
   // A garden's walks are gravel: the shingle read small and pale, darker towards the edges where it is not raked.
@@ -1368,8 +1369,10 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
-export const farUniforms: { uFarWood: { value: Vector3 }; uFarGrass: { value: Vector3 } } = {
+export const farUniforms: { uFarWood: { value: Vector3 }; uFarGrass: { value: Vector3 }; uFarSnow: { value: number } } = {
   uFarWood: uniform(new Vector3(0.07, 0.15, 0.06)) as N, uFarGrass: uniform(new Vector3(0.16, 0.2, 0.08)) as N,
+  // (How far snow lies down from the heights, 0 to 1: in a valley's or a town's winter, everywhere.)
+  uFarSnow: uniform(0) as N,
 };
 
 const farHash: N = Fn(([p]: [N]) => {
@@ -1552,7 +1555,10 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (On a face too steep to hold it, snow still lodges in the gullies and on the ledges of the beds, and lies down the face in
   // streaks and bands; without them a steep face high up was all one dark grey.)
   const lodged: N = max(hollow, 0).mul(0.5).add(max(run.negate(), 0).mul(3).mul(sloping).mul(smoothstep(0.32, 0.62, broad.add(fine.sub(0.5).mul(0.3))))).add(step(0.7, bed).mul(smoothstep(0.42, 0.56, fine.add(broad.sub(0.5).mul(0.8)))).mul(0.42).mul(steep)).toVar();
-  const snow: N = smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(lodged.mul(-0.4).add(0.5), lodged.mul(-0.4).add(0.72), faceN.y)).toVar();
+  // (And in winter, everywhere that is not too steep to hold it, in the open: the woods stand dark out of it, and the snow is thinner
+  // where the wind scours the crests.)
+  const lowSnow: N = (farUniforms.uFarSnow as N).mul(smoothstep(0.5, 0.78, faceN.y)).mul(one(wood.mul(0.85))).mul(smoothstep(0.25, 0.55, broad.add(fine.sub(0.5).mul(0.4)).add(max(hollow, 0).mul(0.5)).add(0.15)));
+  const snow: N = max(smoothstep(0, 0.08, high.sub(0.6).add(hollow.mul(0.12)).add(ragged.mul(0.35))).mul(smoothstep(lodged.mul(-0.4).add(0.5), lodged.mul(-0.4).add(0.72), faceN.y)), lowSnow).toVar();
   land = mix(land, vec3(1.3, 1.34, 1.42), snow);
   // Water, where the sheet says there is some (in the field other materials use for moss): a lake in a valley floor far below, dark,
   // taking the sky's colour, and bright where the sun is on it.

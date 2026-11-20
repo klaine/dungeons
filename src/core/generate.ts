@@ -211,6 +211,9 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     // shadow lying out across it. So the day is oftener young or old up here than in a valley. (The evening goes on to sunset and dusk as elsewhere.)
     setting.hour = base.fork('mountain hour').pick<Hour>(['morning', 'morning', 'morning', 'midday', 'evening', 'evening', 'evening', 'evening']);
   }
+  // A valley or a harbour town has a winter too, one in five: snow lying, the broadleaf trees bare, the ponds frozen, the lamps lit
+  // early. (From a stream of its own, so that the rest keep the seasons they had. Asked for: only a mountain top had one.)
+  if ((kind === 'valley' || kind === 'town') && base.fork('winter').chance(0.2)) setting.season = 'winter';
   // The later hours were added after the first three, and are reached from the evening by a
   // stream of their own, so that most sites already seen keep the hour they had.
   if (setting.hour === 'evening') {
@@ -1961,7 +1964,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   if (below.length) parts.push(below.length === 1 ? `${a(below[0].name)} below` : `${count(below.length)} cellars below`);
   if (above.length) parts.push(above.length === 1 ? `${a(above[0].name)} above` : `${count(above.length)} rooms above`);
   const state = { kept: '', damp: 'damp ', forsaken: 'forsaken ' }[setting.condition];
-  site.title = `${kind === 'island' ? 'On an island in the sea, a' : kind === 'town' ? 'At the head of a harbour town\'s square, a' : kind === 'mountain' ? `On a mountain top above the cloud${setting.season === 'winter' ? ', in snow' : ''}, a` : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
+  site.title = `${kind === 'island' ? 'On an island in the sea, a' : kind === 'town' ? `At the head of a harbour town's square${setting.season === 'winter' ? ', in snow' : ''}, a` : kind === 'mountain' ? `On a mountain top above the cloud${setting.season === 'winter' ? ', in snow' : ''}, a` : setting.season === 'winter' ? 'In snow, a' : 'A'} ${state}${setting.stone} ${setting.kind} ${when}: ${parts.join(', ')}; the sanctum lies ${goal.depth - 1} doors in.${unlit}`;
   return site;
 }
 

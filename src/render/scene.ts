@@ -76,6 +76,11 @@ export interface SeaDesc {
   bed: { x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array };
   /** Points at the foot of the cliffs where the swell breaks into spray, each with the way out to sea. */
   spray?: { x: number; z: number; nx: number; nz: number }[];
+  /**
+   * In a harbour town's winter: the sea frozen out to `reach` metres from `from` (the quay's middle), and beyond that a belt of
+   * floes; and a lane broken through it for the ships, along `lane` from the quay out past the harbour's mouth, `half` across each way.
+   */
+  ice?: { from: [number, number]; reach: number; lane: [number, number][]; half: number };
 }
 
 /**

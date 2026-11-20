@@ -53,6 +53,8 @@ const {
   positionWorld, pow, reflect, reflector, select, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
+/** In a valley's or a town's winter, still water is frozen (`uIce` 1): ice, dark where it is clear and white where snow has drifted on it. */
+export const waterUniforms: { uIce: { value: number } } = { uIce: uniform(0) as N };
 /** `smoothstep`, which may also be asked to fall instead of rise (the first edge above the second). */
 const sstep = (a: number, b: number, x: N): N => (a > b ? one(smoothstep(b, a, x)) : smoothstep(a, b, x));
 
@@ -454,8 +456,9 @@ export class Water {
         // Two sets of ripples crossing, of different sizes, drifting different ways.
         const a: N = texture(this.ripples, P.xz.mul(0.21).add(vec2(0.013, 0.008).mul(t))).xy.mul(2).sub(1);
         const b: N = texture(this.ripples, P.zx.mul(0.057).sub(vec2(0.006, 0.004).mul(t))).xy.mul(2).sub(1);
-        // (And in rain, the drops' rings on it.)
-        const ripple: N = a.mul(0.03).add(b.mul(0.028)).add(rainRings(P.xz, weatherUniforms.uWet as N)).toVar();
+        // (And in rain, the drops' rings on it. Neither on ice.)
+        const iced: N = waterUniforms.uIce as N;
+        const ripple: N = a.mul(0.03).add(b.mul(0.028)).add(rainRings(P.xz, weatherUniforms.uWet as N)).mul(one(iced)).toVar();
         const normal: N = normalize(vec3(ripple.x, 1, ripple.y)).toVar();
         const view: N = normalize(cameraPosition.sub(P)).toVar();
         // Water mirrors nearly everything at a glancing angle and very little looked straight down on.
@@ -463,7 +466,12 @@ export class Water {
         const seen = mirrored(mirror, sky, u, inPicture(P).add(ripple.mul(0.55)), P, reflect(view.negate(), normal));
         // Shallow water is clear: there, what is under it shows through.
         const clear = attribute('aShallow', 'float').mul(one(mirroring)).mul(0.85);
-        return vec4(mix(look.deep, seen, mirroring), one(clear));
+        // Frozen: black ice, seen into a little and mirroring the sky dimly, with snow drifted over it in tongues and scoured off in
+        // between, white as the snow on the ground is (lit by the sky and the sun, as the ground is). Whole, not see-through.
+        const drift: N = smoothstep(0.42, 0.62, sin(P.x.mul(0.31).add(sin(P.z.mul(0.23)).mul(1.7))).mul(0.3).add(sin(P.z.mul(0.47).sub(P.x.mul(0.19))).mul(0.2)).add(a.x.mul(0.25)).add(0.5));
+        const snowLit: N = u.uSkyColor.mul(0.55).add(u.uSunColor.mul(max(u.uSunDir.y, 0)).mul(0.42)).mul(vec3(0.9, 0.93, 0.98));
+        const ice: N = mix(mix(vec3(0.02, 0.03, 0.04), seen, mirroring.mul(0.45).add(0.1)), snowLit, drift.mul(0.92));
+        return vec4(mix(mix(look.deep, seen, mirroring), ice, iced), mix(one(clear), 1, iced));
       })();
     }
     if (this.flowing) {

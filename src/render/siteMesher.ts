@@ -2089,17 +2089,28 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // The time of year colours everything that grows: fresh greens and blossom in spring, deeper
     // greens and drier grass in summer, and in autumn gold, orange and rust with the grass gone to straw.
     const season = site.setting.season ?? 'spring';
+    // (And in winter the broadleaf trees are bare: what they keep is the brown of an oak's dead leaves, and far off the grey-brown haze
+    // of their twigs; the grass is straw, mostly under the snow, and nothing flowers.)
+    const winter = season === 'winter';
     const greens: Colour[] = season === 'autumn'
       ? [[0.5, 0.33, 0.035], [0.52, 0.2, 0.03], [0.34, 0.11, 0.03], [0.42, 0.36, 0.05], [0.2, 0.27, 0.05]]
       : season === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]]
+      : winter ? [[0.19, 0.16, 0.15], [0.16, 0.14, 0.13], [0.21, 0.18, 0.16]]
       : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
-    const parched = season === 'autumn' ? 0.55 : season === 'summer' ? 0.25 : 0;
-    const inFlower = season === 'spring' ? 1 : season === 'summer' ? 0.6 : 0.15;
+    const parched = season === 'autumn' ? 0.55 : season === 'summer' ? 0.25 : winter ? 0.85 : 0;
+    const inFlower = season === 'spring' ? 1 : season === 'summer' ? 0.6 : winter ? 0 : 0.15;
+    // (Winter's grass is dead and pale, the colour of straw, whatever the turf would make it; and lies half as high, bent under the snow.)
+    // (Yellow, as dead grass goes: grey-olive, as it first was, read as grass still green under a dull sky.)
+    const straw = (c: Colour, tone = 1): Colour => (winter ? [0.46 * tone, 0.36 * tone, 0.15 * tone] : c);
+    const lowered = winter ? 0.5 : 1;
     // (A number between 0 and 1 of a point's own, for choices that must not take from `plant`, which would reshuffle all that follows.)
     const own01 = (x: number, z: number, salt: number) => { const v = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453; return v - Math.floor(v); };
     const leafOf = (base: Colour) => (q: Rng): Colour => { const t = q.range(0.7, 1.25); return [base[0] * t, base[1] * t * q.range(0.92, 1.08), base[2] * t]; };
     const blossom: Colour = [0.85, 0.2, 0.38];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
+    // (A conifer in winter keeps its needles, and snow lies on its boughs: two in five of its sprays are white.)
+    const SNOWED: Colour = [0.74, 0.77, 0.82];
+    const needleOf = (base: Colour) => (winter ? (q: Rng): Colour => (q.chance(0.4) ? leafOf(SNOWED)(q) : leafOf(base)(q)) : leafOf(base));
     // Trees used to be a pole with balls of leaves on it, drawn from the same streams of chance
     // as everything planted after them. Those crowns are still drawn, into nothing, so that all
     // that follows stands where it stood; the trees themselves are now grown, each from a
@@ -2118,7 +2129,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
       const green = leafOf(plant.pick(greens));
       spent.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, green, plant, 0.72);
-      growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: 1500, cardSize: 0.74, leaf: green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true) }, rng.fork(`tree${grown++}`));
+      growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 60 : 0) : 1500, cardSize: 0.74, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true), bare: winter }, rng.fork(`tree${grown++}`));
       trees.push([x, z]);
       planted++;
     }
@@ -2249,7 +2260,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
       const lake = lakeLevel?.(x, z);
       if (lake != null && y < lake + 0.8) return;
-      const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
+      const c0 = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
+      // (A far fir in winter, a whole tree on one card, is green and white together.)
+      const c: Colour = winter && fir ? [c0[0] * 0.6 + SNOWED[0] * 0.4, c0[1] * 0.6 + SNOWED[1] * 0.4, c0[2] * 0.6 + SNOWED[2] * 0.4] : c0;
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
     }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
@@ -2336,7 +2349,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
-    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
+    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06] };
 
     // ---- what lies and grows in the valley
     // (The yard before a mine: the ground between its mouth and the tip, and the shed's and the stacks' beside the mouth.)
@@ -2511,7 +2524,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
       if (kind > 0.56 && !pick) {
         const height = plant.range(8, 14), radius = plant.range(1.9, 2.8);
-        const girth = plant.range(0.16, 0.26), needle = leafOf(plant.pick(firs));
+        const girth = plant.range(0.16, 0.26), needle = needleOf(plant.pick(firs));
         // (The old boughs are still drawn from the stream, into nothing, as the old crowns are.)
         spent.conifer(x, y, z, height, radius, Math.round(5 + 6 * detail), needle, plant);
         spent.needles.matrices.length = spent.needles.colours.length = spent.needles.centres.length = 0;
@@ -2520,7 +2533,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           // Pines stand in patches among the spruce, on the drier knolls.
           const pine = fbm2(x * 0.05 - s1, z * 0.05 + s2 * 2, 2) > 0.57;
           growConifer(planting, woodOf(pine ? 'pine' : 'fir'), x, y, z, height * (pine ? 1.25 : 1.2), radius * (pine ? 1.15 : 1), girth * (pine ? 1.15 : 1.05), {
-            kind: pine ? 'pine' : 'spruce', detail, needle: pine ? leafOf(pineGreen) : needle, bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true),
+            kind: pine ? 'pine' : 'spruce', detail, needle: pine ? needleOf(pineGreen) : needle, bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true),
           }, own);
         } else {
           // Far off, a trunk and tiers of boughs are enough.
@@ -2548,8 +2561,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const epic = detail > 0.7 && (oak || mix) && roll >= 0.05 && roll < 0.075;
         const wide = epic ? age.range(2.0, 2.5) : 1;
         const tall = giant * young * (epic ? 0.95 : 1), stout = epic ? 2.6 : giant > 1 ? giant * 1.15 : young * young, leafy = epic ? 5 : giant > 1 ? giant * giant * 0.75 : young * 0.8;
+        // (In winter: near, bare, an oak keeping a few of its dead leaves; far, where twigs are too fine to draw, their haze.)
+        // (Painted sprays a metre and a half across stood for the far twigs at first, and from any height the bare woods were full
+        // brown crowns, an autumn's: a trace of them is left.)
+        const wintry = !winter ? 1 : detail > 0.5 ? (oak ? 0.04 : 0) : 0.05;
         const reach = growTree(planting, woodOf(oak ? 'oak' : 'ash'), x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
-          kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
+          bare: winter, kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy * wintry), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: winter ? leafOf(detail <= 0.5 ? [0.2, 0.18, 0.18] : [0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
           // (Its boughs kept out of the house: a great oak by a house standing free reached over its roofs and drooped into its court,
           // and through the arch from the court, where it stopped whoever walked through.)
           // (Nor low over the track and the paths, where a bough at head height stopped whoever walked up from the gap.)
@@ -2590,7 +2607,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     for (const f of ponds) {
       if (!f.isle) continue;
       const own = rng.fork(`isletree${f.x}`), y = ground(f.isle.x, f.isle.z), pine = own.chance(0.5);
-      growConifer(planting, woodOf(pine ? 'pine' : 'fir'), f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: leafOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true) }, own);
+      growConifer(planting, woodOf(pine ? 'pine' : 'fir'), f.isle.x, y - 0.1, f.isle.z, own.range(4.5, 7), own.range(1.1, 1.6), 0.13, { kind: pine ? 'pine' : 'spruce', detail: 1, needle: needleOf(pine ? pineGreen : firs[0]), bark: pine ? pineBark : firBark, shaded: true, soft: woodOf(pine ? 'pine' : 'fir', true) }, own);
       canopies.push([f.isle.x, f.isle.z, 1.6, 1]);
     }
     // (Not where the keep stands.)
@@ -2670,7 +2687,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const c = turfColour(x, z, s1), t = plant.range(0.75, 1.2);
       // Green where there is water for it; straw-coloured where the ground is dry, and in the odd tuft anywhere.
       const dry = Math.min(1, parched + Math.max(0, (0.42 - wet) * 2.2) + (plant.chance(0.08) ? 0.8 : 0));
-      return [(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t];
+      return straw([(0.17 + 0.2 * dry) * c[0] * t, (0.29 + 0.03 * dry) * c[1] * t, (0.05 + 0.05 * dry) * c[2] * t], t);
     };
     const flowerHues: Colour[] = [[0.25, 0.5, 1.5], [1.4, 0.4, 0.8], [1.3, 1.3, 1.2], [1.5, 1.1, 0.2]];
     const hueAt = (x: number, z: number) => flowerHues[Math.floor(fbm2(x * 0.02 + s2, z * 0.02 - s1, 2) * 3.99) % 4];
@@ -2716,25 +2733,25 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const depth = waterOver(x, z, y);
         if (depth > (running ? 0.04 : 0.3)) continue;
         if (depth > -0.22) {
-          for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5), plant.range(0, Math.PI), [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
+          for (let k = 0; k < 2; k++) planting.tuft(planting.grass, x + plant.range(-0.25, 0.25), y - 0.05, z + plant.range(-0.25, 0.25), plant.range(0.45, 0.7), plant.range(0.9, 1.5) * (winter ? 0.7 : 1), plant.range(0, Math.PI), winter ? [0.42, 0.33, 0.14] : [0.22 * plant.range(0.8, 1.2), 0.3, 0.07]);
           continue;
         }
         const shade = shadeAt(x, z), wet = wetAt(x, z), wear = wearAt(x, z), thin = thinAt(x, z);
         const deep = Math.max(0, shade - 0.4) / 0.6;
         if (!plant.chance((1 - 0.72 * deep) * (1 - 0.45 * thin))) continue;
-        const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wearAt(x, z, true)) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2));
+        const tall = (0.45 + 1.1 * wet) * (1 - 0.82 * wearAt(x, z, true)) * (1 - 0.5 * deep) * (1 - 0.55 * thin) * (0.8 + 0.5 * fbm2(x * 0.3 + s2, z * 0.3 + s1, 2)) * (winter ? 0.5 : 1);
         const w = plant.range(0.4, 0.7) * (0.75 + 0.35 * tall) * scale, h = plant.range(0.2, 0.34) * (0.35 + 1.25 * tall) * Math.sqrt(scale);
         planting.tuft(planting.grass, x, y - 0.05, z, w, h, plant.range(0, Math.PI), grassColour(x, z, wet));
         // Grass in seed, where it stands long and nobody treads it: heads over the sward, paler, the colour of ripe seed (less of it
         // in spring). And rushes in the wettest ground short of standing water, dark, stiff and in clumps. (The sward was one even
         // green, the same height everywhere at once: a lawn.)
         const r1 = own01(x, z, 21);
-        if (tall > 0.8 && wear < 0.2 && shade < 0.4 && r1 < (season === 'spring' ? 0.08 : 0.22)) {
+        if (tall > (winter ? 0.4 : 0.8) && wear < 0.2 && shade < 0.4 && r1 < (season === 'spring' ? 0.08 : 0.22)) {
           const ripe = 0.75 + 0.35 * own01(x, z, 22);
           planting.tuft(planting.grass, x + 0.07, y - 0.05, z - 0.05, w * 0.6, h * 1.45, r1 * 40, [0.36 * ripe, 0.34 * ripe, 0.16 * ripe]);
         } else if (wet > 0.72 && wear < 0.15 && shade < 0.6 && r1 < 0.35 * smooth((wet - 0.72) / 0.15)) {
           const dark = 0.75 + 0.35 * own01(x, z, 23);
-          planting.tuft(planting.reeds, x, y - 0.05, z, w * 0.8, h * 1.2 + 0.25, r1 * 40, [0.07 * dark, 0.16 * dark, 0.035 * dark]);
+          planting.tuft(planting.reeds, x, y - 0.05, z, w * 0.8, h * 1.2 + 0.25, r1 * 40, winter ? [0.15 * dark, 0.13 * dark, 0.07 * dark] : [0.07 * dark, 0.16 * dark, 0.035 * dark]);
         }
         // Flowers want sun, some moisture, and to be left alone.
         if (shade < 0.35 && wear < 0.4 && wet > 0.25 && plant.chance(0.14 * scale)) flowerAt(x, z, y, plant.range(0.3, 0.45) * Math.sqrt(scale));
@@ -2745,7 +2762,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     grass(g.x0 - 22, g.x1 + 22, g.z0 - 10, g.z1 + 22, 1.1, 2.4, (x, z) => !inGrounds(x, z, -2) && !inHouse(x, z, 0.5) && !(z < g.z0 && x > g.x0 && x < g.x1 && z > frontZ));
     planting.muted = false;
 
-    const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : [0.42, 0.14, 0.34];
+    const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : winter ? [0.18, 0.1, 0.11] : [0.42, 0.14, 0.34];
     // ---- a second, taller growth, from a stream of its own so that nothing above is disturbed
     const lush = rng.fork('lush');
     // Meadow grass: knee-high and close where the ground is moist and nobody walks, thinning to
@@ -2766,9 +2783,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       if (walled && rocky.holds(x, z) && (rocky.at(x, z) > 0.1 || loose.at(x, z) > 0.25)) continue;
       const y = ground(x, z);
       if (waterOver(x, z, y) > -0.2 || t > want * (1 - 0.7 * thinAt(x, z)) || slopeOf(ground, x, z, 0.3) > 0.5) continue;
-      const tall = (0.42 + 0.75 * wet) * (0.7 + 0.6 * fbm2(x * 0.21 + s1, z * 0.21 - s2, 2));
+      const tall = (0.42 + 0.75 * wet) * (0.7 + 0.6 * fbm2(x * 0.21 + s1, z * 0.21 - s2, 2)) * lowered;
       const c = turfColour(x, z, s1), dry = Math.min(1, parched + Math.max(0, (0.4 - wet) * 2));
-      planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, [(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
+      planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, straw([(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone], tone));
     }
     planting.muted = false;
     // Down the middle of the track, between the ruts, grass in clumps: thick for a few strides, then none.
@@ -2780,7 +2797,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const y = ground(x, z);
         if (waterOver(x, z, y) > -0.1) continue;
         const c = turfColour(x, z, s1);
-        planting.tuft(planting.grass, x, y - 0.05, z, 0.42 + 0.5 * tall, tall, turn, [(0.17 + 0.1 * parched) * c[0] * tone, 0.3 * c[1] * tone, 0.055 * c[2] * tone]);
+        planting.tuft(planting.grass, x, y - 0.05, z, 0.42 + 0.5 * tall, tall * lowered, turn, straw([(0.17 + 0.1 * parched) * c[0] * tone, 0.3 * c[1] * tone, 0.055 * c[2] * tone], tone));
       }
     }
     // Under trees the ground is last year's leaves, not turf: thickest under the thickest crowns.
@@ -2846,12 +2863,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const y = ground(x, z), patch = fbm2(x * 0.16 + s1 * 2, z * 0.16 + s2, 2);
         if (t < 0.5) {
           const c = turfColour(x, z, s1), dry = Math.min(1, 0.35 + parched);
-          planting.tuft(planting.grass, x, y - 0.05, z, 0.5 + 0.3 * patch, 0.22 + 0.5 * patch, turn, [(0.17 + 0.2 * dry) * c[0] * tone, (0.29 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone]);
+          planting.tuft(planting.grass, x, y - 0.05, z, 0.5 + 0.3 * patch, (0.22 + 0.5 * patch) * lowered, turn, straw([(0.17 + 0.2 * dry) * c[0] * tone, (0.29 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone], tone));
         } else if (t > 0.93 && patch > 0.5 && clearOf(x, z, 1)) {
           const size = 0.3 + 0.3 * top.next();
           planting.crown(x, y + size * 0.35, z, size, size * 0.5, 14, size * 0.9, leafOf(heather), top);
         } else if (t > 0.5 && t < 0.508 && bushes < 9 && clearOf(x, z, 1.6)) {
-          growTree(planting, softBark, x, y - 0.05, z, 1.5 + 1.2 * top.next(), 0.04, { kind: 'oak', detail: 0.5, cards: 56, cardSize: 0.5, leaf: leafOf(greens[0]), bark: oakBark, shaded: true }, rng.fork(`topbush${bushes++}`));
+          growTree(planting, softBark, x, y - 0.05, z, 1.5 + 1.2 * top.next(), 0.04, { kind: 'oak', detail: 0.5, cards: winter ? 0 : 56, cardSize: 0.5, leaf: leafOf(greens[0]), bark: oakBark, shaded: true, bare: winter }, rng.fork(`topbush${bushes++}`));
         }
       }
     }
@@ -2876,7 +2893,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     }
 
     // The other plants, each where it would grow.
-    const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
+    const fernGreen: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : winter ? [0.3, 0.17, 0.07] : [0.1, 0.27, 0.05];
     const open = (x: number, z: number) => inGrounds(x, z, 0.5) && !inHouse(x, z, 0.8) && offTrack(x, z) > 1.6 && offFoot(x, z) > 0.75 && clearOfStones(x, z, 0.05) && clearOfFeatures(x, z) > 0.3 && slopeOf(ground, x, z, 0.4) < 0.6;
     const census = { ferns: 0, bracken: 0, herbs: 0, nettles: 0, heather: 0, bramble: 0, thicket: 0, saplings: 0, scree: screeLaid };
     for (let gz = g.z0 + 1; gz < g.z1; gz += 0.95) for (let gx = g.x0; gx < g.x1; gx += 0.95) {
@@ -2899,7 +2916,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // purple. They were one colour over fifty metres: a whole bank of pink spikes.)
         let pick = 0, most = -9;
         for (let i = 0; i < HERBS.length; i++) { const d = fbm2(x * 0.07 + s2 * (i + 2), z * 0.07 - s1 * (i + 5) + 4.1 * i, 2) + own01(x, z, 40 + i) * 0.06; if (d > most) { most = d; pick = i; } }
-        const hue = season === 'autumn' ? [0.4, 0.3, 0.16] as Colour : HERBS[pick];
+        const hue = season === 'autumn' ? [0.4, 0.3, 0.16] as Colour : winter ? [0.3, 0.25, 0.16] as Colour : HERBS[pick];
         planting.tuft(planting.herbs, x, y - 0.03, z, size, plant.range(0.95, 1.5), plant.range(0, Math.PI), hue);
         census.herbs++;
         continue;
@@ -2907,7 +2924,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // Bracken on the dry banks, in stands: broad fronds to the knee and higher, green in spring and summer, russet in autumn. (The
       // valley's slopes were turf like its floor; bracken is what takes a dry hillside nobody grazes hard.)
       if (shade < 0.5 && wet < 0.45 && thin > 0.12 && thin < 0.65 && fbm2(x * 0.055 + s2 * 3, z * 0.055 - s1, 2) > 0.56 && plant.chance(0.45)) {
-        const size = plant.range(1.0, 1.6), t = plant.range(0.8, 1.15), c: Colour = season === 'autumn' ? [0.46, 0.24, 0.08] : season === 'summer' ? [0.16, 0.27, 0.06] : [0.2, 0.32, 0.07];
+        const size = plant.range(1.0, 1.6), t = plant.range(0.8, 1.15), c: Colour = season === 'autumn' || winter ? [0.46, 0.24, 0.08] : season === 'summer' ? [0.16, 0.27, 0.06] : [0.2, 0.32, 0.07];
         planting.tuft(planting.ferns, x, y - 0.04, z, size, size * plant.range(0.6, 0.85), plant.range(0, Math.PI), [c[0] * t, c[1] * t, c[2] * t]);
         census.bracken++;
         continue;
@@ -2923,7 +2940,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (Trees stood straight up out of the grass, the wood ending at its last trunk.)
       if (shade > 0.15 && shade < 0.55 && thin < 0.5 && own01(x, z, 31) < 0.045) {
         const size = 0.5 + 0.6 * own01(x, z, 32);
-        planting.crown(x, y + size * 0.28, z, size, size * 0.45, 26, size * 0.75, leafOf(season === 'autumn' ? [0.2, 0.12, 0.05] : [0.07, 0.15, 0.04]), plant);
+        planting.crown(x, y + size * 0.28, z, size, size * 0.45, 26, size * 0.75, leafOf(season === 'autumn' ? [0.2, 0.12, 0.05] : winter ? [0.1, 0.09, 0.06] : [0.07, 0.15, 0.04]), plant);
         census.bramble++;
         continue;
       }
@@ -2935,7 +2952,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const green = leafOf(plant.pick(greens));
         spent.crown(x, y + size * 0.55, z, size, size * 0.75, 52, size * 0.72, green, plant);
         spent.leaves.matrices.length = spent.leaves.colours.length = spent.leaves.centres.length = 0;
-        growTree(planting, softBark, x, y - 0.05, z, size * 2.4, 0.03 + 0.02 * size, { kind: 'oak', detail: 0.5, cards: 64, cardSize: 0.52, leaf: green, bark: oakBark, shaded: true }, rng.fork(`bush${census.thicket}`));
+        growTree(planting, softBark, x, y - 0.05, z, size * 2.4, 0.03 + 0.02 * size, { kind: 'oak', detail: 0.5, cards: winter ? 0 : 64, cardSize: 0.52, leaf: green, bark: oakBark, shaded: true, bare: winter }, rng.fork(`bush${census.thicket}`));
         census.thicket++;
         // And now and then a young tree coming up among them.
         if (plant.chance(0.3)) {
@@ -2944,7 +2961,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
             const height = plant.range(2.2, 3.6);
             const green = leafOf(plant.pick(greens));
             spent.broadleaf(sx, ground(sx, sz), sz, height, plant.range(0.8, 1.2), 70, green, plant, 0.7);
-            growTree(planting, woodOf('ash', true), sx, ground(sx, sz), sz, height * 1.15, 0.055, { kind: 'ash', detail: 0.45, cards: 70, cardSize: 0.55, leaf: green, bark: ashBark, shaded: true }, rng.fork(`tree${grown++}`));
+            growTree(planting, woodOf('ash', true), sx, ground(sx, sz), sz, height * 1.15, 0.055, { kind: 'ash', detail: 0.45, cards: winter ? 0 : 70, cardSize: 0.55, leaf: green, bark: ashBark, shaded: true, bare: winter }, rng.fork(`tree${grown++}`));
             census.saplings++;
           }
         }
@@ -4646,6 +4663,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     sea: islandSea,
     ...(rockSharp !== undefined ? { rockSharp } : {}),
     ...(cloudDeck ? { deck: cloudDeck, snow: site.setting.season === 'winter' ? 1 : 0.24, snowLine: [approach.floor + 22, site.setting.season === 'winter' ? 0 : 0.4] as [number, number] } : {}),
+    // (A valley or a town in winter lies under snow: not as deep as a mountain's, so that what stands up out of it shows.)
+    ...(!cloudDeck && site.setting.season === 'winter' ? { snow: 0.85 } : {}),
     flockKind: site.mountain ? 'goat' : 'sheep',
     birds: birdSpots ?? rookSpots,
     birdKind: birdSpots ? (site.mountain ? 'chough' : 'gull') : 'rook',
