@@ -3709,6 +3709,22 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         line.push(sides[3]);
         layWall((m) => wild.mesh(m), { line, gaps: [], fallen: [], height: vq.range(0.75, 1.0) }, ground, wallStone, vq.fork(`plot${n}`));
       }
+      // The churchyard, walled all round in dry stone a little higher, with a gateway before the church's door.
+      const cy = site.village.churchyard;
+      if (cy) {
+        const line: [number, number][] = [];
+        let gate = 0, best = Infinity;
+        for (let e = 0; e < 4; e++) {
+          const [ax, az] = cy.ring[e], [bx, bz] = cy.ring[(e + 1) % 4], m = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5));
+          for (let i = 0; i < m; i++) {
+            const x = ax + ((bx - ax) * (i + 0.5)) / m, z = az + ((bz - az) * (i + 0.5)) / m, d = Math.hypot(x - cy.gate[0], z - cy.gate[1]);
+            if (d < best) { best = d; gate = line.length; }
+            line.push([ax + ((bx - ax) * i) / m, az + ((bz - az) * i) / m]);
+          }
+        }
+        line.push(cy.ring[0]);
+        layWall((m) => wild.mesh(m), { line, gaps: [[gate - 1, gate + 1]], fallen: [], height: vq.range(1.0, 1.2) }, ground, wallStone, vq.fork('churchyard'));
+      }
       if (site.village.well) {
         const [wx, wz] = site.village.well, wy = ground(wx, wz), made = solids((material) => wild.mesh(material));
         const { solid } = anyAngle((m) => wild.mesh(m));

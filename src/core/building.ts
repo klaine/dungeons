@@ -104,6 +104,7 @@ export function wingWindows(b: Building, wing: NonNullable<Building['wings']>[nu
 /** Where a building stands on the ground, as rectangles in its own measures: the main block, what stands forward of it, and its wings. */
 export function footprintOf(b: Building): { u0: number; u1: number; v0: number; v1: number }[] {
   if (b.style === 'brick') return brickFootprint(b);
+  if (b.style === 'chapel' && b.chapel) return chapelParts(b).rects;
   const out = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
   if (b.style === 'imperial') {
     const f = classicalFront(b);
@@ -113,6 +114,19 @@ export function footprintOf(b: Building): { u0: number; u1: number; v0: number; 
   }
   for (const g of b.wings ?? []) out.push({ u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d - 0.01, v1: b.d + g.length });
   return out;
+}
+
+/**
+ * The parts of a village's church on the ground, in its own measures: its nave; its tower beyond one end of it, on the nave's middle
+ * line; its choir beyond the other, narrower; and the apse past the choir, as half a circle of the choir's half breadth.
+ */
+export function chapelParts(b: Building) {
+  const c = b.chapel!, W = b.w, D = b.d, e = c.end, T = c.tower, cw = Math.round(D * 0.68 * 10) / 10, apse = c.apse ? cw / 2 : 0;
+  const nave = { u0: -W / 2, u1: W / 2, v0: 0, v1: D };
+  const tower = e < 0 ? { u0: -W / 2 - T + 0.4, u1: -W / 2 + 0.4, v0: D / 2 - T / 2, v1: D / 2 + T / 2 } : { u0: W / 2 - 0.4, u1: W / 2 + T - 0.4, v0: D / 2 - T / 2, v1: D / 2 + T / 2 };
+  const choir = e < 0 ? { u0: W / 2, u1: W / 2 + c.choir, v0: D / 2 - cw / 2, v1: D / 2 + cw / 2 } : { u0: -W / 2 - c.choir, u1: -W / 2, v0: D / 2 - cw / 2, v1: D / 2 + cw / 2 };
+  const round = apse ? (e < 0 ? { u0: choir.u1, u1: choir.u1 + apse, v0: choir.v0, v1: choir.v1 } : { u0: choir.u0 - apse, u1: choir.u0, v0: choir.v0, v1: choir.v1 }) : null;
+  return { nave, tower, choir, cw, apse, rects: [nave, tower, choir, ...(round ? [round] : [])] };
 }
 
 /**

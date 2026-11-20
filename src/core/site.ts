@@ -471,8 +471,11 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
-  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
+  /**
+   * Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`),
+   * Hanseatic brick (`brick`), a canal house (`canal`), a village's church of stone (`chapel`, with `chapel`), or a shed of boards (`shed`).
+   */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal' | 'chapel' | 'shed';
   x: number;
   z: number;
   w: number;
@@ -555,6 +558,14 @@ export interface Building {
    * stone, open to the ground behind the house by a door and a barred window in its back wall, onto a yard levelled there.
    */
   cellar?: number;
+  /**
+   * Of a village's church (style `chapel`): its nave is `w` long, along its front, and `d` broad, its walls `heights[0]` high, its door in
+   * the middle of its front's half towards the tower. At one end (`end`, -1 for the left as one stands before the front) a square
+   * tower `tower` metres a side, its walls rising to `height` over the ground before the door, under a spire: `pyramid`, `needle` (eight
+   * sides, tall) or `saddle` (a ridged roof between two gables); at the other a choir `choir` metres long, narrower and lower than the
+   * nave, ending in a half-round apse where `apse`.
+   */
+  chapel?: { end: -1 | 1; tower: number; height: number; spire: 'pyramid' | 'needle' | 'saddle'; spireHeight: number; choir: number; apse: boolean };
   /**
    * Wings reaching back from the ends of the main block, making the building an L (one) or a U
    * (two) about a court behind it. `side` is -1 for the left end as one stands before it and 1
@@ -1077,7 +1088,7 @@ export interface Site {
    * The village at a castle's foot, besides its houses (in `buildings`) and its lanes (in `paths`): its little square beside the road
    * below the gate, as its corners round, with the well in its middle; and the plots behind its houses, each its corners round, walled.
    */
-  village?: { square?: [number, number][]; well?: [number, number]; plots: [number, number][][] };
+  village?: { square?: [number, number][]; well?: [number, number]; plots: [number, number][][]; churchyard?: { ring: [number, number][]; gate: [number, number] } };
   /** The valley's fields, in their stretch on either side of the track: each its corners and its crop; a pasture among them for the sheep. */
   fields?: Town['fields'];
   /**

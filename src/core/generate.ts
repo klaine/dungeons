@@ -379,7 +379,7 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   // The valley from its head down: the castle about the house, the village below it, the fields and a pasture, and at its foot,
   // where the player comes in, the forest. (From a stream of its own.)
   {
-    const zq = rng.fork('zones'), castleEnd = round(Math.max(...castle.wall.map((p) => p[1])) + 2), villageEnd = round(castleEnd + 4 + zq.range(46, 60));
+    const zq = rng.fork('zones'), castleEnd = round(Math.max(...castle.wall.map((p) => p[1])) + 2), villageEnd = round(castleEnd + 4 + zq.range(46, 60) + (seated ? 30 : 0));
     const fieldsEnd = round(villageEnd + 4 + (v.mouth - villageEnd - 4) * zq.range(0.5, 0.6));
     site.zones = { castle: [v.z0, castleEnd], village: [round(castleEnd + 4), villageEnd], fields: [round(villageEnd + 4), fieldsEnd], forest: [fieldsEnd, v.mouth + 30] };
   }
@@ -1367,11 +1367,53 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
       }
     }
   }
+  /** Corners of an oblong in a building's own measures (across its front from its middle, `u0` to `u1`; back from its front, `v0` to `v1`). */
+  const localRing = (bx: number, bz: number, th: number, d: number, u0: number, u1: number, v0: number, v1: number): Oblong => {
+    const c = Math.cos(th), sn = Math.sin(th), at = (u: number, w: number): [number, number] => [bx + u * sn + (d / 2 - w) * c, bz - u * c + (d / 2 - w) * sn];
+    return [at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)];
+  };
+  // The church: a small one of stone, as a village under a castle has (asked for: a small church): its long side to the road behind
+  // a walled churchyard, its tower at the end towards the castle and its choir at the other; where it first fits going down the road
+  // from the square. (Its own stream, so nothing else moves.)
+  let churchyard: { ring: [number, number][]; gate: [number, number] } | undefined;
+  {
+    const cq = rng.fork('church'), W = round(cq.range(11, 14.5)), D = round(cq.range(6.6, 7.8)), H = round(cq.range(6.2, 7.4)), T = round(cq.range(4.2, 5));
+    const spire = cq.pick(['pyramid', 'pyramid', 'needle', 'saddle'] as const), before = cq.range(5, 7);
+    const chapel = { tower: T, height: round(H + cq.range(7, 10.5)), spire, spireHeight: round(spire === 'needle' ? cq.range(9, 13) : spire === 'pyramid' ? cq.range(5, 7.5) : cq.range(2.6, 3.4)), choir: round(cq.range(3.6, 5)), apse: cq.chance(0.6) };
+    for (let s = s0 + (square ? 4 : 2); s < s1 - 10 && !churchyard; s += 3) for (const side of [-1, 1] as const) {
+      if (churchyard) break;
+      const [px, pz, dx, dz] = along(s + W / 2 + chapel.tower), nx = -dz * side, nz = dx * side, th = Math.atan2(-nz, -nx), off = 4 + before + D / 2;
+      // (The tower at the end up the road, towards the castle: across the front, that is the right as one stands before it on the road's right hand.)
+      const b: Building = { style: 'chapel', w: W, d: D, storeys: 1, heights: [H], bays: 1, colour: [0.9, 0.88, 0.82], x: round(px + nx * off), z: round(pz + nz * off), faces: Math.cos(th) < 0 ? 'w' : 'e', turn: Math.round(th * 1000) / 1000, chapel: { end: side, ...chapel } };
+      const rects = footprintOf(b), u0 = Math.min(...rects.map((r) => r.u0)) - 3, u1 = Math.max(...rects.map((r) => r.u1)) + 3, v1 = Math.max(...rects.map((r) => r.v1)) + 3;
+      const ring = localRing(b.x, b.z, th, D, u0, u1, -before + 0.8, v1);
+      if (!clearGround(ring, 3) || !free(ring)) continue;
+      out.push(b);
+      kept.push(localRing(b.x, b.z, th, D, u0 - 0.3, u1 + 0.3, -before + 0.5, v1 + 0.3));
+      const [gx, gz] = localRing(b.x, b.z, th, D, side * W / 4, side * W / 4, -before + 0.8, -before + 0.8)[0];
+      churchyard = { ring: ring.map(([x, z]) => [round(x), round(z)] as [number, number]), gate: [round(gx), round(gz)] };
+      // (And a path from the road through the gate to the door.)
+      const [dx2, dz2] = localRing(b.x, b.z, th, D, side * W / 4, side * W / 4, -1.1, -1.1)[0], [rx, rz] = along(s + W / 2 + chapel.tower);
+      (site.paths ??= []).push({ to: 'lane', points: [[round(rx + nx * 2.4), round(rz + nz * 2.4)], [round(gx), round(gz)], [round(dx2), round(dz2)]] });
+    }
+  }
   // The lanes: one or two, leaving the road on either hand further down, some twenty metres long; kept clear of houses for now.
+  // (And first, where there is room, a street across the road: lanes on both hands at one place, longer, along the hillside.)
   const lanes: { s: number; side: number; len: number; corridor: Oblong }[] = [];
   {
-    const lq = rng.fork('lanes'), want = lq.chance(0.6) ? 2 : 1;
-    for (let tries = 0; tries < 12 && lanes.length < want; tries++) {
+    const lq = rng.fork('lanes'), want = lq.chance(0.6) ? 2 : 1, xq = rng.fork('cross street');
+    for (let tries = 0; tries < 16; tries++) {
+      const s = xq.range(s0 + 14, s1 - 10), lens = [xq.range(22, 34), xq.range(22, 34)];
+      const [px, pz, dx, dz] = along(s), rings = ([-1, 1] as const).map((side, i) => {
+        const nx = -dz * side, nz = dx * side, len = lens[i];
+        return { side, len, ring: oblong(px + nx * (len / 2 + 2), pz + nz * (len / 2 + 2), 3.4, len, Math.atan2(dz, dx) + Math.PI / 2), corridor: oblong(px + nx * (len / 2 + 2), pz + nz * (len / 2 + 2), 3.6, len + 2, Math.atan2(dz, dx) + Math.PI / 2) };
+      });
+      if (!rings.every((r) => clearGround(r.ring, 0) && free(r.ring))) continue;
+      for (const r of rings) { lanes.push({ s, side: r.side, len: r.len, corridor: r.corridor }); kept.push(r.corridor); }
+      break;
+    }
+    const crossing = lanes.length;
+    for (let tries = 0; tries < 12 && lanes.length < crossing + want; tries++) {
       const s = lq.range(s0 + sqLen + 10, s1 - 8), side = lq.chance(0.5) ? 1 : -1, len = lq.range(18, 26);
       if (lanes.some((l) => Math.abs(l.s - s) < 18)) continue;
       const [px, pz, dx, dz] = along(s), nx = -dz * side, nz = dx * side;
@@ -1403,7 +1445,9 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   for (const [li, l] of lanes.entries()) {
     const [px, pz, dx, dz] = along(l.s), nx = -dz * l.side, nz = dx * l.side, lq = rng.fork(`lane${li}`);
     const pts: [number, number][] = [[round(px), round(pz)]];
-    for (let t = 4; t <= l.len + 2; t += 4) pts.push([round(px + nx * t + dx * lq.range(-0.6, 0.6)), round(pz + nz * t + dz * lq.range(-0.6, 0.6))]);
+    // (Bending a little as it goes, as every way does.)
+    const bend = lq.range(-1.6, 1.6);
+    for (let t = 4; t <= l.len + 2; t += 4) { const wob = bend * Math.sin((Math.PI * t) / (l.len + 2)) + lq.range(-0.6, 0.6); pts.push([round(px + nx * t + dx * wob), round(pz + nz * t + dz * wob)]); }
     (site.paths ??= []).push({ to: 'lane', points: pts });
     // (The lane's own corridor is let go of now, for its houses to stand along it.)
     const at = kept.indexOf(l.corridor);
@@ -1416,7 +1460,9 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   }
   if (out.length < 4) return false;
   // The plots: behind most houses, running back from it as far as there is room, up to ten metres; walled.
+  const sheds: Building[] = [];
   for (const [n, b] of out.entries()) {
+    if (b.style !== 'timber') continue;
     const q = rng.fork(`plot${n}`);
     if (!q.chance(0.75)) continue;
     const th = b.turn!, bx = -Math.cos(th), bz = -Math.sin(th);
@@ -1425,12 +1471,24 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
       // (Clear of everything but its own house, which it runs back from.)
       if (!clearGround(ring, 3) || !kept.every((o) => o === own.get(b) || parted(ring, o)) || !plots.every((o) => parted(ring, o))) continue;
       plots.push(ring.map(([x, z]) => [round(x), round(z)] as [number, number]));
+      // In half the plots a shed of boards at its back corner, its door towards the house: for wood, tools, a goat or a cart.
+      const sq2 = rng.fork(`shed${n}`);
+      if (sq2.chance(0.5)) {
+        const pw = Math.hypot(ring[1][0] - ring[0][0], ring[1][1] - ring[0][1]), sw = round(sq2.range(2.4, 3.4)), sd = round(sq2.range(2, 2.8)), hand = sq2.chance(0.5) ? 1 : -1;
+        const back = deep / 2 - sd / 2 - 0.45, across = hand * Math.max(0, pw / 2 - sw / 2 - 0.45), ux = Math.sin(th), uz = -Math.cos(th);
+        const x = round(cx + bx * back + ux * across), z = round(cz + bz * back + uz * across), shed = oblong(x, z, sw, sd, th, 0.15);
+        if (deep >= sd + 2.5 && clearGround(shed, 3) && free(shed)) {
+          sheds.push({ style: 'shed', w: sw, d: sd, storeys: 1, heights: [round(sq2.range(2.2, 2.6))], bays: 1, colour: sq2.pick([[0.42, 0.33, 0.24], [0.36, 0.28, 0.2], [0.5, 0.4, 0.3], [0.32, 0.3, 0.28]] as [number, number, number][]), x, z, faces: Math.cos(th) < 0 ? 'w' : 'e', turn: Math.round(th * 1000) / 1000 });
+          kept.push(shed);
+        }
+      }
       break;
     }
   }
-  // The inn is the house nearest the gate.
-  out.sort((p, q) => Math.hypot(p.x - castle.gate.x, p.z - castle.gate.z) - Math.hypot(q.x - castle.gate.x, q.z - castle.gate.z));
-  for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
+  // The inn is the house nearest the gate. (The houses first, then the church and the sheds.)
+  out.sort((p, q) => (p.style === 'timber' ? 0 : 1) - (q.style === 'timber' ? 0 : 1) || Math.hypot(p.x - castle.gate.x, p.z - castle.gate.z) - Math.hypot(q.x - castle.gate.x, q.z - castle.gate.z));
+  for (const [n, b] of out.entries()) if (b.style === 'timber') { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
+  out.push(...sheds);
   // Houses on the hillside take the hillside into them, as such houses do (asked for: half basements). Where the land behind a house
   // stands a storey over the road before it, its stone ground storey is a half basement, open to the road and buried behind, and its
   // first storey has a door at the back onto the ground there; where the land falls away behind it, there is a cellar under it, open
@@ -1438,6 +1496,7 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   if (v.terrain) {
     const ap = site.places.find((q) => q.role === 'approach')!, land = (x: number, z: number) => valleyLand(v, ap.floor, ap, x, z);
     for (const b of out) {
+      if (b.style !== 'timber') continue;
       const th = b.turn!, c = Math.cos(th), sn = Math.sin(th), at = (u: number, w: number) => land(b.x + u * sn + (b.d / 2 - w) * c, b.z - u * c + (b.d / 2 - w) * sn);
       const rise = (at(-b.w / 2, b.d + 1) + at(0, b.d + 1) + at(b.w / 2, b.d + 1)) / 3 - at(0, -1.5);
       // (From a rise of a metre and a half, the yard behind made up to the back door, as hillside villages terrace theirs; from a fall
@@ -1447,7 +1506,7 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
     }
   }
   site.buildings = out;
-  site.village = { ...(square ? { square, well } : {}), plots };
+  site.village = { ...(square ? { square, well } : {}), plots, ...(churchyard ? { churchyard } : {}) };
   return true;
 }
 
