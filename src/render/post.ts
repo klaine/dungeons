@@ -75,8 +75,9 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
   // seen, wider for its shadow, which is softened by the sun's breadth and the thin cloud at its rim.)
   // (`weather` is the noise read at the large sizes about the point, from `weatherAt`: it changes only over kilometres, so where the
   // cloud is asked about at several points close together, as for its shadow and the light that reaches into it, it is read once.)
-  // Cloud in flat banks is the same cloud drawn out one way, in a layer too thin to heap up.
-  const cloudQ = (p: N): N => p.mul(vec3(mix(1, 0.4, u.uCloudFlat), 1, mix(1, 1.2, u.uCloudFlat))).div(1150).add(u.uCloudDrift);
+  // Cloud in flat banks is the same cloud drawn out one way, in a layer too thin to heap up. (Read faster upward, so that what there
+  // is of the layer's depth has lumps and hollows in its top, and is not a slab.)
+  const cloudQ = (p: N): N => p.mul(vec3(mix(1, 0.4, u.uCloudFlat), mix(1, 2.2, u.uCloudFlat), mix(1, 1.2, u.uCloudFlat))).div(1150).add(u.uCloudDrift);
   // The block of noise repeats every kilometre or so, and small heaps showed it, lying in rows towards the horizon, each like the
   // last. So the same noise is read eight times larger as well (`x`): where it is high the heaps gather and stand closer, where it is
   // low the sky opens, and the lesser noise is pushed about by it, so that no two kilometres are laid out alike. And larger still
@@ -85,9 +86,18 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
     const q0 = cloudQ(p).toVar();
     return vec2(noise(q0.mul(vec3(0.13, 0.4, 0.13)).add(0.71)).r, noise(q0.mul(vec3(0.071, 0.3, 0.071)).add(vec3(0.37, 0.12, 0.83))).g);
   };
+  // How high a point stands in the cloud's layer, 0 at its base and 1 at its top. Heaped cloud has its base at one height
+  // everywhere, as it does, where the air rising from the ground cools enough to make cloud. Banks are not so: the layer about
+  // (`uCloudBase` to `uCloudTop`) holds them, each a little more than half its depth, the base of one lower and of the next higher,
+  // rising and falling over a couple of kilometres with the larger noise (`weather.x`); so that a bank lies over one ridge and the
+  // next stands higher, and the far range's peaks go into some and stand clear of others. (All at one height, they were slabs.)
+  const layerAt = (p: N, weather: N): N => {
+    const span = u.uCloudTop.sub(u.uCloudBase), rise = smoothstep(0.3, 0.72, weather.x).mul(u.uCloudFlat).mul(0.45);
+    return p.y.sub(u.uCloudBase).sub(span.mul(rise)).div(span.mul(one(u.uCloudFlat.mul(0.45))));
+  };
   const cloudOf = (fine: boolean): N => Fn(([p, fineW, billow, edge, weather]: [N, N, N, N, N]) => {
     const thick: N = float(0).toVar();
-    const h: N = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase)).toVar();
+    const h: N = layerAt(p, weather).toVar();
     If(h.greaterThan(0).and(h.lessThan(1)), () => {
       const q0: N = cloudQ(p).toVar();
       const big: N = weather.x, spread: N = weather.y;
@@ -192,7 +202,7 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
             // shades its own far side.)
             const through: N = float(0).toVar();
             for (let j = 1; j <= 4; j++) through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(deepen.mul(14 * j * j))), float(0), billow, float(0.1), weather).mul(deepen.mul(14 * (2 * j - 1))));
-            const h = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase));
+            const h = clamp(layerAt(p, weather), 0, 1);
             // Light that has come so far through cloud has been scattered, and scattered again, many times: some of it still comes
             // on, more softly the deeper it has come, which is the glow in a heap's shaded side and the grey of its base. (Three
             // shares of it, each taken as through thinner cloud than the last.)

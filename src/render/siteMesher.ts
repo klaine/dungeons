@@ -12,7 +12,7 @@ import { buildCamp } from './camp';
 import { buildMineYard } from './mine';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
 import { beam, plank, stoneStyles } from './geom/styles';
-import { crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
+import { FAR_RING, crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
 import { buildBuilding, solids } from './buildings';
@@ -2260,6 +2260,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
       const lake = lakeLevel?.(x, z);
       if (lake != null && y < lake + 0.8) return;
+      // (Fewer where the far land begins, coming in to the whole over 180 metres, as the woods it paints do: they stood there one to
+      // every thirteen square metres, against one to a hundred or so in the valley's own woods just inside, and from any height the
+      // open ground about the valley was ringed by a wall of forest. Here about as thick as those woods, at first.)
+      const outOfRing = Math.hypot(x - cxA, z - czA) - FAR_RING;
+      if (own01(x, z, 61) > 0.12 + 0.88 * smooth(outOfRing / 180)) return;
+      // (In winter a far broadleaf, a whole crown painted on one card, is a dark ball: in the wood it is lost among the others, but
+      // standing alone on the snow, as they do where the wood is thin, it was a blot. There the trees standing alone are firs.)
+      if (winter && !fir && own01(x, z, 62) > smooth((outOfRing - 50) / 160)) return;
       const c0 = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       // (A far fir in winter, a whole tree on one card, is green and white together.)
       const c: Colour = winter && fir ? [c0[0] * 0.6 + SNOWED[0] * 0.4, c0[1] * 0.6 + SNOWED[1] * 0.4, c0[2] * 0.6 + SNOWED[2] * 0.4] : c0;
@@ -2349,7 +2357,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
-    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06] };
+    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06], ring: [cxA, czA, FAR_RING] };
 
     // ---- what lies and grows in the valley
     // (The yard before a mine: the ground between its mouth and the tip, and the shed's and the stacks' beside the mouth.)
@@ -3612,7 +3620,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     scenery.cards.push(...planting.sets);
   };
   const planting = new Planting();
-  let farCover: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number] } | undefined;
+  let farCover: { wood: [number, number, number]; grass: [number, number, number]; sward?: [number, number, number]; bare?: [number, number, number, number]; ring?: [number, number, number] } | undefined;
   const arrival: { spawn: Vector3 | null; track: [number, number][] } = { spawn: null, track: [] };
   const fences: { min: Vector3; max: Vector3 }[] = [];
   let underDeep: { min: Vector3; max: Vector3 } | undefined;
