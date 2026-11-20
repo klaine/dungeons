@@ -306,7 +306,11 @@ const INDEXES = new WeakMap<[number, number, number][], { cells: Map<number, num
  * what has been made on the land (the ground levelled for the house, the way, the climb, the
  * cairn's platform) is to be counted; while it is being laid out, it is not yet.
  */
-export function landAt(m: Mountain, floor: number, x: number, z: number, levelled = true): number {
+/**
+ * (`bare`: without the tors, the teeth of rock and the crags by the landings, which the builder carves as solids of their own,
+ * standing on this ground; as bumps of the land their sides were smooth walls, banded where their heights came in beds.)
+ */
+export function landAt(m: Mountain, floor: number, x: number, z: number, levelled = true, bare = false): number {
   // The land's own shape: the plain shape below, or, if this mountain's land is worn, the worn lattice made from it (blended back
   // into the plain shape at the lattice's edge, which is far out and deep in the cloud).
   // Beyond that lattice, once the country round about has been laid out, the mountain's lower flanks are the country's: worn with
@@ -329,7 +333,7 @@ export function landAt(m: Mountain, floor: number, x: number, z: number, levelle
   let cleft = 0;
   if (notch) { const s = onSpur(m, x, z); if (s.off < 60) cleft = notch.deep * (1 - smooth((Math.abs(s.d - notch.at) - notch.wide * 0.28) / (notch.wide * 0.24))); }
   y -= cleft;
-  return made(m, floor, x, z, y, levelled, cleft);
+  return made(m, floor, x, z, y, levelled, cleft, bare);
 }
 
 /** The plain shape of the land, without the cleft and without what is made on it. */
@@ -354,9 +358,9 @@ function baseLand(m: Mountain, floor: number, x: number, z: number): number {
 }
 
 /** The land with the tors on it, and, if `levelled`, with what has been made on it: the ways cut and made up, the platforms levelled. */
-function made(m: Mountain, floor: number, x: number, z: number, y: number, levelled: boolean, cleft: number): number {
+function made(m: Mountain, floor: number, x: number, z: number, y: number, levelled: boolean, cleft: number, bare = false): number {
   const notch = m.spur.notch;
-  if (!levelled) y += torsAt(m, x, z);
+  if (!levelled && !bare) y += torsAt(m, x, z);
   if (levelled) {
     // The way is cut and made up to its own level, across a mule's breadth and a little more, and eased into the land beside it.
     if (m.way) {
@@ -385,7 +389,7 @@ function made(m: Mountain, floor: number, x: number, z: number, y: number, level
       }
     }
     // (The tors and the teeth of rock beside the ways stand as they are: the ways were laid clear of them.)
-    y += torsAt(m, x, z);
+    if (!bare) y += torsAt(m, x, z);
     // Level ground for the shelter on the ridge.
     if (m.shelter) { const w = 1 - smooth((Math.hypot(x - m.shelter.x, z - m.shelter.z) - 3.4) / 3); y += (m.shelter.y - y) * w; }
     // The landings on the climb: level ground at the bends, and a crag standing up beside each on the inner side.
@@ -394,7 +398,7 @@ function made(m: Mountain, floor: number, x: number, z: number, y: number, level
       // (A widening of the path, at the path's own level beside it, so that it rises with the path and leaves no step in it.)
       if (d < l.r + 3) { const level = m.climb ? nearestOn(m.climb, x, z, 16).y : l.y; y += ((Number.isFinite(level) ? level : l.y) - y) * (1 - smooth((d - l.r) / 3)); }
       const dc = Math.hypot(x - l.cx, z - l.cz);
-      if (dc < l.cr) {
+      if (dc < l.cr && !bare) {
         const t = 1 - dc / l.cr, rough = 0.75 + 0.5 * fbm2(x / 3.1 + l.cx, z / 3.1, 2, 17);
         y = Math.max(y, l.y - 1 + (l.height + 1) * Math.pow(t, 0.55) * rough);
       }

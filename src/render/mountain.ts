@@ -91,7 +91,8 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   const winter = site.setting.season === 'winter';
   const rng = b.rng.fork('mountain');
   const s1 = rng.range(0, 60), s2 = rng.range(0, 60);
-  const plain = (x: number, z: number) => landAt(m, F, x, z);
+  // (The land without its tors, teeth and crags, which are carved as stacks of blocks standing on it: see `raiseStack`.)
+  const plain = (x: number, z: number) => landAt(m, F, x, z, true, true);
   // Rock high on a mountain is frost-shattered, whatever stone it is: its edges sharp and its blocks loose in their joints, not
   // rounded by rain as in a valley. So the stone's character is taken sharper and blockier here, and much less worn round.
   const stoneKind = ROCK[site.setting.stone];
@@ -738,9 +739,93 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   }
 
   __T('carve');
-  yield say('scattering boulders', 0.7);
+  yield say('raising the tors', 0.7);
+  // ---- the tors, the teeth of rock beside the ways and the crags by the landings: each a stack of blocks
+  // (They were bumps of the land, its height raised in a knob or a blade, so their sides were smooth curved walls, banded where the
+  // height came in beds: a turned post, not rock. Rock that frost has left standing is blocks, split by its joints and its beds:
+  // each block a few faces, nearly upright and leaning back a little, with a top that is nearly level and a little tilted, the next
+  // block narrower, set a little aside, and so up. A tooth is a blade, longer one way than the other; a tor a squat knob of two or
+  // three blocks, broad at its foot; a crag a tower. The snow lies on each block's top. Carved as boulders are, each by itself on a
+  // lattice as fine as its size calls for, on the ground with them taken out of it, sunk into it so that no gap shows at its foot.)
+  const stackSpots: [number, number, number][] = [];
+  const raiseStack = (q: Rng, x: number, z: number, r: number, height: number, kind: 'fin' | 'knob' | 'crag', turn: number) => {
+    const mid = ground(x, z);
+    let low = mid;
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; low = Math.min(low, ground(x + Math.cos(a) * r * 1.2, z + Math.sin(a) * r * 1.2)); }
+    const top = mid + height;
+    const n = kind === 'knob' ? Math.max(1, Math.round(height / q.range(1.1, 1.7))) : Math.max(2, Math.round(height / q.range(1.5, 2.4)));
+    const shares = Array.from({ length: n }, () => q.range(0.7, 1.3)), sum = shares.reduce((a, b) => a + b, 0);
+    // Each block: its side faces and top as planes (a normal and a point on it), and its foot.
+    type Block = { planes: number[]; reach: number };
+    const blocks: Block[] = [];
+    let yb = low - 0.6, acc = 0, cx = x, cz = z, reach = 0;
+    for (let i = 0; i < n; i++) {
+      acc += shares[i];
+      const yt = mid + (height * acc) / sum, f = n > 1 ? i / (n - 1) : 0;
+      const taper = kind === 'knob' ? 1 - 0.5 * f : kind === 'fin' ? 1 - 0.3 * f : 1 - 0.35 * f;
+      if (i > 0) { cx += q.range(-0.12, 0.12) * r; cz += q.range(-0.12, 0.12) * r; }
+      // (A broad tor's foot is two or three blocks side by side, not one.)
+      const feet = kind === 'knob' && i === 0 && r > 3.4 ? q.int(2, 3) : 1, a1 = q.range(0, Math.PI * 2);
+      for (let foot = 0; foot < feet; foot++) {
+        const fa = a1 + (foot / feet) * Math.PI * 2, fx = feet > 1 ? cx + Math.cos(fa) * r * 0.42 : cx, fz = feet > 1 ? cz + Math.sin(fa) * r * 0.42 : cz;
+        const rr = r * taper * (feet > 1 ? 0.62 : 1) * q.range(0.88, 1.06), k = q.int(6, 9), a0 = q.range(0, Math.PI * 2), ym = (yb + yt) / 2;
+        const planes: number[] = [];
+        for (let j = 0; j < k; j++) {
+          const a = a0 + (j / k) * Math.PI * 2 + q.range(-0.35, 0.35);
+          let dist = rr * q.range(0.78, 1.1);
+          if (kind === 'fin') { const ph = a - turn; dist *= Math.hypot(1.15 * Math.cos(ph), 0.72 * Math.sin(ph)); }
+          const tilt = q.range(-0.04, 0.26), l = Math.hypot(1, tilt);
+          planes.push(Math.cos(a) / l, tilt / l, Math.sin(a) / l, fx + Math.cos(a) * dist, ym, fz + Math.sin(a) * dist);
+          reach = Math.max(reach, Math.hypot(fx - x, fz - z) + dist * 1.25);
+        }
+        const tx = q.range(-0.28, 0.28), tz = q.range(-0.28, 0.28), tl = Math.hypot(tx, 1, tz);
+        planes.push(tx / tl, 1 / tl, tz / tl, fx, yt, fz);
+        planes.push(0, -1, 0, fx, yb, fz);
+        blocks.push({ planes, reach: rr });
+      }
+      yb = yt - 0.04;
+    }
+    // Outside a block when outside any of its faces; the edges where faces meet worn a little round. Outside the stack when outside every block.
+    const K = 0.16;
+    const density = (px: number, py: number, pz: number): number => {
+      let air = Infinity;
+      for (const b of blocks) {
+        const P = b.planes;
+        let s = -Infinity;
+        for (let o = 0; o < P.length; o += 6) {
+          const v = P[o] * (px - P[o + 3]) + P[o + 1] * (py - P[o + 4]) + P[o + 2] * (pz - P[o + 5]);
+          const h = Math.max(K - Math.abs(s - v), 0);
+          s = Math.max(s, v) + (h * h) / (4 * K);
+        }
+        if (s < air) air = s;
+      }
+      // (And near its skin, the rock's own breaks: its joints and blocks a hand or two deep, and its smaller planes. With flat faces
+      // alone a stack was a pillar of dressed stone.)
+      if (air > -0.7 && air < 0.7) air -= Math.max(-0.45, Math.min(0.45, relief.fine(px, py, pz))) * 0.3 + smallPlanesBlended(px, py, pz) * 0.18;
+      return air;
+    };
+    // (A cell a ninth of its breadth, between a fifth and a third of a metre: finer, the stacks were a fifth of all the rock's triangles.)
+    const R = reach + 0.6, cell = Math.min(0.34, Math.max(0.2, r * 0.11));
+    carveRock(rockMesh, density, {
+      min: V(x - R, low - 0.8, z - R), max: V(x + R, top + 1, z + R),
+      cell, uvScale: 0.4, fromSamples: true, occlusion: [cell * 2, Math.max(cell * 3, r * 0.45)], sharp: true,
+      shade: (pt, nn, field, _o, open) => shadeRock(pt, nn, field, open),
+    });
+    stackSpots.push([x, z, reach]);
+  };
+  for (const [i, t] of (m.tors ?? []).entries()) {
+    const fin = t.height > t.r * 1.4, turn = (t.x * 12.9898 + t.z * 78.233) % Math.PI;
+    // (As tall as the land's bump stood at its middle, which the ways were laid clear of.)
+    raiseStack(rng.fork(`tor stack ${i}`), t.x, t.z, fin ? t.r * 0.82 : t.r * 0.78, t.height * (fin ? 0.95 : 0.85), fin ? 'fin' : 'knob', turn);
+  }
+  for (const [i, l] of (m.landings ?? []).entries()) raiseStack(rng.fork(`crag stack ${i}`), l.cx, l.cz, l.cr * 0.72, Math.max(2, l.y - 1 + l.height - ground(l.cx, l.cz)), 'crag', 0);
+  const underStack = (x: number, z: number) => stackSpots.some(([sx, sz, sr]) => Math.hypot(x - sx, z - sz) < sr);
+
+  yield say('scattering boulders', 0.72);
   // ---- boulders: fallen from the crags and the precipices' tops, and left by frost all over the top
   const lying: [number, number, number][] = [];
+  // (Not where a stack stands. Kept apart from `lying`, which numbers the boulders: in it they would all be dealt afresh.)
+  const onStack = (x: number, z: number, size: number) => stackSpots.some(([sx, sz, sr]) => Math.hypot(sx - x, sz - z) < sr * 0.8 + size + 0.4);
   const layBoulder = (x: number, z: number, size: number, q: Rng, sunk = [0.15, 0.5]) => {
     const y = ground(x, z);
     const form = boulderForm(q.fork(`b${lying.length}`), size, rockKind), cy = y + form.half * q.range(sunk[0], sunk[1]), cell = Math.min(0.26, Math.max(0.1, size * 0.13));
@@ -758,7 +843,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     const q = rng.fork(`landing boulders ${i}`);
     for (let k = 0, tries = 0; k < 4 && tries < 40; tries++) {
       const a = l.out + q.range(-1.4, 1.4), d = l.r + q.range(0.2, 1.6), x = l.x + Math.cos(a) * d, z = l.z + Math.sin(a) * d, size = q.range(0.8, 2.1);
-      if (nearClimb(x, z, 6) < size + 1.6 || lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.4)) continue;
+      if (nearClimb(x, z, 6) < size + 1.6 || onStack(x, z, size) || lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.4)) continue;
       layBoulder(x, z, size, q); k++;
     }
   }
@@ -772,7 +857,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
       const under = rocky.holds(x, z) ? rocky.at(x, z) : 0;
       if (under > 0.5 || (under < 0.05 && !q.chance(0.35))) continue;
       const size = q.range(0.5, under > 0.05 ? 2.4 : 1.4);
-      if (lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.6)) continue;
+      if (onStack(x, z, size) || lying.some(([bx, bz, bs]) => Math.hypot(bx - x, bz - z) < bs + size + 0.6)) continue;
       layBoulder(x, z, size, q);
       if (lying.length % 6 === 0) yield say(`scattering boulders, ${lying.length} of about 70`, 0.7 + 0.04 * Math.min(1, lying.length / 70));
     }
@@ -1504,7 +1589,7 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     }
     return stood.length;
   })();
-  const planted = plantMountain({ site, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, layBare: () => lay.bare, hollowAt, rockyAt: (x, z) => (rocky.holds(x, z) ? rocky.at(x, z) : 0), looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0), trackOff, offFoot, insideOuter });
+  const planted = plantMountain({ site, rng: rng.fork('planting'), planting: b.planting, cards: b.cards, ground, turfAt, layBare: () => lay.bare, hollowAt, rockyAt: (x, z) => (underStack(x, z) ? 1 : rocky.holds(x, z) ? rocky.at(x, z) : 0), looseAt: (x, z) => (loose.holds(x, z) ? loose.at(x, z) : 0), trackOff, offFoot, insideOuter });
 
   __T('props+plants');
   yield say('fencing the edge', 0.9);
