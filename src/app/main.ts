@@ -394,6 +394,7 @@ async function start(): Promise<void> {
   } else desc = buildCourtyardHall(seed);
   await stage('Gathering the geometry', 0.7);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
+  farUniforms.uFarRing.value.set(...(desc.far?.ring ?? [0, 0, 0]));
   // (A valley's or a town's winter lies over the far land too, not only on its heights.)
   farUniforms.uFarSnow.value = site?.setting.season === 'winter' && !site.mountain ? 1 : 0;
   // (And its still water is frozen.)
@@ -930,9 +931,11 @@ async function start(): Promise<void> {
     // was a layer three hundred and sixty metres deep two or three hundred metres up, whatever the day: small soft heaps, hanging
     // low over the roofs like smoke, never the towers of a summer's afternoon.)
     const c = w.cloud, sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    // (Banks are some two hundred and thirty metres deep, in a layer of four hundred and twenty, each riding at its own height in it:
+    // see `layerAt` in `post.ts`. They were one layer a hundred and fifty metres deep, everywhere at one height: flat slabs.)
     if (layered) {
-      u.uCloudBase.value = floor + 310 - 150 * c;
-      u.uCloudTop.value = u.uCloudBase.value + 150;
+      u.uCloudBase.value = floor + 300 - 150 * c;
+      u.uCloudTop.value = u.uCloudBase.value + 420;
     } else {
       u.uCloudBase.value = floor + 600 + 350 * (1 - c) - 250 * r;
       u.uCloudTop.value = u.uCloudBase.value + 700 + 1400 * sm(0.2, 0.55, c) * (1 - 0.5 * sm(0.75, 1, c));

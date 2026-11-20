@@ -162,6 +162,9 @@ export function crestAt(height: (x: number, z: number) => number, cx: number, cz
   return best;
 }
 
+/** How far from the middle of the scene the ring of far land begins. */
+export const FAR_RING = 215;
+
 /**
  * A ring of mountains round the whole scene, far enough off to be seen through haze. Drawn as a
  * sheet in polar coordinates over a height function.
@@ -190,7 +193,7 @@ export function layMountains(
   // (A notch finer than first made: more points round each ring, and the rings closer.)
   const around = 1040;
   const radii: number[] = [];
-  for (let r = 215; r <= 3050; r += 3.4 + (r - 215) * 0.013) radii.push(r);
+  for (let r = FAR_RING; r <= 3050; r += 3.4 + (r - FAR_RING) * 0.013) radii.push(r);
   const rings = radii.length;
   const height = heights ?? farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
@@ -198,7 +201,7 @@ export function layMountains(
     const a = (k / around) * Math.PI * 2, o = ri * around + k;
     X[o] = cx + Math.cos(a) * radii[ri]; Z[o] = cz + Math.sin(a) * radii[ri];
     H[o] = height(X[o], Z[o]);
-    if (inner && radii[ri] < 285) { const t = Math.min(1, Math.max(0, (radii[ri] - 215) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
+    if (inner && radii[ri] < FAR_RING + 70) { const t = Math.min(1, Math.max(0, (radii[ri] - FAR_RING) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
   // Rock does not stand in needles. Anything steeper than rock holds for long is worn down to

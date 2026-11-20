@@ -1369,10 +1369,13 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
-export const farUniforms: { uFarWood: { value: Vector3 }; uFarGrass: { value: Vector3 }; uFarSnow: { value: number } } = {
+export const farUniforms: { uFarWood: { value: Vector3 }; uFarGrass: { value: Vector3 }; uFarSnow: { value: number }; uFarRing: { value: Vector3 } } = {
   uFarWood: uniform(new Vector3(0.07, 0.15, 0.06)) as N, uFarGrass: uniform(new Vector3(0.16, 0.2, 0.08)) as N,
   // (How far snow lies down from the heights, 0 to 1: in a valley's or a town's winter, everywhere.)
   uFarSnow: uniform(0) as N,
+  // (Where the far land begins about a valley: its middle, x and z, and how far out from it. The woods it paints come in over the
+  // next 180 metres, as its trees do; none of it where the radius is 0.)
+  uFarRing: uniform(new Vector3(0, 0, 0)) as N,
 };
 
 const farHash: N = Fn(([p]: [N]) => {
@@ -1518,10 +1521,14 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   land = mix(land, pasture, grazed);
   // Woods low down, reaching higher up the gullies than on the spurs between them.
   const woodLine: N = float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42)).toVar();
-  const wood: N = smoothstep(0, 0.05, woodLine).mul(one(steep.mul(0.85))).toVar();
+  // (About a valley, the woods come in gradually from where the far land begins: there they began whole, dark and close, a ring of
+  // forest round the open ground and the scattered trees of the valley's own woods, which from any height was a fence.)
+  const ring = farUniforms.uFarRing as N;
+  const ringIn: N = select(ring.z.greaterThan(0), smoothstep(ring.z, ring.z.add(180), length(fp.sub(ring.xy))), float(1)).toVar();
+  const wood: N = smoothstep(0, 0.05, woodLine).mul(one(steep.mul(0.85))).mul(ringIn.mul(ringIn)).toVar();
   // (And past the wood's edge it thins out into single trees and bushes standing in the pasture, fewer the further out: the wood
   // stopped at a line, as if fenced.)
-  const scattered: N = smoothstep(-0.14, 0.02, woodLine).mul(one(steep.mul(0.85))).toVar();
+  const scattered: N = smoothstep(-0.14, 0.02, woodLine).mul(one(steep.mul(0.85))).mul(ringIn.mul(0.8).add(0.2)).toVar();
   // Two kinds of tree, in stands: the smaller and darker are firs.
   const firs: N = smoothstep(0.42, 0.58, farNoise(fp.mul(0.011).add(5)).add(high.sub(0.2).mul(0.5))).toVar();
   const size = mix(3.7, 2.6, firs);
@@ -1569,5 +1576,12 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
   // field other materials use for damp. Sheets that do not reckon it say none.)
   lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
-  return fadesAtNearEdge(m, 'far');
+  fadesAtNearEdge(m, 'far');
+  // (About a valley, the near ground lies under the far land's first thirty metres, and the far land is let into it there in
+  // patches, more of it the further out: its colours are not the near ground's, and where it began was a circle drawn round the
+  // valley, seen from any height once the woods no longer hid it.)
+  const ringShare: N = clamp(length(fp.sub(ring.xy)).sub(ring.z).div(30), 0, 1);
+  const ringPatch: N = farNoise(fp.div(2.4)).mul(0.65).add(farNoise(fp.div(0.85).add(7.3)).mul(0.35));
+  (m as N).opacityNode = (m as N).opacityNode.mul(select(ring.z.greaterThan(0).and(ringPatch.greaterThan(ringShare.mul(0.7).add(0.15))), float(0), float(1)));
+  return m;
 }
