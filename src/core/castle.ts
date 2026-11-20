@@ -59,8 +59,9 @@ export function castleOff(c: Pick<Castle, 'wall'>, x: number, z: number): number
  * the meadow; the gate where a line from the door down the valley meets it; towers at three or four of the other corners, the
  * sharpest turns first; the keep at the back. Returns the gate, for the road to start from.
  */
-export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1: number; z0: number }, doorX: number, rng: Rng): Castle {
-  const v = site.valley!, round = (x: number) => Math.round(x * 10) / 10;
+export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1: number; z0: number }, doorX: number, rng: Rng, room?: (x: number, z: number) => number): Castle {
+  // (`room`: how far inside the place a point is, where it is not a valley's: on an island, how far inland from the cliffs.)
+  const round = (x: number) => Math.round(x * 10) / 10, within = room ?? ((x: number, z: number) => insideOf(site.valley!, x, z));
   const hx0 = Math.min(house.x0, meadow.x0), hx1 = Math.max(house.x1, meadow.x1), hz0 = house.z0, hz1 = meadow.z1;
   const cx = (hx0 + hx1) / 2, cz = (hz0 + hz1) / 2;
   const fromHouse = (x: number, z: number) => Math.hypot(Math.max(hx0 - x, 0, x - hx1), Math.max(hz0 - z, 0, z - hz1));
@@ -84,7 +85,7 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
       wall.push([round(cx + c * r), round(cz + s * r)]);
     }
     // (Within the valley, with room to walk round it.)
-    if (wall.every(([x, z]) => insideOf(v, x, z) > 7)) break;
+    if (wall.every(([x, z]) => within(x, z) > 7)) break;
   }
   // The gate: where a line from the door straight down the valley crosses the wall.
   let gate = { x: doorX, z: hz1 + 6, out: Math.PI / 2, w: 3.4 }, edge = 0;

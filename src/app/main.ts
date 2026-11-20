@@ -268,7 +268,8 @@ async function start(): Promise<void> {
   // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
   const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
   // (The coursed stone of a castle's walls and towers, in a valley.)
-  const castleStone = place === 'valley' ? await paint('castle', texSize, 89) : null;
+  // (A valley's castle and its village's church, and an island's castle, are of it.)
+  const castleStone = place === 'valley' || place === 'island' ? await paint('castle', texSize, 89) : null;
   // (And the ashlar of a cathedral's walls, laid as a picture and not stone by stone, is only in towns, where the cathedral is.)
   const ashlar = place === 'town' ? await paint('ashlar', texSize, 89) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
