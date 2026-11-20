@@ -9,6 +9,8 @@ import { layTerrain } from '../render/landscape';
 import { squareBuilders } from '../render/streamMesh';
 import { cullCards, vegetationUniforms } from '../render/vegetation';
 import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn } from './dress';
+import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
+import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
 
 /**
@@ -30,6 +32,10 @@ import { WalkTouch } from './touch';
  * at half a metre (`refineSquare`), with tussocks, stones and rills a metre at the most at it; it is
  * remembered in the browser. With touch, a thumb stick on the left, looking by dragging on the right,
  * and buttons to fly, rise, sink and go on (`touch.ts`).
+ *
+ * The same page is the route page (`lab/route.html`, its body marked `data-walk="route"`): one way from a coastal town to a valley
+ * head walked in a corridor about it (`routeMode.ts`); `?from=coast1&to=valley1` (else the shortest town's way), `?broad=` the
+ * corridor's breadth (300 metres), `?beyond=` how far past its edge squares are made (200).
  */
 
 const params = new URLSearchParams(location.search);
@@ -75,7 +81,8 @@ async function start(): Promise<void> {
 
   // ---- the world, from its worker; and meanwhile the surfaces painted
   const named = /^[A-Za-z0-9-]{1,24}$/.test(location.hash.slice(1)) ? location.hash.slice(1) : '';
-  const seed = named || params.get('world') || 'w2', sz = (params.get('size') ?? '').split('x').map(Number);
+  // (The route page's own world, where its body names one: the world with the shortest way from a town to a valley head found.)
+  const seed = named || params.get('world') || document.body.dataset.world || 'w2', sz = (params.get('size') ?? '').split('x').map(Number);
   const size = sz.length === 2 && sz.every((v) => v >= 2 && v <= 20) ? { x: sz[0] * 1000, z: sz[1] * 1000 } : undefined;
   const worldWorker = new Worker(new URL('./worldWorker.ts', import.meta.url), { type: 'module' });
   const t0 = performance.now();
@@ -95,7 +102,12 @@ async function start(): Promise<void> {
   // (The houses' grounds, fitted to the land: made on it in every square they reach.)
   const grounds = W.places.flatMap((q) => (q.ground ? [q.ground] : []));
   const coverAt = (x: number, z: number) => W.cover[Math.min(field.nz - 1, Math.max(0, Math.round((z - field.z0) / field.cell))) * field.nx + Math.min(field.nx - 1, Math.max(0, Math.round((x - field.x0) / field.cell)))];
-  const look = groundLook(coverAt, W.plan.n % 997);
+  // (On the route page, the way's track: how far to one side of its middle, which the ground's material draws as ruts and bare earth.)
+  let trackAt: ((x: number, z: number) => number) | null = null;
+  const plainLook = groundLook(coverAt, W.plan.n % 997);
+  const look: typeof plainLook = { ...plainLook, turf: (x, z, y, slope) => { const c = plainLook.turf(x, z, y, slope); if (trackAt) c[3] = trackAt(x, z); return c; } };
+  // (What grows reads what lies at a point through these: on the route page, nothing grows on the way, nor trees close beside it.)
+  let growCover = coverAt, treeCover = coverAt;
   // The sea: one sheet at its level, out beyond the world's edge, smooth enough to show the sky.
   const water = new MeshStandardNodeMaterial({ color: 0x0b2430, roughness: 0.07, metalness: 0 });
   const sea = new Mesh(new PlaneGeometry(grid.hx * 2 + 24000, grid.hz * 2 + 24000), water);
@@ -105,7 +117,28 @@ async function start(): Promise<void> {
 
   // ---- tiles and squares, from the workers
   const tiles = new Map<string, TileData>(), tileWait = new Map<string, Promise<TileData>>(), tileResolve = new Map<string, (t: TileData) => void>();
-  worldWorker.onmessage = (e) => { if (e.data.type === 'tile') { const t = e.data.tile as TileData, key = `${t.i},${t.j}`; tiles.set(key, t); tileResolve.get(key)?.(t); } };
+  let routeReply: ((m: RouteReply) => void) | null = null;
+  worldWorker.onmessage = (e) => {
+    if (e.data.type === 'tile') { const t = e.data.tile as TileData, key = `${t.i},${t.j}`; tiles.set(key, t); tileResolve.get(key)?.(t); }
+    else if (e.data.type === 'route') routeReply?.(e.data as RouteReply);
+  };
+  // The route page: the way to walk, laid and graded in the world's worker, before any square is asked for, since each is made with its bed.
+  const game = document.querySelector<HTMLMetaElement>('meta[name="dungeons-game"]')?.content || './index.html';
+  const reply = document.body.dataset.walk === 'route'
+    ? await new Promise<RouteReply>((resolve) => { routeReply = resolve; hud.textContent = 'Laying the way…'; worldWorker.postMessage({ type: 'route', from: params.get('from'), to: params.get('to') }); })
+    : null;
+  const route = reply?.route && reply.way
+    ? new RouteWalk({ ...reply, route: reply.route, way: reply.way }, { seed, grid, broad: Math.max(40, Number(params.get('broad')) || 300), beyond: params.has('beyond') ? Math.max(0, Number(params.get('beyond'))) : 200, game, size })
+    : null;
+  if (reply && !route) hud.textContent = 'This world has no way from a town to a valley head to walk.';
+  const ways = route ? [route.way] : [];
+  if (route) {
+    trackAt = (x, z) => route.track(x, z); growCover = route.coverFor(coverAt, 0.8); treeCover = route.coverFor(coverAt, 4);
+    // (The ink map of the stretch the way crosses: from what the world's worker handed over, which is all the ink map needs.)
+    route.setWorld(worldMapOf(W as unknown as HandedWorld));
+    document.getElementById('mapbutton')?.addEventListener('click', (e) => { e.preventDefault(); route.toggleInk(); (e.currentTarget as HTMLElement).blur(); });
+    document.getElementById('inkpanel')?.addEventListener('click', () => route.toggleInk(false));
+  }
   const tile = (i: number, j: number): Promise<TileData> => {
     const key = `${i},${j}`;
     if (tiles.has(key)) return Promise.resolve(tiles.get(key)!);
@@ -117,7 +150,8 @@ async function start(): Promise<void> {
   const pool = Array.from({ length: cores }, () => ({ w: new Worker(new URL('./squareWorker.ts', import.meta.url), { type: 'module' }), busy: false, has: new Set<string>() }));
   const squares = new Map<string, Sq>(), pending = new Set<string>(), squareMs: number[] = [];
   const finePending = new Set<string>(), fineMs: number[] = [];
-  let fineOn = readFine();
+  // (Not on the route page: the tussocks and rills of the half metre would be laid on the way's bed too.)
+  let fineOn = !route && readFine();
   for (const p of pool) p.w.onmessage = (e) => {
     const m = e.data, key = `${m.i},${m.j}`;
     p.busy = false;
@@ -137,7 +171,7 @@ async function start(): Promise<void> {
     const need = tilesFor(grid, i, j), data = await Promise.all(need.map(([a, b]) => tile(a, b)));
     const send = data.filter((t) => !worker.has.has(`${t.i},${t.j}`));
     for (const t of send) worker.has.add(`${t.i},${t.j}`);
-    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds });
+    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways });
   };
   /** Asks a worker to split a square into four at half a metre, from its own heights. */
   const requestFine = (sq: Sq) => {
@@ -204,13 +238,13 @@ async function start(): Promise<void> {
   const standing = (x: number, z: number) => { const k = `${Math.floor(x / LOW)},${Math.floor(z / LOW)}`; return nears.has(k) || mids.has(k); };
   let counts = { tufts: 0, trees: 0, farTrees: 0 };
   const lowBlock = (bx: number, bz: number) => {
-    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, coverAt, W.plan.n % 997, season), meshes = cardsOf(sets);
+    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growCover, W.plan.n % 997, season), meshes = cardsOf(sets);
     for (const m of meshes) scene.add(m);
     lows.set(`${bx},${bz}`, meshes);
     counts.tufts += sets.reduce((s, q) => s + q.matrices.length / 16, 0);
   };
   const treeBlock = (bx: number, bz: number, simply = false) => {
-    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, coverAt, heightAt, W.plan.n), out: (Mesh | InstancedMesh)[] = [];
+    const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treeCover, heightAt, W.plan.n), out: (Mesh | InstancedMesh)[] = [];
     if (trees.length) {
       const { wood, sets } = growTrees(trees, heightAt, season, simply);
       for (const [name, b] of wood) if (b.triangleCount) out.push(meshOf(b, materials[name], hour));
@@ -229,7 +263,7 @@ async function start(): Promise<void> {
   /** Painted trees in a square's ground, all but those near enough to stand whole. */
   const farTreeBlock = (i: number, j: number) => {
     const [x0, z0] = squareOrigin(grid, i, j), key = `${i},${j}`, at = me.clone();
-    const trees = treesIn(x0, z0, SQUARE.size, coverAt, heightAt, W.plan.n).filter((t) => !standing(t.x, t.z));
+    const trees = treesIn(x0, z0, SQUARE.size, treeCover, heightAt, W.plan.n).filter((t) => !standing(t.x, t.z));
     drop(fars.get(key)?.meshes ?? []);
     const meshes = cardsOf(farTrees(trees, heightAt, season));
     for (const m of meshes) { m.castShadow = false; scene.add(m); }
@@ -255,13 +289,13 @@ async function start(): Promise<void> {
     }
     // The game, built on the place chosen: where it is, as the page's head says (`<meta name="dungeons-game">`), or the usual file.
     const play = document.getElementById('play') as HTMLAnchorElement | null;
-    const game = document.querySelector<HTMLMetaElement>('meta[name="dungeons-game"]')?.content || './index.html';
     const playAt = (spec: string) => {
       const m = spec.match(/^(valley|island|mountain|coast)(\d)$/);
       if (play) play.hidden = !m;
       if (play && m) play.href = `${game}#${new URLSearchParams({ world: seed, place: m[1] === 'coast' ? 'town' : m[1], n: m[2] })}`;
     };
-    if (where) {
+    if (route) route.wire();
+    else if (where) {
       const KIND: Record<string, string> = { island: 'island', valley: 'valley head', mountain: 'mountain top', coast: 'coastal town' };
       where.innerHTML = W.places.map((q) => `<option value="${q.kind}${q.n}">${q.name}, ${KIND[q.kind]}</option>`).join('');
       const start = params.get('at') ?? '';
@@ -272,9 +306,11 @@ async function start(): Promise<void> {
   }
   let placeIndex = 0;
   let yaw = 0, pitch = -0.05, flying = params.has('fly'), lift = 1.7;
+  if (route) { const at = route.start(); me.set(at.x, 0, at.z); yaw = at.yaw; }
   const keys = new Set<string>();
   const nextPlace = () => {
-    if (!W.places.length) return;
+    // (On the route page there is only the way: no going on to other places.)
+    if (!W.places.length || route) return;
     const q = W.places[placeIndex++ % W.places.length], menu = document.getElementById('where') as HTMLSelectElement | null;
     // (By the menu, where there is one, so that it and the link to the game follow.)
     if (menu) { menu.value = `${q.kind}${q.n}`; menu.dispatchEvent(new Event('change')); } else me.set(q.x, 0, q.z);
@@ -301,10 +337,13 @@ async function start(): Promise<void> {
   window.addEventListener('keydown', (e: KeyboardEvent) => {
     keys.add(e.code);
     if (e.code === 'KeyV' && !e.repeat) toggleFly();
-    if (e.code === 'KeyM' && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
+    // (On the route page M is the ink map, and T the triangles.)
+    if (e.code === (route ? 'KeyT' : 'KeyM') && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
+    if (route && e.code === 'KeyM' && !e.repeat) route.toggleInk();
+    if (route && e.code === 'Escape') route.toggleInk(false);
     // (Numbers for valley heads, with Shift for islands; P for the next place of any kind. Ctrl with a number changes the browser's tab.)
     const digit = /^Digit([1-4])$/.exec(e.code);
-    if (digit && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (digit && !e.ctrlKey && !e.metaKey && !e.altKey && !route) {
       const spec = `${e.shiftKey ? 'island' : 'valley'}${digit[1]}`, menu = document.getElementById('where') as HTMLSelectElement | null;
       if (menu && W.places.some((q) => `${q.kind}${q.n}` === spec)) { menu.value = spec; menu.dispatchEvent(new Event('change')); } else { const to = place(spec); me.set(to.x, 0, to.z); }
       e.preventDefault();
@@ -321,11 +360,12 @@ async function start(): Promise<void> {
 
   // ---- the loop
   const frames: number[] = [];
-  let last = performance.now(), rebuilt = 0, shown = 0, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5;
+  let last = performance.now(), rebuilt = 0, shown = 0, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5, layingAhead = false;
+  const begun = last;
   /** The squares within reach of where one stands. */
   function* squaresWanted(): Generator<string> {
     const ci = Math.floor((me.x + grid.hx) / SQUARE.size), cj = Math.floor((me.z + grid.hz) / SQUARE.size), r = Math.ceil(NEAR / SQUARE.size) + 1;
-    for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) if (i >= 0 && j >= 0 && i < SX && j < SZ && distTo(i, j) < NEAR) yield `${i},${j}`;
+    for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) if (i >= 0 && j >= 0 && i < SX && j < SZ && distTo(i, j) < NEAR && (!route || route.wantsSquare(i, j))) yield `${i},${j}`;
   }
   /** How far the nearest point of a stretch of ground lies from where one stands, on the level; and of a square. */
   const distRect = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - me.x, me.x - x0 - s), Math.max(0, z0 - me.z, me.z - z0 - s));
@@ -357,11 +397,17 @@ async function start(): Promise<void> {
   const wantedMids = () => blocksNear(MID).filter(([i, j]) => !nears.has(`${i},${j}`) && squaresUnder(i * LOW, j * LOW, LOW));
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
+    /** On the route page: opens or closes the ink map of the stretch. */
+    ink: (open?: boolean) => route?.toggleInk(open),
+    /** On the route page: how far along the way, its length, whether arrived, and how the places ahead are being laid out. */
+    route: () => (route ? { s: route.s, length: route.length, off: route.off, arrived: route.arrived, ahead: route.ahead, ready: [...route.ready], squares: route.squaresInReach, from: route.from, to: route.to, way: route.way } : null),
     /** Ground at half a metre near the walker, or not. */
     fine: (on: boolean) => { setFine(on); const box = document.getElementById('fine') as HTMLInputElement | null; if (box) box.checked = on; },
     /** Goes to a place by its kind and number: `valley1`, `island2`, `mountain3`. */
     to: (spec: string) => { const p = place(spec); me.set(p.x, 0, p.z); },
     goto: (x: number, z: number, y?: number, yawTo?: number, pitchTo?: number, fly?: boolean) => { me.set(x, 0, z); if (yawTo !== undefined) yaw = yawTo; if (pitchTo !== undefined) pitch = pitchTo; if (fly !== undefined) flying = fly; if (y !== undefined) lift = y; },
+    /** What is not yet in, of what `settled` waits for (for scripts that find it waiting). */
+    unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: treesDirty.size, far: farDirty.size }),
     settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && treesDirty.size === 0 && farDirty.size === 0,
   };
   const frame = (now: number) => {
@@ -372,6 +418,11 @@ async function start(): Promise<void> {
     const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) - touch.move.y, s = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + touch.move.x;
     me.x += (-Math.sin(yaw) * f + Math.cos(yaw) * s) * speed * dt; me.z += (-Math.cos(yaw) * f - Math.sin(yaw) * s) * speed * dt;
     me.x = Math.max(-grid.hx, Math.min(grid.hx, me.x)); me.z = Math.max(-grid.hz, Math.min(grid.hz, me.z));
+    // (On the route page, within the corridor about the way.)
+    if (route) route.keepIn(me);
+    // (And the two places laid out for the game ahead, once the squares about the start are in, or after twenty seconds: not before, so
+    // that the worker that does it, making the world again, does not slow the first squares.)
+    if (route && !layingAhead && (now - begun > 20000 || (squares.size >= 6 && pending.size === 0))) { layingAhead = true; void route.layOutAhead(); }
     if (flying) lift = Math.max(1.7, lift + ((keys.has('Space') ? 1 : 0) - (keys.has('KeyC') ? 1 : 0) + touch.move.rise) * speed * dt);
     const groundY = heightAt(me.x, me.z);
     camera.position.set(me.x, Math.max(groundY, 0) + lift, me.z);
@@ -477,7 +528,8 @@ async function start(): Promise<void> {
     if (now - shown > 250) {
       shown = now;
       const st = stats();
-      hud.textContent = `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
+      if (route) { route.drawMap(me, yaw); route.markArrival(); route.drawInkWalker(me, yaw); }
+      hud.textContent = (route ? `${route.lines().join('\n')}\n\n` : '') + `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
         `frame ${st.frameMs.toFixed(1)} ms · drawn ${st.drawnTriangles.toLocaleString()} triangles\n` +
         `squares ${st.squares} (${st.pending} coming), ${st.squareTriangles.toLocaleString()} triangles; a square ${st.squareMsMiddle.toFixed(0)} ms in a worker (${cores} at work)\n` +
         (fineOn ? `at half a metre ${st.fine} (${st.finePending} coming), ${st.fineTriangles.toLocaleString()} triangles; four ${st.fineMsMiddle.toFixed(0)} ms\n` : '') +

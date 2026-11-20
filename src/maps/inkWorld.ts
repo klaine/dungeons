@@ -51,22 +51,33 @@ function contour(v: ArrayLike<number>, nx: number, nz: number, x0: number, z0: n
   }
 }
 
+/** A stretch of a world to map alone, in the world's coordinates: from `x0`, `z0` to `x1`, `z1`. */
+export interface InkArea { x0: number; z0: number; x1: number; z1: number }
+
 /**
  * Where the ink map of `pixels` across puts the world: its margin, the room for its title over it, how many pixels a metre is, how
  * tall the sheet is, and the point on it of a point of the world. (For what is drawn over the map afterwards: places' footprints.)
+ * With an `area`, the map is of that stretch alone, at the scale that fills the sheet's breadth with it, and its key shorter.
  */
-export function inkFrame(plan: { hx: number; hz: number }, pixels = 2400): { edge: number; head: number; scale: number; W: number; H: number; X: (x: number) => number; Z: (z: number) => number } {
-  const W = pixels, u = W / 2400, hx = plan.hx, hz = plan.hz;
-  // (The map as broad as the page, and as tall as the world is deep at that scale.)
-  const edge = 70 * u, head = 190 * u, foot = 470 * u, msx = W - 2 * edge, scale = msx / (2 * hx), msz = 2 * hz * scale;
-  return { edge, head, scale, W, H: Math.round(head + msz + foot), X: (x: number) => edge + (x + hx) * scale, Z: (z: number) => head + (z + hz) * scale };
+export function inkFrame(plan: { hx: number; hz: number }, pixels = 2400, area?: InkArea): { edge: number; head: number; scale: number; W: number; H: number; msz: number; X: (x: number) => number; Z: (z: number) => number; x0: number; z0: number } {
+  const W = pixels, u = W / 2400, x0 = area ? area.x0 : -plan.hx, z0 = area ? area.z0 : -plan.hz;
+  const across = area ? area.x1 - area.x0 : 2 * plan.hx, down = area ? area.z1 - area.z0 : 2 * plan.hz;
+  // (The map as broad as the page, and as tall as the world, or the stretch, is deep at that scale.)
+  const edge = 70 * u, head = 190 * u, foot = (area ? 300 : 470) * u, msx = W - 2 * edge, scale = msx / across, msz = down * scale;
+  return { edge, head, scale, W, H: Math.round(head + msz + foot), msz, X: (x: number) => edge + (x - x0) * scale, Z: (z: number) => head + (z - z0) * scale, x0, z0 };
 }
 
-export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pixels?: number } = {}): number {
-  const W = opts.pixels ?? 2400, u = W / 2400;
+/**
+ * What an ink map of a stretch of a world says over and under it, and draws on it besides the world's own: its title and the line
+ * under it, and a way walked, drawn in red over the rest with its own line in the key.
+ */
+export interface InkAreaOptions { area: InkArea; title: string; subtitle: string; route?: [number, number][]; routeName?: string }
+
+export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pixels?: number; stretch?: InkAreaOptions } = {}): number {
+  const W = opts.pixels ?? 2400, u = W / 2400, stretch = opts.stretch;
   const f = w.field, p = w.plan, hx = p.hx, hz = p.hz, nx = f.nx, nz = f.nz, h = f.data;
   const rng = new Rng(`world/${p.seed}`).fork('ink'), seed = Math.floor(rng.next() * 1e6);
-  const { edge, head, scale, H, X, Z } = inkFrame(p, W), msx = W - 2 * edge, msz = 2 * hz * scale;
+  const { edge, head, scale, H, msz, X, Z, x0: ax0, z0: az0 } = inkFrame(p, W, stretch?.area), msx = W - 2 * edge;
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d')!;
   /** The lattice point nearest a point of the world. */
@@ -133,7 +144,7 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
     const sp = 5.2 * u, buckets = new Map<string, number[]>();
     for (let py = head; py < head + msz; py += sp) for (let px = edge; px < edge + msx; px += sp) {
       const sx = px + rng.range(-0.45, 0.45) * sp, sy = py + rng.range(-0.45, 0.45) * sp;
-      const x = (sx - edge) / scale - hx, z = (sy - head) / scale - hz, k = cellOf(x, z);
+      const x = (sx - edge) / scale + ax0, z = (sy - head) / scale + az0, k = cellOf(x, z);
       if (w.sea[k] || w.lake[k] || snowy(k)) continue;
       // (The fall measured over a lattice step and a half each way: a cut one point wide is a river's bed, not a slope to hatch.)
       const c = f.cell * 1.5, gx = (f.at(x + c, z) - f.at(x - c, z)) / (2 * c), gz = (f.at(x, z + c) - f.at(x, z - c)) / (2 * c), s = Math.hypot(gx, gz);
@@ -160,7 +171,7 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
   }
 
   // ---- what lies on the land, by its marks
-  const at = (sx: number, sy: number) => cellOf((sx - edge) / scale - hx, (sy - head) / scale - hz);
+  const at = (sx: number, sy: number) => cellOf((sx - edge) / scale + ax0, (sy - head) / scale + az0);
   /** Points on a jittered grid `sp` pixels apart where the land is of kind `c`. */
   const scatter = (sp: number, c: number, chance: number, draw: (x: number, y: number) => void) => {
     for (let py = head; py < head + msz; py += sp) for (let px = edge; px < edge + msx; px += sp) {
@@ -325,6 +336,15 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       ctx.fillStyle = RED; ctx.beginPath(); ctx.arc(X(q.landing.x), Z(q.landing.z), 2.6 * u, 0, Math.PI * 2); ctx.fill();
     }
   }
+  // A way walked, on a map of a stretch: red over the paper, as the places it joins are.
+  if (stretch?.route && stretch.route.length > 1) {
+    const r = stretch.route;
+    ctx.beginPath(); r.forEach(([x, z], k) => { if (k) ctx.lineTo(X(x), Z(z)); else ctx.moveTo(X(x), Z(z)); });
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = PAPER; ctx.lineWidth = 7 * u; ctx.stroke();
+    ctx.strokeStyle = RED; ctx.lineWidth = 3.2 * u; ctx.setLineDash([12 * u, 5 * u]); ctx.stroke(); ctx.setLineDash([]);
+    for (let k = 0; k < r.length; k += 6) mark(X(r[k][0]), Z(r[k][1]), 4 * u);
+  }
   for (const q of w.places) { const x = X(q.x), y = Z(q.z); placeMark(q, x, y, 7 * u); mark(x, y, 8 * u); }
   // Their names, most important first, so they get the clearest places.
   for (const q of w.places) label(q.name, X(q.x), Z(q.z), 8 * u, `italic 600 ${17 * u}px ${SERIF}`, RED);
@@ -334,8 +354,8 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
     label(big ? t.name.toUpperCase() : t.name, X(t.x), Z(t.z), (big ? 12 : 6) * u, big ? `${15 * u}px ${SERIF}` : `italic ${14 * u}px ${SERIF}`, INK);
   }
 
-  // The names of the sea, the upland and the range, spaced out across them, along the run of the coast.
-  {
+  // The names of the sea, the upland and the range, spaced out across them, along the run of the coast. (Not on a map of a stretch.)
+  if (!stretch) {
     const spots: Record<string, [number, number][]> = { sea: [], bay: [], upland: [], range: [] };
     for (let z = -hz + hz / 50; z < hz; z += hz / 25) for (let x = -hx + hx / 50; x < hx; x += hx / 25) {
       const zn = zonesAt(p, x, z), k = cellOf(x, z);
@@ -403,16 +423,17 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
   // ---- heading, scale and the north point
   ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.font = `italic ${58 * u}px ${SERIF}`;
-  ctx.fillText(`The Country of ${w.name}`, W / 2, 92 * u);
+  ctx.fillText(stretch ? stretch.title : `The Country of ${w.name}`, W / 2, 92 * u, W - 2 * edge);
   ctx.font = `${22 * u}px ${SERIF}`;
-  ctx.fillText(`with ${w.regions.sea}, ${w.regions.bay}, ${w.regions.upland} and ${w.regions.range}; the places of adventure in red`, W / 2, 132 * u, W - 2 * edge);
+  ctx.fillText(stretch ? stretch.subtitle : `with ${w.regions.sea}, ${w.regions.bay}, ${w.regions.upland} and ${w.regions.range}; the places of adventure in red`, W / 2, 132 * u, W - 2 * edge);
   {
-    const sx = edge, sy = 160 * u, kmPx = 100 * scale;
+    // (A kilometre in tenths; or, where a kilometre would take more than half the sheet, half a kilometre in tenths of that.)
+    const half = 1000 * scale > msx * 0.55, step = half ? 50 : 100, sx = edge, sy = 160 * u, kmPx = step * scale;
     ctx.lineWidth = 1.4 * u; ctx.strokeStyle = INK;
     for (let i = 0; i < 10; i++) { ctx.fillStyle = i % 2 ? PAPER : INK; ctx.fillRect(sx + i * kmPx, sy - 5 * u, kmPx, 7 * u); }
     ctx.strokeRect(sx, sy - 5 * u, 10 * kmPx, 7 * u);
     ctx.fillStyle = INK; ctx.font = `italic ${18 * u}px ${SERIF}`; ctx.textAlign = 'left';
-    ctx.fillText('one kilometre', sx + 10 * kmPx + 12 * u, sy + 2 * u);
+    ctx.fillText(half ? 'half a kilometre' : 'one kilometre', sx + 10 * kmPx + 12 * u, sy + 2 * u);
     const nx0 = W - edge - 20 * u, ny0 = 128 * u, r = 26 * u;
     ctx.beginPath(); ctx.moveTo(nx0, ny0 - r); ctx.lineTo(nx0 + r * 0.38, ny0 + r * 0.6); ctx.lineTo(nx0, ny0 + r * 0.25); ctx.lineTo(nx0 - r * 0.38, ny0 + r * 0.6); ctx.closePath(); ctx.fill();
     ctx.textAlign = 'center'; ctx.font = `${22 * u}px ${SERIF}`;
@@ -440,8 +461,9 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       ['Heath, rough grazing', (x, y) => { ctx.lineWidth = 0.9 * u; ctx.strokeStyle = INK; ctx.beginPath(); for (let i = 0; i < 3; i++) tuft(x + 7 * u + i * 10 * u, y + 3 * u, 2.4 * u); ctx.stroke(); }],
       ['Hachures: the steeper, the darker', (x, y) => { ctx.strokeStyle = INK; ctx.beginPath(); for (let i = 0; i < 9; i++) { ctx.lineWidth = (0.4 + i * 0.18) * u; ctx.moveTo(x + i * 4 * u, y - 6 * u); ctx.lineTo(x + i * 4 * u, y + 4 * u); } ctx.stroke(); }],
     ];
+    if (stretch?.route) keys.unshift([stretch.routeName ?? 'The way walked', (x, y) => { ctx.strokeStyle = RED; ctx.lineWidth = 3.2 * u; ctx.setLineDash([12 * u, 5 * u]); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 34 * u, y); ctx.stroke(); ctx.setLineDash([]); }]);
     keys.forEach(([text, draw], i) => {
-      const col = Math.floor(i / 6), row = i % 6, x = edge + col * 330 * u, y = top + 38 * u + row * lh * 1.25;
+      const rows = stretch ? 5 : 6, col = Math.floor(i / rows), row = i % rows, x = edge + col * (stretch ? 450 : 330) * u, y = top + 38 * u + row * lh * 1.25;
       draw(x, y - 5 * u);
       ctx.fillStyle = INK; ctx.font = `${16 * u}px ${SERIF}`; ctx.textAlign = 'left';
       ctx.fillText(text, x + 46 * u, y);
@@ -455,8 +477,9 @@ export function drawInkWorld(canvas: HTMLCanvasElement, w: WorldMap, opts: { pix
       ['mountain', 'Hospices on mountain tops', (q) => `${q.name}, ${Math.round(q.y)} m${q.ground ? `, the hospice at ${Math.round(q.ground.terraces[q.ground.terraces.length - 1].y)} m` : ''}${fitted(q)}`],
       ['coast', 'Houses above harbour towns', (q) => `${q.name}, ${Math.round(q.y)} m over the sea${fitted(q)}`],
     ];
-    // (Two by two beside the key: three abreast ran off the paper's edge with four kinds.)
-    kinds.forEach(([kind, title, text], c) => {
+    // (Two by two beside the key: three abreast ran off the paper's edge with four kinds. Not on a map of a stretch, whose places are
+    // named on it, and whose key runs across the sheet.)
+    if (!stretch) kinds.forEach(([kind, title, text], c) => {
       const x = edge + 700 * u + (c % 2) * 820 * u, y0 = top + Math.floor(c / 2) * 200 * u;
       placeMark({ kind } as WorldPlace, x + 8 * u, y0 - 8 * u, 7 * u);
       ctx.fillStyle = INK; ctx.font = `italic ${22 * u}px ${SERIF}`; ctx.textAlign = 'left';
