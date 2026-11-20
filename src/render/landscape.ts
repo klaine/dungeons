@@ -189,11 +189,16 @@ export function layMountains(
   inner?: HeightFn,
   /** The hills' own heights, where the land is not made up here: as for a valley that was found, whose hills are the land it was found in. */
   heights?: HeightFn,
+  /**
+   * Where its first ring lies, if not at `FAR_RING`: beyond everything laid nearer, which ends there. (It lay over what was laid
+   * nearer wherever that reached past it, the two at nearly the same height, and whichever stood the higher showed, cell by cell.)
+   */
+  ring = FAR_RING,
 ): void {
   // (A notch finer than first made: more points round each ring, and the rings closer.)
   const around = 1040;
   const radii: number[] = [];
-  for (let r = FAR_RING; r <= 3050; r += 3.4 + (r - FAR_RING) * 0.013) radii.push(r);
+  for (let r = ring; r <= 3050 + ring - FAR_RING; r += 3.4 + (r - ring) * 0.013) radii.push(r);
   const rings = radii.length;
   const height = heights ?? farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
@@ -201,7 +206,7 @@ export function layMountains(
     const a = (k / around) * Math.PI * 2, o = ri * around + k;
     X[o] = cx + Math.cos(a) * radii[ri]; Z[o] = cz + Math.sin(a) * radii[ri];
     H[o] = height(X[o], Z[o]);
-    if (inner && radii[ri] < FAR_RING + 70) { const t = Math.min(1, Math.max(0, (radii[ri] - FAR_RING) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
+    if (inner && radii[ri] < ring + 70) { const t = Math.min(1, Math.max(0, (radii[ri] - ring) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
   // Rock does not stand in needles. Anything steeper than rock holds for long is worn down to

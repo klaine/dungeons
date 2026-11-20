@@ -2327,16 +2327,30 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.box('stone', V(o.x0 - k, y0, o.z0), V(o.x0, y1, o.z1), coping, coping, `kerbw${o.id}`);
       kit.box('stone', V(o.x1, y0, o.z0), V(o.x1 + k, y1, o.z1), coping, coping, `kerbe${o.id}`);
     }
-    const reach = 246;
-    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), ground, {
+    // Each sheet ends where a finer one begins, and none lies over another at its own height. (The far land's ring began two hundred
+    // and fifteen metres from the meadow, inside the coarse sheet's square, and once the valley had grown long enough for a castle, a
+    // village, fields and a forest, inside the fine sheet too, where the player arrives. Lying one on another at nearly the same height,
+    // whichever stood the higher showed, a cell at a time: hard-edged pieces of two grounds, and steps of light and shade.) So the far
+    // land begins beyond the fine sheet's farthest corner, and the coarse sheet fills what lies between, out to that circle and on
+    // under the far land's first thirty metres, where the far land is let into it in patches (`ringShare` in the far material), and
+    // no further: its corners beyond drawn in onto the circle there. Under the far land it lies a metre and a quarter lower than its
+    // own ground, so that the far land is always the higher where both are drawn, and the ground shows only where the far land lets it.
+    // (Ending at the ring itself, the far land's patches there opened onto the sky.)
+    const farRing = Math.max(FAR_RING, Math.ceil(Math.max(...([[fine.x0, fine.z0], [fine.x1, fine.z0], [fine.x0, fine.z1], [fine.x1, fine.z1]] as const).map(([x, z]) => Math.hypot(x - cxA, z - czA))) + 6));
+    const UNDER = 30, coarseEnd = farRing + UNDER;
+    const reach = Math.max(246, snap(coarseEnd + 3, true));
+    const ringOut = (x: number, z: number) => Math.hypot(x - cxA, z - czA) - farRing;
+    const underFar = (x: number, z: number) => ground(x, z) - 1.25 * smooth(ringOut(x, z) / 4);
+    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), underFar, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 3,
+      warp: (x, z) => { const out = ringOut(x, z) - UNDER; if (out <= 0) return [x, z]; const k = coarseEnd / (out + coarseEnd); return [cxA + (x - cxA) * k, czA + (z - czA) * k]; },
       // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
       // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
       // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)
       // (Where the valley was found its hills are the land's own, with long slopes of forty and fifty degrees that are turf and
       // trees in such country; at six metres to a cell they came out as grey slabs. There only the steepest is bare.)
       bare: vale?.terrain ? 0.42 : 0.8,
-      skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
+      skip: (c) => (c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1) || [ringOut(c.x0, c.z0), ringOut(c.x1, c.z0), ringOut(c.x0, c.z1), ringOut(c.x1, c.z1)].every((d) => d >= UNDER),
     });
     // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
     wild.group = 'soft';
@@ -2366,7 +2380,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (Fewer where the far land begins, coming in to the whole over 180 metres, as the woods it paints do: they stood there one to
       // every thirteen square metres, against one to a hundred or so in the valley's own woods just inside, and from any height the
       // open ground about the valley was ringed by a wall of forest. Here about as thick as those woods, at first.)
-      const outOfRing = Math.hypot(x - cxA, z - czA) - FAR_RING;
+      const outOfRing = ringOut(x, z);
       if (own01(x, z, 61) > 0.12 + 0.88 * smooth(outOfRing / 180)) return;
       // (In winter a far broadleaf, a whole crown painted on one card, is a dark ball: in the wood it is lost among the others, but
       // standing alone on the snow, as they do where the wood is thin, it was a blot. There the trees standing alone are firs.)
@@ -2376,7 +2390,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const c: Colour = winter && fir ? [c0[0] * 0.6 + SNOWED[0] * 0.4, c0[1] * 0.6 + SNOWED[1] * 0.4, c0[2] * 0.6 + SNOWED[2] * 0.4] : c0;
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
-    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
+    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined, farRing);
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
@@ -2460,7 +2474,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
-    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06], ring: [cxA, czA, FAR_RING] };
+    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06], ring: [cxA, czA, farRing] };
 
     // ---- what lies and grows in the valley
     // (The yard before a mine: the ground between its mouth and the tip, and the shed's and the stacks' beside the mouth.)
@@ -2734,7 +2748,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
     const row = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('treerow') : null; // (no woods when a row is asked for, so the row stands alone)
     if (!row) woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
-    if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+    if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, (x, z) => inFine(x, z) || ringOut(x, z) > -4);
     // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
     if (row) {
       const [rx, rz] = row.split(',').map(Number);
