@@ -3,6 +3,7 @@ import { Rng } from './rng';
 import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { layOutTown as layOutHarbourTown } from './town';
+import { draftCathedral } from './cathedral';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { castleOff, layOutCastle } from './castle';
@@ -236,6 +237,16 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     const low = setting.hour === 'morning' || setting.hour === 'sunset' || setting.hour === 'dusk';
     setting.cloudForm = air.chance(0.2 + (low ? 0.3 : 0) + ((setting.cloud ?? 0) > 0.55 ? 0.2 : 0)) ? 'layered' : 'heaped';
   }
+  // A harbour town's house is a cathedral (`cathedral.ts`): a plan of its own, laid out once on the land found for the town. (Another
+  // stream of its measures is tried where the first will not go.)
+  if (kind === 'town') {
+    setting.kind = 'cathedral';
+    let why = '';
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { return draftCathedral(seed, setting, base.fork(attempt ? `cathedral/${attempt}` : 'cathedral'), opts.world); } catch (e) { why = (e as Error).message; }
+    }
+    throw new Error(why);
+  }
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
   const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);
@@ -254,9 +265,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
   // (Every kind of place unless asked otherwise, `plain`: valleys too, now that a found one walks and looks as a drawn one does.)
-  // (A town is always laid on land that was found: its drafts lay nothing out but the box it would have.)
-  if (opts.terrain !== 'plain' || kind === 'town') {
-    if (kind === 'town') return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' });
+  if (opts.terrain !== 'plain') {
     try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
       // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
       if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
