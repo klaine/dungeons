@@ -1282,6 +1282,15 @@ async function start(): Promise<void> {
   let last = performance.now();
   let frames = 0, fpsAt = last, drawn = 0;
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
+  // The picture's resolution follows how fast frames come (asked for: lighter frames; on a laptop the valley ran at eighteen to
+  // thirty-five frames a second). Where they come slower than forty a second, averaged over a second and a half, the pixel ratio is
+  // lowered a tenth at a time, down to some three fifths of the chosen detail's and never below three quarters; where they come at
+  // fifty-eight or more for three such spells, it is raised a tenth again, up to the chosen. Much of a frame is the overdraw of
+  // leaves and the air reckoned at every point of the picture, and both go with the number of points. The smoothing over frames keeps
+  // the picture whole at the lower ratios. (`?adapt=0` keeps the ratio fixed.)
+  const fullRatio = Math.min(window.devicePixelRatio, num('dpr', quality.dpr)), leastRatio = Math.min(fullRatio, Math.max(0.75, fullRatio * 0.6));
+  const adapt = params.get('adapt') !== '0';
+  let ratio = fullRatio, spellAt = last, spellFrames = 0, quick = 0;
 
   // (How far a point is outside the place the player may walk, once that is known: see `__dbg.beyond` below.)
   let beyondPlay: ((x: number, z: number) => number) | null = null;
@@ -1445,8 +1454,21 @@ async function start(): Promise<void> {
     // (The air's pictures likewise, a few times: they are the far sun's shadow in a large place, and whatever was not ready the first
     // time, the crowns drawn with their own materials above all, was missing from them.)
     if (drawn === 40 || drawn === 200 || drawn === 600) drawAirMaps();
+    if (adapt && !held && document.visibilityState === 'visible' && (window as any).__bakeDone !== undefined) {
+      spellFrames++;
+      if (now - spellAt > 1500) {
+        const each = (now - spellAt) / spellFrames;
+        // (A spell with a long gap in it, a tab hidden or the program busy, says nothing of how fast frames come.)
+        if (each < 250) {
+          if (each > 25 && ratio > leastRatio + 0.01) { ratio = Math.max(leastRatio, Math.round((ratio - 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); window.dispatchEvent(new Event('resize')); }
+          else if (each < 17.2 && ratio < fullRatio - 0.01 && ++quick >= 3) { ratio = Math.min(fullRatio, Math.round((ratio + 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); window.dispatchEvent(new Event('resize')); }
+          else if (each >= 17.2) quick = 0;
+        }
+        spellAt = now; spellFrames = 0;
+      }
+    }
     if (now - fpsAt > 500) {
-      document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
+      document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps${ratio < fullRatio - 0.01 ? ` · ${ratio.toFixed(2)}×` : ''}`;
       frames = 0;
       fpsAt = now;
     }
