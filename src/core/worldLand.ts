@@ -141,6 +141,39 @@ export function toWorld(f: SiteFrame, x: number, z: number): [number, number] {
   return [f.u + c * dx - sn * dz, f.v + sn * dx + c * dz];
 }
 
+/**
+ * The level of the water of the world's lakes at a point of a place's site, in the site's heights, or nothing where no lake is: from
+ * each lake's shore as a ring of points (`World['lakes']`, which is what a world made in a worker hands over), a point being in a
+ * lake if it is inside the ring or within six metres of a point of it, so that the shore is taken a little wide. For what grows in
+ * the country about a place, which stood in the lakes: the far trees favour low hollows, and a lake fills one. Nothing for a place
+ * not built in a world.
+ */
+export function lakeLevelAt(site: Site): ((x: number, z: number) => number | null) | null {
+  const f = siteFrame(site);
+  if (!f) return null;
+  const lakes = (worldLand(f.world).lakes ?? []).map((lk) => {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of lk.outline) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    return { ...lk, x0: x0 - 6, x1: x1 + 6, z0: z0 - 6, z1: z1 + 6 };
+  });
+  if (!lakes.length) return null;
+  return (x: number, z: number) => {
+    const [wx, wz] = toWorld(f, x, z);
+    for (const lk of lakes) {
+      if (wx < lk.x0 || wx > lk.x1 || wz < lk.z0 || wz > lk.z1) continue;
+      const ring = lk.outline;
+      let inside = false, near = false;
+      for (let a = 0, b = ring.length - 1; a < ring.length; b = a++) {
+        const [ax, az] = ring[a], [bx, bz] = ring[b];
+        if ((az > wz) !== (bz > wz) && wx < ((bx - ax) * (wz - az)) / (bz - az) + ax) inside = !inside;
+        if (!near && (ax - wx) ** 2 + (az - wz) ** 2 < 36) near = true;
+      }
+      if (inside || near) return lk.level - f.base + f.floor;
+    }
+    return null;
+  };
+}
+
 const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
 
 /**

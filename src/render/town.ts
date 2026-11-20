@@ -3,6 +3,7 @@ import { fbm2, fbm3, Rng } from '../core/rng';
 import { Building, Site, Town } from '../core/site';
 import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, riverAt, squareY, townGround, townLand } from '../core/town';
 import { footprintOf } from '../core/building';
+import { lakeLevelAt } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
 import { alongSheet, carveRock } from './geom/rock';
 import { boulderForm, cliffRelief, erode, Grid2, ROCK, Strata } from './geom/rockForms';
@@ -1627,13 +1628,15 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
     let painted = 0;
     const pt = rng.fork('painted trees');
+    // (Not in the world's lakes, which lie in hollows where woods are thickest: the trees stood up out of the water.)
+    const lakeLevel = lakeLevelAt(site);
     for (let z = L.z0 + 6; z < L.z1 - 6; z += 4.2) for (let x = L.x0 + 6; x < L.x1 - 6; x += 4.2) {
       const px = x + pt.range(-2, 2), pz = z + pt.range(-2, 2);
       if (Math.hypot(px - centre.x, (pz - centre.z) * 1.2) < 230) continue;
       const w = woodAt(px, pz);
       if (w < 0.25 || pt.next() > w) continue;
-      const y = ground(px, pz), above = y - sea;
-      if ((rocky.holds(px, pz) && rocky.at(px, pz) > 0.3) || steep(px, pz) > 0.9) continue;
+      const y = ground(px, pz), above = y - sea, lake = lakeLevel?.(px, pz);
+      if ((rocky.holds(px, pz) && rocky.at(px, pz) > 0.3) || steep(px, pz) > 0.9 || (lake != null && y < lake + 0.8)) continue;
       const fir = conifer(px, pz, above), own = pt.next(), c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], tone = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 9 + 7 * ((own * 3.7) % 1) : 7 + 5 * ((own * 3.7) % 1);
       pl.farTree(fir, px, y - 0.4, pz, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * tone, c[1] * tone, c[2] * tone]);
@@ -1754,7 +1757,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       : season2 === 'summer' ? [[0.09, 0.21, 0.035], [0.12, 0.25, 0.04], [0.08, 0.19, 0.045], [0.15, 0.25, 0.05]] : [[0.13, 0.27, 0.035], [0.18, 0.31, 0.04], [0.1, 0.23, 0.04], [0.2, 0.3, 0.05]];
     const firs: Colour[] = [[0.045, 0.13, 0.04], [0.06, 0.15, 0.04], [0.04, 0.11, 0.05]];
     let far = 0;
+    const lakeLevel = lakeLevelAt(site);
     layCountry(mesh('far'), t, F, tint, (x, y, z, fir, own) => {
+      const lake = lakeLevel?.(x, z);
+      if (lake != null && y < lake + 0.8) return;
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], tone = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 9 + 7 * ((own * 3.7) % 1) : 7 + 5 * ((own * 3.7) % 1);
       b.planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * tone, c[1] * tone, c[2] * tone]);

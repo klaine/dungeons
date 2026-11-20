@@ -20,7 +20,7 @@ import { placeHouse } from './housePlacing';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
 import { armRise, boxValley, edgeAt, hallOnward, insideOf, joinLine, slantAt, valleyLand } from '../core/valley';
-import { siteFrame, toSite, worldLand } from '../core/worldLand';
+import { lakeLevelAt, siteFrame, toSite, worldLand } from '../core/worldLand';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
@@ -2209,7 +2209,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const top = crestAt(hills, cxA, czA, (l.angle * Math.PI) / 180, l.range === 'near' ? 255 : 400, l.range === 'near' ? 330 : 540);
       return { ...l, ...top, r: l.kind === 'castle' ? 40 : l.kind === 'ruin' ? 36 : 19 };
     });
+    // (Not in the world's lakes, which lie in the low hollows these trees like best: they stood up out of the water.)
+    const lakeLevel = lakeLevelAt(site);
     layMountains(farLand, cxA, czA, p.floor + 30, s2, stoneTint, (x, y, z, fir, own) => {
+      const lake = lakeLevel?.(x, z);
+      if (lake != null && y < lake + 0.8) return;
       const c = fir ? firs[Math.floor(own * 2.999)] : greens[Math.floor(own * (greens.length - 0.001))], t = (fir ? 0.75 : 0.5) + 0.3 * ((own * 7.3) % 1);
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
