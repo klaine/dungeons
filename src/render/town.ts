@@ -204,6 +204,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // bumps; held to one in seven, the garden was refused on single points and came out a pair of beds in a great lawn.)
     const gentle = (x: number, z: number) => Math.hypot(ground(x + 1, z) - ground(x - 1, z), ground(x, z + 1) - ground(x, z - 1)) < 0.5;
     const plain = (x: number, z: number) => zoneAt(x, z) === Z.wild && gentle(x, z);
+    // (Nothing within three metres of the house's walls: no bed is laid where this is nothing, which it is anywhere inside the house.)
     const houseOff = (x: number, z: number) => Math.min(...b.outerRects.map((r) => outsideRect({ x0: r.x0 - clearOfHouse, x1: r.x1 + clearOfHouse, z0: r.z0 - clearOfHouse, z1: r.z1 + clearOfHouse }, x, z)));
     const lineOff = (v: number, o: number) => { const m = (((v - o) % S) + S) % S; return Math.min(m, S - m); };
     // The beds first, so that the walks are laid only where they lead between beds or round them.
@@ -212,7 +213,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     for (let cj = cj0; cj <= cj1; cj++) for (let ci = ci0; ci <= ci1; ci++) {
       const r = { x0: hx + ci * S + half + 0.6, x1: hx + (ci + 1) * S - half - 0.6, z0: zRef + cj * S + half + 0.6, z1: zRef + (cj + 1) * S - half - 0.6 };
       let ok = r.x0 > R.x0 && r.x1 < R.x1 && r.z0 > R.z0 && r.z1 < R.z1;
-      for (let z = r.z0 - 2; z <= r.z1 + 2.01 && ok; z += 1) for (let x = r.x0 - 2; x <= r.x1 + 2.01 && ok; x += 1) if (!plain(x, z) || houseOff(x, z) < 0) ok = false;
+      for (let z = r.z0 - 2; z <= r.z1 + 2.01 && ok; z += 1) for (let x = r.x0 - 2; x <= r.x1 + 2.01 && ok; x += 1) if (!plain(x, z) || houseOff(x, z) <= 0) ok = false;
       if (ok) fits.set(`${ci},${cj}`, r);
     }
     // (Only in pairs either side of the house's line, so that the garden is as symmetrical as the house; laid one-sided where the

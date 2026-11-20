@@ -19,7 +19,7 @@ import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite, generateWorldPlace, MakeOptions } from '../core/generate';
-import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
+import { Hour, roundStair, SKIES, stairEnds, stairPath, WHEN } from '../core/site';
 import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
@@ -49,7 +49,7 @@ import { placeSeed, siteFrame } from '../core/worldLand';
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
-  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
+  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand', ashlar: 'ashlar',
 };
 import { Torch, TorchLights, gatherTorches } from '../render/torch';
 import { SunShadow } from '../render/sunShadow';
@@ -191,7 +191,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, ashlar: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -245,7 +245,7 @@ async function start(): Promise<void> {
   chamfering.on = num('edges', 1) > 0;
   // Each surface is painted in turn, with the page given a chance to draw between them.
   const TEXTURES = ['stone', 'wood', 'moss', 'rock', 'ground', 'scree', 'bark', 'barkAsh', 'barkPine', 'barkFir', 'soil', 'litter', 'plaster', 'thatch', 'tile', 'redBrick', 'buffBrick'];
-  const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 1 : 0);
+  const textureCount = TEXTURES.length + (place === 'island' ? 1 : 0) + (place === 'town' ? 2 : 0);
   let textureDone = 0;
   const paint = async (name: string, size: number, tseed: number) => {
     await stage(`Painting surfaces: ${TEXTURE_NAMES[name] ?? name}`, 0.04 + 0.2 * (textureDone++ / textureCount), `${textureDone} of ${textureCount} textures, ${size} pixels square`);
@@ -267,6 +267,8 @@ async function start(): Promise<void> {
   const redBrick = await paint('redBrick', texSize, 73), buffBrick = await paint('buffBrick', texSize, 79);
   // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
   const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
+  // (And the ashlar of a cathedral's walls, laid as a picture and not stone by stone, is only in towns, where the cathedral is.)
+  const ashlar = place === 'town' ? await paint('ashlar', texSize, 89) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -315,6 +317,7 @@ async function start(): Promise<void> {
     lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
     // Coloured glass in the sanctum's windows, glowing with the day through it (dim at dusk, nearly dark at night).
     stained: makeStainedMaterial(),
+    ...(ashlar ? { ashlar: makeSiteMaterial(ashlar, moss, { normalScale: 1.0, chips: weathered, weather: weathered }) } : {}),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -1058,7 +1061,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), ...(ashlar ? { ashlar } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
@@ -1486,16 +1489,20 @@ async function start(): Promise<void> {
       if (w.kind === 'window') continue;
       const a = site.places[w.a], b = site.places[w.b];
       if (w.kind === 'stair') {
-        // A stair is walked from a stride before its foot to a stride beyond its head, and back.
-        const { foot, head } = stairEnds(site, w);
-        for (const [from, to, floorFrom, floorTo] of [[foot, head, a.floor, b.floor], [head, foot, b.floor, a.floor]] as const) {
+        // A stair is walked from a stride before its foot to a stride beyond its head, and back; one that climbs round the walls by
+        // way of each landing between.
+        const path = stairPath(site, w);
+        for (const [route, floorFrom, floorTo] of [[path, a.floor, b.floor], [[...path].reverse(), b.floor, a.floor]] as const) {
+          const from = route[0], to = route[route.length - 1];
           player.place(new Vector3(from[0], floorFrom + 1.68 + 0.05, from[1]), 0);
           player.analog.set(0, -1);
-          let ok = false;
-          for (let i = 0; i < 900 && !ok; i++) {
-            player.yaw = Math.atan2(-(to[0] - player.position.x), -(to[1] - player.position.z));
+          let ok = false, next = 1;
+          for (let i = 0; i < 900 * route.length && !ok; i++) {
+            const aim = route[next];
+            player.yaw = Math.atan2(-(aim[0] - player.position.x), -(aim[1] - player.position.z));
             player.update(1 / 60);
-            ok = Math.hypot(to[0] - player.position.x, to[1] - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < 0.12;
+            if (next < route.length - 1 && Math.hypot(aim[0] - player.position.x, aim[1] - player.position.z) < 0.35) next++;
+            ok = next === route.length - 1 && Math.hypot(to[0] - player.position.x, to[1] - player.position.z) < 0.35 && Math.abs(player.position.y - floorTo) < 0.12;
           }
           if (!ok) failures.push(`stair ${w.a}->${w.b} ${floorTo > floorFrom ? 'up' : 'down'}: stopped at (${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)}), wanted (${to[0].toFixed(2)}, ${floorTo.toFixed(2)}, ${to[1].toFixed(2)})`);
         }
@@ -1566,11 +1573,13 @@ async function start(): Promise<void> {
       const w = site.ways[m.way];
       const a = site.places[w.a];
       if (w.kind === 'stair') {
-        const { foot, head } = stairEnds(site, w), [near, far] = at === w.a ? [foot, head] : [head, foot];
-        if (!(walkTo(near[0], near[1], 0.3) && walkTo(far[0], far[1], 0.3))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
+        const path = at === w.a ? stairPath(site, w) : [...stairPath(site, w)].reverse(), far = path[path.length - 1];
+        if (!path.every(([x, z]) => walkTo(x, z, 0.3))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
         // Off the end of the stair and onto the floor beside it, as anyone would, before going on: otherwise whoever
         // has just come up makes for the next door across the well and goes straight back down it.
-        const off = { n: [0, 1.5], s: [0, -1.5], e: [-1.5, 0], w: [1.5, 0] }[w.side];
+        // (Away from the wall the flight ends against: for a stair round the walls, its last leg's going up, its first's coming down.)
+        const legs = w.round ? roundStair(site, w).legs : [], endSide = !w.round ? w.side : at === w.a ? legs[legs.length - 1].side : legs[0].side;
+        const off = { n: [0, 1.5], s: [0, -1.5], e: [-1.5, 0], w: [1.5, 0] }[endSide];
         walkTo(far[0] + off[0], far[1] + off[1], 0.4);
         at = m.to;
         const kept = desc.anchors?.get(at);

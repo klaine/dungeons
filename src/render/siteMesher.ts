@@ -2,16 +2,18 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { anyAngle } from './coast';
-import { Building, Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
+import { Building, Place, POINTED_VAULT, ROUND_TREAD, roundStair, shoreOf, Side, Site, SKIES, vaultRise, Way } from '../core/site';
+import { toplineOf } from '../core/cathedral';
+import { buildCathedral, cathedralWindows, spireTops } from './cathedral';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
-import { Frame, Kit, Opening } from './geom/kit';
+import { archSdf, Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { alongSheet, carveRock, smin } from './geom/rock';
 import { buildCamp } from './camp';
 import { buildMineYard } from './mine';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
-import { beam, plank, stoneStyles } from './geom/styles';
+import { beam as beamBuilt, plank as plankBuilt, stoneStyles } from './geom/styles';
 import { FAR_RING, crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
@@ -46,7 +48,7 @@ interface Hole extends Opening {
 }
 
 /** A window in an outer wall of a house that stands free: a way into nowhere, there only to be cut through the wall. */
-type OuterWindow = Way & { outer: true };
+type OuterWindow = Way & { outer: true; circle?: boolean };
 
 /** One flat face of a roof of tiles, through the given corners, wound to face away from `inside`. */
 function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, number], inside: Vector3): void {
@@ -85,7 +87,20 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const rng = new Rng(site.seed).fork('mesh');
   const T = site.wallThickness;
   const places = site.places;
-  const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint } = stoneStyles(site.setting.stone);
+  // (A cathedral is too large to be laid stone by stone: its walls, vaults, arches and floors are plain surfaces with their courses in
+  // the picture, `ashlar`, as the buildings of the towns are drawn. See `MasonryStyle.flat`.)
+  const built = stoneStyles(site.setting.stone);
+  const flatOf = (st: MasonryStyle, cell = 0.6): MasonryStyle => ({ ...st, flat: true, material: 'ashlar', maxSeg: cell, uvScale: 1 / 2.4, tint: [st.tint[0] * 1.08, st.tint[1] * 1.08, st.tint[2] * 1.08] });
+  const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint } = site.cathedral
+    ? { ...built, ashlar: flatOf(built.ashlar), dressed: flatOf(built.dressed, 0.35), vaultStone: flatOf(built.vaultStone), flag: flatOf(built.flag, 0.8), hallFlag: flatOf(built.hallFlag, 0.8), coping: flatOf(built.coping, 0.6) }
+    : built;
+  /**
+   * In a cathedral a wall more than a storey or two high is laid in larger blocks, as the great churches were, in courses half a
+   * metre high and up to a metre and a half long (and its cost, forty metres of wall, stays within bounds).
+   */
+  // (Over a cathedral's floors, where nothing is seen close, the lattice its surfaces are cut on is coarser.)
+  const big: MasonryStyle = { ...ashlar, maxSeg: 1.1 }, midStone = ashlar, bigDressed = dressed, bigVault = vaultStone;
+  const NEAR = 6.5;
   const sky = SKIES[site.setting.hour];
   // Where sheep graze, if anywhere: worked out with the planting of each kind of place.
   let flockSpots: { x: number; z: number; r: number; count: number }[] | undefined;
@@ -94,6 +109,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   let fireflySpots: number[] | undefined;
 
   // ------------------------------------------------------------------ helpers
+  // (A cathedral's places stand at heights of their own, and not under one roofline: see `cathedral.ts`.)
+  const cath = site.cathedral;
+  // (A cathedral's boards and beams too are plain surfaces, their grain the picture's.)
+  const plank: MasonryStyle = cath ? { ...plankBuilt, flat: true, maxSeg: 0.9 } : plankBuilt, beam: MasonryStyle = cath ? { ...beamBuilt, flat: true, maxSeg: 1.5 } : beamBuilt;
+  /** The top of the masonry over a place: the house's roofline, or in a cathedral the place's own. */
+  const topOf = (p: Place) => (cath ? toplineOf(p) : site.top);
+  /** How high what is solid over a place goes: to its top, or to the floor of whatever room lies over it. */
+  const overlaps = (a: { x0: number; x1: number; z0: number; z1: number }, b: { x0: number; x1: number; z0: number; z1: number }) => a.x0 < b.x1 - 0.01 && b.x0 < a.x1 - 0.01 && a.z0 < b.z1 - 0.01 && b.z0 < a.z1 - 0.01;
+  const solidTop = (p: Place) => {
+    let top = topOf(p);
+    for (const q of places) if (q.role !== 'approach' && (q.level ?? 0) > (p.level ?? 0) && q.floor > p.floor && overlaps(p, q)) top = Math.min(top, q.floor - 0.035);
+    return top;
+  };
+  /** The places on storeys under a place that lie under part of it. */
+  const placesUnder = (p: Place) => places.filter((q) => q.role !== 'approach' && (q.level ?? 0) < (p.level ?? 0) && q.floor < p.floor && overlaps(p, q));
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
   const frameOf = (p: Place, side: Side, e: number): Frame => {
     switch (side) {
@@ -115,13 +145,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const flip: Record<Side, Side> = { n: 's', s: 'n', e: 'w', w: 'e' };
   const sideOf = (w: Way, p: Place): Side => (w.a === p.id ? w.side : flip[w.side]);
 
-  const shape = (w: Way): { y0: number; ys: number } => {
+  const shape = (w: Way): { y0: number; ys: number; point?: number; circle?: boolean } => {
     const lo = Math.min(places[w.a].floor, places[w.b].floor);
     const hi = Math.max(places[w.a].floor, places[w.b].floor);
-    // (A window in an outer wall of a house that stands free: tall and arched in a room lit by day, a slit where torches light it.)
-    if ((w as OuterWindow).outer) { const p = places[w.a]; return { y0: p.floor + 1.05, ys: p.floor + Math.min(p.wall - 0.55, w.halfWidth < 0.3 ? 2.3 : 2.75) }; }
-    if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35 };
-    return { y0: lo - 0.1, ys: hi + (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0) };
+    // (A pointed arch, as a church's are: two arcs each as broad as the opening.)
+    const point = w.pointed ? 2 : undefined;
+    // (A window in an outer wall of a house that stands free: tall and arched in a room lit by day, a slit where torches light it.
+    // A church's windows say where they begin and spring.)
+    if ((w as OuterWindow).outer) {
+      const p = places[w.a];
+      if ((w as OuterWindow).circle) return { y0: p.floor + w.spring! - w.halfWidth, ys: p.floor + w.spring!, circle: true };
+      if (w.spring !== undefined) return { y0: p.floor + (w.sill ?? 1.05), ys: p.floor + w.spring, point };
+      return { y0: p.floor + 1.05, ys: p.floor + Math.min(p.wall - 0.55, w.halfWidth < 0.3 ? 2.3 : 2.75) };
+    }
+    if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35, point };
+    return { y0: lo - 0.1, ys: hi + (w.spring ?? (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0)), point };
   };
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
@@ -131,7 +169,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     : [...outerWindows.values()].flat().filter((w) => w.side === 's' && Math.abs(places[w.a].z1 + T - p.z0) < 0.05);
   // (The stretches of a free house's front that stand on the forecourt's line, where its front is the forecourt's wall. A room set back
   // from that line has an outer wall of its own, with its windows; a front drawn across from end to end stood before it as a blank screen.)
-  const frontPieces = (p: Place, fx0: number, fx1: number): [number, number][] => !free ? [[fx0, fx1]]
+  const frontPieces = (p: Place, fx0: number, fx1: number): [number, number][] => cath ? [] : !free ? [[fx0, fx1]]
     : runs.filter((r) => r.side === 's' && Math.abs(r.at - p.z0) < 0.05).map((r): [number, number] => [Math.max(fx0, r.from), Math.min(fx1, r.to)]).filter(([a, b]) => b - a > 0.05);
   const buildFront = (p: Place, fx0: number, fx1: number) => {
     for (const [a, b] of frontPieces(p, fx0, fx1)) kit.wallFace('stone', kit.frame(a, p.z0, b, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).filter((h) => h.at > a && h.at < b).map((h) => ({ ...h, c: h.at - a })) });
@@ -142,11 +180,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
   const isEndWall = (p: Place, side: Side) => (p.axis === 'x') === (side === 'e' || side === 'w');
+  /** The radius of a pointed vault's arcs over its half span, or 1 for a half-round one. */
+  const pointOf = (p: Place) => (p.pointed ? POINTED_VAULT : 1);
   const wallTop = (p: Place, side: Side): number => {
-    if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? span(p) / 2 + 0.3 : 0.12);
+    if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? vaultRise(p) + 0.3 : 0.12);
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
     if (p.roof === 'cave') return p.floor + p.wall + 1.3;
-    return site.top;
+    return topOf(p);
   };
 
   /**
@@ -183,7 +223,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     for (const k of [-0.13, 0.13]) solid('metal', corners(wallBox(f, u + k - 0.02, u + k + 0.02, top + 0.012, top + 0.265, mid + 0.155, mid - 0.155)), gold);
     // The windows glazed: each a lattice of coloured panes, deep blue and red with gold and green among them, the leading dark between.
     const glass = rng.fork(`glass${p.id}`), hues: [number, number, number][] = [[0.08, 0.18, 0.75], [0.7, 0.06, 0.06], [0.85, 0.62, 0.1], [0.08, 0.45, 0.18], [0.35, 0.1, 0.55]];
-    for (const w of outerWindows.get(p.id) ?? []) {
+    // (A cathedral's windows are glazed in colour with its outside: see `cathedral.ts`.)
+    for (const w of cath ? [] : outerWindows.get(p.id) ?? []) {
       const q = places[p.id], wf = frameOf(q, w.side, 0.1), c = alongFrame(q, w.side, w.at, 0.1), { y0, ys } = shape(w);
       const cols = Math.max(2, Math.round((w.halfWidth * 2) / 0.16)), rows = Math.max(4, Math.round((ys - y0) / 0.16)), cw = (w.halfWidth * 2) / cols, ch = (ys - y0) / rows;
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
@@ -221,15 +262,29 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       : side === 'w' ? { x0: p.x0, x1: p.x0 + deep, z0: lo, z1: hi } : { x0: p.x1 - deep, x1: p.x1, z0: lo, z1: hi };
   };
   /** What a stair is made of: how many steps, how deep each, which way it climbs along its wall, and how broad. */
-  const flightOf = (w: Way) => {
-    const steps = Math.max(1, Math.round((places[w.b].floor - places[w.a].floor) / STEP)), to = w.to ?? w.at;
+  const flightOf = (w: Way & { base?: number }) => {
+    const steps = Math.max(1, Math.round((places[w.b].floor - places[w.a].floor - (w.base ?? 0)) / STEP)), to = w.to ?? w.at;
     return { steps, tread: Math.abs(to - w.at) / steps, dir: to >= w.at ? 1 : -1, wide: w.halfWidth * 2, to };
+  };
+  /**
+   * A stair that climbs round the walls (`round`), as the straight flight of its last leg, which comes up through the floor above,
+   * and how high over the lower floor that leg begins (`base`). A straight stair as it is.
+   */
+  const headLeg = (w: Way): Way & { base?: number } => {
+    if (!w.round) return w;
+    const { legs } = roundStair(site, w), last = legs[legs.length - 1];
+    return { ...w, side: last.side, at: last.from, to: last.to, round: undefined, base: last.y0 };
   };
   // How many steps can be climbed before the head comes to the beams of the ceiling: the well must have begun by then.
   // (With room to spare: whoever climbs is a stride deep, front to back, as well as a man high.)
-  const stepsUnderCeiling = (w: Way) => Math.max(0, Math.floor((places[w.a].wall - 0.27 - 2.3) / STEP));
+  const stepsUnderCeiling = (w: Way & { base?: number }) => Math.max(0, Math.floor((places[w.a].wall - 0.27 - 2.3 - (w.base ?? 0)) / STEP));
   /** Where a stair stands on the floor of the lower place, and the well it comes up through in the floor of the upper. */
   const flightRect = (w: Way): Rect => strip(places[w.a], w.side, w.at, flightOf(w).to, flightOf(w).wide);
+  /** Of a stair round the walls, the floor its legs and landings stand over within the first three metres of its climb. */
+  const lowLegs = (w: Way): Rect[] => {
+    const { legs, landings, width } = roundStair(site, w), p = places[w.a];
+    return [...legs.filter((l) => l.y0 < 3.2).map((l) => strip(p, l.side, l.from, l.to, width)), ...landings.filter((l) => l.y < 3.2)];
+  };
   const wellRect = (w: Way): Rect => {
     const f = flightOf(w);
     // The well begins where there would otherwise be less than a man's height over the steps.
@@ -270,7 +325,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   type Run = { side: Side; at: number; from: number; to: number };
   const runs: Run[] = [];
   const outerWindows = new Map<number, OuterWindow[]>();
-  if (free) {
+  if (free && cath) for (const [id, list] of cathedralWindows(site)) outerWindows.set(id, list as OuterWindow[]);
+  if (free && !cath) {
     const C = 0.1, ox = Math.min(...outerRects.map((r) => r.x0)) - C, oz = Math.min(...outerRects.map((r) => r.z0)) - C;
     const nx = Math.round((Math.max(...outerRects.map((r) => r.x1)) + C - ox) / C) + 1, nz = Math.round((Math.max(...outerRects.map((r) => r.z1)) + C - oz) / C) + 1;
     const solid = new Uint8Array(nx * nz);
@@ -492,10 +548,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     if (p.roof === 'barrel') {
       const a0 = p.axis === 'x' ? p.x0 : p.z0;
       const length = p.axis === 'x' ? p.x1 - p.x0 : p.z1 - p.z0;
-      const ribs = Math.max(0, Math.round(length / 3.4) - 1);
+      // (In a church, the ribs mark its bays: between its arcade's arches where it has one, every six metres or so where it has not.
+      // Under a vault of more than one span, they go over its columns, every three metres or so.)
       const sides: Side[] = p.axis === 'x' ? ['n', 's'] : ['w', 'e'];
+      const arcade = cath ? site.ways.filter((w) => w.kind === 'arch' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === sides[0]).map((w) => w.at).sort((a, b) => a - b) : [];
+      const ribs = !cath ? Math.max(0, Math.round(length / 3.4) - 1) : arcade.length >= 2 ? arcade.length - 1 : Math.max(0, Math.round(length / ((p.spans ?? 1) > 1 ? 3.2 : 5.8)) - 1);
       for (let k = 1; k <= ribs; k++) {
-        const pos = a0 + (length * k) / (ribs + 1);
+        const pos = arcade.length >= 2 ? (arcade[k - 1] + arcade[k]) / 2 : a0 + (length * k) / (ribs + 1);
         for (const side of sides) {
           const clear = !holesOn(p, side, 0).some((h) => Math.abs(h.at - pos) < h.w + 0.95);
           slots.push({ pos, side, clear });
@@ -505,6 +564,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     pilasterSlots.set(p.id, slots);
 
     const list: TorchSpec[] = [];
+    const inward = (side: Side): Vector3 => ({ n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) })[side];
     if (p.roof !== 'sky') {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
       // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none. (A long hall, of two cells
@@ -565,13 +625,24 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           list.push({ position: V(x, top + 0.1, z), out: V(0, -1, 0), flames: wicks });
         }
       }
+      // Up a stair that climbs round the walls, a torch on the wall over every other landing, so that it is never dark long.
+      // (On the wall of the leg that comes up to the landing, a little short of it: over its last steps, with headroom under it.)
+      for (const w of stairsFrom(p).filter((x) => x.round)) {
+        const { legs, landings } = roundStair(site, w);
+        landings.forEach((l, k) => {
+          const leg = legs[k];
+          if (k % 2 === 1 || !leg) return;
+          const along = leg.to - Math.sign(leg.to - leg.from) * 0.8, off = 0.24;
+          const at = leg.side === 'n' ? V(along, 0, p.z0 + off) : leg.side === 's' ? V(along, 0, p.z1 - off) : leg.side === 'w' ? V(p.x0 + off, 0, along) : V(p.x1 - off, 0, along);
+          list.push({ position: at.setY(p.floor + l.y + 2.3), out: inward(leg.side) });
+        });
+      }
       const extra = list.length;
       const want = Math.max(0, (p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : area < 90 ? 3 : 4) : p.light === 'day' ? (area >= 90 ? 2 : area >= 40 ? 1 : 0) : 0) - (extra ? 1 : 0)) + extra;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
-      const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
       const onWall = (side: Side, at: number, off: number): TorchSpec => {
-        const out = inward[side];
+        const out = inward(side);
         const base = side === 'n' ? V(at, 0, p.z0) : side === 's' ? V(at, 0, p.z1) : side === 'w' ? V(p.x0, 0, at) : V(p.x1, 0, at);
         return { position: base.addScaledVector(out, off).setY(p.floor + 2.25), out };
       };
@@ -590,8 +661,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       // No torch on the wall where a stair stands against it.
       for (const w of [...stairsFrom(p), ...stairsInto(p)]) {
-        const r = flightRect(w);
-        for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
+        for (const r of w.round && w.a === p.id ? lowLegs(w) : [flightRect(headLeg(w))]) {
+          for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
+        }
       }
       // (Nor on the wall over a hearth.)
       const hearth = hearthOf.get(p.id);
@@ -3799,7 +3871,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
-    const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag: built.flag });
     smokes.push(...made.smokes);
     paving = made.paving;
     lamps = made.lamps;
@@ -3868,14 +3940,15 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.mass(V(p.x0, p.floor - 1.6, p.z0), V(p.x1, p.floor - 0.7, p.z1));
     } else {
       // The floor: flags on the ground, boards over another room; and left open over any stair that comes up through it.
-      const wells = stairsInto(p).map(wellRect);
+      const wells = stairsInto(p).map(headLeg).map(wellRect);
       for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
         if ((p.level ?? 0) > 0) kit.plane('wood', V(r.x0, p.floor, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, 1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
         else kit.slab('floor', r.x0, r.z0, r.x1, r.z1, p.floor, open ? flag : hallFlag);
       }
       // Solid under it, unless there is a room there.
-      if (!roomUnder(p)) kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
-      for (const w of stairsInto(p)) {
+      // (In a cathedral, rooms lie under parts of others without a stair between: the solid is left out over each.)
+      if (!roomUnder(p)) for (const r of without({ x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 }, placesUnder(p))) kit.mass(V(r.x0, p.floor - 1.2, r.z0), V(r.x1, p.floor - 0.035, r.z1));
+      for (const w of stairsInto(p).map(headLeg)) {
         // The thickness of the floor shows round the well: it is boarded in, on the two sides that are not wall or stair.
         const r = wellRect(w), under = places[w.a], y0 = under.floor + under.wall - 0.27, alongX = w.side === 'n' || w.side === 's', f = flightOf(w);
         const foot = w.at + f.dir * stepsUnderCeiling(w) * f.tread;
@@ -3903,7 +3976,47 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           railed(xw + (w.side === 'w' ? 0.1 : -0.1), foot - f.dir * 0.05, xi + (w.side === 'w' ? 0.05 : -0.05), foot - f.dir * 0.05);
         }
       }
-      for (const w of stairsFrom(p)) {
+      for (const w of stairsFrom(p).filter((x) => x.round)) {
+        // A stair round the walls: each step a block set into the wall and carried out from it, a hand deeper than a step so that
+        // the flight has a soffit under it; a slab at each landing in the corners; and a rail along the open side, posts and a top
+        // rail following the flight, so that nobody steps off it into the well of the tower.
+        const { legs, landings, width } = roundStair(site, w), stepStyle: MasonryStyle = { ...hallFlag, course: [0.45, 0.45], length: [1.4, 1.4] };
+        const rail = anyAngle((m) => kit.mesh(m)), oak: [number, number, number] = [0.36, 0.25, 0.16];
+        const inner = (side: Side, along: number, off: number): [number, number] => (side === 'n' ? [along, p.z0 + off] : side === 's' ? [along, p.z1 - off] : side === 'w' ? [p.x0 + off, along] : [p.x1 - off, along]);
+        const post = (x: number, z: number, y: number) => kit.box('wood', V(x - 0.05, y - 0.05, z - 0.05), V(x + 0.05, y + 1.0, z + 0.05), beam, beam, 'post');
+        const bar = (a: [number, number, number], b: [number, number, number]) => {
+          const dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1, nx = (-dz / l) * 0.04, nz = (dx / l) * 0.04;
+          rail.solid('wood', [[a[0] - nx, a[1] - 0.05, a[2] - nz], [a[0] + nx, a[1] - 0.05, a[2] + nz], [b[0] + nx, b[1] - 0.05, b[2] + nz], [b[0] - nx, b[1] - 0.05, b[2] - nz], [a[0] - nx, a[1] + 0.04, a[2] - nz], [a[0] + nx, a[1] + 0.04, a[2] + nz], [b[0] + nx, b[1] + 0.04, b[2] + nz], [b[0] - nx, b[1] + 0.04, b[2] - nz]], oak);
+        };
+        // (Each step one stone, its arrises worn: a solid with its edges taken off, and not coursed masonry, of which a tower's
+        // hundreds of steps would be a quarter of a million triangles.)
+        const stepTone: [number, number, number] = [hallFlag.tint[0] * 0.95, hallFlag.tint[1] * 0.95, hallFlag.tint[2] * 0.95];
+        const stone = (b: { min: Vector3; max: Vector3 }) => { const { min: a, max: c } = b; kit.mass(a, c); rail.rounded('floor', [[a.x, a.y, a.z], [c.x, a.y, a.z], [c.x, a.y, c.z], [a.x, a.y, c.z], [a.x, c.y, a.z], [c.x, c.y, a.z], [c.x, c.y, c.z], [a.x, c.y, c.z]], stepTone, 0.02); };
+        void stepStyle;
+        for (const leg of legs) {
+          const fr = frameOf(p, leg.side, 0), dir = leg.to >= leg.from ? 1 : -1;
+          for (let k = 0; k < leg.steps; k++) {
+            const a = leg.from + dir * k * ROUND_TREAD, top = p.floor + leg.y0 + STEP * (k + 1);
+            stone(wallBox(fr, alongFrame(p, leg.side, a, 0), alongFrame(p, leg.side, a + dir * ROUND_TREAD, 0), Math.max(p.floor - 0.05, top - 0.45), top, 0.12, -width));
+          }
+          // (The rail rises a step's height a tread; its posts stand on the steps, a little in from their open edge.)
+          const n = Math.max(2, Math.ceil(Math.abs(leg.to - leg.from) / 1.1) + 1);
+          for (let i = 0; i < n; i++) {
+            const along = leg.from + (leg.to - leg.from) * (i / (n - 1)), [x, z] = inner(leg.side, along, width - 0.07);
+            post(x, z, p.floor + leg.y0 + STEP * Math.max(1, Math.min(leg.steps, Math.ceil((i / (n - 1)) * leg.steps))));
+          }
+          const [ax, az] = inner(leg.side, leg.from, width - 0.07), [bx, bz] = inner(leg.side, leg.to, width - 0.07);
+          bar([ax, p.floor + leg.y0 + STEP + 0.95, az], [bx, p.floor + leg.y0 + STEP * leg.steps + 0.95, bz]);
+        }
+        for (const l of landings) {
+          stone({ min: V(l.x0, p.floor + l.y - 0.4, l.z0), max: V(l.x1, p.floor + l.y, l.z1) });
+          // (Its two open sides are where the flights come onto it and go off it; only its inner corner looks into the well, and a post
+          // stands there, where the rails of the two flights meet.)
+          const cxL = l.x0 <= p.x0 + 0.01 ? l.x1 : l.x0, czL = l.z0 <= p.z0 + 0.01 ? l.z1 : l.z0, wx = l.x0 <= p.x0 + 0.01 ? p.x0 : p.x1, wz = l.z0 <= p.z0 + 0.01 ? p.z0 : p.z1;
+          post(cxL + (cxL > wx ? -0.07 : 0.07), czL + (czL > wz ? -0.07 : 0.07), p.floor + l.y);
+        }
+      }
+      for (const w of stairsFrom(p).filter((x) => !x.round)) {
         // The flight: courses of stone a step high, each a step shorter than the one under it.
         const f = flightOf(w), fr = frameOf(p, w.side, 0), stepStyle: MasonryStyle = { ...hallFlag, course: [STEP, STEP], length: [0.8, 1.3] };
         for (let k = 1; k <= f.steps; k++) {
@@ -3922,15 +4035,18 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const R = span(p) / 2;
       const end = p.roof === 'barrel' && isEndWall(p, side);
       // A cave has masonry only where the builders walled it off to hang a door.
+      // (Under a pointed vault the end wall is cut to its point; under a vault of more than one span it is built up whole, and each
+      // span's vault meets it.)
       if (!cave || holesOn(p, side, 0).some((h) => !h.way.natural)) {
-        kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, top, ashlar, {
-          openings: holesOn(p, side, 0.1),
-          keep: end ? (u, y) => y < roofY + 0.3 || Math.hypot(u - mid, y - roofY) < R + 0.45 : undefined,
-        });
+        const keep = end && (p.spans ?? 1) <= 1 ? (u: number, y: number) => y < roofY + 0.3 || archSdf(u - mid, y - roofY, R, pointOf(p)) < 0.45 : undefined;
+        // (A cathedral's walls higher than a man sees close are of larger blocks, from a course a little over the doors.)
+        const split = cath && top - p.floor > 9 ? p.floor + NEAR : top;
+        kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, split, cath ? midStone : ashlar, { openings: holesOn(p, side, 0.1), keep });
+        if (split < top) kit.wallFace('stone', f, split, top, big, { openings: holesOn(p, side, 0.1), keep, courseKey: 'high' });
       }
       // Solid behind the wall, one wall's thickness deep; beyond that is another place or the outside.
       const ext = T / 2 + 0.02;
-      kit.wallMass(frameOf(p, side, ext), T, p.floor - 1.2, p.roof === 'sky' ? top : site.top, holesOn(p, side, ext));
+      kit.wallMass(frameOf(p, side, ext), T, p.floor - 1.2, p.roof === 'sky' ? top : solidTop(p), holesOn(p, side, ext));
     }
 
     // Roof.
@@ -4039,16 +4155,68 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
     } else if (p.roof === 'barrel') {
-      const R = span(p) / 2;
-      const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1);
-      const start = p.axis === 'x' ? V(p.x0 - 0.1, roofY, cz) : V(cx, roofY, p.z0 - 0.1);
+      const n = p.spans ?? 1, R = span(p) / 2 / n, k = pointOf(p);
+      const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1), across = p.axis === 'x' ? V(0, 0, 1) : V(1, 0, 0);
       const length = (p.axis === 'x' ? dx : dz) + 0.2;
-      kit.barrelVault('stone', start, axis, length, R, vaultStone);
-      kit.mass(V(p.x0 - T / 2, roofY + R + 0.06, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      // (Each span its own vault; between them, a row of columns under a beam of stone that the vaults spring from.)
+      const offsets = Array.from({ length: n }, (_, i) => -span(p) / 2 + R * (2 * i + 1));
+      for (const o of offsets) {
+        const start = (p.axis === 'x' ? V(p.x0 - 0.1, roofY, cz) : V(cx, roofY, p.z0 - 0.1)).addScaledVector(across, o);
+        kit.barrelVault('stone', start, axis, length, R, cath && R > 1.6 ? bigVault : vaultStone, k);
+      }
+      kit.mass(V(p.x0 - T / 2, roofY + vaultRise(p) + 0.06, p.z0 - T / 2), V(p.x1 + T / 2, solidTop(p), p.z1 + T / 2));
+      if (n > 1) {
+        const lo = p.axis === 'x' ? p.x0 : p.z0, hi = p.axis === 'x' ? p.x1 : p.z1, bays = Math.max(2, Math.round((hi - lo) / 3.2));
+        for (let i = 1; i < n; i++) {
+          const line = (p.axis === 'x' ? cz : cx) - span(p) / 2 + 2 * R * i;
+          const at = (along: number, acr: number, y: number) => (p.axis === 'x' ? V(along, y, acr) : V(acr, y, along));
+          const box = (a0: number, a1: number, c0: number, c1: number, y0: number, y1: number, style: MasonryStyle, tag: string) => {
+            const A0 = at(a0, c0, y0), A1 = at(a1, c1, y1);
+            kit.box('stone', V(Math.min(A0.x, A1.x), y0, Math.min(A0.z, A1.z)), V(Math.max(A0.x, A1.x), y1, Math.max(A0.z, A1.z)), style, coping, tag);
+          };
+          // The beam the two vaults spring from, from wall to wall over the columns.
+          box(lo - 0.1, hi + 0.1, line - 0.28, line + 0.28, roofY - 0.42, roofY + R * 0.55, dressed, 'beam');
+          for (let j = 1; j < bays; j++) {
+            const a = lo + ((hi - lo) * j) / bays;
+            // A column: a square base, a round shaft as a drum of stone (here eight-sided), and a cushion capital under the beam.
+            box(a - 0.36, a + 0.36, line - 0.36, line + 0.36, p.floor - 0.05, p.floor + 0.32, coping, 'base');
+            const c = at(a, line, 0), drum = anyAngle((m) => kit.mesh(m)), r = 0.24, sides = 8, y0 = p.floor + 0.32, y1 = roofY - 0.62;
+            for (let q = 0; q < sides; q++) {
+              const t0 = (q / sides) * Math.PI * 2, t1 = ((q + 1) / sides) * Math.PI * 2, ca = Math.cos(t0) * r, sa = Math.sin(t0) * r, cb2 = Math.cos(t1) * r, sb = Math.sin(t1) * r;
+              drum.face('stone', [[c.x + ca, y0, c.z + sa], [c.x + cb2, y0, c.z + sb], [c.x + cb2, y1, c.z + sb], [c.x + ca, y1, c.z + sa]], [0.78 * stoneTint[0], 0.72 * stoneTint[1], 0.62 * stoneTint[2]], [c.x, (y0 + y1) / 2, c.z]);
+            }
+            box(a - 0.34, a + 0.34, line - 0.34, line + 0.34, roofY - 0.62, roofY - 0.42, coping, 'capital');
+          }
+        }
+      }
+
+      // In a cathedral's crypt, tombs: a chest of stone in each bay of its side spans, an effigy lying on its lid, clear of the doors
+      // and of the stair's foot; the middle span is the way through.
+      if (cath && p.name === 'crypt' && n > 2) {
+        const lo = p.axis === 'x' ? p.x0 : p.z0, hi = p.axis === 'x' ? p.x1 : p.z1, bays = Math.max(2, Math.round((hi - lo) / 3.2)), tq = rng.fork(`tombs${p.id}`);
+        const sidesAcross: Side[] = p.axis === 'x' ? ['n', 's'] : ['w', 'e'];
+        for (const [k2, o] of [[0, offsets[0]], [1, offsets[n - 1]]] as [number, number][]) {
+          const doors = holesOn(p, sidesAcross[k2], 0);
+          for (let j = 0; j < bays; j++) {
+            const a0 = lo + ((hi - lo) * j) / bays, a1 = lo + ((hi - lo) * (j + 1)) / bays, am = (a0 + a1) / 2;
+            if (a1 - a0 < 2.8 || doors.some((h) => Math.abs(h.at - am) < h.w + 2.2) || !tq.chance(0.75)) continue;
+            const c = (p.axis === 'x' ? cz : cx) + o, L = Math.min(2.2, a1 - a0 - 0.9), W = Math.min(0.95, R * 1.1);
+            const at = (along: number, acr: number) => (p.axis === 'x' ? [along, acr] : [acr, along]);
+            const [x0, z0] = at(am - L / 2, c - W / 2), [x1, z1] = at(am + L / 2, c + W / 2);
+            kit.box('stone', V(Math.min(x0, x1), p.floor - 0.05, Math.min(z0, z1)), V(Math.max(x0, x1), p.floor + 0.78, Math.max(z0, z1)), dressed, coping, 'tomb');
+            kit.box('stone', V(Math.min(x0, x1) - 0.06, p.floor + 0.78, Math.min(z0, z1) - 0.06), V(Math.max(x0, x1) + 0.06, p.floor + 0.92, Math.max(z0, z1) + 0.06), coping, coping, 'tomblid');
+            // The effigy: a figure lying with its hands joined, as a long block with a head at one end and a cushion under it.
+            const [e0x, e0z] = at(am - L / 2 + 0.25, c - W * 0.22), [e1x, e1z] = at(am + L / 2 - 0.45, c + W * 0.22);
+            kit.box('stone', V(Math.min(e0x, e1x), p.floor + 0.92, Math.min(e0z, e1z)), V(Math.max(e0x, e1x), p.floor + 1.12, Math.max(e0z, e1z)), dressed, dressed, 'effigy');
+            const [hx, hz] = at(am + L / 2 - 0.3, c);
+            kit.box('stone', V(hx - 0.13, p.floor + 0.92, hz - 0.13), V(hx + 0.13, p.floor + 1.18, hz + 0.13), dressed, dressed, 'effigyhead');
+          }
+        }
+      }
 
       const slots = pilasterSlots.get(p.id)!;
       for (const pos of new Set(slots.map((s) => s.pos))) {
-        kit.rib('stone', p.axis === 'x' ? V(pos, roofY, cz) : V(cx, roofY, pos), axis, R, 0.52, 0.3, dressed);
+        for (const o of offsets) kit.rib('stone', (p.axis === 'x' ? V(pos, roofY, cz) : V(cx, roofY, pos)).addScaledVector(across, o), axis, R, n > 1 ? 0.36 : 0.52, n > 1 ? 0.2 : 0.3, cath && R > 2 ? bigDressed : dressed, k);
       }
       for (const s of slots) {
         // In the wall's own terms: along it, and out of the wall into the room (negative depth).
@@ -4056,7 +4224,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const u = alongFrame(p, s.side, s.pos, 0);
         if (s.clear) {
           const b = wallBox(f, u - 0.26, u + 0.26, p.floor - 0.1, roofY - 0.2, 0.05, -0.3);
-          kit.box('stone', b.min, b.max, ashlar);
+          kit.box('stone', b.min, b.max, roofY - p.floor > 9 ? big : ashlar);
         }
         const c = wallBox(f, u - 0.33, u + 0.33, roofY - 0.2, roofY + 0.02, 0.05, -0.37);
         kit.box('stone', c.min, c.max, coping, coping, 'impost');
@@ -4064,7 +4232,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     } else if (p.roof === 'timber') {
       const alongX = dx >= dz;
       // Boards on beams; with a well left in them wherever a stair goes up through to the room above.
-      const wells = stairsFrom(p).map(wellRect);
+      const wells = stairsFrom(p).map(headLeg).map(wellRect);
       for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
         if (alongX) kit.plane('wood', V(r.x0, roofY, r.z0), V(1, 0, 0), V(0, 0, 1), V(0, -1, 0), r.x1 - r.x0, r.z1 - r.z0, plank);
         else kit.plane('wood', V(r.x0, roofY, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, -1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
@@ -4080,7 +4248,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
       // Solid above, unless there is a room there.
-      if (!roomOver(p)) kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      if (!roomOver(p)) kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, solidTop(p), p.z1 + T / 2));
     }
 
     // Furnishings by role.
@@ -4292,13 +4460,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
     }
     for (const w of stairsFrom(p)) {
-      // The flight itself, and the floor at its foot.
+      // The flight itself, and the floor at its foot. (Of a stair round the walls, all of it that stands low.)
+      if (w.round) { keepClear.push(...lowLegs(w)); continue; }
       const f = flightOf(w);
       keepClear.push(flightRect(w), strip(p, w.side, w.at - f.dir * 1.3, w.at, f.wide + 0.4));
       const foot = strip(p, w.side, w.at - f.dir * 0.9, w.at - f.dir * 0.5, f.wide);
       doorPoints.push([(foot.x0 + foot.x1) / 2, (foot.z0 + foot.z1) / 2]);
     }
-    for (const w of stairsInto(p)) {
+    for (const w of stairsInto(p).map(headLeg)) {
       // The well, with room to walk round it, and the floor at the head of the stair.
       const f = flightOf(w), r = wellRect(w);
       keepClear.push({ x0: r.x0 - 0.5, x1: r.x1 + 0.5, z0: r.z0 - 0.5, z1: r.z1 + 0.5 }, strip(p, w.side, f.to, f.to + f.dir * 1.3, f.wide + 0.4));
@@ -4358,7 +4527,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const c = alongFrame(p, w.side, w.at, 0.1);
       const op: Opening = { c, w: w.halfWidth, ...shape(w) };
       const secret = w.door?.leaf === 'secret';
-      kit.openingTrim('stone', f, op, T, dressed, secret ? (p.id === site.secret ? 'front' : 'back') : 'both');
+      kit.openingTrim('stone', f, op, T, cath && (op.ys - op.y0 > 4 || op.w > 1.4) ? bigDressed : dressed, secret ? (p.id === site.secret ? 'front' : 'back') : 'both');
       if (w.kind === 'window') {
         const sill = wallBox(f, c - w.halfWidth - 0.22, c + w.halfWidth + 0.22, op.y0 - 0.14, op.y0, -0.07, T + 0.07);
         kit.box('stone', sill.min, sill.max, coping, coping);
@@ -4393,16 +4562,18 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const yaw = Math.atan2(-d.z, d.x);
         const faces = Math.sign(Math.sin(yaw) * towardsHigh.x + Math.cos(yaw) * towardsHigh.z) || 1;
         const barred = w.door.barredFrom;
-        const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + 3.2, t - 0.14, t + 0.14);
+        // (The leaf fills its doorway, which in a church may be higher than a man's door.)
+        const leafSpring = Math.max(2.0, op.ys - hi), leafTop = leafSpring > 2.01 ? Math.max(3.2, leafSpring + w.halfWidth * 2 + 0.2) : 3.2;
+        const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + leafTop, t - 0.14, t + 0.14);
         // A door that starts shut is baked shut, so a locked room does not fill with its neighbour's light.
         if (w.door.leaf === 'shut' || secret) {
-          const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + 3.2, t - 0.03, t + 0.03);
+          const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + leafTop, t - 0.03, t + 0.03);
           kit.mass(slab.min, slab.max);
         }
         const leafSeed = `${site.seed}/door${site.ways.indexOf(w)}`;
         doors.push({
-          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: thick,
-          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(leafSeed, lw, 2.0, thick, secret ? { ...ashlar, length: [0.4, 0.8], course: [0.27, 0.36] } : undefined),
+          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: leafSpring, thickness: thick,
+          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(leafSeed, lw, leafSpring, thick, secret ? { ...ashlar, length: [0.4, 0.8], course: [0.27, 0.36] } : undefined),
           material: secret ? 'stone' : 'wood',
           blocker: block,
           centre: f.a.clone().addScaledVector(f.dir, c).addScaledVector(f.normal, -t).setY(hi + 1.2),
@@ -4414,7 +4585,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
   // ------------------------------------------------------------------ the outside of a house that stands free
   yield { label: 'Walling and roofing the house', at: 0.92 };
-  if (free) {
+  if (free && cath) {
+    // A cathedral's outside is its own: see `cathedral.ts`.
+    kit.field = outdoorFieldAt(places.find((q) => q.role === 'approach')!.floor, 1.0);
+    buildCathedral({ kit, site, outerWindows, shape, ashlar: big, plain: midStone, dressed, coping, stoneTint, rng: rng.fork('cathedral') });
+  }
+  if (free && !cath) {
     const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;
     const ox0 = Math.min(...outerRects.map((r) => r.x0)), ox1 = Math.max(...outerRects.map((r) => r.x1));
     // (Where the house front meets the forecourt it is built with the forecourt, and that stretch is left out here.)
@@ -4597,7 +4773,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   }
 
   // ------------------------------------------------------------------ result
-  const min = V(Infinity, -3, Infinity), max = V(-Infinity, site.top + 2, -Infinity);
+  const min = V(Infinity, -3, Infinity), max = V(-Infinity, Math.max(site.top, ...(cath ? spireTops(site) : [])) + 2, -Infinity);
   for (const p of places) {
     min.x = Math.min(min.x, p.x0 - 3); min.z = Math.min(min.z, p.z0 - 3);
     max.x = Math.max(max.x, p.x1 + 3); max.z = Math.max(max.z, p.z1 + 3);

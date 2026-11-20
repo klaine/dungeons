@@ -212,7 +212,59 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   };
 }
 
+/**
+ * Ashlar: cut stone laid in courses, for what is built too large to be laid block by block (a cathedral; see `MasonryStyle.flat`).
+ * The picture is 2.4 metres square, laid on by the metre: six courses of 0.4, each cut into three or four blocks at joints of its
+ * own, so no two courses break joint alike; each block its own tone of a pale stone that the colour given to each point tints, its
+ * face dressed with the drag of the tool, its arrises a little worn and chipped; joints of lime a centimetre broad, standing back.
+ */
+const ASHLAR_CELL = /* glsl */ `
+vec4 ashlarCell(vec2 uv) {
+  float row = mod(floor(uv.y * 6.), 6.), fy = fract(uv.y * 6.);
+  float n = 3. + step(.5, hash21(vec2(row, 3.)));
+  float x = fract(uv.x + hash21(vec2(row, 7.))) * n, b = floor(x);
+  // (The joint before block b stands a little off its even place, and so does the one after.)
+  float j0 = (hash21(vec2(row * 11. + mod(b, n), 5.)) - .5) * .5, j1 = (hash21(vec2(row * 11. + mod(b + 1., n), 5.)) - .5) * .5;
+  float s = b + j0, e = b + 1. + j1;
+  if (x < s) { e = s; b -= 1.; s = b + (hash21(vec2(row * 11. + mod(b, n), 5.)) - .5) * .5; }
+  else if (x > e) { s = e; b += 1.; e = b + 1. + (hash21(vec2(row * 11. + mod(b + 1., n), 5.)) - .5) * .5; }
+  float len = (e - s) / n * 2.4;
+  return vec4((x - s) / (e - s), fy, hash21(vec2(mod(b, n) + row * 13., 9.)), len);
+}
+// How far a point is in from the nearest joint, in metres.
+float ashlarEdge(vec2 uv, vec4 c) { return min(min(c.x, 1. - c.x) * c.w, min(c.y, 1. - c.y) * .4); }`;
+
 const RECIPES: Record<string, Recipe> = {
+  ashlar: {
+    normalStrength: 4.5,
+    height: ASHLAR_CELL + /* glsl */ `
+float heightFn(vec2 uv) {
+  vec4 c = ashlarCell(uv);
+  float d = ashlarEdge(uv, c) + fbm(uv + c.z * 4.1, vec2(96.), 2, .5) * .006;
+  // The arris worn round over a couple of centimetres, and here and there a chip out of it.
+  float face = smoothstep(.004, .026, d);
+  float chip = smoothstep(.6, .8, fbm(uv + 3.3, vec2(48.), 3, .5)) * (1. - smoothstep(.02, .07, d));
+  float tool = gnoise(vec2(uv.x * 20., uv.y * 140.) + c.z * 30., vec2(20., 140.)) * .5;
+  float dent = fbm(uv + c.z * 2.7, vec2(24.), 3, .55) * .14 + (c.z - .5) * .05;
+  float mortar = .2 + fbm(uv + 9.1, vec2(160.), 2, .5) * .06;
+  return clamp(mix(mortar, .72 + dent + tool * .05 - chip * .25, face), 0., 1.);
+}`,
+    // (The height's code comes before the surface's in one program, so the cell is written there once.)
+    surface: /* glsl */ `
+void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough) {
+  vec4 c = ashlarCell(uv);
+  float id = c.z, k = fract(id * 13.7), m = fract(id * 7.31);
+  // Each block from its own part of the bed: paler, darker, warmer or cooler; now and then one with iron in it.
+  vec3 stone = mix(vec3(.62, .6, .56), vec3(.76, .74, .7), k);
+  stone *= vec3(1. + (m - .5) * .08, 1., 1. - (m - .5) * .08);
+  stone = mix(stone, vec3(.66, .54, .4), step(.9, fract(id * 3.9)) * .4);
+  stone *= .9 + .2 * fbm(uv + id * 5., vec2(16.), 4, .5);
+  vec3 lime = vec3(.7, .67, .6) * (.85 + .15 * fbm(uv + 1.7, vec2(80.), 2, .5));
+  float face = smoothstep(.34, .5, h);
+  albedo = mix(lime, stone, face) * (1. - cavity * .4) * (.96 + .08 * hash21(floor(uv * 512.)));
+  rough = mix(.95, .86, face);
+}`,
+  },
   // Dressed limestone: broad undulation, pitting, fine tooling and grain. Pale, so vertex tint sets the colour.
   stone: {
     normalStrength: 5.5,

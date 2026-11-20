@@ -94,7 +94,7 @@ docs/
 - **The mission.** Each site is given something to overcome. The sanctum is locked and wants a gold key, which is hidden somewhere that takes finding, by preference a dead end and sometimes a dark one. About half the time that room is itself locked with an iron lock, with the iron key elsewhere. About a third of the time one way out of the entrance hall cannot be passed at first, and becomes a shortcut once the player has gone round. It is either a door barred on its far side, or a portcullis whose lever stands just beyond it: the player can see through the bars into the room they cannot yet enter. The lever is the first thing in the game that changes somewhere else when used. Other doorways are hung with doors standing open or shut, or left as plain arches.
 - **The valley.** The player arrives at the far end of a valley some hundred and twenty metres across and eighty long, on a worn track that wanders up through woods to a meadow and the door of the house, which is built into the escarpment at the valley's head. All of it can be walked: the ground and the trunks of trees are solid, boulders lie about, and cliffs too high to climb shut the valley in on three sides, with wooded hills and three ranges of mountains beyond them, one behind another to three kilometres, each paler in the haze than the one in front. The meadow before the door and the scarp beside it are carved and baked with the house; the rest of the rim is carved from the same lattice of heights, and the floor of the valley is a sheet laid over the same height function, so all of them meet. What grows is drawn as cards: grass in tufts, thick in the meadow and thin by the track, with flowers in drifts; bushes by rocks; trees with crowns of several hundred leaf cards shaded as one rounded body; firs in drooping tiers on the higher ground; and here and there a stand in blossom. Getting on for three hundred thousand cards in all, moving in the wind. The hill above the house is its roof: mounded turf with rough grass and heather, a coping on the front wall and a stone kerb round each court and roofless room. A roaming test drives the player at the rim and the cliffs from thirty-six directions, jumping, and confirms they neither get out nor fall through.
 - **The island.** With `?place=island` the same house stands instead on the high ground of an island in the sea: sea cliffs and stacks all round, a cove with a beach and a jetty where the player arrives, a hamlet of fishermen's cottages and their boats, a lighthouse that can be climbed, often a castle on a headland and a cave in the cove's cliff, and the mainland across the water. See item 20 below.
-- **The town.** With `?place=town` the same house stands on a terrace at the head of the market square of a harbour town, on a coast between the sea and the mountains: a harbour with a quay, two moles and a light, where the player arrives; streets of classical buildings by the square and the waterfront, timber-framed and wooden houses beyond, shacks on the fringes and red storehouses along the shore; fields, woods, and an outlook on the headland. See item 37 below.
+- **The town.** With `?place=town` a cathedral stands on a terrace at the head of the market square of a harbour town (item 53: a nave between aisles, transepts, a choir and a shrine, west towers that are climbed to their bells and the walk round their spires, a crypt and a dungeon under it, a cloister beside it, made between one and a half and three times as high as the buildings about the square), on a coast between the sea and the mountains: a harbour with a quay, two moles and a light, where the player arrives; streets of classical buildings by the square and the waterfront, timber-framed and wooden houses beyond, shacks on the fringes and red storehouses along the shore; fields, woods, and an outlook on the headland. See item 37 below.
 - **The mountain top.** With `?place=mountain` the same house is a hospice in a saddle on a mountain top that stands out of a sea of cloud, summer or winter. See item 21 below.
 - **A secret.** About three sites in five have a chamber that no door leads to. One stretch of wall is really a door faced in stone: its courses do not quite line up with the wall's, and a thin arched outline shows if you look. It holds at two paces and gives when all but leaned on. Inside is a relic. Nothing the mission needs is ever put behind it, the map leaves the chamber off until it is found, and the end of a run says whether you found it.
 - **Storeys.** About half the houses have a room over a room, or a cellar under one, or both: a solar, loft or muniment room above, a cellar, undercroft, crypt or cold store below. Each has the outline of the room it belongs to and is reached from it by a stone stair of eighteen steps that runs up one long wall and comes through a railed well in the floor above. Nothing else opens off such a room, so it is a place to go to and come back from; the mission knows about them and hides keys there. The hill over the house is as much higher as the rooms under it need. The plan in play shows the storey the player is on; exported maps show the ground storey, with stairs drawn and what is kept on other storeys marked at them.
@@ -418,6 +418,65 @@ The machine this is developed on now has a graphics card, and tablets were repor
     mission (the game's rules); its torches and lamps as lights, smoke, birds and sheep; and the build's own frames are not yet timed on a
     graphics card. What stands about the house comes cut into tiles of 64 metres, cut in the worker (`tilePacked`), as the game cuts it,
     so that what is out of view is not drawn; the page puts in some six milliseconds' worth of them a frame.
+
+53. **The town's house a cathedral.** Asked: "adapt the coastal town \"house\": make it a \"cathedral\" kind of monumental building
+    complex to explore, can have towers / spires, crypt, dungeon etc. Style it properly how it will look outwards"; then, while it was
+    being built, "it should always be a higher building than the nearby town buildings by at least factor of 1.5x but can vary up to
+    3x"; and, once it was standing and turned out ten million triangles laid stone by stone, "the house doesn't need to be built out of
+    individual stones... you can use principles found in building generators and adapt or create new one". *Done* (`src/core/cathedral.ts`,
+    `src/render/cathedral.ts`; see [document 4](04-look.md), *The cathedral*, and [document 5](05-site-format.md), *Cathedrals*):
+    - *The plan*, of places as any house is, so that doors, keys, the solver, the maps and the bake all know it: the west front to the
+      square, two towers either side of a narthex that is the nave's first bay (seven in ten) or one great tower whose foot is the
+      porch, with chapels either side; a nave of four to six bays between aisles, open to them through pointed arcades springing as high
+      as the aisles' walls allow; the crossing with the transepts' arms either side; a choir of two or three bays with its own aisles;
+      and the shrine beyond, a few steps up, locked, which is the goal. On one side of the nave (in most) the cloister: its garth with
+      the walk round it, a refectory and a library by the front; off the transepts the chapter house and the sacristy. Under the choir
+      the crypt, a low hall of three vaults on two rows of columns with tombs in its side aisles, reached by stairs down from both of the
+      choir's aisles (a loop); beside it, under a transept, the dungeon, a passage with three to five cells off it; under the shrine a
+      chamber that only a secret door in the crypt's end wall leads to. The towers are climbed: from the room at the foot by a flight up
+      the outer wall to the tower's stair, which climbs round its walls (a new kind of stair, `round`) to the belfry, where the bells
+      hang in an oak frame, and a steep flight from there up through the top, a walk behind the parapet round the spire.
+    - *How high.* Once the town is laid out round the church's ground, the tallest building within 170 metres of the forecourt is
+      measured to its ridge (`buildingHeight` in `town.ts`, reckoned generously), and the nave's ridge is made between one and a half and
+      three times that, dealt (`measure` in the document); the nave, crossing, transepts and choir rise to that, the aisles to about half
+      the nave's walls, with room left for a clerestory over their roofs. Where the least a nave with aisles and a clerestory can be is
+      more than three times the town (a town of low houses), it is that least. The towers' tops stand at the ridge or up to a fifth over
+      it (a single tower a quarter), and their spires over that.
+    - *Its outside*, built by `buildCathedral`: walls traced from the outline of its places in bands of height, so that the clerestory
+      rises clear of the aisles' lean-to roofs and the towers out of everything; tall pointed windows of two to four lights with tracery,
+      coloured glass within, dark glass without; round windows where it has them, in the west front and the transepts' ends; buttresses
+      at every bay with pinnacles, and flying buttresses over the aisles; parapets along the eaves; steep roofs of lead, copper or dark
+      tiles with standing seams, gables of stone, coped, with a cross on each; the towers buttressed at the corners, stages of blind
+      lancets up their faces, louvred belfry openings, a parapet with corner pinnacles and a spire of stone (crocketed, banded, with
+      lucarnes at its foot), lead or copper, or none; over the crossing a tower with its own spire or none, or a slender flèche on the
+      ridge; and the west portal, orders of stone stepping in to the doors with a figure in the tympanum and a gable over it, blind
+      portals on the towers' fronts, and over it a gallery of figures under canopies.
+    - *Not stone by stone.* Laid as every house is, block by block, the first cathedral was ten and a half million triangles, ten times
+      a house; trying larger blocks and leaner joints brought it to eight. Now its walls, vaults, arches, floors and timber are each one
+      plain surface, cut on a lattice fine enough to carry the baked light and to follow the edges of its openings (`MasonryStyle.flat`
+      in `masonry.ts`), and the courses and joints are in the picture laid on it by the metre, a new recipe, `ashlar` (`textures.ts`): six
+      courses of 0.4 metres to a picture 2.4 metres square, each cut into three or four blocks at joints of its own, every block its own
+      tone, its face dressed, its arrises worn and chipped, joints of lime. The same rooms, built by the same code, with the same styles
+      made flat: the cathedral is now some 460,000 triangles, a third of an old house's, and meshes with its town in about 25 seconds.
+    - *Found and mended on the way:* the first number a freshly forked stream gives is much alike for seeds alike (`a`, `b`, …), so
+      that a choice made on it came out the same for nearly every seed (every roof copper); the cathedral's streams pass over their
+      first few. The town's garden kept out of the house by a distance that is never less than nothing (`outsideRect`), and so never
+      kept out of it: the old house's ground happened to refuse it, the cathedral's did not, and box hedges and flower beds grew in the
+      nave. Doors that spring higher than a man's door have leaves as high.
+    - *Checked:* `npm run typecheck`, `npm run build`; `npx tsx tools/sites.ts 48 town` (six towns, none failing; it now checks the
+      cathedral too: its ridge between 1.5 and 3 times the houses about the square, no two rooms of a storey overlapping, every flight
+      within its room and no steeper than a tread of 0.17, every stair round the walls climbing exactly to the floor over it and ending
+      on a leg of a dozen steps or more; the six came out at 1.5 to 3.0 times); `npx tsx tools/sites.ts 40 valley` (unchanged, none
+      failing); `npx tsx tools/town.ts 2` (both sound, whole towns of 4.8 and 5.5 million triangles, built in 21 and 24 seconds);
+      `PLACE=town node tools/browser/play.cjs a e` (a twin-towered and a single-towered cathedral: every doorway and every stair walked
+      both ways with the player's body, the stairs round the towers' walls to the belfries 50 and 70 metres up among them, and both
+      played to the end, down into the crypt and the dungeon for the keys and up to the shrine); photographed in headless Chromium
+      (software drawing, the light not baked) from the square, the air, the sides and the harbour, and inside the nave, the crossing,
+      the crypt, a tower's stair and a cell. The walk test first stopped on every stair round a tower's walls: its corner landings
+      had been railed on the sides the flights come onto them by; only a post stands at a landing's inner corner now.
+    - *Not yet:* the light baked and frames timed on a graphics card; the cathedral built into the world on the walk page (towns are not
+      yet); people, an organ, a pulpit and a font; a portal on the transepts' ends; the towers of a single-tower front are broad and
+      plain over their lower stages; the crypt's stairs are straight flights under timber ceilings.
 
 ## Risks
 

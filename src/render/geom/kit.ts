@@ -28,6 +28,13 @@ export interface Opening {
    * Leave unset for the usual band; set to zero where the wall must run right up to the opening.
    */
   band?: number;
+  /**
+   * A pointed head: two arcs whose radius is so many times the half width, each struck from a point on the springing line on the
+   * far side of the middle, meeting at the head (2 is the equilateral arch of Gothic work). Left out, or 1, a half circle.
+   */
+  point?: number;
+  /** A round window: a circle `w` in radius about the springing (`y0` is then its foot, `ys - w`). */
+  circle?: boolean;
 }
 
 export interface Frame {
@@ -66,26 +73,64 @@ export function cylinderSurface(centre: Vector3, axis: Vector3, side: Vector3, u
   };
 }
 
+/** How high the head of an arch `w` half broad stands over its springing: `w` for a half circle, more for a pointed one (`point`, as in `Opening`). */
+export function archRise(w: number, point = 1): number {
+  if (point <= 1) return w;
+  const R = point * w;
+  return Math.sqrt(R * R - (R - w) * (R - w));
+}
+
+/**
+ * How far a point is outside an arch's curve (less than nothing inside), the point given across from the arch's middle (`du`) and
+ * up from its springing (`dy`). A pointed arch is where both its circles are.
+ */
+export function archSdf(du: number, dy: number, w: number, point = 1): number {
+  if (point <= 1) return Math.hypot(du, dy) - w;
+  const R = point * w, off = R - w;
+  return Math.max(Math.hypot(du - off, dy), Math.hypot(du + off, dy)) - R;
+}
+
 export function openingSdf(o: Opening, u: number, y: number): number {
+  if (o.circle) return Math.hypot(u - o.c, y - o.ys) - o.w;
   const dx = Math.abs(u - o.c);
-  if (y >= o.ys) return Math.hypot(dx, y - o.ys) - o.w;
+  if (y >= o.ys) return archSdf(u - o.c, y - o.ys, o.w, o.point);
   return Math.max(dx - o.w, o.y0 - y);
 }
 
+/** The angle each arc of a pointed head sweeps, from the springing to the head. */
+const sweepOf = (o: Opening) => Math.acos(((o.point ?? 1) - 1) / (o.point ?? 1));
+
 function outlineLength(o: Opening): number {
+  if (o.circle) return 2 * Math.PI * o.w;
+  if ((o.point ?? 1) > 1) return 2 * (o.ys - o.y0) + 2 * (o.point! * o.w) * sweepOf(o);
   return 2 * (o.ys - o.y0) + Math.PI * o.w;
 }
 
 /** Point and outward direction on an opening's outline: up one jamb, round the arch, down the other. */
 function outline(o: Opening, t: number, out: { u: number; y: number; ou: number; oy: number }): void {
+  if (o.circle) {
+    // (From its foot, up its left side, over and down: the way the others go round.)
+    const th = -Math.PI / 2 - t / o.w;
+    out.ou = Math.cos(th); out.oy = Math.sin(th);
+    out.u = o.c + o.w * out.ou; out.y = o.ys + o.w * out.oy;
+    return;
+  }
   const h = o.ys - o.y0;
-  const arc = Math.PI * o.w;
+  const pointed = (o.point ?? 1) > 1, R = pointed ? o.point! * o.w : o.w, sweep = pointed ? sweepOf(o) : Math.PI / 2;
+  const arc = pointed ? 2 * R * sweep : Math.PI * o.w;
   if (t < h) {
     out.u = o.c - o.w; out.y = o.y0 + t; out.ou = -1; out.oy = 0;
   } else if (t < h + arc) {
-    const th = Math.PI - (t - h) / o.w;
+    if (!pointed) {
+      const th = Math.PI - (t - h) / o.w;
+      out.ou = Math.cos(th); out.oy = Math.sin(th);
+      out.u = o.c + o.w * out.ou; out.y = o.ys + o.w * out.oy;
+      return;
+    }
+    // (The left arc is struck from right of the middle, and the right from left of it.)
+    const s = t - h, left = s < R * sweep, th = left ? Math.PI - s / R : sweep - (s - R * sweep) / R, cx = o.c + (left ? 1 : -1) * (R - o.w);
     out.ou = Math.cos(th); out.oy = Math.sin(th);
-    out.u = o.c + o.w * out.ou; out.y = o.ys + o.w * out.oy;
+    out.u = cx + R * out.ou; out.y = o.ys + R * out.oy;
   } else {
     out.u = o.c + o.w; out.y = o.ys - (t - h - arc); out.ou = 1; out.oy = 0;
   }
@@ -123,7 +168,9 @@ export class Kit {
   }
 
   patch(material: string, surface: Surface, opts: Omit<PatchOptions, 'rng' | 'field'> & { field?: FieldFn }): void {
-    this.blocks += layMasonry(this.mesh(material), surface, { field: this.field, ...opts, rng: this.rng(material) });
+    // (A flat style's picture is a material of its own: see `MasonryStyle.flat`.)
+    const as = opts.style.material ?? material;
+    this.blocks += layMasonry(this.mesh(as), surface, { field: this.field, ...opts, rng: this.rng(material) });
   }
 
   mass(min: Vector3, max: Vector3): void {
@@ -155,7 +202,7 @@ export class Kit {
       let bottom = y0;
       for (const op of [...col].sort((a, b) => a.y0 - b.y0)) {
         add(left, right, bottom, op.y0 - i);
-        const top = op.ys + op.w + i;
+        const top = op.ys + archRise(op.w, op.point) + i;
         add(left, op.c - op.w - i, Math.max(bottom, op.y0 - i), top);
         add(op.c + op.w + i, right, Math.max(bottom, op.y0 - i), top);
         bottom = top;
@@ -286,35 +333,51 @@ export class Kit {
     this.plane(material, new Vector3(min.x, min.y, min.z), X, Z, new Vector3(0, -1, 0), sx, sz, topStyle, { open });
   }
 
-  /** The inside of a half-round vault. `start` is on the axis at springing height. */
-  barrelVault(material: string, start: Vector3, axis: Vector3, length: number, radius: number, style: MasonryStyle): void {
+  /**
+   * The inside of a half-round vault. `start` is on the axis at springing height. With `point` (as in `Opening`, the radius of its
+   * arcs over its half span), a pointed vault: two arcs meeting along the crown, each laid in courses from its springing.
+   */
+  barrelVault(material: string, start: Vector3, axis: Vector3, length: number, radius: number, style: MasonryStyle, point = 1): void {
     const side = new Vector3().crossVectors(UP, axis).normalize();
-    this.patch(material, cylinderSurface(start, axis, side, UP, radius, true), {
-      u0: 0, u1: length, v0: 0, v1: Math.PI * radius, style, courseKey: 'vault',
-    });
+    if (point <= 1) {
+      this.patch(material, cylinderSurface(start, axis, side, UP, radius, true), {
+        u0: 0, u1: length, v0: 0, v1: Math.PI * radius, style, courseKey: 'vault',
+      });
+      return;
+    }
+    const R = point * radius, sweep = Math.acos((R - radius) / R);
+    // (Each arc as a cylinder of its own: the one on `side`'s side is struck from a point the other side of the axis.)
+    this.patch(material, cylinderSurface(start.clone().addScaledVector(side, -(R - radius)), axis, side, UP, R, true), { u0: 0, u1: length, v0: 0, v1: R * sweep, style, courseKey: 'vault' });
+    this.patch(material, cylinderSurface(start.clone().addScaledVector(side, R - radius), axis, side, UP, R, true), { u0: 0, u1: length, v0: R * (Math.PI - sweep), v1: R * Math.PI, style, courseKey: 'vault' });
   }
 
-  /** A half-round arch of rectangular section under a vault: soffit and two cheeks. */
-  rib(material: string, centre: Vector3, axis: Vector3, radius: number, width: number, depth: number, style: MasonryStyle): void {
+  /**
+   * A half-round arch of rectangular section under a vault: soffit and two cheeks. With `point`, under a pointed vault: its two
+   * arcs struck from the same points as the vault's, and its soffit `depth` inside them.
+   */
+  rib(material: string, centre: Vector3, axis: Vector3, radius: number, width: number, depth: number, style: MasonryStyle, point = 1): void {
     const side = new Vector3().crossVectors(UP, axis).normalize();
     const start = centre.clone().addScaledVector(axis, -width / 2);
-    const inner = radius - depth;
     const key = `rib/${this.counter}`;
+    // Where a point round the arch is: `u` from the springing on `side`'s side, `off` out from the soffit; and the way out there.
+    const R = point <= 1 ? radius : point * radius, inner = R - depth, shift = R - radius, sweep = point <= 1 ? Math.PI / 2 : Math.acos(shift / R);
+    const total = 2 * inner * sweep;
+    const at = (u: number, off: number, base: Vector3, p: Vector3, n: Vector3) => {
+      const first = u < inner * sweep, t = first ? u / inner : Math.PI - sweep + (u - inner * sweep) / inner;
+      n.set(0, 0, 0).addScaledVector(side, Math.cos(t)).addScaledVector(UP, Math.sin(t));
+      p.copy(base).addScaledVector(side, first ? -shift : shift).addScaledVector(n, inner + off);
+    };
     this.patch(material, (u, v, p, n) => {
       // Here u runs round the arch and v across its width, so stones split along the arch.
-      const t = u / inner;
-      n.set(0, 0, 0).addScaledVector(side, Math.cos(t)).addScaledVector(UP, Math.sin(t));
-      p.copy(start).addScaledVector(axis, v).addScaledVector(n, inner);
+      at(u, 0, start.clone().addScaledVector(axis, v), p, n);
       n.negate();
-    }, { u0: 0, u1: Math.PI * inner, v0: 0, v1: width, style, singleCourse: true, splitKey: key, open: { v0: true, v1: true } });
+    }, { u0: 0, u1: total, v0: 0, v1: width, style, singleCourse: true, splitKey: key, open: { v0: true, v1: true } });
     for (const sgn of [-1, 1]) {
-      const at = centre.clone().addScaledVector(axis, (sgn * width) / 2);
+      const base = centre.clone().addScaledVector(axis, (sgn * width) / 2);
       this.patch(material, (u, v, p, n) => {
-        const t = u / inner;
-        n.set(0, 0, 0).addScaledVector(side, Math.cos(t)).addScaledVector(UP, Math.sin(t));
-        p.copy(at).addScaledVector(n, inner + v);
+        at(u, v, base, p, n);
         n.copy(axis).multiplyScalar(sgn);
-      }, { u0: 0, u1: Math.PI * inner, v0: 0, v1: depth, style, singleCourse: true, splitKey: key, open: { v0: true, v1: true } });
+      }, { u0: 0, u1: total, v0: 0, v1: depth, style, singleCourse: true, splitKey: key, open: { v0: true, v1: true } });
     }
   }
 
