@@ -1,6 +1,7 @@
 import { Rng } from './rng';
 import { fbmd, HeightField, landDetail, wearByFrost, wearByWater } from './terrain';
 import { Ground, groundsOpen, withGrounds } from './fit';
+import { Way, WAY, WayIndex, withWay } from './way';
 
 /**
  * The world's land at a metre, made a square at a time where it is wanted (`docs/06-world.md`,
@@ -19,6 +20,8 @@ import { Ground, groundsOpen, withGrounds } from './fit';
 export const SQUARE = { size: 256, n: 257 };
 /** How far beyond a square its land is made and worn, so the wear at its edge has ground to run on; and how far in from the edge the wear fades in. */
 const APRON = 24, FADE = 20;
+/** What a point of a way's bed counts as for the mesh, in metres: kept in every mesh of a square within some 250 metres (`LEVELS` in the walk page). */
+const WAY_KEEP = 0.5;
 
 /** What a square needs of the world's tiles: each tile's lattice and where its middle lies (`ox`, `oz`). */
 export interface TileData { i: number; j: number; ox: number; oz: number; x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array }
@@ -88,8 +91,10 @@ export interface Square { i: number; j: number; x0: number; z0: number; heights:
  * Makes a square's land from the tiles under it. `seed` is the world's number for its noise. `grounds`
  * are the houses' grounds fitted to the land (`fit.ts`): made on it, levelled or terraced, with their
  * banks, after the wear; each a function of where a point lies alone, so two squares still meet.
+ * `ways` are ways' beds (`way.ts`), cut and filled into the land after the wear and before the
+ * grounds, alike in every square they pass through.
  */
-export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number, grounds: Ground[] = []): Square {
+export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number, seed: number, grounds: Ground[] = [], ways: Way[] = []): Square {
   const t0 = performance.now();
   const [x0, z0] = squareOrigin(g, i, j), n = SQUARE.n + 2 * APRON;
   const read = tiles.map((t) => { const f = new HeightField(t.x0, t.z0, t.cell, t.nx, t.nz); f.data.set(t.data); return { t, f }; });
@@ -112,11 +117,29 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
     const k = (jj + APRON) * n + ii + APRON, edge = Math.min(ii, jj, SQUARE.n - 1 - ii, SQUARE.n - 1 - jj);
     out[jj * SQUARE.n + ii] = shaped[k] + (f.data[k] - shaped[k]) * smooth(edge / FADE);
   }
+  // The ways through it, their beds cut and filled into the land (`withWay`): before the houses' grounds, which a way comes onto as
+  // they lie. Each point of a way's bed and a strip either side is kept in every mesh near enough to see its track (`keep`): the
+  // ground's material reads the track from a number that changes by a metre to the metre across it, and a triangle broader than the
+  // track would spread that number over the grass.
+  let keep: Float32Array | undefined;
+  const near = ways.map((w) => new WayIndex(w)).filter((ix) => ix.touches(x0, z0, x0 + SQUARE.size, z0 + SQUARE.size));
+  if (near.length) {
+    keep = new Float32Array(SQUARE.n * SQUARE.n);
+    const strip = WAY.half + WAY.shoulder + 4;
+    for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
+      const k = jj * SQUARE.n + ii, x = x0 + ii, z = z0 + jj;
+      for (const ix of near) {
+        out[k] = withWay(ix, x, z, out[k]);
+        const n = ix.near(x, z);
+        if (n && n.d < strip) keep[k] = WAY_KEEP;
+      }
+    }
+  }
   if (grounds.length) for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
     const k = jj * SQUARE.n + ii;
     out[k] = withGrounds(grounds, x0 + ii, z0 + jj, out[k]);
   }
-  return { i, j, x0, z0, heights: out, errors: errorsOf(out), ms: performance.now() - t0 };
+  return { i, j, x0, z0, heights: out, errors: errorsOf(out, keep), ms: performance.now() - t0 };
 }
 
 /**
@@ -199,13 +222,14 @@ export function refineSquare(coarse: Float32Array, i: number, j: number, x0: num
  * triangulated irregular networks); a mesh true to within a given distance splits wherever this
  * says more than that distance.
  */
-export function errorsOf(h: Float32Array): Float32Array {
+export function errorsOf(h: Float32Array, keep?: Float32Array): Float32Array {
   const size = SQUARE.n, tile = size - 1, count = tile * tile * 2 - 2, parents = count - tile * tile;
   const coords = triangleCoords(), err = new Float32Array(size * size);
   for (let i = count - 1; i >= 0; i--) {
     const k = i * 4, ax = coords[k], ay = coords[k + 1], bx = coords[k + 2], by = coords[k + 3];
     const mx = (ax + bx) >> 1, my = (ay + by) >> 1, cx = mx + my - ay, cy = my + ax - mx, m = my * size + mx;
-    err[m] = Math.max(err[m], Math.abs((h[ay * size + ax] + h[by * size + bx]) / 2 - h[m]));
+    // (`keep`: points to be kept at least to that distance, whatever the ground does there; carried up the hierarchy as the rest is.)
+    err[m] = Math.max(err[m], Math.abs((h[ay * size + ax] + h[by * size + bx]) / 2 - h[m]), keep ? keep[m] : 0);
     if (i < parents) err[m] = Math.max(err[m], err[((ay + cy) >> 1) * size + ((ax + cx) >> 1)], err[((by + cy) >> 1) * size + ((bx + cx) >> 1)]);
   }
   return err;

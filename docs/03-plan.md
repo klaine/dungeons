@@ -361,6 +361,25 @@ The machine this is developed on now has a graphics card, and tablets were repor
 
 48. **Going to places from the maps.** Asked: "we have now the worlds as default and the build all function, but how do jump into any of the locations after the build all is completed? and how do i return to the world map page from ingame to choose another location?" Both were there (**Build a house here** on each place's card; **World map** in the game's row of buttons), but neither was plain. *Done:* on the world page a place clicked on the ink map, within some twenty pixels of its mark or inside its footprint if it was built, opens the game on it, and its card's link says **Go there**; in the game, on the world's map that `M` shows past the large plan, another place clicked is gone to, its house its own (after `Esc`, which lets the pointer go); elsewhere a click goes back to the plan, as before. The pointer shows which can be clicked, and the place's name. The world's map in the game zooms, by the wheel or `+` and `-`, out to the whole world and back: as it opens, a kilometre and four fifths across, there was seldom another place in it to go to (tried at the first valley head of `w2`: none).
 
+49. **A way from a town to a valley head, walked.** Asked first how long ways between the places would be ("lets say 200-400m wide
+    path following playable areas, how long would the routes be in km?"), then that nothing be left unjoined, towns joined to towns and
+    valley heads to valley heads if need be; then "lets try this with one traversable path from a town to a valley? find a shorter such
+    a route and deploy it as a page accessible in a ./lab/ folder path", and "inkmap for the area covering the route and a bit of the
+    surroundings of the locations in one map". The lengths measured, and the network that joins everything, are in
+    [document 6](06-world.md), *A way between places*: a few kilometres a leg, 22 to 28 a world. *Done, one way:* `route.ts` lays each
+    town's way to the valley head nearest it by way and grades its bed on the land at a metre's own source; `way.ts` cuts and fills the
+    bed into every square it passes through, alike, so squares still meet, and keeps its points in the mesh so the ground's material
+    draws its track; `lab/route.html` (published) walks it: `w0`, Halhaven's quay to Strath Norith's house, 0.93 kilometres, in a
+    corridor of 300 metres, with a panel of how far, a small map, an ink map of the stretch (`drawInkWorld` now draws a stretch of a
+    world alone, with a way in red), and both places laid out for the game while one walks and kept, so that entering either builds it
+    at once. *Checked:* `npm run typecheck`, `npm run build`; `tools/route.ts w0` (the four towns' ways in 0.7 seconds; 17 squares,
+    their 25 shared edges exact, the bed exact on the land, cut and fill 1.1 metres at most); `tools/stream.ts` unchanged where no way
+    passes; `tools/browser/route.cjs` in headless Chromium, drawing in software (the way laid 77 seconds after the page opened; the
+    track drawn as ruts and bare earth with grass along its verges; the walker held at the corridor's edge; both places laid out ahead
+    and kept in 195 seconds). *Not yet:* the places drawn on the page
+    themselves (only their grounds), building the next place while walking (it is laid out, not built), a mark of the corridor's edge on
+    the ground, bridges, the half metre on this page, and ways other than town to valley head walked. Not tried on a graphics card.
+
 ## Risks
 
 | Risk | Mitigation |

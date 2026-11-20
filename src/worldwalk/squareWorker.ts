@@ -2,7 +2,8 @@ import { makeSquare, refineSquare, TileData } from '../core/stream';
 
 /**
  * Makes squares of land at a metre, one at a time, from tiles the page sends (each kept here once
- * sent); and splits a square the page sends back into four at half a metre, when it asks.
+ * sent), with the beds of any ways through them cut in (`withWay`); and splits a square the page
+ * sends back into four at half a metre, when it asks.
  */
 const tiles = new Map<string, TileData>();
 self.onmessage = (e: MessageEvent) => {
@@ -14,6 +15,6 @@ self.onmessage = (e: MessageEvent) => {
   }
   for (const t of m.tiles as TileData[]) tiles.set(`${t.i},${t.j}`, t);
   const use = (m.need as [number, number][]).map(([a, b]) => tiles.get(`${a},${b}`)!);
-  const s = makeSquare(m.grid, use, m.i, m.j, m.seed, m.grounds);
+  const s = makeSquare(m.grid, use, m.i, m.j, m.seed, m.grounds, m.ways ?? []);
   self.postMessage({ type: 'square', i: s.i, j: s.j, x0: s.x0, z0: s.z0, heights: s.heights, errors: s.errors, ms: s.ms }, { transfer: [s.heights.buffer, s.errors.buffer] });
 };

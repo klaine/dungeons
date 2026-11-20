@@ -9,8 +9,8 @@ import { worldData } from './worldData';
  * them. All handed to the page as it comes, to be kept in the browser (`worldStore.ts`), where the game finds them: going to a place
  * built beforehand, it neither makes the world nor its tiles nor lays the place out, but builds what was laid out.
  */
-self.onmessage = (e: MessageEvent<{ seed: string; size?: { x: number; z: number } }>) => {
-  const { seed, size } = e.data, steps = worldSteps(seed, size);
+self.onmessage = (e: MessageEvent<{ seed: string; size?: { x: number; z: number }; only?: string[] }>) => {
+  const { seed, size, only } = e.data, steps = worldSteps(seed, size);
   let w: World;
   for (;;) {
     const s = steps.next();
@@ -21,8 +21,10 @@ self.onmessage = (e: MessageEvent<{ seed: string; size?: { x: number; z: number 
   const land = landOfWorld(w);
   self.postMessage({ type: 'world', world: worldData(w) });
   const sent = new Set<string>();
-  w.places.forEach((q, k) => {
-    self.postMessage({ type: 'progress', text: `Laying out ${q.name}`, done: k, total: w.places.length });
+  // (Only those asked for, in the order asked, where a page wants only some laid out ahead: the route page, the place it goes to first.)
+  const places = only ? only.flatMap((spec) => w.places.filter((q) => `${q.kind}${q.n}` === spec)) : w.places;
+  places.forEach((q, k) => {
+    self.postMessage({ type: 'progress', text: `Laying out ${q.name}`, done: k, total: places.length });
     let site: unknown = null, why = '', house = '';
     try { ({ seed: house, site } = generateWorldPlace(seed, q.kind === 'coast' ? 'town' : q.kind, q.n)); } catch (err) { why = (err as Error).message; }
     // (The tiles made for it, each handed over once.)

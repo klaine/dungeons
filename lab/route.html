@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dungeons: a way from a town to a valley</title>
+  <!-- Where the game is, from this folder: the "Enter" links open it on either end of the way. -->
+  <meta name="dungeons-game" content="../index.html">
+  <style>
+    /* The walk page's look (walk.html): the sky behind the picture, dark glass panels over it. */
+    :root {
+      --sky: #9ab6cf;
+      --panel: rgba(12, 11, 10, 0.66);
+      --panel-edge: rgba(232, 226, 214, 0.35);
+      --ink: #e8e2d6;
+      --focus: #e0b070;
+      --pressed: rgba(224, 176, 112, 0.45);
+      --text: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color-scheme: dark;
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
+    body { background: var(--sky); color: var(--ink); font: var(--text); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    canvas#view { display: block; width: 100vw; height: 100vh; touch-action: none; }
+    #hud, #hint, #menus select, #menus .box, #routemap { color: var(--ink); background: var(--panel); border-radius: 6px; }
+    #hud { position: fixed; left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(10px + env(safe-area-inset-top, 0px)); padding: 8px 12px; white-space: pre-wrap; font-variant-numeric: tabular-nums; pointer-events: none; max-width: min(620px, calc(100vw - 210px)); overflow: hidden; }
+    #hint { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); padding: 6px 10px; pointer-events: none; max-width: calc(100vw - 24px); transition: opacity .4s; }
+    #hint .touch { display: none; }
+    #menus { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(10px + env(safe-area-inset-top, 0px)); display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: stretch; max-width: calc(100vw - 24px); }
+    #menus select { font: inherit; border: 1px solid var(--panel-edge); padding: 6px 8px; max-width: 46vw; }
+    #menus .box { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--panel-edge); padding: 6px 10px; cursor: pointer; white-space: nowrap; }
+    #menus a.box { color: var(--focus); text-decoration: none; }
+    #menus a.box.ready { background: var(--focus); color: #14110d; border-color: var(--focus); font-weight: 600; }
+    #menus select:focus-visible, #menus .box:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+    /* The small map of the way, under the menus. */
+    #routemap { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(56px + env(safe-area-inset-top, 0px)); width: 170px; height: 170px; border: 1px solid var(--panel-edge); pointer-events: none; }
+
+    /* The ink map, over everything, as large as the screen allows. */
+    #inkpanel { position: fixed; inset: 0; z-index: 5; background: rgba(12, 11, 10, 0.6); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; cursor: pointer; }
+    #inkpanel[hidden] { display: none; }
+    #inkpanel .sheet { position: relative; line-height: 0; box-shadow: 0 6px 30px rgba(0, 0, 0, 0.5); }
+    #inkpanel canvas#ink { display: block; width: auto; height: auto; max-width: calc(100vw - 24px); max-height: calc(100vh - 56px); }
+    #inkpanel canvas#inkme { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #inkpanel p { margin: 0; padding: 3px 10px; border-radius: 6px; background: var(--panel); }
+    #menus a.box[aria-pressed="true"] { background: var(--pressed); }
+
+    /* Touch: as on the walk page, without going on to the next place (here there is only the way). */
+    #stick { position: fixed; width: 112px; height: 112px; margin: -56px 0 0 -56px; border-radius: 50%; border: 1.5px solid var(--panel-edge); background: rgba(11, 10, 9, .22); pointer-events: none; opacity: 0; transition: opacity .15s; }
+    #stick.on { opacity: 1; }
+    #knob { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(232, 226, 214, .5); transition: background .15s; }
+    #stick.run #knob { background: var(--focus); }
+    .pad { display: none; position: fixed; width: 56px; height: 56px; border-radius: 50%; border: 1.5px solid var(--panel-edge); background: rgba(11, 10, 9, .32); color: var(--ink); font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; touch-action: none; -webkit-user-select: none; user-select: none; padding: 0; }
+    .pad:active, .pad[aria-pressed="true"] { background: var(--pressed); }
+    #fly { right: calc(22px + env(safe-area-inset-right, 0px)); bottom: calc(26px + env(safe-area-inset-bottom, 0px)); width: 68px; height: 68px; font-size: 12px; }
+    #up { right: calc(28px + env(safe-area-inset-right, 0px)); bottom: calc(108px + env(safe-area-inset-bottom, 0px)); }
+    #down { right: calc(104px + env(safe-area-inset-right, 0px)); bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
+    body.touch #fly, body.touch.flying #up, body.touch.flying #down { display: block; }
+    #next { display: none !important; }
+    body.touch #hint { right: auto; left: calc(12px + env(safe-area-inset-left, 0px)); max-width: calc(100vw - 140px); }
+    body.touch #hint .keys { display: none; }
+    body.touch #hint .touch { display: inline; }
+    body.touched #hint { opacity: 0; }
+
+    @media (max-width: 640px) {
+      #menus { left: calc(12px + env(safe-area-inset-left, 0px)); justify-content: flex-start; }
+      #menus select { max-width: calc(100vw - 24px); }
+      #hud { font-size: 10px; padding: 6px 9px; top: calc(132px + env(safe-area-inset-top, 0px)); max-width: calc(100vw - 150px); }
+      #routemap { top: calc(132px + env(safe-area-inset-top, 0px)); width: 120px; height: 120px; }
+      #hint { font-size: 11px; }
+    }
+  </style>
+</head>
+<body data-walk="route" data-world="w0">
+  <canvas id="view"></canvas>
+  <div id="hud">Starting…</div>
+  <div id="menus">
+    <select id="worlds" aria-label="World"></select>
+    <select id="where" aria-label="Way to walk"></select>
+    <a class="box" id="mapbutton" href="#" role="button" aria-pressed="false" title="The ink map of the way and the country about it (M)">Map</a>
+    <a class="box" id="enter-from" href="../index.html" hidden>Enter the town</a>
+    <a class="box" id="enter-to" href="../index.html" hidden>Enter the valley</a>
+  </div>
+  <canvas id="routemap" aria-label="Map of the way"></canvas>
+  <div id="inkpanel" hidden>
+    <div class="sheet"><canvas id="ink" aria-label="Ink map of the way and the country about it"></canvas><canvas id="inkme"></canvas></div>
+    <p>Click, or press M or Escape, to close</p>
+  </div>
+  <div id="hint"><span class="keys">Click to look about · W A S D to walk the way · Shift to run · V to fly over it (Space up, C down) · M the ink map · T triangles</span><span class="touch">Left thumb to walk, push far to run · drag on the right to look · Fly, Up and Down · Map at the top</span></div>
+  <script type="module" src="../src/worldwalk/main.ts"></script>
+</body>
+</html>

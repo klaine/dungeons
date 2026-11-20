@@ -40,8 +40,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
-    // Six pages: the tool itself, the gallery of candidates, the map of a world, a walk over a world's land streamed in at a metre, the
-    // small example that reads what it exports, and the building lab.
-    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', walk: 'walk.html', viewer: 'examples/viewer/index.html', buildings: 'lab/buildings.html' } },
+    // Seven pages: the tool itself, the gallery of candidates, the map of a world, a walk over a world's land streamed in at a metre, the
+    // small example that reads what it exports, the building lab, and the route lab (a way from a town to a valley head, walked).
+    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', walk: 'walk.html', viewer: 'examples/viewer/index.html', buildings: 'lab/buildings.html', route: 'lab/route.html' } },
   },
 });

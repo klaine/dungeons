@@ -529,6 +529,77 @@ at a metre under a place (the
 site reads the tiles at 5 metres, as it read its upland at 5, and lays its own detail); a world's lakes and
 rivers in its places.
 
+## A way between places
+
+Asked: "if we were to build traversable roads between the destinations (like sailable way from an island to nearest town and from a
+town to nearest valley and from there to the nearest mountain location), lets say 200-400m wide path following playable areas, how long
+would the routes be in km?", "These would be mostly just traversal where the next area can be built and loaded while travelling
+there?"; then "I think town-to-town routes would be realistic also to have", "so nothing should be totally unlinked; valley to valley
+would be ok"; then "lets try this with one traversable path from a town to a valley? find a shorter such a route and deploy it as a
+page accessible in a ./lab/ folder path", and "inkmap for the area covering the route and a bit of the surroundings of the locations
+in one map".
+
+**How long the ways are.** Measured on six worlds (`w0` to `w5`) with the world's own way of laying a track (`leastPath` on its lattice
+of 16 metres, the cost of a step rising with the square of its slope, a bridge counted as ninety metres more, water not crossed;
+ferries over water only). From an island's landing to the nearest town's quay by sea, 0.6 to 1.8 kilometres (only `w2` and `w4` have
+islands); from a town to the valley head nearest it by way, 0.7 to 6.9, some 2.7 in the middle; from a valley head's mouth to the
+foot of the nearest mountain top's ridge, 3.6 to 8.1, some 5.6 in the middle, climbing 390 to 920 metres, with 450 metres more up the
+ridge. Over land a way is 1 to 3 times as long as the line between its ends, the mountains' the most. A network joining every place
+(roads between the towns, the shortest set of links; each valley head and mountain top joined to whatever of it is cheapest to reach,
+which is another valley's way for one or two valley heads in each world and another mountain's for most mountain tops; each island by
+sea to its nearest town) left nothing unjoined in any of the six: 22 to 28 kilometres over land and up to 3.6 by sea, a corridor of 300
+metres about it some 6 to 8 square kilometres, a sixth of the world's land, some 200 to 240 squares of 256 metres. Along it, the average
+journey between two places is 6.6 to 8.2 kilometres and the longest 13 to 18. Towns on either side of the bay are 6 to 11 kilometres
+apart by road and 2 to 4 by sea; towns on the same shore 1 to 3. The nearest place to any place along the network is 0.6 to 3
+kilometres off for a town (1.5 in the middle), 1 to 4 for a valley head (2), 1.1 to 5.4 for a mountain top (2.5): so the next place is
+always several minutes off on foot, longer than the half minute to a minute and a half a place takes to lay out and build, but often
+close enough to be seen from the last.
+
+**The way, as built** (`src/core/route.ts`, `src/core/way.ts`). `townValleyRoutes` lays, for each coastal town, the way from its quay
+to every valley head's house and keeps the shortest; `layRoute` lays one between any two places, as the world's tracks are laid, its
+line smoothed and its points set four metres apart. `wayOf` grades its bed on the land the squares at a metre are made from (the
+world's tiles of 5 metres, blended where they overlap), drawn out smooth along the way over some thirty metres either side, the land's
+own height at its ends, where it comes onto the places' grounds. `withWay` makes the bed in the land: level across for 2.4 metres either
+side of its middle and a shoulder of 0.6, then a bank out to the land as it was, half again as broad as it is high, from two metres to
+sixteen. It is a function of where a point lies and of the land there alone, so that every square it passes through makes it alike,
+and squares still meet exactly; it is laid after a square's wear and before the houses' grounds, which a way comes onto as they lie.
+Each point of the bed and four metres either side is kept in the square's mesh to half a metre (`keep` in `errorsOf`), so that it is
+kept in every mesh within some 250 metres: the ground's material reads the track from a number that changes by a metre to the metre
+across it (how far to one side of the middle, plus a hundred, as a valley's track has it), and a triangle broader than the track would
+smear that number over the grass. The page fills that number in and keeps grass off the bed and trees four metres back from it.
+
+**The route page** (`lab/route.html`, published with the tool; the walk page's program with its body marked `data-walk="route"`,
+`src/worldwalk/routeMode.ts`). The world `w0` unless another is chosen, and in it the shortest town's way to a valley head, or any
+town's (the menu, or `?from=coast2&to=valley2`). The walker is set down on the town's quay facing along the way, and held within a
+corridor about it (`?broad=`, 300 metres); squares are made only within reach of the corridor and as far again beyond its edge
+(`?beyond=`, 200 metres), the world's own lattice further off. A panel says how far has been walked and how far is left, a small map
+shows the way, the corridor and the walker, and on coming to the valley head the link into it lights. **Map** (or `M`) opens an ink
+map of the stretch of country the way crosses, the world's own ink map (`drawInkWorld` with an `area`, at the scale that fills the
+sheet with it: its hachures, woods, fields, heath, rivers and the world's other ways) of the way and its two places with 450 metres
+about them, the way in red, the walker on it, and both places' streets, buildings and grounds as they are laid out. While one walks,
+once the squares about the start are in, both places are laid out for the game in a worker of their own (`placesWorker.ts`, asked only
+for those two, the valley head first), and kept in the browser with the world and its tiles, as the world page's *Build every place*
+keeps them; **Enter** at either end opens the game on that place, which then neither makes the world nor lays the place out, but
+builds what was laid out (in a build only: in development nothing is kept, and the places are laid out only for the map).
+
+*Measured* (`npx tsx tools/route.ts w0`, without a browser, in the cloud container of four cores): every town's way to its nearest
+valley head laid in 0.7 seconds for the four towns of `w0`; the shortest, from Halhaven to Strath Norith, 0.93 kilometres as against
+0.88 as the crow flies, rising 47 metres, at its steepest 8.7% over twenty metres; graded in 2 seconds (most of it making two tiles).
+The 17 squares a corridor of 300 metres touches meet exactly along their 25 shared edges; on the bed the land is the bed's height to the
+millimetre; the bed is cut 1.1 metres into the land at most and built 1.1 metres over it; a square takes 612 milliseconds in the middle
+with the way through it and 588 without; keeping the bed's points in the mesh adds some 7% of triangles at 20 centimetres, 26% at 40,
+and almost nothing nearer, where the mesh keeps them anyway. In the browser (Chromium, headless, drawing in software, so slowly that
+grass and trees come in at seconds a block, so that its frames say nothing of a real one) the page made the world and laid the way in
+73 to 78 seconds; the 18 squares within 700 metres of the start (of the 26 within reach of the corridor) were made and meshed in a
+minute or two more; from the quay the way showed as a cart track, ruts and bare earth, grass along its verges and none on its bed;
+put four hundred metres off the way, the walker was held at the corridor's edge, 150 metres from its middle; and both places were laid
+out ahead and kept in 195 seconds, while the page was drawing. Not yet tried on a graphics card.
+
+*Not yet:* the places themselves are not drawn on the page, only their grounds in the land, and they are built only on entering them;
+nothing marks the corridor's edge on the ground (the panel and the small map say where it is); the half-metre ground is off on this page,
+since its tussocks and rills would be laid on the bed too; a way crosses a river where it must without a bridge drawn, and goes round
+lakes; and only a way from a town to a valley head is laid for walking, though `layRoute` lays one between any two places over land.
+
 ## Where next: the land, and places that fit it
 
 Asked: "do we need better noise/fractal/erosion algorithm for terrain? also we should adapt the
