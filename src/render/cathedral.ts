@@ -536,14 +536,14 @@ export function buildCathedral(cx: CathedralContext): void {
   };
   const isChurch = (q: Place | undefined) => !!q && !!part.get(q.id) && part.get(q.id) !== 'tower';
   const nave = sv.nave, naveWallTop = nave.floor + nave.wall;
-  const buttress = (r: Run, at: number, top: number, flyer: boolean) => {
+  const buttress = (r: Run, at: number, top: number, flyer: boolean, foot = low - 0.3) => {
     const [ox, oz] = outward[r.side], alongX = r.side === 'n' || r.side === 's';
     const box = (a: number, b: number, y0: number, y1: number, out: number, style: MasonryStyle, tag: string) => {
       const p0 = alongX ? V(at + a, y0, r.at) : V(r.at, y0, at + a), p1 = alongX ? V(at + b, y1, r.at + oz * out) : V(r.at + ox * out, y1, at + b);
       kit.box('stone', V(Math.min(p0.x, p1.x), y0, Math.min(p0.z, p1.z)), V(Math.max(p0.x, p1.x), y1, Math.max(p0.z, p1.z)), style, style, tag);
     };
-    const h = top - low, s1 = low + h * 0.38, s2 = low + h * 0.72, deep = Math.min(1.9, 1.1 + h * 0.025);
-    box(-0.48, 0.48, low - 0.3, s1, deep, h > 9 ? ashlar : plain, 'buttress');
+    const h = top - foot, s1 = foot + h * 0.38, s2 = foot + h * 0.72, deep = Math.min(1.9, 1.1 + (top - low) * 0.025);
+    box(-0.48, 0.48, foot, s1, deep, h > 9 ? ashlar : plain, 'buttress');
     box(-0.54, 0.54, s1, s1 + 0.22, deep + 0.08, long, 'weathering');
     box(-0.44, 0.44, s1 + 0.22, s2, deep * 0.72, h > 9 ? ashlar : plain, 'buttress');
     box(-0.5, 0.5, s2, s2 + 0.2, deep * 0.72 + 0.08, long, 'weathering');
@@ -573,10 +573,13 @@ export function buildCathedral(cx: CathedralContext): void {
   };
   const flyers = c.flyers;
   for (const r of runs) {
-    if (r.y0 > low + 0.01) continue;
     const owner = ownerOf(r, (r.from + r.to) / 2);
     if (!isChurch(owner) || part.get(owner!.id) === 'narthex') continue;
     const kind = part.get(owner!.id)!, top = column.get(owner!.id)! - 0.6;
+    // (A wall whose foot is hidden, by the cloister's walk or a range against it, is buttressed from where it is seen, the
+    // buttresses standing on what is below; but not the clerestory, which the flyers stay.)
+    const raised = r.y0 > low + 0.01;
+    if (raised && (top - r.y0 < 6 || kind === 'nave' || kind === 'choir' || kind === 'crossing')) continue;
     kit.group = 'roofs';
     // Between its windows; and at its ends where they are outer corners.
     const ws = windowsOn(r).filter(({ q }) => q.id === owner!.id && !(cx.outerWindows.get(q.id) as CathedralWindow[] | undefined)?.some(() => false)).map(({ w }) => w.at).sort((a, b) => a - b);
@@ -593,7 +596,7 @@ export function buildCathedral(cx: CathedralContext): void {
       if (site.ways.some((w) => w.kind === 'door' && (w.a === owner!.id || w.b === owner!.id) && Math.abs(w.at - at) < w.halfWidth + 0.9 && Math.abs(lineOf(owner!, w.a === owner!.id ? w.side : OPPOSITE[w.side]) - r.at) < 0.05)) continue;
       const aisle = kind === 'aisle' || kind === 'choir aisle';
       const longSide = (r.side === 'e' || r.side === 'w') && aisle && !spots.slice(-2).includes(at);
-      buttress(r, at, top, flyers && longSide);
+      buttress(r, at, top, flyers && longSide, raised ? r.y0 - 0.2 : low - 0.3);
     }
   }
 

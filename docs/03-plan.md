@@ -473,7 +473,9 @@ The machine this is developed on now has a graphics card, and tablets were repor
       played to the end, down into the crypt and the dungeon for the keys and up to the shrine); photographed in headless Chromium
       (software drawing, the light not baked) from the square, the air, the sides and the harbour, and inside the nave, the crossing,
       the crypt, a tower's stair and a cell. The walk test first stopped on every stair round a tower's walls: its corner landings
-      had been railed on the sides the flights come onto them by; only a post stands at a landing's inner corner now.
+      had been railed on the sides the flights come onto them by; only a post stands at a landing's inner corner now. And the pictures
+      showed the clerestory open to the sky over its windows (the band tracing left a place out of a band whose top, rounded to the
+      centimetre, stood a hair over the place's own) and no buttresses along an aisle whose foot the cloister hid; both mended.
     - *Not yet:* the light baked and frames timed on a graphics card; the cathedral built into the world on the walk page (towns are not
       yet); people, an organ, a pulpit and a font; a portal on the transepts' ends; the towers of a single-tower front are broad and
       plain over their lower stages; the crypt's stairs are straight flights under timber ceilings.
