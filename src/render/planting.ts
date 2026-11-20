@@ -77,9 +77,17 @@ export class Planting {
   }
 
   tuft(set: CardSet, x: number, y: number, z: number, width: number, height: number, yaw: number, colour: Colour): void {
+    if (this.keepOut?.(set, x, z)) return;
     M.compose(P.set(x, y, z), Q.setFromEuler(E.set(0, yaw, 0)), S.set(width, height, width));
     this.push(set, colour, x, y - 1000, z);
   }
+
+  /**
+   * Where low plants are not to grow, if anywhere: asked of every tuft by its set and where it stands. (A valley's fields: what grows
+   * wild is kept out of them by this, from every one of the many places it is planted, and their crops are planted by themselves.)
+   * Not asked of trees, whose crowns reach out over whatever is beside them.
+   */
+  keepOut?: (set: CardSet, x: number, z: number) => boolean;
 
   /** A whole tree far off, as one tuft: shaded as a rounded body about a point a third of the way up it. */
   farTree(fir: boolean, x: number, y: number, z: number, width: number, height: number, yaw: number, colour: Colour): void {

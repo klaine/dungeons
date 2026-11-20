@@ -202,6 +202,8 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     // Mostly a sky of broken cloud; now and then nearly clear, or heavy.
     cloud: Math.round(base.fork('cloud').pick([0.12, 0.3, 0.38, 0.45, 0.5, 0.58, 0.72]) * 100) / 100,
   };
+  // In a valley the house is a castle's: its hall and keep within a curtain wall, a village below it. (Asked for.)
+  if (kind === 'valley') setting.kind = 'castle';
   // A mountain top has two seasons, not four: bare rock and thin turf in summer, snow in winter.
   // (From a stream of its own, so valleys and islands keep the seasons they had.)
   // And what stands on a pass or a peak, keeping travellers alive, is a hospice.
@@ -292,10 +294,10 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   const round = (v: number) => Math.round(v * 10) / 10;
   // The valley itself: its two sides, from the house to the gap at its foot. No two are the same shape.
   const others = site.places.filter((q) => q !== meadow), house = { x0: Math.min(...others.map((q) => q.x0)) - site.wallThickness, x1: Math.max(...others.map((q) => q.x1)) + site.wallThickness };
-  // How the house stands: nearly half stand free in the valley; a third are no house but a delve of caves under the ridge; the rest are built into it.
-  const stands = rng.fork('stands').next(), free = stands < 0.45;
-  if (free) site.stands = 'free';
-  else if (stands < 0.8) { site.stands = 'delve'; makeDelve(site, rng.fork('delve')); }
+  // How the house stands: free, at the valley's head, as the buildings of its castle. (Nearly half stood free once, a third were a
+  // delve of caves under the ridge and the rest built into it; asked for: a valley is a castle with a village below it.)
+  const free = true;
+  site.stands = 'free';
   const back = Math.min(...others.map((q) => q.z0)) - site.wallThickness;
   // If the land comes first, the valley is found now: the head of a glen in an upland made by noise and worn (`highlands.ts`), with
   // ground for the meadow at its head. (The uplands are drawn from a pool, as islands' seas are, so that one made serves many sites.)
@@ -337,6 +339,14 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   }
   track.push([round((edgeAt(v, 'w', v.mouth) + edgeAt(v, 'e', v.mouth)) / 2), v.mouth - 1]);
   site.track = track;
+  // The valley from its head down: the castle about the house, the village below it, the fields and a pasture, and at its foot,
+  // where the player comes in, the forest. (From a stream of its own.)
+  {
+    const zq = rng.fork('zones'), castleEnd = round(meadow.z1 + 12), villageEnd = round(castleEnd + 4 + zq.range(46, 60));
+    const fieldsEnd = round(villageEnd + 4 + (v.mouth - villageEnd - 4) * zq.range(0.5, 0.6));
+    site.zones = { castle: [v.z0, castleEnd], village: [round(castleEnd + 4), villageEnd], fields: [round(villageEnd + 4), fieldsEnd], forest: [fieldsEnd, v.mouth + 30] };
+  }
+  layOutCastle(site, meadow, { ...house, z0: back }, rng.fork('castle'));
   const fromTrack = (px: number, pz: number): number => {
     let best = Infinity;
     for (let k = 0; k < track.length - 1; k++) {
@@ -346,16 +356,15 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
     }
     return best;
   };
-  // What kind of settlement the valley has is settled first, and everything else is put round it.
-  const settle = rng.fork('settle').next();
-  site.settlement = settle < 0.4 ? 'village' : settle < 0.6 ? 'hamlet' : settle < 0.78 ? 'manor' : undefined;
-  // Of the valleys meant to have a village, about half have a little town of brick instead. (From a stream of its own.)
-  if (site.settlement === 'village' && rng.fork('town').chance(0.5)) site.settlement = 'town';
+  // What kind of settlement the valley has is settled first, and everything else is put round it: a small village below the castle.
+  // (A valley could be a village with a keep over it, a hamlet, a manor, a little town of brick or nothing; `asked` still gives any.)
+  site.settlement = 'village';
   if (asked) site.settlement = asked === 'none' ? undefined : asked;
   if (!site.settlement) delete site.settlement;
   // (A town that has no room is a village of timber houses, which take less; a village that has none, a hamlet.)
   if (site.settlement === 'town' && !layOutTown(site, meadow, fromTrack, rng.fork('town street'))) site.settlement = 'village';
-  if (site.settlement === 'village' && !layOutVillage(site, meadow, fromTrack, rng.fork('village'))) site.settlement = 'hamlet';
+  if (site.settlement === 'village' && !layOutVillage(site, meadow, fromTrack, rng.fork('village'), site.zones.village)) site.settlement = 'hamlet';
+  layOutFields(site, fromTrack, rng.fork('fields'));
   const features: Feature[] = [];
   const place = (kind: Feature['kind'], radius: [number, number], nearest: number, furthest: number) => {
     for (let tries = 0; tries < 200; tries++) {
@@ -379,9 +388,11 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   }
   site.features = features;
   layOutWater(site, meadow, fromTrack, rng.fork('water'));
-  layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
+  // (No terrace against a side, nor a grotto in one, in a castle's valley: each needed a face of rock raised on the valley's side, and
+  // the sides are the land it was found in, which has none there. Asked: the cliffs along its sides looked made.)
+  if (!site.castle) layOutHeights(site, meadow, fromTrack, rng.fork('heights'));
   layOutArms(site, meadow, doorX, rng.fork('armways'));
-  layOutTower(site, meadow, fromTrack, rng.fork('tower'));
+  // (No tower stands by itself in the valley any more: its builder raises the castle's towers.)
   layOutFootpaths(site, rng.fork('footpaths'));
   if (site.settlement && site.settlement !== 'village' && site.settlement !== 'town') layOutBuildings(site, meadow, fromTrack, rng.fork('buildings'), site.settlement === 'hamlet');
   layOutMill(site, fromTrack, rng.fork('mill'));
@@ -843,6 +854,10 @@ function roomAt(site: Site, x: number, z: number, r: number): boolean {
 
 /** Whether a point is at least `r` metres from the ground of every building already in the valley. */
 function clearOfBuildings(site: Site, x: number, z: number, r: number): boolean {
+  for (const f of site.fields ?? []) if (inFieldBy(f.corners, x, z, r)) return false;
+  // (Nor in the castle, nor within a few paces of its wall.)
+  const c = site.castle;
+  if (c && x > c.x0 - 4 - r && x < c.x1 + 4 + r && z > c.z0 - 4 - r && z < c.z1 + 4 + r) return false;
   // (Nothing else goes on or before the promontory a keep stands on, nor on the way up to it.)
   for (const t of site.terraces ?? []) if (t.keep && site.valley) {
     const inside = (x - edgeAt(site.valley, t.side, z)) * (t.side === 'w' ? 1 : -1);
@@ -1064,7 +1079,7 @@ function timberHouse(rng: Rng, colour: [number, number, number]): Omit<Building,
  * and above it, on the hillside beyond the valley's side, its keep. Returns false if there was
  * not room for at least four houses, and leaves nothing.
  */
-function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng): boolean {
+function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: number) => number, rng: Rng, zone?: [number, number]): boolean {
   const v = site.valley!, track = site.track!, round = (x: number) => Math.round(x * 10) / 10;
   const trackX = (z: number): number => {
     let k = 0;
@@ -1072,15 +1087,16 @@ function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: numb
     const t = Math.min(1, Math.max(0, (z - track[k][1]) / ((track[k + 1][1] - track[k][1]) || 1)));
     return track[k][0] + (track[k + 1][0] - track[k][0]) * t;
   };
-  // Where the valley is broadest, in the stretch below the house and above the gap.
-  const lo = meadow.z1 + 18, hi = v.mouth - 30;
-  if (hi - lo < 30) return false;
+  // Where the valley is broadest, in the stretch below the house and above the gap; or in the stretch given it, below the castle.
+  const lo = zone ? zone[0] : meadow.z1 + 18, hi = zone ? zone[1] - 10 : v.mouth - 30;
+  if (hi - lo < (zone ? 20 : 30)) return false;
   let mid = lo, best = -Infinity;
   for (let z = lo; z <= hi; z += 2) {
     const broad = edgeAt(v, 'e', z) - edgeAt(v, 'w', z) + rng.range(-4, 4);
     if (broad > best) { best = broad; mid = z; }
   }
-  const length = rng.range(38, 58), z0 = Math.max(lo, mid - length / 2), z1 = Math.min(hi + 10, z0 + length);
+  const length = rng.range(38, 58), z0 = zone ? zone[0] : Math.max(lo, mid - length / 2), z1 = zone ? zone[1] : Math.min(hi + 10, z0 + length);
+  if (zone) mid = (z0 + z1) / 2;
   const washes: [number, number, number][] = [[0.86, 0.8, 0.66], [0.82, 0.62, 0.3], [0.78, 0.5, 0.44], [0.55, 0.66, 0.74], [0.6, 0.68, 0.5], [0.88, 0.87, 0.82], [0.74, 0.36, 0.26]];
   const out: Building[] = [];
   const fits = (b: Building): boolean => {
@@ -1109,6 +1125,8 @@ function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: numb
   out.sort((p, q) => Math.abs(p.z - mid) - Math.abs(q.z - mid));
   for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
   site.buildings = out;
+  // (Under a castle the village has no keep of its own.)
+  if (zone) return true;
   // The keep: on a promontory over the village, a high shelf standing out from one side of the valley, sheer to the valley floor,
   // with a ledge climbing along the side wall to its end; and the castle's gate faces that end. It is put where it fits nearest the village's middle.
   // (A castle wants a broad promontory; where none fits, the keep is a tower alone on a smaller one.)
@@ -1156,6 +1174,99 @@ function layOutVillage(site: Site, meadow: Place, fromTrack: (x: number, z: numb
     (site.paths ??= []).push({ to: 'keep', points: pts });
   }
   return true;
+}
+
+/**
+ * The castle at the valley's head: a curtain wall round the house and the ground before it, the bailey, a little way off the house
+ * on either hand and behind and some paces before the meadow's end; the gate in its front wall where the track goes out, between
+ * two towers; and at its back corners a tower, or two, or none. (Asked for: the house is a castle's, with walls, two to four towers,
+ * a gate, a keep, a chapel and a dungeon.)
+ */
+function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1: number; z0: number }, rng: Rng): void {
+  const v = site.valley!, track = site.track!, round = (x: number) => Math.round(x * 10) / 10;
+  const thick = 2.2, TH = round(rng.range(3.4, 4.1));
+  let side = rng.range(9, 13), backGap = rng.range(7, 10);
+  const z1 = round(meadow.z1 + rng.range(4, 6));
+  // (Kept within the valley's head with room to walk round outside it: drawn in if the head is narrow.)
+  const fits = () => {
+    const x0 = Math.min(house.x0, meadow.x0) - side, x1 = Math.max(house.x1, meadow.x1) + side, z0 = house.z0 - backGap;
+    for (const [x, z] of [[x0, z0], [x1, z0], [x0, z1], [x1, z1], [x0, (z0 + z1) / 2], [x1, (z0 + z1) / 2]]) if (insideOf(v, x, z) < TH + 4) return false;
+    return true;
+  };
+  for (let k = 0; k < 12 && !fits(); k++) { side *= 0.85; backGap *= 0.85; }
+  const x0 = round(Math.min(house.x0, meadow.x0) - side), x1 = round(Math.max(house.x1, meadow.x1) + side), z0 = round(house.z0 - backGap);
+  // The gate: where the track crosses the front wall, and never so near a corner that its towers would not fit.
+  let k = 0;
+  while (k < track.length - 2 && track[k + 1][1] < z1) k++;
+  const t = Math.min(1, Math.max(0, (z1 - track[k][1]) / ((track[k + 1][1] - track[k][1]) || 1)));
+  const gw = 5.6, gx = round(Math.min(x1 - TH * 2 - gw / 2 - 1, Math.max(x0 + TH * 2 + gw / 2 + 1, track[k][0] + (track[k + 1][0] - track[k][0]) * t)));
+  site.castle = { x0, x1, z0, z1, height: round(rng.range(7, 8.6)), thick, gate: { x: gx, w: gw } };
+  // Its towers: one on either hand of the gate, astride the wall, their doors on the gate's passage; and at the back corners, none,
+  // one or both, their doors towards the bailey.
+  const towers: NonNullable<Site['towers']> = [
+    { x: round(gx - gw / 2 - TH), z: z1, half: TH, storeys: rng.int(3, 4), door: 'e', castle: true },
+    { x: round(gx + gw / 2 + TH), z: z1, half: TH, storeys: rng.int(3, 4), door: 'w', castle: true },
+  ];
+  const back = rng.pick([0, 1, 2, 2]), first = rng.chance(0.5);
+  if (back === 2 || (back === 1 && first)) towers.push({ x: x0, z: z0, half: TH, storeys: rng.int(3, 5), door: 'e', castle: true });
+  if (back === 2 || (back === 1 && !first)) towers.push({ x: x1, z: z0, half: TH, storeys: rng.int(3, 5), door: 'w', castle: true });
+  site.towers = [...(site.towers ?? []), ...towers];
+}
+
+/** Whether a point lies within a field's corners, or within `r` of them. */
+function inFieldBy(c: [number, number][], x: number, z: number, r: number): boolean {
+  let inside = false;
+  for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+    if ((c[i][1] > z) !== (c[j][1] > z) && x < ((c[j][0] - c[i][0]) * (z - c[i][1])) / (c[j][1] - c[i][1] || 1e-9) + c[i][0]) inside = !inside;
+  }
+  if (inside || r <= 0) return inside;
+  for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+    const [ax, az] = c[j], [bx, bz] = c[i], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1, t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+    if (Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t) < r) return true;
+  }
+  return false;
+}
+
+/**
+ * The fields: in their stretch of the valley (`zones.fields`), on either side of the track, between a few paces off it and a few
+ * short of the valley's side, in parcels one after another down the valley, each twenty to thirty-five metres long with a few paces
+ * between, under a crop: wheat, barley, oats, roots, or lying fallow; and the largest one or two a pasture, where the sheep are.
+ */
+function layOutFields(site: Site, fromTrack: (x: number, z: number) => number, rng: Rng): void {
+  const v = site.valley!, track = site.track!, zone = site.zones?.fields, round = (x: number) => Math.round(x * 10) / 10;
+  if (!zone) return;
+  const trackX = (z: number): number => {
+    let k = 0;
+    while (k < track.length - 2 && z > track[k + 1][1]) k++;
+    const t = Math.min(1, Math.max(0, (z - track[k][1]) / ((track[k + 1][1] - track[k][1]) || 1)));
+    return track[k][0] + (track[k + 1][0] - track[k][0]) * t;
+  };
+  const out: { corners: [number, number][]; crop: NonNullable<Site['fields']>[number]['crop']; area: number }[] = [];
+  const crops = ['wheat', 'wheat', 'barley', 'oats', 'roots', 'fallow'] as const;
+  for (const side of [-1, 1] as const) {
+    let z = zone[0] + rng.range(0, 4);
+    while (z < zone[1] - 12) {
+      const z1 = Math.min(zone[1], z + rng.range(20, 35));
+      // (Its inner edge a few paces off the track, its outer one short of the valley's side; as the valley wanders, so do they.)
+      const at = (zz: number): [number, number] => {
+        const inner = trackX(zz) + side * 4.6, outer = edgeAt(v, side > 0 ? 'e' : 'w', zz) - side * 8;
+        return [round(inner), round(outer)];
+      };
+      const [i0, o0] = at(z), [i1, o1] = at(z1), mid = at((z + z1) / 2);
+      if ((o0 - i0) * side > 12 && (o1 - i1) * side > 12 && (mid[1] - mid[0]) * side > 12) {
+        const corners: [number, number][] = [[i0, round(z)], [o0, round(z)], [o1, round(z1)], [i1, round(z1)]];
+        // (Not over the track where it swings, nor on the house's ground.)
+        if (corners.every(([x, zz]) => fromTrack(x, zz) > 3.5)) out.push({ corners, crop: rng.pick([...crops]), area: Math.abs(((o0 - i0) + (o1 - i1)) / 2) * (z1 - z) });
+      }
+      z = z1 + rng.range(2.5, 4.5);
+    }
+  }
+  if (!out.length) return;
+  // The pasture: the largest field, and another now and then.
+  const byArea = [...out].sort((a, b) => b.area - a.area);
+  byArea[0].crop = 'pasture';
+  if (byArea.length > 3 && rng.chance(0.5)) byArea[1].crop = 'pasture';
+  site.fields = out.map(({ corners, crop }) => ({ corners, crop }));
 }
 
 /** A cave in the valley's wall, in about one valley in two: where no water rises or goes to ground. */
@@ -1429,7 +1540,8 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   }
   // Some of the water that rises under the rim comes over it instead, as a fall: the bigger the stream the likelier.
   const falls = rng.fork('falls');
-  for (const st of streams) if (st.from === 'spring' && falls.chance(st.width >= 2.2 ? 0.55 : 0.4)) st.from = 'fall';
+  // (Not over the rim in a castle's valley, which has no rock there for it to fall over: it rises at a spring.)
+  for (const st of streams) if (st.from === 'spring' && falls.chance(st.width >= 2.2 ? 0.55 : 0.4) && !site.castle) st.from = 'fall';
   if (streams.length) site.streams = streams;
 }
 
@@ -1771,6 +1883,8 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
 
   // ---- what each room was for. The big ones get the communal uses, one of each at most.
   const communal = shuffle(['refectory', 'dormitory', 'chapter house'], rng);
+  // (A castle's first great room is its chapel.)
+  if (kind === 'valley') communal.push('chapel');
   const working = shuffle(['kitchen', 'store', 'workshop', 'scriptorium', 'dormitory'], rng);
   for (const p of places) {
     if (p.name !== 'gallery') continue;
@@ -1871,7 +1985,8 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   {
     const up = rng.fork('storeys');
     const TREAD = 0.25, STEPS = 18, RISE = STEPS * STEP, RUN = STEPS * TREAD;
-    const want = up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0;
+    // (A castle has a dungeon under it, always: the first room made below is that.)
+    const want = Math.max(kind === 'valley' ? 1 : 0, up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0);
     const hosts = shuffle(places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && !p.fallen && p.id !== secretId && p.role !== 'goal' && p.role !== 'entrance' && p.id !== forecourt.id
       && Math.max(p.x1 - p.x0, p.z1 - p.z0) >= RUN + 1.55 && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 3.7), up);
     let made = 0;
@@ -1893,7 +2008,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         }
       }
       if (!options.length) continue;
-      const stair = up.pick(options), down = up.chance(0.5);
+      const stair = up.pick(options), down = up.chance(0.5) || (kind === 'valley' && made === 0);
       const other: Place = {
         ...host, id: places.length, role: 'reward', roof: 'timber', fallen: undefined, shaft: undefined,
         wall: down ? RISE - 0.3 : up.range(2.9, 3.5),
@@ -1901,7 +2016,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         level: down ? -1 : 1,
         // Never two dark rooms in a row: a cellar is dark unless the room over it is.
         light: down ? (host.light === 'dark' ? 'torch' : 'dark') : up.chance(0.5) && host.light !== 'dark' ? 'dark' : 'torch',
-        name: down ? up.pick(['cellar', 'undercroft', 'crypt', 'cold store']) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
+        name: down ? (kind === 'valley' && !places.some((q) => q.name === 'dungeon') ? 'dungeon' : up.pick(['cellar', 'undercroft', 'crypt', 'cold store'])) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
       };
       // The lower of the two has a flat ceiling at the height the stair climbs to.
       if (!down) { host.roof = 'timber'; host.wall = RISE - 0.3; }
