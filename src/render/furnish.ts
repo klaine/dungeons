@@ -460,6 +460,23 @@ export class Furnisher {
         for (const side of longWalls) wallRow(side, 0.86, Math.min(1.95, short / 2 - 0.7), 0.6, (r) => this.bed(r));
         break;
       }
+      case 'chapel': {
+        // The castle's chapel: benches down both long walls facing in, as in a choir, and an altar against one end wall, a table of
+        // stone under its cloth, with the candlesticks on it.
+        for (const side of longWalls) wallRow(side, 2.0, 0.34, 0.5, (r) => this.bench(r));
+        const end = rng.chance(0.5), half = 0.9, deep = 0.45;
+        const altar: Rect = alongX ? { x0: end ? p.x1 - 0.35 - deep * 2 : p.x0 + 0.35, x1: end ? p.x1 - 0.35 : p.x0 + 0.35 + deep * 2, z0: cz - half, z1: cz + half }
+          : { x0: cx - half, x1: cx + half, z0: end ? p.z1 - 0.35 - deep * 2 : p.z0 + 0.35, z1: end ? p.z1 - 0.35 : p.z0 + 0.35 + deep * 2 };
+        if (this.table(altar)) this.setTable(altar, 'desk');
+        break;
+      }
+      case 'dungeon': {
+        // Under the castle: barrels and sacks heaped in its corners, and a bench or two along its walls for whoever was kept here.
+        cluster(rng.int(0, 3));
+        if (rng.chance(0.6)) cluster(rng.int(0, 3));
+        wallRow(rng.pick(longWalls), 1.6, 0.34, 9, (r) => this.bench(r));
+        break;
+      }
       case 'chapter house':
       case 'gallery':
       case 'gatehall': {

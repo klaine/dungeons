@@ -503,8 +503,11 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
-  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
+  /**
+   * Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`),
+   * Hanseatic brick (`brick`), a canal house (`canal`), a village's church of stone (`chapel`, with `chapel`), or a shed of boards (`shed`).
+   */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal' | 'chapel' | 'shed';
   x: number;
   z: number;
   w: number;
@@ -577,9 +580,24 @@ export interface Building {
    * For a building set into rising ground: how much higher the ground stands at its back than
    * before its door. Its lowest storey is then half a basement, open to the front and buried at
    * the back, and it has a second door in the back wall, at `backDoor` across it, onto the ground there.
+   * Of a timber house, a village's on its hillside: its stone ground storey is the half basement, its windows to the street alone, and
+   * its first framed storey has the second door, in the middle bay of its back wall, onto a yard levelled there.
    */
   sunk?: number;
   backDoor?: number;
+  /**
+   * Of a timber house on a hillside that falls away behind it: a cellar under it, as deep as this below its floor, its walls of rough
+   * stone, open to the ground behind the house by a door and a barred window in its back wall, onto a yard levelled there.
+   */
+  cellar?: number;
+  /**
+   * Of a village's church (style `chapel`): its nave is `w` long, along its front, and `d` broad, its walls `heights[0]` high, its door in
+   * the middle of its front's half towards the tower. At one end (`end`, -1 for the left as one stands before the front) a square
+   * tower `tower` metres a side, its walls rising to `height` over the ground before the door, under a spire: `pyramid`, `needle` (eight
+   * sides, tall) or `saddle` (a ridged roof between two gables); at the other a choir `choir` metres long, narrower and lower than the
+   * nave, ending in a half-round apse where `apse`.
+   */
+  chapel?: { end: -1 | 1; tower: number; height: number; spire: 'pyramid' | 'needle' | 'saddle'; spireHeight: number; choir: number; apse: boolean };
   /**
    * Wings reaching back from the ends of the main block, making the building an L (one) or a U
    * (two) about a court behind it. `side` is -1 for the left end as one stands before it and 1
@@ -698,12 +716,16 @@ export interface Town {
  * ground; there are slit windows above. It is no part of the house and has nothing to do with
  * its doors and keys.
  */
+import type { Castle } from './castle';
+
 export interface Tower {
   x: number;
   z: number;
   half: number;
   storeys: number;
   door: 'e' | 'w';
+  /** One of the castle's towers, standing astride its curtain wall. */
+  castle?: boolean;
 }
 
 export interface Stream {
@@ -1067,7 +1089,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' | 'lane' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */
@@ -1087,6 +1109,20 @@ export interface Site {
    * against one another, of the kinds in `BrickWork`, and where there is room a church of brick.
    */
   settlement?: 'village' | 'hamlet' | 'manor' | 'town';
+  /**
+   * A valley's stretches from its head down, each as the range of `z` it spans: the castle about the house at the head, the
+   * village below it, then fields and a pasture, and the forest at the foot, where the player arrives.
+   */
+  zones?: { castle: [number, number]; village: [number, number]; fields: [number, number]; forest: [number, number] };
+  /** The castle at a valley's head, about the house, which is its hall and keep, on its hill: see `Castle`. */
+  castle?: Castle;
+  /**
+   * The village at a castle's foot, besides its houses (in `buildings`) and its lanes (in `paths`): its little square beside the road
+   * below the gate, as its corners round, with the well in its middle; and the plots behind its houses, each its corners round, walled.
+   */
+  village?: { square?: [number, number][]; well?: [number, number]; plots: [number, number][][]; churchyard?: { ring: [number, number][]; gate: [number, number] } };
+  /** The valley's fields, in their stretch on either side of the track: each its corners and its crop; a pasture among them for the sheep. */
+  fields?: Town['fields'];
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
    * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,

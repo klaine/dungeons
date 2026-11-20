@@ -70,12 +70,22 @@ for (let n = 0; n < (only && only !== 'valley' ? 0 : count); n++) {
     const site = generateSite(seed, 'valley', { settlement: process.env.SETTLE as MakeOptions['settlement'] });
     bump(`settlement=${site.settlement ?? 'none'}`);
     // Buildings stand clear of the track and of one another: a street's houses may touch, but none stands in another.
+    // (Each footprint as its corners, turned as the building is: a house turned to face a road wherever it bends is not square to the valley.)
     const ground = (site.buildings ?? []).map((b) => footprintOf(b).map((r) => {
-      const t = b.faces === 'w' ? 1 : -1, xs = [b.x - (t * b.d) / 2 + t * r.v0, b.x - (t * b.d) / 2 + t * r.v1], zs = [b.z + t * r.u0, b.z + t * r.u1];
-      return { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+      const th = b.turn ?? (b.faces === 'w' ? Math.PI : 0), c = Math.cos(th), sn = Math.sin(th), e = 0.05;
+      const at = (u: number, v: number): [number, number] => [b.x + u * sn + (b.d / 2 - v) * c, b.z - u * c + (b.d / 2 - v) * sn];
+      return [at(r.u0 + e, r.v0 + e), at(r.u1 - e, r.v0 + e), at(r.u1 - e, r.v1 - e), at(r.u0 + e, r.v1 - e)];
     }));
+    const parted = (a: [number, number][], c: [number, number][]) => {
+      for (const poly of [a, c]) for (let i = 0; i < 4; i++) {
+        const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % 4], nx = z1 - z0, nz = x0 - x1;
+        const pa = a.map(([x, z]) => x * nx + z * nz), pc = c.map(([x, z]) => x * nx + z * nz);
+        if (Math.max(...pa) <= Math.min(...pc) || Math.max(...pc) <= Math.min(...pa)) return true;
+      }
+      return false;
+    };
     for (let i = 0; i < ground.length; i++) for (let j = i + 1; j < ground.length; j++) for (const a of ground[i]) for (const c of ground[j]) {
-      if (Math.min(a.x1, c.x1) - Math.max(a.x0, c.x0) > 0.05 && Math.min(a.z1, c.z1) - Math.max(a.z0, c.z0) > 0.05) throw new Error(`buildings ${i} and ${j} stand in one another`);
+      if (!parted(a, c)) throw new Error(`buildings ${i} and ${j} stand in one another`);
     }
     const track = site.track ?? [];
     for (const [i, rects] of ground.entries()) for (const r of rects) for (let k = 0; k < track.length - 1; k++) {

@@ -1,6 +1,6 @@
 import {
   CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh,
-  NoColorSpace, PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture, Vector2,
+  NoColorSpace, PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture, Vector2, Vector3,
   DataTexture, NearestFilter, RGBAFormat, UnsignedByteType,
 } from 'three';
 import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
@@ -18,7 +18,7 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, floor, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec2, vec3 } = TSL as N;
+const { Fn, abs, attribute, cameraPosition, clamp, cos, diffuseColor, distance, dot, faceDirection, float, floor, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, pow, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec2, vec3 } = TSL as N;
 
 /**
  * `uGrassTall` multiplies how tall grass stands, and `uGrassVary` (0 to 1) makes it more unequal: at 0 it is as it was planted, at 1 some
@@ -701,6 +701,20 @@ export function treeShare(level: TreeLevel, tree: N): N {
 }
 
 /**
+ * How many of a tree's painted leaves are drawn at a distance: all within `near` metres, fewer beyond, down to `least` of them from `far`
+ * on; those left grow a little, by the share to the power `grow`, so that a crown thins rather than shrinks and keeps most of its mass. (Asked for: lighter frames. A
+ * valley holds two million cards of leaves in summer, a thousand to a tree, and every one was drawn wherever its tree stood: with all of
+ * them shrunk to points a frame over the valley took ten milliseconds less, half of them in drawing the cards' points and half in
+ * the cards' own overdraw, each tree's leaves lying a dozen deep. A wood a furlong off is a texture of crowns, and a third of its cards
+ * draw it.) Each card has a rank in its block, dealt at random; it is drawn while its rank is under the share where it stands, and each
+ * block draws only as many of its cards, lowest rank first, as the share at its nearest point allows (`cullCards`).
+ */
+export const LEAF_THIN = { near: 35, far: 140, least: 0.4, grow: 0.3 };
+/** Where the eye is, for thinning: the player's, not the camera drawing (which for the sun's shadow stands hundreds of metres off, and would thin every tree's shadow). */
+const leafEye = uniform(new Vector3());
+const leafShare = (d: number) => { const t = Math.min(1, Math.max(0, (d - LEAF_THIN.near) / (LEAF_THIN.far - LEAF_THIN.near))); return 1 - (1 - LEAF_THIN.least) * t * t * (3 - 2 * t); };
+
+/**
  * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
  * mesh to a block, so that blocks out of view are not drawn at all; blocks of grass and flowers
  * too far away to matter are dropped as well (see `cullCards`). `level`, for trees drawn in levels
@@ -726,6 +740,9 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
   const at: N = attribute('aAt', 'vec4');
   // (Drawn in levels only where every card says which tree it belongs to.)
   const levelled = level && set.trees && set.trees.length === set.matrices.length / 4 ? level : undefined;
+  // (Leaves, needles and pines thin out with distance, but for trees drawn in levels, which have their own way of going.)
+  // (`?thin=0` draws every card at every distance, as before, for comparing.)
+  const thinned = (set.kind === 'leaf' || set.kind === 'needle' || set.kind === 'pine') && !levelled && new URLSearchParams(location.search).get('thin') !== '0';
   const materialFor = (layer: 'painted' | 'blades' | 'sprigs' | 'far'): MeshStandardNodeMaterial => {
     const real = layer === 'blades', sprig = layer === 'sprigs', far = layer === 'far';
     const material = new MeshStandardNodeMaterial({
@@ -784,6 +801,13 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
       } else if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d.add(own.sub(0.5).mul(uRange).mul(0.15)))));
       // A tree drawn in levels: as much of it as this level's share, each card shrinking to where it stands.
       if (levelled && layer === 'painted') p.assign(mix(at.xyz, p, treeShare(levelled, attribute('aTree', 'vec4'))));
+      // Thinned with distance (`LEAF_THIN`): a card whose rank is over the share where it stands shrinks to where it stands, over a
+      // twentieth of the ranks, so that cards go one by one and not in a ring; and those left grow (`LEAF_THIN.grow`).
+      if (thinned && layer === 'painted') {
+        const share: N = float(1).sub(smoothstep(float(LEAF_THIN.near), float(LEAF_THIN.far), distance(leafEye as N, at.xyz)).mul(1 - LEAF_THIN.least)).toVar();
+        const stays: N = clamp(share.sub(attribute('aRank', 'float')).div(0.05), 0, 1);
+        p.assign(mix(at.xyz, p, stays.mul(pow(share, -LEAF_THIN.grow))));
+      }
       return p;
     })();
     // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
@@ -818,7 +842,9 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
     list.push(i);
   }
   const meshes: InstancedMesh[] = [];
-  for (const list of blocks.values()) {
+  for (const block of blocks.values()) {
+    // (Where cards thin out with distance, each block's in an order of their own, dealt from where each stands: the first are the last to go.)
+    const list = thinned ? block.map((i) => ({ i, key: Math.sin(set.matrices[i * 16 + 12] * 12.9898 + set.matrices[i * 16 + 14] * 78.233 + set.matrices[i * 16 + 13] * 37.719) * 43758.5453 })).map((q) => ({ ...q, key: q.key - Math.floor(q.key) })).sort((a, b) => a.key - b.key).map((q) => q.i) : block;
     const n = list.length;
     const matrices = new Float32Array(n * 16), colours = new Float32Array(n * 3), centres = new Float32Array(n * 3), stands = new Float32Array(n * 4);
     const trees = levelled ? new Float32Array(n * 4) : null;
@@ -845,6 +871,7 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
       geometry.setAttribute('aCentre', new InstancedBufferAttribute(pick(centres, 3), 3));
       geometry.setAttribute('aAt', new InstancedBufferAttribute(pick(stands, 4), 4));
       if (trees) geometry.setAttribute('aTree', new InstancedBufferAttribute(pick(trees, 4), 4));
+      if (thinned) geometry.setAttribute('aRank', new InstancedBufferAttribute(Float32Array.from({ length: n }, (_, k) => k / n), 1));
       const mesh = new InstancedMesh(geometry, material, m);
       mesh.instanceMatrix.setUsage(StaticDrawUsage);
       (mesh.instanceMatrix.array as Float32Array).set(pick(matrices, 16));
@@ -857,6 +884,7 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
       mesh.userData.ground = ground;
       mesh.userData.layer = layer === 'far' ? 'far' : split ? layer : sprigs ? 'sprays' : 'whole';
       if (levelled) mesh.userData.level = levelled;
+      if (thinned && layer === 'painted') mesh.userData.thin = m;
       meshes.push(mesh);
     }
   }
@@ -942,10 +970,13 @@ function gatherSprigs(mesh: InstancedMesh, eye: { x: number; y: number; z: numbe
  * and, where grass comes in two kinds, blades beyond the blade range and tufts wholly inside it.
  */
 export function cullCards(meshes: InstancedMesh[], eye: { x: number; y: number; z: number }): void {
+  (leafEye.value as Vector3).set(eye.x, eye.y, eye.z);
   for (const m of meshes) {
     if (m.userData.layer === 'sprigs') { gatherSprigs(m, eye); m.visible = m.count > 0; continue; }
     const s = m.boundingSphere!;
     const d = Math.hypot(s.center.x - eye.x, s.center.y - eye.y, s.center.z - eye.z);
+    // (A block of leaves thinned with distance draws only as many of its cards as its nearest point keeps: the rest are shrunk away.)
+    if (m.userData.thin) m.count = Math.min(m.userData.thin, Math.ceil(m.userData.thin * leafShare(Math.max(0, d - s.radius)) + 1));
     // Leaves: the sprigs gathered about the eye (above), and the painted sprays unless all of the block is within the sprigs' range.
     if (m.userData.layer === 'sprays') { m.visible = d + s.radius > sprigRange * 0.78; continue; }
     if (m.userData.layer === 'far') { m.visible = d + s.radius > vegetationRange.value * 0.4 && d - s.radius < vegetationRange.value * FAR_GRASS; continue; }
