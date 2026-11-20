@@ -21,6 +21,8 @@ export interface WalkActions {
 export class WalkTouch {
   /** What the thumbs ask for: across (right) and back, each to 1 at most; whether to run; and up or down while flying, 1 to -1. */
   readonly move = { x: 0, y: 0, run: false, rise: 0 };
+  /** Whether the page was last shown flying (`flying`). */
+  shownFlying = false;
   private moveId = -1;
   private lookId = -1;
   private originX = 0;
@@ -108,6 +110,7 @@ export class WalkTouch {
 
   /** Shows whether one flies, on the button and in the page (Up and Down are shown only then). */
   flying(on: boolean): void {
+    this.shownFlying = on;
     this.flyButton.setAttribute('aria-pressed', String(on));
     document.body.classList.toggle('flying', on);
     if (!on) this.move.rise = 0;

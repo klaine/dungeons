@@ -343,16 +343,34 @@ over 160 metres about the walker, the game's sky, its air (`Atmosphere`, with ha
 since here the eye sees ten kilometres) and its pipeline, the eye adjusting to the picture. What grows:
 grass, flowers, ferns and reeds grown about the walker out to 90 metres, in blocks of 32 (as the lab's meadow
 is grown: thick in pasture, tall and pale in hay, short and brown or purple on heath, sparse in woods, none
-on rock, shingle or water); trees where the world has woods (one to a cell of seven metres there, a few in
-pasture and heath; oak and ash low down, spruce and pine higher, pine alone near the treeline; the same trees
-whoever asks, `treesIn`), grown whole out to 120 metres as the valley's are, grown more simply out to 320 (a
-trunk and its main limbs, with a sixth as many leaf sprays, each larger; asked: "the trees change too near to
-very low detail fillers ... there needs to be something between"), and beyond as single painted cards out to
-1.8 kilometres, as the valley's far hillsides have them. A block of 32 metres stands whole or simply, never
-both, and the painted cards leave out every tree in a block that stands either way, painted again when one of
-their blocks changes. `?hour=`, `?season=`, `?haze=`, `?tex=`.
-Not yet: water but the sea (lakes and rivers are not drawn), snow, tracks and roads on the ground, the
-places' houses.
+on rock, shingle or water; flowers by kind in drifts of their own that overlap, grass in seed where it stands
+long, and bracken in stands on the dry banks of the pasture and the heath, as the game's meadows have them); trees
+where the world has woods (`treesIn`: one to a cell of seven metres, close in a wood's heart, with now and then
+a second in the cell, and thinning tree by tree towards its edge, from some 200 a hectare in the heart to 70 in
+its last ten metres; past the edge single trees in the pasture and on the heath, some 40 a hectare in the first
+ten metres out and fewer further, and a few anywhere in the open; how far inside a wood a point lies worked out
+once for the whole world from its cover, `woodDepth`; the trees at an edge a little shorter; oak and ash low
+down, spruce and pine higher, pine alone near the treeline; the same trees whoever asks), with bramble, bushes
+and young trees in a belt along every wood's edge near by. Trees are drawn three ways: whole as the valley's are,
+grown more simply (a trunk and its main limbs, with a sixth as many leaf sprays, each larger; asked: "the trees
+change too near to very low detail fillers ... there needs to be something between"), and as single painted
+cards out to 1.8 kilometres, as the valley's far hillsides have them. Each tree gives way from whole to simple
+at a distance of its own between 110 and 150 metres, and from simple to painted between 300 and 360 (`treeLevels`
+in `vegetation.ts`), its cards shrinking to nothing where they stand over four metres either way as the next
+way's grow from nothing in the same place, and its wood changing once at the middle; every way of a tree reads
+the tree's own foot and number (`aTree`, given to its cards and to every point of its wood), so the two ways of
+a tree always add up to one tree. Each way's blocks are grown a little past where it is seen, both ways standing
+in a block within a band, and the painted cards are made once a square, for every tree in it. The shader is told
+which blocks are grown each way (`treeGrownMap`, a texture of the world in blocks of 32 metres): a tree whose
+nearer way is not grown yet is drawn the next way out until it is, so that nothing is missing at the start, after
+going somewhere at once, or flying fast (in the first try without it, a wood seen from above was bare ground past
+the whole trees until its simpler blocks came in), and a block just grown comes in over some 0.6 seconds. (A block of 32
+metres used to stand whole or simply, never both, changing whole at once at 120 and 320 metres, a block a frame,
+and the painted squares were painted again whenever one of their blocks changed: asked, "the pop in of more
+detailed trees is too evident!") `?hour=`, `?season=`, `?haze=`, `?tex=`.
+Not yet: water but the sea (lakes and rivers are not drawn), snow, roads on the ground but the route page's
+way, the places' houses; nor the game's far material (`makeFarMaterial`), which paints its own woods from the lie
+of the land rather than the world's, so the far land here is the near ground's material laid every 32 metres.
 
 **At half a metre** (asked: "add touch controls and maybe a toggle to build with higher 0.5m
 resolution?"). The page's box **Half-metre ground** (`?fine`, `?fine=0`; the browser remembers it) splits
@@ -599,6 +617,39 @@ out ahead and kept in 195 seconds, while the page was drawing. Not yet tried on 
 nothing marks the corridor's edge on the ground (the panel and the small map say where it is); the half-metre ground is off on this page,
 since its tussocks and rills would be laid on the bed too; a way crosses a river where it must without a bridge drawn, and goes round
 lakes; and only a way from a town to a valley head is laid for walking, though `layRoute` lays one between any two places over land.
+
+## The world as the game
+
+Asked: "so adapt the game engine to this, as this would eventually become the game (instead of current single locations)". The
+game builds one place at a time, whole (`src/app/main.ts`: a site laid out, meshed, its light baked, walked by the body in its one
+mesh), and goes from one to another by loading a page. The world as the game is the walk over the world's land streamed in at a metre
+(`src/worldwalk/`), with the places built into it as one comes to them, and the game's rules in each. It is made in steps, each of which
+leaves both the game and the walk working:
+
+1. **The game's body in the world.** *Done:* the walk and route pages move the game's own body (`Player`: its pace, 3.2 metres a second
+   and 6.5 running, its weight, the steps it climbs, its jump, `V` to fly), not a camera slid over the ground. What it walks on and is
+   stopped by is a set of meshes asked in turn (`Colliders`, which a site's one mesh is too), here `WorldColliders`
+   (`src/worldwalk/body.ts`): a patch of ground 64 metres across at a metre about the body, from the land as it is drawn, made again when
+   the body has gone a quarter of the way to its edge or land under it has come in finer; and the trunks of the trees on it, each a
+   six-sided post (bushes and young trees stop nobody, as in the game). The page keeps the body in the world, in the way's corridor on
+   the route page, out of the sea (which stops one at the depth of a knee), and never under the ground. Touch drives the same body.
+   *Checked* without a browser (`npx tsx tools/body.ts w0`): the body ran the whole way from Halhaven to Strath Norith, 0.93 kilometres,
+   in 141 seconds against 143 at its running pace, never stopped; then straight through a wood 160 metres deep and back, coming no nearer
+   a trunk's bark than its own breadth; never more than 6 centimetres under the ground or 14 over it; a patch takes some 5 milliseconds
+   (43 at most).
+2. **Places built into the world.** As one comes within a kilometre or so of a place, its layout made in a worker (as the route page
+   already does, `placesWorker.ts`), its meshes built in steps that do not hold up the picture (`meshSiteSteps` moved into a worker, or
+   cut finer), its light baked in workers as now; its own far land left out, since the world's is there; its ground laid in place of the
+   squares under it (the squares cut away within its footprint, `footprintOf`, and the seam closed), and its meshes added to the body's
+   colliders. Its buildings, rock, water and planting then stand in the world, and are let go of far off.
+3. **One renderer.** The game's sky, real clouds, sea, ambient occlusion, levels of detail, lamps and night, used by the world as by the
+   place, rather than the walk page's own copies (`dress.ts`'s `makeLight`).
+4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
+   place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
+   a boat for the sea legs; and something faster than walking for the kilometres between.
+5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
+   (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
+6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.
 
 ## Where next: the land, and places that fit it
 

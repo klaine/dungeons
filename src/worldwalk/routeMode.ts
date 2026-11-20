@@ -29,8 +29,8 @@ export interface RouteReply {
   climb: { up: number; down: number; steepest: number } | null;
 }
 
-/** How fast the walk page's walker goes, metres a second: walking, and running (`main.ts`). */
-const PACE = { walk: 4.5, run: 12 };
+/** How fast the walker goes, metres a second, walking and running: the game's own body's pace (`Player`). */
+const PACE = { walk: 3.2, run: 6.5 };
 /** How much country the ink map shows beyond the way and its two places, metres; and how broad the sheet is drawn, pixels. */
 const INK_MARGIN = 450, INK_PIXELS = 1800;
 

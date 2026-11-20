@@ -1,6 +1,7 @@
 import {
   CanvasTexture, DoubleSide, InstancedBufferAttribute, InstancedMesh,
-  NoColorSpace, PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture,
+  NoColorSpace, PlaneGeometry, BufferGeometry, Float32BufferAttribute, SRGBColorSpace, StaticDrawUsage, Texture, Vector2,
+  DataTexture, NearestFilter, RGBAFormat, UnsignedByteType,
 } from 'three';
 import { MeshStandardNodeMaterial, PhysicalLightingModel } from 'three/webgpu';
 import * as TSL from 'three/tsl';
@@ -17,7 +18,7 @@ import { CardSet } from './scene';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec2, vec3 } = TSL as N;
+const { Fn, abs, attribute, cameraPosition, cos, diffuseColor, distance, dot, faceDirection, float, floor, mix, normalMap, normalView, normalViewGeometry, normalize, positionLocal, positionViewDirection, positionWorld, sin, smoothstep, texture: tex, transformNormalToView, uniform, uv, vec2, vec3 } = TSL as N;
 
 /**
  * `uGrassTall` multiplies how tall grass stands, and `uGrassVary` (0 to 1) makes it more unequal: at 0 it is as it was planted, at 1 some
@@ -645,11 +646,67 @@ export const sprigRange = 26;
 const sprigRangeUniform = uniform(sprigRange);
 
 /**
+ * Trees drawn three ways, as the walk page draws the world's woods: whole near by, grown more simply further off, a single painted card
+ * beyond. Where one way gives way to the next, each tree changes at a distance of its own within a band (`uNear` from whole to simple,
+ * `uFar` from simple to painted, in metres), and over a few metres (`uSoft`): its cards shrink to nothing where they stand as the next
+ * way's grow from nothing in the same place. So there is no ring at which a whole block of trees changes at once, only a belt in which
+ * some trees have already changed and others not yet; and since every way of a tree reads the same foot and the same number, the two
+ * ways of one tree always add up to one tree, with nothing doubled or missing. (Asked: "the pop in of more detailed trees is too
+ * evident!": each 32-metre block of trees changed whole at once, at 120 and 320 metres, the changes coming in a block a frame.)
+ */
+export const treeLevels: { uNear: { value: Vector2 }; uFar: { value: Vector2 }; uSoft: { value: number } } = { uNear: uniform(new Vector2(110, 150)), uFar: uniform(new Vector2(300, 360)), uSoft: uniform(4) };
+export type TreeLevel = 'whole' | 'simple' | 'painted';
+
+/**
+ * Which of a page's blocks of trees are grown, whole and simply, so that a tree whose nearer way is not grown yet is drawn the next way
+ * out until it is (a page grows its blocks a few a frame, and flying fast, or just arrived, it is behind: the trees there were missing,
+ * the painted cards no longer drawn so near). A texture of the world in blocks of `cell` metres, red whole, green simple, each 0 to 1:
+ * a page raises a block's number over half a second or so once it is grown, so that it comes in gently, and lets it go to nothing when
+ * the block is let go of. Made by the page, before any material that draws trees in levels; where none is made, every block counts as
+ * grown.
+ */
+let grown: { map: DataTexture; w: number; h: number; ox: number; oz: number; cell: number } | null = null;
+export function treeGrownMap(hx: number, hz: number, cell = 32): { set(bi: number, bj: number, level: 'whole' | 'simple', share: number): void; clear(): void; flush(): void } {
+  const ox = Math.ceil(hx / cell) + 1, oz = Math.ceil(hz / cell) + 1, w = 2 * ox, h = 2 * oz, data = new Uint8Array(w * h * 4);
+  const map = new DataTexture(data, w, h, RGBAFormat, UnsignedByteType);
+  map.magFilter = map.minFilter = NearestFilter; map.generateMipmaps = false; map.needsUpdate = true;
+  grown = { map, w, h, ox, oz, cell };
+  let dirty = false;
+  return {
+    set(bi, bj, level, share) {
+      const i = bi + ox, j = bj + oz;
+      if (i < 0 || j < 0 || i >= w || j >= h) return;
+      const k = (j * w + i) * 4 + (level === 'whole' ? 0 : 1), v = Math.round(255 * Math.min(1, Math.max(0, share)));
+      if (data[k] !== v) { data[k] = v; dirty = true; }
+    },
+    clear() { data.fill(0); dirty = true; },
+    // (Sent to the graphics card at most once a frame, however many blocks changed.)
+    flush() { if (dirty) { map.needsUpdate = true; dirty = false; } },
+  };
+}
+
+/** How much of a tree is drawn the given way, 0 to 1, from `tree`: its foot (`xyz`) and its own number (`w`). */
+export function treeShare(level: TreeLevel, tree: N): N {
+  // (Measured along the ground, as the blocks of each level are chosen: flying over a wood, the trees under one stay whole, where measured
+  // through the air they would have been drawn at a level whose blocks were never grown there.)
+  const dist: N = distance(cameraPosition.xz, tree.xz), own: N = tree.w, soft: N = treeLevels.uSoft as N;
+  const near: N = mix((treeLevels.uNear as N).x, (treeLevels.uNear as N).y, own), far: N = mix((treeLevels.uFar as N).x, (treeLevels.uFar as N).y, own);
+  const past: N = smoothstep(near.sub(soft), near.add(soft), dist), beyond: N = smoothstep(far.sub(soft), far.add(soft), dist);
+  const whole: N = float(1).sub(past), simple: N = past.mul(float(1).sub(beyond));
+  if (!grown) return level === 'whole' ? whole : level === 'simple' ? simple : beyond;
+  // What is not grown yet goes to the next way out: whole to simple, simple to painted. (The three still add up to one tree.)
+  const g = grown, at: N = vec2(floor(tree.x.div(g.cell)).add(g.ox + 0.5).div(g.w), floor(tree.z.div(g.cell)).add(g.oz + 0.5).div(g.h));
+  const has: N = (tex(g.map, at) as N).level(0), wholeNow: N = whole.mul(has.r), simpleNow: N = has.g.mul(simple.add(whole.mul(float(1).sub(has.r))));
+  return level === 'whole' ? wholeNow : level === 'simple' ? simpleNow : float(1).sub(wholeNow).sub(simpleNow);
+}
+
+/**
  * Builds the meshes for a set of cards. The cards are sorted into square blocks of ground, one
  * mesh to a block, so that blocks out of view are not drawn at all; blocks of grass and flowers
- * too far away to matter are dropped as well (see `cullCards`).
+ * too far away to matter are dropped as well (see `cullCards`). `level`, for trees drawn in levels
+ * whose cards say which tree they belong to (`set.trees`): which way these are drawn (`treeShare`).
  */
-export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
+export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): InstancedMesh[] {
   // Whole trees stand far off, are never dropped for distance, and are drawn in large lots.
   const whole = set.kind === 'fir' || set.kind === 'tree';
   const ground = set.kind !== 'leaf' && set.kind !== 'needle' && set.kind !== 'pine' && !whole;
@@ -667,6 +724,8 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   const uTime = vegetationUniforms.uTime as N, uWind = vegetationUniforms.uWind as N, uRange = vegetationRange as N, uBlade = bladeRangeUniform as N, uSprig = sprigRangeUniform as N;
   // Where each card stands, and how large it is.
   const at: N = attribute('aAt', 'vec4');
+  // (Drawn in levels only where every card says which tree it belongs to.)
+  const levelled = level && set.trees && set.trees.length === set.matrices.length / 4 ? level : undefined;
   const materialFor = (layer: 'painted' | 'blades' | 'sprigs' | 'far'): MeshStandardNodeMaterial => {
     const real = layer === 'blades', sprig = layer === 'sprigs', far = layer === 'far';
     const material = new MeshStandardNodeMaterial({
@@ -723,6 +782,8 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
         // of the grass is not a step down onto the ground but grass getting shorter and thinner until none is left.)
         p.assign(mix(p, at.xyz, smoothstep(uRange.mul(FAR_GRASS * 0.3), uRange.mul(FAR_GRASS), d.add(own.sub(0.5).mul(uRange).mul(0.9))).pow(1.5)));
       } else if (ground) p.assign(mix(p, at.xyz, smoothstep(uRange.mul(0.66), uRange, d.add(own.sub(0.5).mul(uRange).mul(0.15)))));
+      // A tree drawn in levels: as much of it as this level's share, each card shrinking to where it stands.
+      if (levelled && layer === 'painted') p.assign(mix(at.xyz, p, treeShare(levelled, attribute('aTree', 'vec4'))));
       return p;
     })();
     // Shade every card as part of one rounded body about its centre, not as a flat sheet. (A normal
@@ -760,7 +821,9 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
   for (const list of blocks.values()) {
     const n = list.length;
     const matrices = new Float32Array(n * 16), colours = new Float32Array(n * 3), centres = new Float32Array(n * 3), stands = new Float32Array(n * 4);
+    const trees = levelled ? new Float32Array(n * 4) : null;
     list.forEach((i, k) => {
+      if (trees) for (let c = 0; c < 4; c++) trees[k * 4 + c] = set.trees![i * 4 + c];
       for (let c = 0; c < 16; c++) matrices[k * 16 + c] = set.matrices[i * 16 + c];
       for (let c = 0; c < 3; c++) stands[k * 4 + c] = set.matrices[i * 16 + 12 + c];
       stands[k * 4 + 3] = Math.hypot(set.matrices[i * 16], set.matrices[i * 16 + 1], set.matrices[i * 16 + 2]);
@@ -781,6 +844,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       };
       geometry.setAttribute('aCentre', new InstancedBufferAttribute(pick(centres, 3), 3));
       geometry.setAttribute('aAt', new InstancedBufferAttribute(pick(stands, 4), 4));
+      if (trees) geometry.setAttribute('aTree', new InstancedBufferAttribute(pick(trees, 4), 4));
       const mesh = new InstancedMesh(geometry, material, m);
       mesh.instanceMatrix.setUsage(StaticDrawUsage);
       (mesh.instanceMatrix.array as Float32Array).set(pick(matrices, 16));
@@ -792,6 +856,7 @@ export function makeCards(set: CardSet, texture: Texture): InstancedMesh[] {
       mesh.matrixAutoUpdate = false;
       mesh.userData.ground = ground;
       mesh.userData.layer = layer === 'far' ? 'far' : split ? layer : sprigs ? 'sprays' : 'whole';
+      if (levelled) mesh.userData.level = levelled;
       meshes.push(mesh);
     }
   }
