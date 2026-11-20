@@ -5,7 +5,7 @@ import * as TSL from 'three/tsl';
 // (The pieces of shader program used below, taken untyped: see the note in `siteMaterial.ts`.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
-const { Fn, If, abs, float, max, mix, normalWorld, shadow, shadowPositionWorld, smoothstep, step, texture, uniform, vec2, vec4 } = TSL as N;
+const { Fn, If, abs, float, max, min, mix, normalWorld, shadow, shadowPositionWorld, smoothstep, step, texture, uniform, vec2, vec4 } = TSL as N;
 
 /** A light that stands only for where a shadow is seen from: what `shadow` needs of a light. */
 class Eye extends Object3D {
@@ -89,10 +89,15 @@ export class SunShadow extends ShadowBaseNode {
     const size = f.depth.image.width as number;
     const at: N = vec2(s.x.mul(0.5).add(0.5), s.y.mul(-0.5).add(0.5)).mul(size).sub(0.5).toVar();
     const base: N = at.floor().toVar(), w: N = at.sub(base).toVar();
-    const lit = (dx: number, dy: number): N => step(deep.sub(1.5 / f.deep), (texture(f.depth, base.add(vec2(dx, dy)).add(0.5).div(size)) as N).level(0).x);
+    // (A point further from the sun than the picture reaches is shaded only by what the picture holds between it and the sun: compared
+    // as it was, with its own depth past the picture's end, the empty picture behind everything said it was in shadow. At evening the
+    // picture's box lies slantwise over the land, and the land down-sun of it was a dark strip with straight sides, wherever the near
+    // map did not reach.)
+    const lit = (dx: number, dy: number): N => step(min(deep, 1).sub(1.5 / f.deep), (texture(f.depth, base.add(vec2(dx, dy)).add(0.5).div(size)) as N).level(0).x);
     const out: N = mix(mix(lit(0, 0), lit(1, 0), w.x), mix(lit(0, 1), lit(1, 1), w.x), w.y);
-    // (Outside the picture there is nothing to shade it.)
-    return mix(float(1), out, step(max(abs(s.x), abs(s.y)), 0.999));
+    // (Outside the picture there is nothing to shade it; and a shadow running out past its side fades over the last tenth of the way,
+    // and is not cut off along a line.)
+    return mix(float(1), out, float(1).sub(smoothstep(0.9, 0.999, max(abs(s.x), abs(s.y)))));
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
