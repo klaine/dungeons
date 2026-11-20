@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
 import { LEAN, toplineOf } from '../core/cathedral';
-import { Building, CathedralPart, OPPOSITE, Place, POINTED_RISE, roundStair, Side, Site, SpireKind, STEP_RISE, Way } from '../core/site';
+import { Building, CathedralPart, OPPOSITE, Place, POINTED_RISE, roundStair, Side, Site, SpireKind, stairEnds, STEP_RISE, vaultRise, Way } from '../core/site';
 import { archRise, archSdf, Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { brickTools, Face, Pt } from './brick';
@@ -291,6 +291,13 @@ export function spireTops(site: Site): number[] {
 
 export interface CathedralContext {
   kit: Kit;
+  /**
+   * What is built but not baked, nor walked into, nor casts a shadow: the windows' glass. (Laid with the stone, glass in every window
+   * shut the daylight out of the bake and the sun out of the church: the nave was lit by its torches alone.)
+   */
+  wild: Kit;
+  /** Things left about the place to be found, as the valley's are: a tower's top, the belfry, the crypt, the dungeon. */
+  finds: { at: Vector3; what: string }[];
   site: Site;
   outerWindows: Map<number, (Way & { outer: true; circle?: boolean })[]>;
   shape: (w: Way) => { y0: number; ys: number; point?: number; circle?: boolean };
@@ -316,6 +323,9 @@ export function buildCathedral(cx: CathedralContext): void {
   const STONE: Colour = [0.86 * stoneTint[0], 0.8 * stoneTint[1], 0.7 * stoneTint[2]], PALE: Colour = shade(STONE, 1.08);
   const fake: Building = { style: 'brick', x: 0, z: 0, w: 1, d: 0, faces: 'w', storeys: 1, heights: [3], bays: 1, colour: [1, 1, 1] };
   const k = brickTools(fake, 0, (m) => kit.mesh(m)), any = anyAngle((m) => kit.mesh(m));
+  // (The glass, in the scenery that is not baked, so that the day comes in at the windows: see `wild`.)
+  const kw = brickTools(fake, 0, (m) => cx.wild.mesh(m)), anyW = anyAngle((m) => cx.wild.mesh(m));
+  cx.wild.group = 'cathedralGlass';
   const V = (x: number, y: number, z: number) => new Vector3(x, y, z);
   const outward: Record<Side, [number, number]> = { n: [0, -1], s: [0, 1], w: [-1, 0], e: [1, 0] };
 
@@ -444,7 +454,7 @@ export function buildCathedral(cx: CathedralContext): void {
         : edge ? GLASS[2] : odd === 0 ? GLASS[3] : odd === 1 ? GLASS[4] : GLASS[(band + theme) % 2 === 0 ? 0 : 1];
       const tone = q.range(0.8, 1.15), a = f.P(s0 + 0.012, y0 + 0.012, t), b = f.P(s0 + cw - 0.012, y0 + 0.012, t), cc = f.P(s0 + cw - 0.012, y0 + ch - 0.012, t), d = f.P(s0 + 0.012, y0 + ch - 0.012, t);
       const into = f.P(sm, ym, t + 1);
-      any.face('stained', [[a.x, a.y, a.z], [b.x, b.y, b.z], [cc.x, cc.y, cc.z], [d.x, d.y, d.z]], shade(hue, tone), [2 * a.x - into.x, a.y, 2 * a.z - into.z]);
+      anyW.face('stained', [[a.x, a.y, a.z], [b.x, b.y, b.z], [cc.x, cc.y, cc.z], [d.x, d.y, d.z]], shade(hue, tone), [2 * a.x - into.x, a.y, 2 * a.z - into.z]);
     }
   };
   /** Tracery: mullions dividing the window into lights, each with a pointed head of its own, a ring in the head over them, and bars. */
@@ -514,7 +524,7 @@ export function buildCathedral(cx: CathedralContext): void {
       }
       const deep = T * 0.45;
       if (fill === 'louvre') { louvres(face, op, deep); continue; }
-      k.prism(face, outline(op), [], deep + 0.06, deep + 0.08, 'glass', PANE);
+      kw.prism(face, outline(op), [], deep + 0.06, deep + 0.08, 'glass', PANE);
       if (fill === 'tracery') {
         if (op.circle) rose(face, op, deep); else tracery(face, op, deep);
         stained(face, op, deep + 0.1, seed++);
@@ -688,7 +698,7 @@ export function buildCathedral(cx: CathedralContext): void {
       kit.group = 'roofs';
       kit.wallFace('stone', fr, rf.eaves - 0.1, y + rise + 0.5, rise > 6 ? ashlar : plain, { keep: (u, yy) => yy < hAt(u), openings: oc });
       const face = faceOf(fr);
-      for (const o of oc) { kit.openingTrim('stone', fr, o, 0.6, dressed, 'front'); k.prism(face, outline(o), [], 0.35, 0.4, 'glass', PANE); rose(face, o, 0.25); }
+      for (const o of oc) { kit.openingTrim('stone', fr, o, 0.6, dressed, 'front'); kw.prism(face, outline(o), [], 0.35, 0.4, 'glass', PANE); rose(face, o, 0.25); }
       // Its coping, up both slopes; kneelers at its feet; a cross at its head.
       const [ox, oz] = outward[side], out = 0.08;
       const foot0 = rf.alongX ? V(at + ox * out, y + 0.2, lo) : V(lo, y + 0.2, at + oz * out), foot1 = rf.alongX ? V(at + ox * out, y + 0.2, hi) : V(hi, y + 0.2, at + oz * out);
@@ -923,6 +933,48 @@ export function buildCathedral(cx: CathedralContext): void {
       const sx = x + (span + 2 * T) / n / 2;
       if (i < n - 1) k.block('stone', V(sx - 0.07, y, zf + 0.42), V(sx + 0.07, y + 2.6, zf + 0.56), shade(STONE, 0.75));
     }
+  }
+
+  // ---- the rood: across the arch from the crossing into the choir, high up, a beam of oak and on it a great cross, gilt at its ends;
+  // seen from the west door down the length of the nave
+  {
+    const w = site.ways.find((x) => x.kind === 'arch' && part.get(x.a) === 'crossing' && part.get(x.b) === 'choir');
+    if (w) {
+      const cr = places[w.a], y = Math.max(cr.floor + 6, cr.floor + (w.spring ?? 4) - 0.8), z = cr.z0 - T / 2, half = w.halfWidth + 0.2;
+      kit.group = `p${cr.id}`;
+      // (Painted and gilt, as roods were: dark oak against a dark vault could not be seen from the door.)
+      const RED: Colour = [0.42, 0.06, 0.05];
+      k.block('wood', V(w.at - half - 0.3, y - 0.35, z - 0.2), V(w.at + half + 0.3, y, z + 0.2), RED, true);
+      for (const o of [-0.36, 0]) k.block('metal', V(w.at - half - 0.3, y + o - 0.02, z - 0.21), V(w.at + half + 0.3, y + o + 0.02, z + 0.21), GOLD);
+      const h = Math.min(5.5, Math.max(3, (w.spring ?? 4) * 0.2)), arm = h * 0.36, t = Math.max(0.16, h * 0.045);
+      k.block('metal', V(w.at - t, y, z - t), V(w.at + t, y + h, z + t), shade(GOLD, 0.85));
+      k.block('metal', V(w.at - arm, y + h * 0.66 - t, z - t), V(w.at + arm, y + h * 0.66 + t, z + t), shade(GOLD, 0.85));
+      for (const [x, yy] of [[w.at, y + h], [w.at - arm, y + h * 0.66], [w.at + arm, y + h * 0.66]] as [number, number][]) k.block('metal', V(x - t * 1.4, yy - t * 1.4, z - t * 1.1), V(x + t * 1.4, yy + t * 1.4, z + t * 1.1), GOLD);
+      // (And it hangs from the vault on two rods, as roods were hung where they had no screen to stand on.)
+      for (const o of [-1, 1]) k.stick(V(w.at + o * half * 0.6, y, z), V(w.at + o * half * 0.6, cr.floor + cr.wall + vaultRise(cr) - 0.2, z), 0.04, 0.04, IRON, 'metal');
+    }
+  }
+
+  // ---- things to be found where the way ends and nothing else is kept: on the walk round each tower's spire, in the belfry, before the
+  // crypt's end wall (where a chamber lies behind it that no door shows), and in the dungeon's cell that holds no key
+  {
+    const kept = new Set(site.items.map((x) => x.place));
+    const what = ['a pilgrim\'s badge of lead, the shrine\'s figure on it, dropped by the parapet', 'a steeplejack\'s iron rule, left on the leads'];
+    sv.stacks.forEach((st, i) => {
+      const top = st.top, up = site.ways.find((x) => x.kind === 'stair' && x.b === top.id);
+      // (In the corner of the walk farthest from where the stair comes up, a little in from the parapet.)
+      const corners: [number, number][] = [[top.x0 + 0.55, top.z0 + 0.55], [top.x1 - 0.55, top.z0 + 0.55], [top.x0 + 0.55, top.z1 - 0.55], [top.x1 - 0.55, top.z1 - 0.55]];
+      const [hx, hz] = up ? stairEnds(site, up).head : [(top.x0 + top.x1) / 2, (top.z0 + top.z1) / 2];
+      // (The farthest corner is where a key would lie, on its block: the find in the next.)
+      const [fx, fz] = corners.sort((a, b) => Math.hypot(b[0] - hx, b[1] - hz) - Math.hypot(a[0] - hx, a[1] - hz))[kept.has(top.id) ? 1 : 0];
+      cx.finds.push({ at: V(fx, top.floor + 0.25, fz), what: what[i % what.length] });
+      const bel = st.rooms[1];
+      if (i === 0 && bel) cx.finds.push({ at: V(bel.x0 + 0.7, bel.floor + 0.25, (bel.z0 + bel.z1) / 2), what: 'a bell-ringer\'s leather glove, worn through at the palm' });
+    });
+    const crypt = places.find((p) => p.name === 'crypt');
+    if (crypt) cx.finds.push({ at: V((crypt.x0 + crypt.x1) / 2, crypt.floor + 0.25, crypt.z0 + 1.6), what: 'a stub of beeswax candle, burnt down before the end wall, where someone knelt' });
+    const empty = places.filter((p) => (p.name === 'cell' || p.name === 'oubliette') && !kept.has(p.id));
+    if (empty.length) { const c = empty[empty.length - 1]; cx.finds.push({ at: V((c.x0 + c.x1) / 2, c.floor + 0.25, c.z0 + 1.2), what: 'a die cut from a bone, and the scratches of a long tally on the wall above it' }); }
   }
 
   // ---- the cloister's walls where they stand free: a coping along their tops

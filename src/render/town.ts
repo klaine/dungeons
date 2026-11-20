@@ -757,7 +757,12 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       // (Within two to four metres of the quay's edge: further back they lay across the way along the waterfront, where one walks in
       // from the harbour light; and none on the bridge over a river's mouth.)
       if (t.river && Math.abs(x - t.river.line[t.river.line.length - 1][0]) < t.river.width[t.river.width.length - 1] / 2 + 4) continue;
-      heap(x, q.z - h.range(2.9, 3.2));
+      // (And a metre clear of the way along the waterfront, which runs down the middle of the apron: a heap reaches some 1.8 metres
+      // either side of where it is set, and on a narrow apron one came within a hand of the way, and whoever walked in from the light
+      // stuck against it. Towards the quay's edge then, as far as a quarter metre short of it; or none.)
+      const want = q.z - h.range(2.9, 3.2), clear = q.z - q.apron / 2 + 1.0 + 1.85, z = Math.max(want, clear);
+      if (z > q.z - 2.1) continue;
+      heap(x, z);
     }
     // The crane: on a block of stone at the quay's edge beside the ship, a mast with a jib raked up from low on it and out over the
     // water, held up by a rope from the mast's head; a winch at its foot, and a crate in a sling hanging from the jib's end.

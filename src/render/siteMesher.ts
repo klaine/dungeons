@@ -2,7 +2,7 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { anyAngle } from './coast';
-import { Building, Place, POINTED_VAULT, ROUND_TREAD, roundStair, shoreOf, Side, Site, SKIES, vaultRise, Way } from '../core/site';
+import { Building, Place, POINTED_VAULT, ROUND_TREAD, roundStair, shoreOf, Side, Site, SKIES, stairEnds, vaultRise, Way } from '../core/site';
 import { toplineOf } from '../core/cathedral';
 import { buildCathedral, cathedralWindows, spireTops } from './cathedral';
 import { buildDoorLeaf } from './doorLeaf';
@@ -182,6 +182,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const isEndWall = (p: Place, side: Side) => (p.axis === 'x') === (side === 'e' || side === 'w');
   /** The radius of a pointed vault's arcs over its half span, or 1 for a half-round one. */
   const pointOf = (p: Place) => (p.pointed ? POINTED_VAULT : 1);
+  /** Whether a room is a cathedral's great space, whose ring of candles is a corona hung high. */
+  const coronaOf = (p: Place) => !!cath && span(p) > 8 && ['nave', 'choir', 'crossing'].includes(p.name);
   const wallTop = (p: Place, side: Side): number => {
     if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? vaultRise(p) + 0.3 : 0.12);
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
@@ -600,17 +602,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
       // A ring of candles hung over the middle of a great room, high enough to walk under and clear of the ceiling.
-      const ringChance = ({ refectory: 0.6, 'chapter house': 0.6, gatehall: 0.35, dormitory: 0.3, sanctum: 0.5, scriptorium: 0.4, solar: 0.3 } as Record<string, number>)[p.name] ?? 0;
-      const ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : p.floor + p.wall;
+      // (In a cathedral, a great corona of candles in the nave, the choir and under the crossing, hung high on a long chain.)
+      const ringChance = ({ refectory: 0.6, 'chapter house': 0.6, gatehall: 0.35, dormitory: 0.3, sanctum: 0.5, scriptorium: 0.4, solar: 0.3, ...(cath ? { nave: 1, choir: 0.85, crossing: 0.7, shrine: 0.6 } : {}) } as Record<string, number>)[p.name] ?? 0;
+      const ceiling = p.roof === 'barrel' ? p.floor + p.wall + vaultRise(p) : p.floor + p.wall;
       if (built && area >= 26 && ceiling - p.floor >= 3.3 && ringChance && lq.chance(ringChance)) {
-        const at = V((p.x0 + p.x1) / 2, Math.max(p.floor + 2.55, Math.min(ceiling - 0.8, p.floor + 3.0)), (p.z0 + p.z1) / 2);
+        const great = coronaOf(p), at = V((p.x0 + p.x1) / 2, great ? p.floor + 4.6 : Math.max(p.floor + 2.55, Math.min(ceiling - 0.8, p.floor + 3.0)), (p.z0 + p.z1) / 2);
         ringOf.set(p.id, at);
-        const wicks = Array.from({ length: 6 }, (_, k) => V(at.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), at.y + 0.2, at.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)));
+        const R = great ? 1.3 : 0.5, n = great ? 12 : 6;
+        const wicks = Array.from({ length: n }, (_, k) => V(at.x + R * Math.cos((k / n) * Math.PI * 2), at.y + 0.2, at.z + R * Math.sin((k / n) * Math.PI * 2)));
         list.push({ position: at.clone().setY(at.y + 0.15), out: V(0, -1, 0), flames: wicks });
       }
       // A standing candelabrum in a corner clear of doors and stairs, and far enough along each wall from its middle to keep clear of
       // whatever stands against it there.
-      const standChance = ({ sanctum: 0.7, 'chapter house': 0.4, vestry: 0.5, reliquary: 0.6, antechamber: 0.3, 'muniment room': 0.3, scriptorium: 0.3 } as Record<string, number>)[p.name] ?? 0;
+      const standChance = ({ sanctum: 0.7, 'chapter house': 0.4, vestry: 0.5, reliquary: 0.6, antechamber: 0.3, 'muniment room': 0.3, scriptorium: 0.3, ...(cath ? { shrine: 0.9, crypt: 0.8, chapel: 0.7, sacristy: 0.6, library: 0.5 } : {}) } as Record<string, number>)[p.name] ?? 0;
       if (built && standChance && lq.chance(standChance)) {
         const corners = [[p.x0 + 0.5, p.z0 + 0.5, 'w', 'n'], [p.x1 - 0.5, p.z0 + 0.5, 'e', 'n'], [p.x0 + 0.5, p.z1 - 0.5, 'w', 's'], [p.x1 - 0.5, p.z1 - 0.5, 'e', 's']] as [number, number, Side, Side][];
         const fits = corners.filter(([x, z, sx, sz]) => {
@@ -4383,17 +4387,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       const ring = ringOf.get(p.id);
       if (ring) {
-        // An iron ring of six candles, hung on three chains to a hook and from the hook on one to the ceiling.
-        const R0 = 0.46, R1 = 0.54, n = 16;
+        // An iron ring of six candles, hung on three chains to a hook and from the hook on one to the ceiling. (A cathedral's corona
+        // is greater: twelve candles on a ring two and a half metres across.)
+        const great = coronaOf(p), RR = great ? 1.3 : 0.5, cn = great ? 12 : 6;
+        const R0 = RR - 0.04 - (great ? 0.04 : 0), R1 = RR + 0.04 + (great ? 0.04 : 0), n = great ? 28 : 16;
         for (let k = 0; k < n; k++) {
           const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2, y0 = ring.y - 0.02, y1 = ring.y + 0.02;
           const c = (r: number, a: number, h: number): [number, number, number] => [ring.x + r * Math.cos(a), h, ring.z + r * Math.sin(a)];
           solid('metal', [c(R0, a0, y0), c(R1, a0, y0), c(R1, a1, y0), c(R0, a1, y0), c(R0, a0, y1), c(R1, a0, y1), c(R1, a1, y1), c(R0, a1, y1)], IRON);
         }
-        const hook = ring.clone().setY(ring.y + 0.8), ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : roofY;
-        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.5; rod(V(ring.x + 0.5 * Math.cos(a), ring.y + 0.02, ring.z + 0.5 * Math.sin(a)), hook, 0.008, IRON); }
-        rod(hook, hook.clone().setY(ceiling + 0.05), 0.012, IRON);
-        for (let k = 0; k < 6; k++) candle(V(ring.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), ring.y + 0.2, ring.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)), ring.y + 0.02);
+        const hook = ring.clone().setY(ring.y + (great ? 1.6 : 0.8)), ceiling = p.roof === 'barrel' ? p.floor + p.wall + vaultRise(p) : roofY;
+        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.5; rod(V(ring.x + RR * Math.cos(a), ring.y + 0.02, ring.z + RR * Math.sin(a)), hook, great ? 0.012 : 0.008, IRON); }
+        rod(hook, hook.clone().setY(ceiling + 0.05), great ? 0.02 : 0.012, IRON);
+        for (let k = 0; k < cn; k++) candle(V(ring.x + RR * Math.cos((k / cn) * Math.PI * 2), ring.y + 0.2, ring.z + RR * Math.sin((k / cn) * Math.PI * 2)), ring.y + 0.02);
       }
       const stand = standOf.get(p.id);
       if (stand) {
@@ -4408,7 +4414,17 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         candle(V(x, y + 1.72, z), y + 1.55);
       }
     }
-    if ((p.role === 'goal' || p.role === 'reward') && !cave) {
+    // On the walk round a tower's spire there is no room for a chest against the parapet: what is kept there lies on a block of stone
+    // in the corner of the walk farthest from where the stair comes up. (A chest there filled the walk, and could only be reached by
+    // its end, a metre from what lay on it.)
+    const walkTop = !!cath && p.roof === 'sky' && (p.level ?? 0) > 0;
+    if (walkTop && site.items.some((it) => it.place === p.id)) {
+      const up = stairsInto(p)[0], head = up ? stairEnds(site, up).head : [cx, cz];
+      const corners: [number, number][] = [[p.x0 + 0.55, p.z0 + 0.55], [p.x1 - 0.55, p.z0 + 0.55], [p.x0 + 0.55, p.z1 - 0.55], [p.x1 - 0.55, p.z1 - 0.55]];
+      const [bx, bz] = corners.sort((a, b) => Math.hypot(b[0] - head[0], b[1] - head[1]) - Math.hypot(a[0] - head[0], a[1] - head[1]))[0];
+      kit.box('stone', V(bx - 0.26, p.floor - 0.02, bz - 0.26), V(bx + 0.26, p.floor + 0.72, bz + 0.26), dressed, coping, 'keyblock');
+      anchors.set(p.id, V(bx, p.floor + 0.72, bz));
+    } else if ((p.role === 'goal' || p.role === 'reward') && !cave && !walkTop) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
       // Against the wall opposite the way in, unless that wall has an opening of its own (a
@@ -4588,7 +4604,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   if (free && cath) {
     // A cathedral's outside is its own: see `cathedral.ts`.
     kit.field = outdoorFieldAt(places.find((q) => q.role === 'approach')!.floor, 1.0);
-    buildCathedral({ kit, site, outerWindows, shape, ashlar: big, plain: midStone, dressed, coping, stoneTint, rng: rng.fork('cathedral') });
+    buildCathedral({ kit, wild, finds, site, outerWindows, shape, ashlar: big, plain: midStone, dressed, coping, stoneTint, rng: rng.fork('cathedral') });
   }
   if (free && !cath) {
     const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;

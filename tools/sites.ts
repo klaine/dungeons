@@ -19,7 +19,7 @@ import { Building } from '../src/core/site';
  * What is wrong with a cathedral, if anything: its nave's ridge must stand between half as high again and three times as high as the
  * tallest buildings about the square (unless the least a nave with aisles and a clerestory can be is more); no two rooms on one storey
  * may overlap; every stair stands within its room; and a stair round a tower's walls must come up through the floor over it on a leg
- * long enough to keep a head clear of the ceiling.
+ * long enough to keep a head clear of the ceiling; and the way to the shrine must climb a tower and go down into the dungeon.
  */
 function cathedralProblem(site: Site): string | null {
   const c = site.cathedral;
@@ -32,6 +32,10 @@ function cathedralProblem(site: Site): string | null {
     if (a.id >= b.id || (a.level ?? 0) !== (b.level ?? 0)) continue;
     if (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0.05 && Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0) > 0.05) return `${a.name} and ${b.name} overlap`;
   }
+  // Its plot goes high and low: the shortest way to the shrine climbs to a tower's top and goes down into the dungeon.
+  const route = solve(site).moves.map((m) => site.places[m.to].name);
+  if (!route.includes('tower top')) return 'the way to the shrine does not climb a tower';
+  if (!route.some((n) => n === 'cell' || n === 'oubliette')) return 'the way to the shrine does not go down into the dungeon';
   for (const w of site.ways) {
     if (w.kind !== 'stair') continue;
     const p = site.places[w.a], q = site.places[w.b];

@@ -480,6 +480,46 @@ The machine this is developed on now has a graphics card, and tablets were repor
       yet); people, an organ, a pulpit and a font; a portal on the transepts' ends; the towers of a single-tower front are broad and
       plain over their lower stages; the crypt's stairs are straight flights under timber ceilings.
 
+54. **The cathedral as a place of adventure.** Asked: "ok check that it is refined and fantastic place of adventure". Judged against
+    document 1: its loops, verticality and postcard held; four things did not. *Done:*
+    - *Light.* The glass of its windows was laid with its stone, baked and casting shadow, so the bake took every window for wall and
+      the sun never came in: the nave would have been lit by two torches. The glass (dark without, coloured within) is now built with
+      the scenery (`wild`), not baked, not walked into and casting no shadow, so the day comes in at the windows and the sun falls
+      through them across the floor.
+    - *A plot that goes somewhere.* The house's mission put both keys in the dungeon every time, and the towers, the greatest thing in
+      it, were never needed. A cathedral now has its own (`core/cathedral.ts`): the shrine is locked, and of its gold key and the iron
+      key that opens the way to it, one lies at the top of a tower, on the walk round the spire, and one in a cell of the dungeon. Either
+      the iron key is up the tower and the gold behind an iron door into the dungeon, or (between two towers) the gold is up a tower
+      whose doors are locked with iron and the iron key down in the dungeon: some seventy metres up and twenty down before the shrine, 19
+      moves where the shortest way is 5. A shortcut too: the door from the narthex into the other tower is a portcullis, its lever in
+      the tower's foot, seen through the bars and reached round by the aisle; under a single tower the door from the transept into the
+      cloister is barred on the transept's side.
+    - *Dead ends that earn their keep.* Things to find, as the valley's are: on the walk round each tower's spire, in a belfry, before
+      the crypt's end wall (where the hidden chamber lies behind it), and in the dungeon's cell that holds no key. A single tower's
+      chapels each have an altar chest.
+    - *What draws the eye in the great spaces.* A corona of twelve candles hung high on a long chain in the nave, the choir and under
+      the crossing; a rood, a great cross on a beam across the choir's arch, seen from the west door down the length of the nave;
+      candlesticks in the shrine, the crypt, the chapels, the sacristy and the library. (A ring's chain had been cut off short of a
+      pointed vault's crown.) The rood is painted and gilt: of plain oak against the dark vault it could not be seen from the door.
+    - *A key on a tower's top* lies on a block of stone in the corner of the walk farthest from where the stair comes up: a chest
+      against the parapet filled the walk between it and the spire, and could be reached only by its end, a metre from the key. The
+      game's own playthrough (`playthrough` in `main.ts`) now goes round by a room's corners to what is kept in it, a lever, or the foot
+      of a stair, as a player goes round the spire, where it had walked only straight.
+    - *Found by the way, in the town:* the heaps of cargo along the quay lay three metres from its edge, and reached about 1.8 metres
+      either side of that; the way in from the harbour light runs down the middle of the apron, ten to thirteen metres broad, so on the
+      narrowest a heap's back came within a hand of it and the walker stuck there (seed `g`). A heap now keeps a metre clear of the
+      way, set nearer the quay's edge where it must, or is left out. Past the heaps the walker still stopped three metres short of
+      the square: one stretch of the way along the quay is 130 metres between its points, and the playthrough gave every point the
+      same time, which at a walk is a little under that. It now has time in proportion to the distance.
+    - *Checked:* `npm run typecheck`, `npm run build`; `npx tsx tools/sites.ts 48 town` (six towns, none failing; it now checks too that
+      the way to the shrine climbs a tower and goes down into the dungeon); `npx tsx tools/town.ts 1` (sound); the light baked in
+      headless Chromium (software drawing, eight rays, half an hour) and photographed: the sun comes in at the windows in shafts across
+      the piers and the floor, the glass glows, the corona hangs in the nave and the rood over it; the belfry dim with its bells and
+      light through the louvres; the walk round the spire with the sea below; the crypt torchlit and dark. `PLACE=town node
+      tools/browser/play.cjs a c e g k` against a build served by `npx vite preview`: every doorway walked, and all five won with
+      both keys, three with the iron key up a tower and two (`g`, `k`) with the gold up a tower whose doors the iron key from the
+      dungeon opens, in 19 to 27 moves.
+
 ## Risks
 
 | Risk | Mitigation |

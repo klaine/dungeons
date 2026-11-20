@@ -596,7 +596,7 @@ async function start(): Promise<void> {
       mesh.userData.group = group;
       mesh.receiveShadow = true;
       // (Glass throws no shadow: the sun comes in at windows.)
-      mesh.castShadow = material !== 'glass' && material !== 'window' && material !== 'pane' && material !== 'paneLit';
+      mesh.castShadow = material !== 'glass' && material !== 'window' && material !== 'pane' && material !== 'paneLit' && material !== 'stained';
       mesh.matrixAutoUpdate = false;
       scene.add(mesh);
       scenic.push(mesh);
@@ -1543,7 +1543,10 @@ async function start(): Promise<void> {
     let clock = 0;
     const walkTo = (tx: number, tz: number, reach: number): boolean => {
       let lastX = player.position.x, lastZ = player.position.z, sidestep = 0, turn = 1, tries = 0;
-      for (let i = 0; i < 2600; i++) {
+      // (Time enough to go round what is in the way, and more for a long way: a town's waterfront runs for a hundred metres and more
+      // between two points of its track, which at a walk takes longer than the rest allows.)
+      const budget = 2600 + Math.ceil(Math.hypot(tx - lastX, tz - lastZ) * 25);
+      for (let i = 0; i < budget; i++) {
         if (Math.hypot(tx - player.position.x, tz - player.position.z) < reach) { player.analog.set(0, 0); return true; }
         player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
         player.analog.set(sidestep > 0 ? turn : 0, sidestep > 0 ? -0.3 : -1);
@@ -1563,6 +1566,21 @@ async function start(): Promise<void> {
       player.analog.set(0, 0);
       return false;
     };
+    /**
+     * To something in the room the body is in: straight, or round by one corner of the room or two, as one goes round what stands in
+     * the middle of it (the spire on a tower's top, a stair's well).
+     */
+    const reachIn = (here: number, tx: number, tz: number, reach: number): boolean => {
+      if (walkTo(tx, tz, reach)) return true;
+      const p = site.places[here], cs = [[p.x0 + 0.7, p.z0 + 0.7], [p.x1 - 0.7, p.z0 + 0.7], [p.x1 - 0.7, p.z1 - 0.7], [p.x0 + 0.7, p.z1 - 0.7]];
+      const near = cs.map((c, k) => ({ c, k, d: Math.hypot(c[0] - player.position.x, c[1] - player.position.z) })).sort((a, b) => a.d - b.d);
+      for (const { c, k } of near) {
+        if (!walkTo(c[0], c[1], 0.5)) continue;
+        if (walkTo(tx, tz, reach)) return true;
+        for (const step of [1, 3]) { const n = cs[(k + step) % 4]; if (walkTo(n[0], n[1], 0.5) && walkTo(tx, tz, reach)) return true; }
+      }
+      return false;
+    };
     player.place(desc.spawn.position, desc.spawn.yaw);
     // Up the track from where the player arrives to the meadow.
     for (const [tx, tz] of desc.track ?? []) {
@@ -1574,7 +1592,8 @@ async function start(): Promise<void> {
       const a = site.places[w.a];
       if (w.kind === 'stair') {
         const path = at === w.a ? stairPath(site, w) : [...stairPath(site, w)].reverse(), far = path[path.length - 1];
-        if (!path.every(([x, z]) => walkTo(x, z, 0.3))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
+        // (To its first point round whatever stands in the room, a spire on a tower's top; then along it.)
+        if (!path.every(([x, z], i) => (i === 0 ? reachIn(at, x, z, 0.3) : walkTo(x, z, 0.3)))) { log.push(`stuck on the stair from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
         // Off the end of the stair and onto the floor beside it, as anyone would, before going on: otherwise whoever
         // has just come up makes for the next door across the well and goes straight back down it.
         // (Away from the wall the flight ends against: for a stair round the walls, its last leg's going up, its first's coming down.)
@@ -1583,7 +1602,7 @@ async function start(): Promise<void> {
         walkTo(far[0] + off[0], far[1] + off[1], 0.4);
         at = m.to;
         const kept = desc.anchors?.get(at);
-        if (kept && game.things.some((k) => !k.taken && k.item.place === at) && !walkTo(kept.x, kept.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
+        if (kept && game.things.some((k) => !k.taken && k.item.place === at) && !reachIn(at, kept.x, kept.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
         log.push(`${site.places[at].name}${m.events.length ? ` (${m.events.join(', ')})` : ''}`);
         continue;
       }
@@ -1618,13 +1637,13 @@ async function start(): Promise<void> {
       if (!ok) { log.push(`stuck going from ${site.places[at].name} to ${site.places[m.to].name}`); return { won: false, log }; }
       at = m.to;
       for (const l of game.levers) {
-        if (!l.thrown && l.lever.place === at && !walkTo(l.at.x, l.at.z, 0.9)) { log.push(`could not reach the lever in the ${site.places[at].name}`); return { won: false, log }; }
+        if (!l.thrown && l.lever.place === at && !reachIn(at, l.at.x, l.at.z, 0.9)) { log.push(`could not reach the lever in the ${site.places[at].name}`); return { won: false, log }; }
       }
       // Give a rising gate time to clear before walking on.
       for (let i = 0; i < 100; i++) game.update(1 / 60, (clock += 1 / 60));
       const anchor = desc.anchors?.get(at);
       if (anchor && (at === site.goal || game.things.some((k) => !k.taken && k.item.place === at))) {
-        if (!walkTo(anchor.x, anchor.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
+        if (!reachIn(at, anchor.x, anchor.z, 1.0)) { log.push(`could not reach what is kept in the ${site.places[at].name}`); return { won: false, log }; }
       }
       log.push(`${site.places[at].name}${m.events.length ? ` (${m.events.join(', ')})` : ''}`);
     }

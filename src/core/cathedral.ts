@@ -1,5 +1,5 @@
 import { Rng } from './rng';
-import { planMission, solve } from './mission';
+import { leverSpot, solve } from './mission';
 import { buildingHeight, layOutTown } from './town';
 import {
   allReachable, Cathedral, CathedralPart, neighbours, OPPOSITE, Place, POINTED_RISE, ROUND_TREAD as ROUND, roundLegs, Setting, Side, Site, SKIES,
@@ -97,7 +97,7 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
   const narthex = add({ x0: -half, x1: half, ...front }, twin ? 'narthex' : 'tower porch', { role: 'entrance', axis: twin ? 'z' : 'x', roof: twin ? 'barrel' : 'timber', pointed: twin }, twin ? 'narthex' : 'tower');
   const fronts = ([-1, 1] as const).map((s) => twin
     ? add(mirror({ x0: half + T, x1: half + T + Lw, ...front }, s), 'tower', { roof: 'timber', light: 'torch' }, 'tower')
-    : add(mirror({ ...aisleX, ...front }, s), 'chapel', { axis: 'z', pointed: true, light: 'torch' }, 'chapel'));
+    : add(mirror({ ...aisleX, ...front }, s), 'chapel', { axis: 'z', pointed: true, light: 'torch', role: 'reward' }, 'chapel'));
   const nave = add(naveR, 'nave', { axis: 'z', pointed: true }, 'nave');
   const aisles = ([-1, 1] as const).map((s) => add(mirror({ ...aisleX, z0: naveR.z0, z1: naveR.z1 }, s), 'aisle', { axis: 'z', pointed: true }, 'aisle'));
   const crossing = add(crossR, 'crossing', { axis: 'z', pointed: true }, 'crossing');
@@ -155,10 +155,11 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
   // ---- the ways
   way(narthex, forecourt, 's', 'door', 0, 1.25, { spring: 2.9 });
   const westArch = way(narthex, nave, 'n', 'arch', 0, twin ? half - 1.1 : Math.min(2.6, half - 1.6), { pointed: true });
+  const towerDoors: Way[][] = [[], []];
   ([-1, 1] as const).forEach((s) => {
     const f = side(fronts, s), aisle = side(aisles, s), arm = side(arms, s), ca = side(choirAisles, s);
-    if (twin) way(f, narthex, OPPOSITE[across(s)], 'door', -Lr * 0.45, 0.85);
-    way(f, aisle, 'n', 'door', mid(aisle, true), 0.85);
+    if (twin) towerDoors[s === -1 ? 0 : 1].push(way(f, narthex, OPPOSITE[across(s)], 'door', -Lr * 0.45, 0.85));
+    towerDoors[s === -1 ? 0 : 1].push(way(f, aisle, 'n', 'door', mid(aisle, true), 0.85));
     way(aisle, arm, 'n', 'arch', mid(aisle, true), A / 2 - 0.7, { pointed: true });
     way(crossing, arm, across(s), 'arch', mid(crossing, false), half - 1.1, { pointed: true });
     way(arm, ca, 'n', 'arch', mid(ca, true), A / 2 - 0.7, { pointed: true });
@@ -172,7 +173,7 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
     for (let i = 0; i < cb; i++) arcades.push(way(choir, side(choirAisles, s), across(s), 'arch', choirR.z0 + (i + 0.5) * B, ha, { pointed: true }));
   }
   const greatArches = [way(nave, crossing, 'n', 'arch', 0, half - 1.1, { pointed: true }), way(crossing, choir, 'n', 'arch', 0, half - 1.1, { pointed: true })];
-  way(choir, shrine, 'n', 'door', 0, 0.95);
+  const shrineDoor = way(choir, shrine, 'n', 'door', 0, 0.95);
   if (court) {
     const aisle = side(aisles, cs), arm = side(arms, cs);
     way(aisle, court, across(cs), 'door', mid(court, false), 0.9);
@@ -181,8 +182,8 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
     if (library) way(range ?? court, library, 's', 'door', mid(library, true), 0.85);
   }
   for (const s of [-1, 1] as const) way(side(cryptStairs, s), crypt, OPPOSITE[across(s)], 'door', mid(crypt, false), 0.85);
-  way(side(cryptStairs, ds), passage, 's', 'door', mid(side(cryptStairs, ds), true), 0.85);
-  for (const c of cells) way(passage, c, 's', 'door', mid(c, true), 0.6);
+  const dungeonDoor = way(side(cryptStairs, ds), passage, 's', 'door', mid(side(cryptStairs, ds), true), 0.85);
+  const cellDoors = cells.map((c) => way(passage, c, 's', 'door', mid(c, true), 0.6));
   way(crypt, hidden, 'n', 'door', 0, 0.85, { door: { leaf: 'secret' } });
 
   // ---- the town, laid out round the church's ground and its forecourt
@@ -311,7 +312,48 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
   if (!allReachable(site)) throw new Error(`cathedral is not connected (seed ${seed})`);
 
   // ---- the mission: doors, locks and keys, and proof that it can be done
-  planMission(site, rng.fork('mission'));
+  // A cathedral's mission is its own, so that it takes the player both high and low: the shrine is locked, and its gold key and the
+  // iron key that opens the way to it lie one at the top of a tower and one in the dungeon. Either the iron key is up the tower and
+  // the gold behind the iron door into the dungeon; or the gold key is up the tower, behind an iron lock on the tower's doors, and the
+  // iron key down in the dungeon. (A single tower's foot is the porch, which cannot be locked, so a single tower always has the iron key
+  // at its top.) And a shortcut: one way in that is shut at first and opened from beyond.
+  {
+    const q = streamOf(rng, 'mission');
+    const keyTower = q.int(0, stacks.length - 1), up = stacks[keyTower].top, deep = q.chance(0.5) ? cells[cells.length - 1] : q.pick(cells);
+    const upFirst = !twin || q.chance(0.5);
+    up.role = 'reward';
+    shrineDoor.door = { leaf: 'shut', lock: 'gold' };
+    if (upFirst) {
+      // The iron key at the top; the gold behind the dungeon's iron door.
+      site.items.push({ kind: 'key', key: 'iron', place: up.id }, { kind: 'key', key: 'gold', place: deep.id });
+      dungeonDoor.door = { leaf: 'shut', lock: 'iron' };
+    } else {
+      site.items.push({ kind: 'key', key: 'gold', place: up.id }, { kind: 'key', key: 'iron', place: deep.id });
+      for (const w of towerDoors[keyTower]) w.door = { leaf: 'shut', lock: 'iron' };
+    }
+    // The shortcut. Between two towers: the door from the narthex into the tower without the key is a portcullis, its lever in the
+    // tower's foot, seen through the bars and reached round by the aisle. Under one tower: the door from the arm into the cloister is
+    // barred on the arm's side; or, with no cloister, the door from a chapel into its aisle is a portcullis from the chapel's side.
+    const other = twin ? stacks[1 - keyTower].foot : null;
+    const gateIn = other ? towerDoors[1 - keyTower].find((w) => w.b === narthex.id || w.a === narthex.id) : undefined;
+    if (gateIn && !gateIn.door) {
+      const [x, z] = leverSpot(site, gateIn, other!.id);
+      gateIn.door = { leaf: 'gate', lever: site.levers.length };
+      site.levers.push({ place: other!.id, opens: ways.indexOf(gateIn), x, z });
+    } else if (court) {
+      const w = ways.find((x) => x.a === side(arms, cs).id && x.b === court!.id);
+      if (w && !w.door) w.door = { leaf: 'shut', barredFrom: side(arms, cs).id };
+    }
+    // Other doors: some hung with a door standing open, some shut but free, the rest open arches; the great door stands open; the cells'
+    // doors are all hung, shut or ajar.
+    for (const w of ways) {
+      if (w.kind !== 'door' || w.door) continue;
+      const r = q.next(), cell = cellDoors.includes(w);
+      if (w.a === forecourt.id || w.b === forecourt.id) w.door = { leaf: 'open' };
+      else if (cell || r < 0.3) w.door = { leaf: r < 0.65 ? 'shut' : 'open' };
+      else if (r < 0.6) w.door = { leaf: 'open' };
+    }
+  }
   if (!solve(site).ok) throw new Error(`cathedral cannot be completed (seed ${seed})`);
 
   // ---- what it is called
