@@ -428,7 +428,11 @@ The machine this is developed on now has a graphics card, and tablets were repor
     the world has the game's clouds and their shadows, ice cloud, mist lit by a low sun, smoothing over frames, the hollows darkened,
     rain, the game's levels of detail and its sun's shadow near and far. See [document 6](06-world.md), *The world as the game*.
     *Checked:* `npm run typecheck`, `npm run build`; `tools/places.ts` for a valley head, a town, an island and a mountain top (figures in
-    document 6); the route page in headless Chromium at 480 by 270, starting on Halhaven's quay (see below). *Not yet:* lamps and lights
+    document 6); the game's own page and the route page in headless Chromium at 480 by 270, drawing in software with WebGL 2: the game
+    built and drew a valley under its clouds and mist with no fault; on the route page, starting on Halhaven's quay, Halhaven and Strath
+    Norith were built in the worker (6.0 and 4.8 million triangles), put in and their light baked, the third place in reach (Falyhaven)
+    held back; the walker stood on the quay among the town's houses, the harbour, its boats and the game's sea and clouds about it; no
+    fault. (Before the fixes the walker, sent to the quay, stood on the harbour's floor under the water.) *Not yet:* lamps and lights
     of the places, smoke, birds and sheep; and no frame of the world drawn the game's way has been timed on a graphics card.
 
 ## Risks
