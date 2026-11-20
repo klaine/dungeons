@@ -123,7 +123,8 @@ export function layOutCastle(site: Site, meadow: Place, house: { x0: number; x1:
   // The keep: tall and slender, at the back of the bailey, where the wall is furthest from the gate, on the bailey's side of it and
   // clear of the house. Its door faces the bailey's middle. (A tower that can be gone into and climbed, as the old lone tower could.)
   const back = wall.map((p, k) => ({ p, k })).sort((a, b) => Math.hypot(b.p[0] - gate.x, b.p[1] - gate.z) - Math.hypot(a.p[0] - gate.x, a.p[1] - gate.z));
-  const half = round(rng.range(2.7, 3.1)), storeys = rng.int(5, 6);
+  // (Six or seven storeys: it should stand over everything else, as a keep does over its castle.)
+  const half = round(rng.range(2.7, 3.1)), storeys = rng.int(6, 7);
   for (const { p } of back) {
     const dx = cx - p[0], dz = cz - p[1], l = Math.hypot(dx, dz) || 1, inset = half + 0.9 + 1.0 + 0.6;
     const kx = round(p[0] + (dx / l) * inset), kz = round(p[1] + (dz / l) * inset);

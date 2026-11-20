@@ -207,3 +207,38 @@ export function buildCastle(b: CastleBuild): void {
     for (const a of [-G * 0.62, G * 0.62]) { const [x, z] = P(a, D / 2); slit(x, z, ox, oz, crown + 0.8); }
   }
 }
+
+/**
+ * A bartizan: a small round turret corbelled out from the corner of a building's top, as castles' halls have them, its foot a cone
+ * of corbelling under it, its shaft of coursed stone with a slit, and a pointed roof of slates. (Built of plain solids, as the castle.)
+ */
+export function bartizan(mesh: (material: string) => MeshBuilder, x: number, z: number, r: number, y0: number, y1: number, stone: Colour, out: number): void {
+  const sides = 14, slate: Colour = [0.24, 0.25, 0.29];
+  const ring = (rr: number, y: number) => Array.from({ length: sides }, (_, k) => { const a = (k / sides) * Math.PI * 2; return [x + Math.cos(a) * rr, y, z + Math.sin(a) * rr] as P3; });
+  const quad = (material: string, pts: P3[], colour: Colour, inside: P3, us?: number[]) => {
+    const m = mesh(material), [p0, p1, p2] = pts;
+    let nx = (p1[1] - p0[1]) * (p2[2] - p0[2]) - (p1[2] - p0[2]) * (p2[1] - p0[1]), ny = (p1[2] - p0[2]) * (p2[0] - p0[0]) - (p1[0] - p0[0]) * (p2[2] - p0[2]), nz = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const mid = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+    const order = pts.map((_, k) => k);
+    if ((mid[0] - inside[0]) * nx + (mid[1] - inside[1]) * ny + (mid[2] - inside[2]) * nz < 0) { order.reverse(); nx = -nx; ny = -ny; nz = -nz; }
+    const ids = order.map((k) => m.addVertex(pts[k][0], pts[k][1], pts[k][2], nx, ny, nz, (us ? us[k] : pts[k][0] + pts[k][2]) * 0.5, pts[k][1] * 0.5, colour[0], colour[1], colour[2]));
+    for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+  };
+  const c: P3 = [x, (y0 + y1) / 2, z], base = y0 + 1.1;
+  const foot = ring(0.35, y0), shaftLo = ring(r, base), shaftHi = ring(r, y1), eave = ring(r * 1.16, y1), apex: P3 = [x, y1 + r * 2.5, z];
+  for (let k = 0; k < sides; k++) {
+    const j = (k + 1) % sides, u0 = (k / sides) * Math.PI * 2 * r, u1 = ((k + 1) / sides) * Math.PI * 2 * r;
+    quad('castle', [foot[k], foot[j], shaftLo[j], shaftLo[k]], stone, [x, base + 1, z]);
+    quad('castle', [shaftLo[k], shaftLo[j], shaftHi[j], shaftHi[k]], stone, c, [u0, u1, u1, u0]);
+    quad('tile', [eave[k], eave[j], apex], slate, [x, y1, z]);
+  }
+  quad('tile', eave, slate, apex);
+  quad('castle', foot, stone, c);
+  // A slit looking out.
+  const ox = Math.cos(out), oz = Math.sin(out), ux = -oz, uz = ox, sx = x + ox * r, sz = z + oz * r, w = 0.08, ys = base + (y1 - base) * 0.35;
+  const s = (a: number, d: number, y: number): P3 => [sx + ux * a + ox * d, y, sz + uz * a + oz * d];
+  const dark: Colour = [0.04, 0.04, 0.045];
+  for (const [p, q] of [[s(-w, 0.03, ys), s(w, 0.03, ys + 0.9)]]) quad('stone', [p, [q[0], p[1], q[2]], q, [p[0], q[1], p[2]]], dark, [x, ys, z]);
+}

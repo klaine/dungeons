@@ -869,6 +869,9 @@ function roomAt(site: Site, x: number, z: number, r: number): boolean {
 /** Whether a point is at least `r` metres from the ground of every building already in the valley. */
 function clearOfBuildings(site: Site, x: number, z: number, r: number): boolean {
   for (const f of site.fields ?? []) if (inFieldBy(f.corners, x, z, r)) return false;
+  // (Nor in the village's square or its plots.)
+  if (site.village?.square && inFieldBy(site.village.square, x, z, r)) return false;
+  for (const pl of site.village?.plots ?? []) if (inFieldBy(pl, x, z, r)) return false;
   // (Nor in the castle, nor within a few paces of its wall.)
   if (site.castle && castleOff(site.castle, x, z) < 4 + r) return false;
   // (Nothing else goes on or before the promontory a keep stands on, nor on the way up to it.)
@@ -1247,9 +1250,12 @@ function layOutFields(site: Site, fromTrack: (x: number, z: number) => number, r
 }
 
 /**
- * A village grown at a castle's foot: its houses along the road from just below the gate, close together on both sides of it, each
- * turned to face the road wherever it bends, as the houses of Gruyères stand along the street that climbs to its castle, or Corfe's
- * along the road under its hill; thickest nearest the gate, a lane between them now and then. Returns false if fewer than four fit.
+ * A village grown at a castle's foot, as the villages under castles on hills are (Gruyères, Corfe, Beynac): its houses along the road
+ * from just below the gate, close together on both sides of it and each turned to face it wherever it bends; the largest nearest the
+ * gate, where the road has come up and trade is, three storeys and broad, giving way to cottages further down; set back a little more
+ * or less from the road and not quite square to it, as houses are that were built one at a time; a little square opening off the road
+ * just below the gate, with houses round it and a well in its middle; a lane or two leaving the road with houses along it; and behind
+ * most houses its plot, walled, a garden or a yard running back from the house. Returns false if fewer than four houses fit.
  */
 function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => number, rng: Rng, zone: [number, number]): boolean {
   const v = site.valley!, track = site.track!, castle = site.castle!, round = (x: number) => Math.round(x * 10) / 10;
@@ -1269,50 +1275,141 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   while (s1 < lengths[lengths.length - 1] && along(s1)[1] < zone[1]) s1 += 1;
   if (s1 - s0 < 24) return false;
   const washes: [number, number, number][] = [[0.86, 0.8, 0.66], [0.82, 0.62, 0.3], [0.78, 0.5, 0.44], [0.55, 0.66, 0.74], [0.6, 0.68, 0.5], [0.88, 0.87, 0.82], [0.74, 0.36, 0.26]];
-  const out: Building[] = [];
-  const cornersOf = (b: Building, grow = 0): [number, number][] => {
-    const th = b.turn!, c = Math.cos(th), sn = Math.sin(th), hw = b.w / 2 + grow, hd = b.d / 2 + grow;
-    return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([u, d]) => [b.x + u * sn + d * c, b.z - u * c + d * sn]);
+  type Oblong = [number, number][];
+  const out: Building[] = [], kept: Oblong[] = [], plots: Oblong[] = [], own = new Map<Building, Oblong>();
+  /** An oblong `w` along and `d` deep about a middle, its front facing the bearing `th`. */
+  const oblong = (x: number, z: number, w: number, d: number, th: number, grow = 0): Oblong => {
+    const c = Math.cos(th), sn = Math.sin(th), hw = w / 2 + grow, hd = d / 2 + grow;
+    return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([u, dd]) => [x + u * sn + dd * c, z - u * c + dd * sn]);
   };
   // (Two turned oblongs overlap unless a line square to one of their sides parts them.)
-  const parted = (a: [number, number][], b: [number, number][]) => {
-    for (const poly of [a, b]) for (let i = 0; i < 4; i++) {
-      const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % 4], nx = z1 - z0, nz = x0 - x1;
+  const parted = (a: Oblong, b: Oblong) => {
+    for (const poly of [a, b]) for (let i = 0; i < poly.length; i++) {
+      const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % poly.length], nx = z1 - z0, nz = x0 - x1;
       const pa = a.map(([x, z]) => x * nx + z * nz), pb = b.map(([x, z]) => x * nx + z * nz);
       if (Math.max(...pa) < Math.min(...pb) || Math.max(...pb) < Math.min(...pa)) return true;
     }
     return false;
   };
-  const fits = (b: Building): boolean => {
-    const ring = cornersOf(b);
-    for (const [x, z] of [...ring, [b.x, b.z] as [number, number]]) {
-      if (!walkable(v, x, z, 5) || fromTrack(x, z) < 3.0 || !roomAt(site, x, z, 0.8) || castleOff(castle, x, z) < 7) return false;
-    }
-    const grown = cornersOf(b, 0.3);
-    return out.every((q) => parted(grown, cornersOf(q, 0.3)));
+  const clearGround = (ring: Oblong, fromRoad: number) => ring.every(([x, z]) => walkable(v, x, z, 5) && fromTrack(x, z) >= fromRoad && roomAt(site, x, z, 0.8) && castleOff(castle, x, z) >= 7);
+  const free = (ring: Oblong) => kept.every((q) => parted(ring, q));
+  /** A house of the village: larger nearer the gate (`near`, 1 there and 0 at the village's foot). */
+  const house = (k: number, near: number) => {
+    const h = timberHouse(rng.fork(`house${k}`), washes[(k * 3 + 1) % washes.length]);
+    const q = rng.fork(`size${k}`), big = near > 0.55 && q.chance(0.6), small = near < 0.45 && q.chance(0.55);
+    if (big) { h.w = round(q.range(8, 9.6)); h.storeys = 3; h.bays = 3; h.heights = [round(q.range(2.8, 3.3)), round(q.range(2.5, 2.9)), round(q.range(2.4, 2.7))]; }
+    if (small) { h.w = round(q.range(5.4, 6.6)); h.d = round(q.range(5.6, 6.6)); h.storeys = q.chance(0.6) ? 1 : 2; h.bays = 2; h.heights = h.heights.slice(0, h.storeys); h.gable = q.chance(0.35); }
+    return h;
+  };
+  const place = (h: ReturnType<typeof timberHouse>, x: number, z: number, th: number, fromRoad: number): Building | null => {
+    const b: Building = { ...h, x: round(x), z: round(z), faces: Math.cos(th) < 0 ? 'w' : 'e', turn: Math.round(th * 1000) / 1000 };
+    const ring = oblong(b.x, b.z, b.w, b.d, th);
+    if (!clearGround([...ring, [b.x, b.z]], fromRoad) || !free(oblong(b.x, b.z, b.w, b.d, th, 0.35))) return null;
+    out.push(b);
+    const o = oblong(b.x, b.z, b.w, b.d, th, 0.35);
+    kept.push(o);
+    own.set(b, o);
+    return b;
   };
   let k = 0;
+  // The square: beside the road just below the gate, on whichever hand has the more room, some fifteen metres along it and ten deep;
+  // the houses round it face into it, and the well stands in its middle.
+  const sq = rng.fork('square'), sqLen = sq.range(14, 18), sqDeep = sq.range(9, 12);
+  let square: Oblong | undefined, well: [number, number] | undefined;
+  // (Where it fits nearest the gate: along the road a couple of metres at a time, on the hand with more room first.)
+  let at: { mx: number; mz: number; nx: number; nz: number; th: number; cx: number; cz: number } | null = null;
+  for (let ds = 0; ds <= 24 && !at; ds += 2) {
+    const [mx, mz, dx, dz] = along(s0 + ds + sqLen / 2 + 1);
+    const room = (side: number) => insideOf(v, mx - dz * side * (3 + sqDeep + 8), mz + dx * side * (3 + sqDeep + 8));
+    for (const side of room(1) >= room(-1) ? [1, -1] : [-1, 1]) {
+      const nx = -dz * side, nz = dx * side, th = Math.atan2(-nz, -nx), cx = mx + nx * (3.2 + sqDeep / 2), cz = mz + nz * (3.2 + sqDeep / 2), ring = oblong(cx, cz, sqLen, sqDeep, th);
+      if (ring.every(([x, z]) => walkable(v, x, z, 4) && fromTrack(x, z) >= 2.5 && roomAt(site, x, z, 0.5) && castleOff(castle, x, z) >= 4) && free(ring)) { at = { mx, mz, nx, nz, th, cx, cz }; break; }
+    }
+  }
+  if (at) {
+    const { nx, nz, th, cx, cz } = at, ring = oblong(cx, cz, sqLen, sqDeep, th);
+    {
+      square = ring.map(([x, z]) => [round(x), round(z)] as [number, number]);
+      well = [round(cx + sq.range(-1.5, 1.5)), round(cz + sq.range(-1, 1))];
+      kept.push(oblong(cx, cz, sqLen, sqDeep, th, 0.3));
+      // Its houses: across its back, facing the road over it; and at either end, facing along it.
+      for (let a = -sqLen / 2 + 0.5; a < sqLen / 2 - 3;) {
+        const h = house(k, 1), b = place(h, cx + Math.sin(th) * (a + h.w / 2) + nx * (sqDeep / 2 + 0.6 + h.d / 2), cz - Math.cos(th) * (a + h.w / 2) + nz * (sqDeep / 2 + 0.6 + h.d / 2), th, 3);
+        a += h.w + (b ? sq.range(0.3, 1.2) : 2);
+        if (b) k++;
+      }
+      for (const end of [-1, 1]) {
+        const h = house(k, 1), ux = Math.sin(th) * end, uz = -Math.cos(th) * end, off = sqLen / 2 + 0.6 + h.d / 2;
+        if (place(h, cx + ux * off + nx * 0.4, cz + uz * off + nz * 0.4, Math.atan2(-uz, -ux), 3)) k++;
+      }
+    }
+  }
+  // The lanes: one or two, leaving the road on either hand further down, some twenty metres long; kept clear of houses for now.
+  const lanes: { s: number; side: number; len: number; corridor: Oblong }[] = [];
+  {
+    const lq = rng.fork('lanes'), want = lq.chance(0.6) ? 2 : 1;
+    for (let tries = 0; tries < 12 && lanes.length < want; tries++) {
+      const s = lq.range(s0 + sqLen + 10, s1 - 8), side = lq.chance(0.5) ? 1 : -1, len = lq.range(18, 26);
+      if (lanes.some((l) => Math.abs(l.s - s) < 18)) continue;
+      const [px, pz, dx, dz] = along(s), nx = -dz * side, nz = dx * side;
+      const ring = oblong(px + nx * (len / 2 + 2), pz + nz * (len / 2 + 2), 3.4, len, Math.atan2(dz, dx) + Math.PI / 2);
+      if (!clearGround(ring, 0) || !free(ring)) continue;
+      const corridor = oblong(px + nx * (len / 2 + 2), pz + nz * (len / 2 + 2), 3.6, len + 2, Math.atan2(dz, dx) + Math.PI / 2);
+      lanes.push({ s, side, len, corridor });
+      kept.push(corridor);
+    }
+  }
+  // The street: both sides of the road, from below the square down to the village's foot.
   for (const side of [-1, 1] as const) {
     for (let s = s0 + rng.range(0, 3); s < s1;) {
-      const house = timberHouse(rng.fork(`house${k}`), washes[(k * 3 + 1) % washes.length]);
-      const [px, pz, dx, dz] = along(s + house.w / 2), nx = -dz * side, nz = dx * side;
+      const near = 1 - Math.min(1, (s - s0) / Math.max(1, s1 - s0)), h = house(k, near);
+      const [px, pz, dx, dz] = along(s + h.w / 2), nx = -dz * side, nz = dx * side;
+      // (Set back a little more or less, and not quite square to the road: built one at a time.)
+      const set = rng.range(0, 1.4), skew = rng.range(-0.07, 0.07);
       let placed = false;
       for (let step = 0; step < 4 && !placed; step++) {
-        const off = 4.0 + step * 1.0 + house.d / 2, turn = Math.atan2(-nz, -nx);
-        const b: Building = { ...house, x: round(px + nx * off), z: round(pz + nz * off), faces: Math.cos(turn) < 0 ? 'w' : 'e', turn: Math.round(turn * 1000) / 1000 };
-        if (fits(b)) { out.push(b); placed = true; k++; }
+        const off = 4.0 + set + step * 1.0 + h.d / 2;
+        if (place(h, px + nx * off, pz + nz * off, Math.atan2(-nz, -nx) + skew, 3.0)) { placed = true; k++; }
       }
-      // (Next door: close by, or across a lane; and more often close the nearer the gate.)
-      const nearGate = 1 - Math.min(1, (s - s0) / Math.max(1, s1 - s0));
-      s += house.w + (rng.chance(0.3 - 0.2 * nearGate) ? rng.range(3.5, 6) : rng.range(0.4, 1.8));
+      // (Next door: close by, or across a gap; closer the nearer the gate.)
+      s += h.w + (rng.chance(0.3 - 0.2 * near) ? rng.range(3.5, 6) : rng.range(0.4, 1.8));
       if (!placed) s += 2;
     }
   }
+  // The lanes' houses: along both sides of each, facing it.
+  for (const [li, l] of lanes.entries()) {
+    const [px, pz, dx, dz] = along(l.s), nx = -dz * l.side, nz = dx * l.side, lq = rng.fork(`lane${li}`);
+    const pts: [number, number][] = [[round(px), round(pz)]];
+    for (let t = 4; t <= l.len + 2; t += 4) pts.push([round(px + nx * t + dx * lq.range(-0.6, 0.6)), round(pz + nz * t + dz * lq.range(-0.6, 0.6))]);
+    (site.paths ??= []).push({ to: 'lane', points: pts });
+    // (The lane's own corridor is let go of now, for its houses to stand along it.)
+    const at = kept.indexOf(l.corridor);
+    if (at >= 0) kept.splice(at, 1);
+    for (const hand of [-1, 1]) for (let t = 5 + lq.range(0, 2); t < l.len;) {
+      const h = house(k, 0.3), lx = px + nx * (t + h.w / 2), lz = pz + nz * (t + h.w / 2), off = 2.4 + h.d / 2, ex = dx * hand, ez = dz * hand;
+      if (place(h, lx + ex * off, lz + ez * off, Math.atan2(-ez, -ex) + lq.range(-0.06, 0.06), 3.0)) k++;
+      t += h.w + lq.range(1, 3.5);
+    }
+  }
   if (out.length < 4) return false;
+  // The plots: behind most houses, running back from it as far as there is room, up to ten metres; walled.
+  for (const [n, b] of out.entries()) {
+    const q = rng.fork(`plot${n}`);
+    if (!q.chance(0.75)) continue;
+    const th = b.turn!, bx = -Math.cos(th), bz = -Math.sin(th);
+    for (const deep of [q.range(7, 11), 6, 4.5]) {
+      const cx = b.x + bx * (b.d / 2 + 0.2 + deep / 2), cz = b.z + bz * (b.d / 2 + 0.2 + deep / 2), ring = oblong(cx, cz, b.w + q.range(-0.4, 1.2), deep, th);
+      // (Clear of everything but its own house, which it runs back from.)
+      if (!clearGround(ring, 3) || !kept.every((o) => o === own.get(b) || parted(ring, o)) || !plots.every((o) => parted(ring, o))) continue;
+      plots.push(ring.map(([x, z]) => [round(x), round(z)] as [number, number]));
+      break;
+    }
+  }
   // The inn is the house nearest the gate.
   out.sort((p, q) => Math.hypot(p.x - castle.gate.x, p.z - castle.gate.z) - Math.hypot(q.x - castle.gate.x, q.z - castle.gate.z));
   for (const [n, b] of out.entries()) { b.door = rng.fork(`door${n}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
   site.buildings = out;
+  site.village = { ...(square ? { square, well } : {}), plots };
   return true;
 }
 

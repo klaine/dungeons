@@ -1039,7 +1039,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' | 'lane' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */
@@ -1066,6 +1066,11 @@ export interface Site {
   zones?: { castle: [number, number]; village: [number, number]; fields: [number, number]; forest: [number, number] };
   /** The castle at a valley's head, about the house, which is its hall and keep, on its hill: see `Castle`. */
   castle?: Castle;
+  /**
+   * The village at a castle's foot, besides its houses (in `buildings`) and its lanes (in `paths`): its little square beside the road
+   * below the gate, as its corners round, with the well in its middle; and the plots behind its houses, each its corners round, walled.
+   */
+  village?: { square?: [number, number][]; well?: [number, number]; plots: [number, number][][] };
   /** The valley's fields, in their stretch on either side of the track: each its corners and its crop; a pasture among them for the sheep. */
   fields?: Town['fields'];
   /**

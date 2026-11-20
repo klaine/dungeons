@@ -27,7 +27,7 @@ import { buildIsland } from './island';
 import { buildMountain } from './mountain';
 import { buildTown } from './town';
 import { layWall } from './walls';
-import { buildCastle } from './castle';
+import { bartizan, buildCastle } from './castle';
 import { castleOff } from '../core/castle';
 
 /**
@@ -1938,6 +1938,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (On a footpath, how far from its middle plus two hundred: the material for ground tells the one from the other.)
       const foot = offFoot(x, z);
       lay.track = Math.abs(off) < 6 ? 100 + off : foot < 3 ? 200 + foot : 0;
+      // The village's square is trodden earth; half its plots are gardens, in beds of dug earth with paths between.
+      const vl = site.village;
+      if (vl?.square && inPolygon(vl.square, x, z)) { lay.bare = Math.max(lay.bare, 0.75 + 0.15 * fbm2(x * 0.4, z * 0.4, 2)); return turfColour(x, z, s1); }
+      if (vl) for (const [n, pl] of vl.plots.entries()) if (n % 2 === 0 && inPolygon(pl, x, z)) {
+        const row = Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7);
+        lay.bare = Math.max(lay.bare, smooth((row - 0.15) / 0.12) * 0.9);
+        break;
+      }
       // In a field, its crop: ploughed earth where it lies fallow, and roots in rows with the earth between.
       const fi = fieldList.length ? fieldAt(x, z) : -1;
       if (fi >= 0) {
@@ -2177,9 +2185,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const season = site.setting.season ?? 'spring';
     // Nothing wild grows in the fields: their crops are planted by themselves, below. In a pasture, its grass only.
     let cropping = false;
-    if (fieldList.length) planting.keepOut = (set, x, z) => {
+    const vlg = site.village;
+    if (fieldList.length || vlg) planting.keepOut = (set, x, z) => {
       if (cropping) return false;
-      const k = fieldAt(x, z);
+      if (vlg?.square && inPolygon(vlg.square, x, z)) return true;
+      if (vlg) for (const [n, pl] of vlg.plots.entries()) if (n % 2 === 0 && inPolygon(pl, x, z)) return set !== planting.herbs || Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7) > 0.2;
+      const k = fieldList.length ? fieldAt(x, z) : -1;
       return k >= 0 && (fieldList[k].crop !== 'pasture' || set !== planting.grass);
     };
     // (And in winter the broadleaf trees are bare: what they keep is the brown of an oak's dead leaves, and far off the grey-brown haze
@@ -2930,6 +2941,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       cropping = false;
     }
+    // The village's gardens: greens in rows on their beds.
+    if (site.village && !winter) {
+      const gq = rng.fork('gardens');
+      cropping = true;
+      for (const [n, pl] of site.village.plots.entries()) {
+        if (n % 2) continue;
+        const xs = pl.map((q) => q[0]), zs = pl.map((q) => q[1]);
+        for (let gz = Math.min(...zs); gz < Math.max(...zs); gz += 0.45) for (let gx = Math.min(...xs); gx < Math.max(...xs); gx += 0.45) {
+          const x = gx + gq.range(0, 0.45), z = gz + gq.range(0, 0.45);
+          if (!inPolygon(pl, x, z) || edgeOff(pl, x, z) < 0.6 || Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7) > 0.18) continue;
+          planting.tuft(planting.herbs, x, ground(x, z) - 0.04, z, gq.range(0.35, 0.5), gq.range(0.22, 0.4), gq.range(0, Math.PI * 2), [0.09 + gq.range(0, 0.05), 0.2 + gq.range(0, 0.06), 0.06]);
+        }
+      }
+      cropping = false;
+    }
     // Down the middle of the track, between the ruts, grass in clumps: thick for a few strides, then none.
     {
       const strip = rng.fork('strip');
@@ -3524,6 +3550,40 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         layBeam(wood, V(w.x - 0.55, cy, w.z), V(b.x + dir * (b.d / 2 - 0.5), cy, w.z), 0.22, 0.22, oak, 90);
       }
     });
+    // The village's plots, walled in dry stone on three sides, the house standing across the fourth; and the well in its square.
+    if (site.village) {
+      const vq = rng.fork('village walls'), wallStone: Colour = [0.62 * (0.6 + 0.4 * stoneTint[0]), 0.6 * (0.6 + 0.4 * stoneTint[1]), 0.56 * (0.6 + 0.4 * stoneTint[2])];
+      for (const [n, pl] of site.village.plots.entries()) {
+        // (Its corners go round from the far side's left: the side by the house, from the third to the fourth, is not walled.)
+        const sides = [pl[3], pl[0], pl[1], pl[2]], line: [number, number][] = [];
+        for (let e = 0; e < 3; e++) {
+          const [ax, az] = sides[e], [bx, bz] = sides[e + 1], m = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5));
+          for (let i = 0; i < m; i++) line.push([ax + ((bx - ax) * i) / m, az + ((bz - az) * i) / m]);
+        }
+        line.push(sides[3]);
+        layWall((m) => wild.mesh(m), { line, gaps: [], fallen: [], height: vq.range(0.75, 1.0) }, ground, wallStone, vq.fork(`plot${n}`));
+      }
+      if (site.village.well) {
+        const [wx, wz] = site.village.well, wy = ground(wx, wz), made = solids((material) => wild.mesh(material));
+        const { solid } = anyAngle((m) => wild.mesh(m));
+        const ring = (r: number, y0: number, y1: number, colour: Colour) => {
+          const n = 10;
+          for (let k = 0; k < n; k++) {
+            const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2, ri = r - 0.28;
+            const p = (a: number, rr: number, y: number): [number, number, number] => [wx + Math.cos(a) * rr, y, wz + Math.sin(a) * rr];
+            solid('stone', [p(a0, ri, y0), p(a1, ri, y0), p(a1, r, y0), p(a0, r, y0), p(a0, ri, y1), p(a1, ri, y1), p(a1, r, y1), p(a0, r, y1)], colour, 0.6);
+          }
+        };
+        // Its round kerb of stone, the water dark below; two posts, a beam with its windlass, and a little roof of tiles over all.
+        ring(0.95, wy - 0.4, wy + 0.85, wallStone);
+        made.block('stone', V(wx - 0.68, wy + 0.2, wz - 0.68), V(wx + 0.68, wy + 0.22, wz + 0.68), [0.03, 0.04, 0.05]);
+        const oak: Colour = [0.24, 0.16, 0.1];
+        for (const s of [-1, 1]) made.block('wood', V(wx + s * 0.9 - 0.08, wy + 0.6, wz - 0.08), V(wx + s * 0.9 + 0.08, wy + 2.35, wz + 0.08), oak);
+        made.block('wood', V(wx - 1.05, wy + 1.55, wz - 0.06), V(wx + 1.05, wy + 1.67, wz + 0.06), oak);
+        const tileC: Colour = [0.55, 0.3, 0.22];
+        for (const s of [-1, 1]) solid('tile', [[wx - 1.2, wy + 2.3, wz], [wx + 1.2, wy + 2.3, wz], [wx + 1.2, wy + 2.3, wz + s * 0.02], [wx - 1.2, wy + 2.3, wz + s * 0.02], [wx - 1.2, wy + 1.95, wz + s * 0.95], [wx + 1.2, wy + 1.95, wz + s * 0.95], [wx + 1.2, wy + 2.0, wz + s * 0.95], [wx - 1.2, wy + 2.0, wz + s * 0.95]], tileC, 0.6);
+      }
+    }
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {
       if (t.keep) continue;
@@ -4592,6 +4652,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // A plinth along its foot, a band at the height of the rooms' floors upstairs, and a cornice under the roof.
         ledge(r, a, b, low - 0.4, low + 0.42, 0.14, coping, 'plinth');
         ledge(r, a, b, site.top - 0.34, site.top + 0.12, 0.24, coping, 'cornice');
+        // (A castle's hall and ranges are finished with a battlement along the tops of their outer walls, on the cornice, the roofs
+        // behind it: what most tells a castle's buildings from a cloister's.)
+        if (site.castle) {
+          ledge(r, a, b, site.top + 0.12, site.top + 1.15, -0.55, ashlar, 'parapet');
+          const teeth = Math.max(1, Math.round((b - a) / 1.7));
+          for (let m = 0; m < teeth; m++) ledge(r, a + ((b - a) * (m + 0.2)) / teeth, a + ((b - a) * (m + 0.72)) / teeth, site.top + 1.15, site.top + 1.75, -0.55, ashlar, 'merlon');
+        }
       }
     }
     // The windows dressed through the thickness of the wall, each with a sill.
@@ -4609,7 +4676,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const ridgeOf = new Map<number, { y: number; alongX: boolean; a: number; b: number; c: number }>();
     for (const q of places) {
       if (q.role === 'approach' || (q.level ?? 0) !== 0 || q.roof === 'sky' || q.fallen) continue;
-      const sanctum = q.role === 'goal', pitch = sanctum ? 1.05 : 0.62;
+      const sanctum = q.role === 'goal', pitch = sanctum ? 1.05 : site.castle ? 0.42 : 0.62;
       const e = T / 2 + 0.34, x0 = q.x0 - e, x1 = q.x1 + e, z0 = q.z0 - e, z1 = q.z1 + e, y = site.top + 0.12;
       const alongX = x1 - x0 >= z1 - z0, half = (alongX ? z1 - z0 : x1 - x0) / 2, rise = half * pitch, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const tone: [number, number, number] = [roofTone[0] * (0.94 + 0.12 * ((q.id * 7919) % 11) / 11), roofTone[1] * 0.98, roofTone[2] * 0.97];
@@ -4634,6 +4701,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
             if (alongX) kit.box('stone', V(at - 0.3, y0, cz - w), V(at + 0.3, y1, cz + w), ashlar, coping, 'gable'); else kit.box('stone', V(cx - w, y0, at - 0.3), V(cx + w, y1, at + 0.3), ashlar, coping, 'gable');
           }
         }
+        if (site.castle) continue;
         const front = alongX ? (Math.abs(x1 - yard.z0) < Math.abs(x0 - yard.z0) ? x1 : x0) : (z1 > z0 ? z1 - 0.3 : z0 + 0.3), top = y + rise + 0.05;
         const bx = alongX ? front + (front > cx ? -0.3 : 0.3) : cx, bz = alongX ? cz : front;
         for (const off of [-0.55, 0.55]) {
@@ -4658,6 +4726,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // Buttresses against the outside of every vaulted room, where the ribs of its vault come down within, to take their thrust;
     // in two stages, each with a sloping coping; and a clasping buttress round every outer corner.
     const buttress = (r: Run, at: number) => {
+      // (A castle's walls are thick enough to need none: buttresses down every wall are a church's, or a cloister's.)
+      if (site.castle) return;
       const mid = low + (site.top - low) * 0.55;
       ledge(r, at - 0.38, at + 0.38, low - 0.4, mid, 0.9, ashlar, 'buttress');
       ledge(r, at - 0.44, at + 0.44, mid, mid + 0.16, 0.98, coping, 'weathering');
@@ -4698,12 +4768,22 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
     }
+    const turrets = new Set<string>();
     for (const r of runs) for (const end of [r.from, r.to]) {
       const dir = end === r.from ? -1 : 1, [ox, oz] = outward[r.side], along = r.side === 'n' || r.side === 's';
       // (A point just past the end of the run and just inside the wall: if that is outside the house, the corner is an outer one.)
       const px = along ? end + dir * 0.2 : r.at - ox * 0.2, pz = along ? r.at - oz * 0.2 : end + dir * 0.2;
       if (insideOuter(px, pz)) continue;
       kit.group = 'roofs';
+      if (site.castle) {
+        // A castle's hall has a turret corbelled out at each outer corner of its top instead. (Each corner is met by two runs: once.)
+        const cx = along ? end : r.at, cz = along ? r.at : end, key = `${Math.round(cx * 10)},${Math.round(cz * 10)}`;
+        if (turrets.has(key)) continue;
+        turrets.add(key);
+        const dx = ox + (along ? dir : 0), dz = oz + (along ? 0 : dir), l = Math.hypot(dx, dz) || 1, tr = 1.35;
+        bartizan((m) => kit.mesh(m), cx + (dx / l) * tr * 0.72, cz + (dz / l) * tr * 0.72, tr, site.top - 3.2, site.top + 1.9, [0.62 * stoneTint[0], 0.6 * stoneTint[1], 0.56 * stoneTint[2]], Math.atan2(dz, dx));
+        continue;
+      }
       ledge(r, dir < 0 ? end : end - 0.95, dir < 0 ? end + 0.95 : end, low - 0.4, site.top - 0.75, 0.42, ashlar, 'corner');
       ledge(r, dir < 0 ? end : end - 1.05, dir < 0 ? end + 1.05 : end, site.top - 0.75, site.top - 0.6, 0.5, coping, 'cornercap');
     }
