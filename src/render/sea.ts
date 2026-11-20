@@ -22,8 +22,8 @@ import { SeaDesc } from './scene';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Fn, abs, attribute, cameraFar, cameraNear, cameraViewMatrix, cos, positionLocal, positionView, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize,
-  perspectiveDepthToViewZ, positionWorld, pow, reflect, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture,
+  Fn, abs, attribute, cameraFar, cameraNear, cameraViewMatrix, cos, fwidth, positionLocal, positionView, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize,
+  perspectiveDepthToViewZ, positionWorld, pow, reflect, screenUV, select, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture, viewportSharedTexture,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
 /**
@@ -33,6 +33,15 @@ const one = (x: N): N => float(1).sub(x);
  * slope tilts it.
  */
 const SWELL: [number, number, number, number][] = [[0.11, 0.05, 1.08, 0.42], [-0.04, 0.13, 1.13, 0.3], [0.21, -0.12, 1.55, 0.1]];
+/**
+ * The waves the wind raises on the swell: each as how far it is turned from the way the wind blows, its length in metres, and how
+ * high it stands (crest above the trough's floor). They do not lift the surface (the rings are too far apart to carry them), only
+ * tilt it. The wind blows towards greater x and a little greater z, as the pennants stream (`layVessel`).
+ */
+const WIND_WAY = Math.atan2(0.34, 0.94);
+const WIND: [number, number, number][] = [[0, 9.1, 0.13], [0.55, 5.3, 0.075], [-0.6, 3.1, 0.042], [0.25, 1.9, 0.024]];
+/** How far off a point is, for how much the water bends what is seen through it (less far off, where a point of the picture is large). */
+const far0 = (P: N): N => length(cameraPosition.sub(P));
 
 /**
  * The swell at a point at a time, as the sea's surface is lifted by it (see `positionNode` below): how high it stands there, and
@@ -158,66 +167,120 @@ export class Sea {
       const out: N = length(p.xz.sub(vec2(this.desc.x, this.desc.z)));
       return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4)).mul(one(smoothstep(this.reach, this.reach + 250, out)))), p.z);
     })();
-    // Which way the surface faces at a point: the swell, and waves and wavelets on it, finer and fainter with distance, so that far
-    // off the sea is smooth and only glints.
-    const surface = (P: N, d: N): { normal: N; fade: N } => {
+    /**
+     * The surface at a point: which way it faces, how rough it is past what can be drawn, and how high the waves on it stand.
+     *
+     * On the swell run waves the wind raises, four trains of them from three to nine metres long about the way the wind blows (the
+     * way every pennant in a harbour streams), each sharp at its crest and broad in its trough as wind waves are (`exp(sin - 1)`, not
+     * a plain wave); on those, ripples read from a picture at four sizes, each turned from the last so that their repeats do not line
+     * up (with three, close to, the same pattern of ripples showed over and over). Where a wave is too small for the points of the
+     * picture to show (fewer than a few points to its length), it is left out of which way the surface faces, and what it would have
+     * tilted the surface by is kept as roughness instead (`rough`, the spread of the surface's slopes): the sea far off is not
+     * smooth, only too finely rough to see, and it is that roughness that spreads the sun's reflection into a path of glitter.
+     */
+    const surface = (P: N, d: N): { normal: N; rough: N; crest: N; fade: N } => {
       const far: N = length(cameraPosition.xz.sub(P.xz)).toVar();
-      const calm: N = smoothstep(0.5, 8, d).mul(0.75).add(0.25);
-      const swell: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.add(vec2(kx, kz).mul(sin(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a))), vec2(0, 0)).mul(calm).toVar();
-      const fade: N = exp(far.div(-260)).toVar();
-      const w1: N = rip(P.xz.mul(0.045).add(vec2(0.011, 0.007).mul(t)));
-      const w2: N = rip(P.zx.mul(0.13).sub(vec2(0.017, 0.009).mul(t)));
-      const w3: N = rip(P.xz.mul(0.41).add(vec2(-0.03, 0.04).mul(t)));
-      const slope: N = swell.add(w1.mul(0.075)).add(w2.mul(0.055).mul(fade.mul(0.6).add(0.4))).add(w3.mul(0.04).mul(fade)).mul(calm).toVar();
-      return { normal: normalize(vec3(slope.x.negate(), 1, slope.y.negate())).toVar(), fade };
+      // (How many metres a point of the picture covers here.)
+      const px: N = max(length(fwidth(P.xz)), 1e-4).toVar();
+      const shown = (metres: number): N => clamp(float(metres).div(px).sub(2).div(4), 0, 1);
+      const calm: N = smoothstep(0.5, 8, d).mul(0.75).add(0.25).toVar();
+      let slope: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.add(vec2(kx, kz).mul(sin(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a))), vec2(0, 0));
+      let height: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(P.x.mul(kx).add(P.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0)).div(SWELL.reduce((m, w) => m + w[3], 0));
+      let lost: N = float(0.0012), crest: N = float(0);
+      const windTotal = WIND.reduce((m, w) => m + w[2], 0);
+      for (const [turn, len, a] of WIND) {
+        const k = (Math.PI * 2) / len, w = Math.sqrt(9.81 * k), dx = Math.cos(WIND_WAY + turn) * k, dz = Math.sin(WIND_WAY + turn) * k;
+        const ph: N = P.x.mul(dx).add(P.z.mul(dz)).sub(t.mul(w)).toVar(), peak: N = exp(sin(ph).sub(1)).toVar();
+        const seen: N = shown(len);
+        slope = slope.add(vec2(dx, dz).mul(cos(ph).mul(peak).mul(a * 1.0)).mul(seen));
+        lost = lost.add(one(seen).mul((k * a) ** 2 * 0.25));
+        crest = crest.add(peak.mul(a / windTotal));
+      }
+      // The ripples: tiles of 26, 8.3, 2.6 and 0.8 metres, each turned and drifting its own way.
+      for (const [size, weight, ang, vx, vz] of [[26, 0.07, 0.3, 0.011, 0.007], [8.3, 0.05, 1.9, -0.017, 0.009], [2.6, 0.03, 4.1, 0.03, -0.04], [0.83, 0.014, 2.7, -0.05, 0.06]] as [number, number, number, number, number][]) {
+        const c = Math.cos(ang), sn = Math.sin(ang);
+        const q: N = vec2(P.x.mul(c).sub(P.z.mul(sn)), P.x.mul(sn).add(P.z.mul(c))).div(size).add(vec2(vx, vz).mul(t));
+        const r: N = rip(q), seen: N = shown(size / 6);
+        // (Turned back to the world's two ways.)
+        slope = slope.add(vec2(r.x.mul(c).add(r.y.mul(sn)), r.y.mul(c).sub(r.x.mul(sn))).mul(weight).mul(seen));
+        lost = lost.add(one(seen).mul(weight * weight * 0.18));
+      }
+      slope = slope.mul(calm);
+      return {
+        normal: normalize(vec3(slope.x.negate(), 1, slope.y.negate())).toVar(),
+        rough: lost.mul(calm).toVar(),
+        crest: clamp(crest.sub(0.3).div(0.7).mul(0.7).add(height.mul(0.3)), 0, 1).mul(calm).toVar(),
+        fade: exp(far.div(-260)),
+      };
     };
     // What it mirrors of what stands about it, the quay, the boats, the houses along the shore, is found in the picture by the air's
     // pass (`mirrored` in `post.ts`): the sea says how nearly a mirror it is, as the waves let it be, and which way it faces. Less where
-    // it shoals to nothing at the shore.
+    // it shoals to nothing at the shore, and less where it is rough.
     this.material.userData.mirror = Fn(() => {
       const d: N = max(attribute('aDepth', 'float'), 0);
-      const n: N = cameraViewMatrix.mul(vec4(surface(positionWorld, d).normal, 0)).xyz;
-      return mirrorAs(n, smoothstep(0.1, 1.2, d).mul(0.75));
+      const sf = surface(positionWorld, d);
+      const n: N = cameraViewMatrix.mul(vec4(sf.normal, 0)).xyz;
+      return mirrorAs(n, smoothstep(0.1, 1.2, d).mul(0.75).mul(one(smoothstep(0.01, 0.06, sf.rough).mul(0.5))));
     })();
     this.material.fragmentNode = Fn(() => {
       const P: N = positionWorld, d: N = max(attribute('aDepth', 'float'), 0).toVar();
-      const { normal, fade } = surface(P, d);
+      const { normal, rough, crest, fade } = surface(P, d);
       const view: N = normalize(cameraPosition.sub(P)).toVar();
       const facing: N = max(dot(normal, view), 0).toVar();
       // (A sea is never a mirror: its waves hide part of what it would reflect at a glancing angle, and show the water's own dark instead.)
       const fresnel: N = pow(one(facing), 5).mul(0.7).add(0.025).toVar();
       const dir: N = reflect(view.negate(), normal).toVar();
-      // What it reflects: the sky that way (never the ground under the horizon), and the sun itself as a scatter of glints.
+      // What it reflects: the sky that way (never the ground under the horizon), blurred as much as the surface is rough.
       const up: N = normalize(vec3(dir.x, max(dir.y, 0.02), dir.z));
       // (The sky towards the sun is far brighter than anything shown; it is brought down whole, keeping its colour, as for the haze.)
-      const raw: N = u.tSky.sample(up).level(2).rgb.toVar();
+      const raw: N = u.tSky.sample(up).level(mix(1.5, 4.5, smoothstep(0.002, 0.04, rough))).rgb.toVar();
       const skyColour: N = raw.mul(min(1, float(1.1).div(max(max(raw.r, raw.g), max(raw.b, 0.001))))).add(sky.skyAfterDark(up)).toVar();
-      const glint: N = pow(max(dot(dir, u.uSunDir), 0), 900).mul(60).add(pow(max(dot(dir, u.uSunDir), 0), 90).mul(0.6)).mul(smoothstep(-0.02, 0.06, u.uSunDir.y));
-      // The water itself: blue-green and clear over sand, dark where it is deep, lit by the sky over it.
-      const body: N = mix(shallow, deep, smoothstep(0.5, 14, d)).toVar();
-      let colour: N = mix(body, skyColour, fresnel).add(u.uSunColor.mul(glint).mul(0.012));
+      // The sun (or the moon) in it: each facet of the waves that is turned just so throws it to the eye, and how many are is reckoned
+      // from the spread of the surface's slopes (the waves too small to draw included): close to, a scatter of points of light; far
+      // off, towards a low sun, a road of glitter that broadens with the roughness of the sea.
+      const half: N = normalize(view.add(u.uSunDir)).toVar();
+      const nh: N = max(dot(normal, half), 0.001).toVar(), m2: N = rough.mul(2).add(0.0006).toVar();
+      const tan2: N = one(nh.mul(nh)).div(nh.mul(nh));
+      const spread: N = exp(tan2.div(m2).negate()).div(m2.mul(3.1416).mul(nh.mul(nh).mul(nh).mul(nh)));
+      const fh: N = pow(one(max(dot(half, view), 0)), 5).mul(0.98).add(0.02);
+      const glint: N = min(spread.mul(fh).div(max(facing, 0.08).mul(4)), 60).mul(smoothstep(-0.02, 0.05, u.uSunDir.y)).toVar();
+      // The water itself, as the eye sees into it: what lies under it (the bottom, rocks, the foot of a wall), bent a little by the
+      // waves and fading with the depth of water the eye looks through, red first, so that sand under a metre of water is
+      // turquoise and under five lost in blue-green; and where the eye sees nothing under it, the water's own colour.
+      // (It was drawn half see-through, the same at every depth, so that shallows showed what lay under them washed out and flat.)
+      const viewZ = (at: N): N => perspectiveDepthToViewZ(viewportDepthTexture(at).x, cameraNear, cameraFar);
+      const thick0: N = positionView.z.sub(viewZ(screenUV)).toVar();
+      const bentUV: N = screenUV.add(vec2(normal.x, normal.z.negate()).mul(0.03).mul(clamp(thick0.mul(0.4), 0, 1)).div(max(far0(P), 1).mul(0.05).add(1))).toVar();
+      const thick1: N = positionView.z.sub(viewZ(bentUV)).toVar();
+      // (Not bent where what is at the bent point stands above the water: a post, a hull.)
+      const under0: N = thick1.greaterThan(0);
+      const thick: N = max(select(under0, thick1, thick0), 0).toVar();
+      const under: N = viewportSharedTexture(select(under0, bentUV, screenUV)).rgb.toVar();
+      const through: N = exp(vec3(0.6, 0.2, 0.22).mul(thick).negate()).toVar();
+      const own: N = mix(shallow.mul(0.5), deep, smoothstep(0.5, 5, d));
+      const body: N = under.mul(through).add(own.mul(one(through)));
+      // Light comes through the thin crests of the waves from behind, turquoise, looking towards the sun.
+      const backlit: N = pow(max(dot(view.negate(), u.uSunDir), 0), 4).mul(0.8).add(0.12);
+      const glow: N = u.uSunColor.mul(vec3(0.06, 0.32, 0.26)).mul(crest.mul(crest)).mul(backlit).mul(one(fresnel)).mul(smoothstep(-0.02, 0.1, u.uSunDir.y)).mul(0.22);
+      let colour: N = mix(body, skyColour, fresnel).add(glow).add(u.uSunColor.mul(glint).mul(0.16));
       // The surf: where the water shoals it breaks in lines running in to the shore, broken up as foam is; and against rock and sand at the very edge a fringe of white.
       const run: N = d.mul(1.6).add(t.mul(0.55)).add(rip(P.xz.mul(0.03)).x.mul(0.8));
       const lines: N = smoothstep(0.75, 0.98, sin(run.mul(2.4)).mul(0.5).add(0.5)).mul(one(smoothstep(0.4, 2.6, d))).toVar();
       const breakup: N = smoothstep(-0.3, 0.45, rip(P.xz.mul(0.27).add(vec2(0.02, -0.03).mul(t))).x.add(rip(P.zx.mul(0.61).sub(vec2(0.01, 0.04).mul(t))).y.mul(0.6)));
       const edge: N = one(smoothstep(0.05, 0.55, d)).mul(smoothstep(-0.6, 0.2, rip(P.xz.mul(0.5).add(t.mul(0.03))).x)).toVar();
-      // And now and then a crest breaks out on the open water.
-      const caps: N = smoothstep(0.78, 1.05, rip(P.xz.mul(0.021).add(vec2(0.004, 0.002).mul(t))).x.add(rip(P.zx.mul(0.09).add(t.mul(0.02))).y.mul(0.5))).mul(smoothstep(4, 12, d)).mul(fade).mul(0.35);
+      // And now and then a crest breaks out on the open water: where the wind's waves stand highest.
+      const caps: N = smoothstep(0.78, 1.05, rip(P.xz.mul(0.021).add(vec2(0.004, 0.002).mul(t))).x.add(rip(P.zx.mul(0.09).add(t.mul(0.02))).y.mul(0.5)).add(crest.mul(0.25))).mul(smoothstep(4, 12, d)).mul(fade).mul(0.35);
       // And against whatever stands in the water, a quay's wall, a mole's stones, a hull, a stake, the swell slaps and lies in a fringe
       // of foam a hand or two broad, which comes and goes: found from how little water there is between the surface and what the eye
       // sees through it. (The bed's depth knows nothing of a wall: the water is deep right up to it, and it stood clean against it.)
-      const through: N = positionView.z.sub(perspectiveDepthToViewZ(viewportDepthTexture().x, cameraNear, cameraFar)).toVar();
       // (A soft band, broken up into patches and streaks that come and go: drawn as a sharp one, it followed every step of a clinker
       // hull's planks in a row of white teeth.)
       const churn: N = rip(P.xz.mul(1.3).add(vec2(0.05, -0.04).mul(t))).x.mul(0.6).add(rip(P.zx.mul(3.1).sub(vec2(0.03, 0.06).mul(t))).y.mul(0.4)).toVar();
-      const lap: N = pow(one(smoothstep(0, mix(0.7, 1.6, churn.mul(0.5).add(0.5)), through)), 1.6)
+      const lap: N = pow(one(smoothstep(0, mix(0.7, 1.6, churn.mul(0.5).add(0.5)), thick0)), 1.6)
         .mul(smoothstep(-0.35, 0.35, churn.add(sin(t.mul(1.3).add(P.x.mul(0.21)).add(P.z.mul(0.17))).mul(0.3)))).mul(smoothstep(0.3, 1, d)).toVar();
       const foam: N = clamp(max(max(lines.mul(breakup), edge), lap.mul(0.7)).add(caps.mul(breakup)), 0, 1).toVar();
       colour = mix(colour, foamColour, foam.mul(0.9));
-      // Shallow water shows what lies under it; at the very edge it thins to nothing, so the shore has no hard line.
-      const clear: N = one(smoothstep(0.1, 3.2, d)).mul(one(fresnel)).mul(0.82);
-      const alpha: N = one(clear).mul(smoothstep(0, 0.12, d).mul(0.85).add(0.15)).max(foam.mul(0.9));
-      return vec4(min(colour, vec3(12)), alpha);
+      return vec4(min(colour, vec3(12)), 1);
     })();
   }
 

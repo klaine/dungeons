@@ -709,7 +709,10 @@ export class Atmosphere {
           // otherwise reach it and it lies under the sky.
           const at: N = wp.sub(rd.mul(0.08)).toVar();
           const sun = seen(this.sunDepth.depthTexture!, u.uSunVP, at, 0.0025), open2 = seen(this.skyDepth.depthTexture!, u.uSkyVP, at, 0.0025);
-          col.mulAssign(one(u.uShade.mul(sky.cloudShade(wp)).mul(mix(0.35, 1, sun)).mul(open2)));
+          // (Not what mirrors the sky, as the sea does: the sky it shows is not shaded by the cloud's shadow on it, and a cloud's shadow
+          // on the water was a dark blot as on a field.)
+          const mirrorShare: N = mirrors ? min(length(this.scenePass.getTextureNode('gloss').sample(screenUV).level(0).rgb.mul(2).sub(1)), 1).mul(0.85) : float(0);
+          col.mulAssign(one(u.uShade.mul(sky.cloudShade(wp)).mul(mix(0.35, 1, sun)).mul(open2).mul(one(mirrorShare))));
         });
         // And on the near thing's side of an edge, the cloud over the sky's share of it.
         If(open.not().and(edgeSky.greaterThan(0.02)), () => {
