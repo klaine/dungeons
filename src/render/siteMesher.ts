@@ -2575,9 +2575,10 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           if (step > 8 && own01(x, z, 54) < 0.85 * (1 - smooth((here - 0.46) / 0.12))) continue;
           // Full detail anywhere the player can stand, and for a stone's throw beyond, so that the wood the valley lies in goes on as
           // a wood past where one may walk (asked for: it had turned to rough trees within a few strides of the edge); less with
-          // distance beyond that.
+          // distance beyond that. (Fifteen metres and then sixty to nothing: twenty-five and ninety cost a frame some 2.5
+          // milliseconds more than before, and was trimmed when asked.)
           const out = vale ? Math.max(0, -insideAt(x, z), g.z0 - z, z - vale.mouth - 8) : Math.max(0, g.x0 - x, x - g.x1, z - g.z1, g.z0 - z);
-          tree(x, z, f(x, z), 1 - smooth((out - 25) / 90));
+          tree(x, z, f(x, z), 1 - smooth((out - 15) / 60));
         }
       }
     };
