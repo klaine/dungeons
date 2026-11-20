@@ -194,7 +194,11 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   // (Carved at half a metre, where a valley's rim and an island's cliffs are carved at four tenths: there is twice as much rock
   // here, most of it seen from further off, and at four tenths it took a minute and a half to build.)
   // (Rock carved at four tenths of a metre and the sheet laid at a metre: a notch finer than first made.)
-  const CELL = 0.4, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
+  // (And carved at half a metre again, `CARVE`, the land's lattice staying at four tenths: what makes rock look made of card is one size
+  // of plane, not the size of the carving's cells, which keeps edges sharp at either. With finer planes near the player and the
+  // ledges cut only on cliffs, half a metre gives more to see with a quarter fewer triangles, 1.3 million against 1.76, in the time
+  // four tenths took.)
+  const CELL = 0.4, CARVE = 0.5, SHEET = 1, TILE = 10, IN = 5, OUT = 11;
   const snap = (v: number, up: boolean, to = TILE) => (up ? Math.ceil(v / to - 1e-6) : Math.floor(v / to + 1e-6)) * to;
   const area = { x0: snap(g.x0 - 90, false), x1: snap(g.x1 + 90, true), z0: snap(g.z0 - 90, false), z1: snap(g.z1 + 90, true) };
   const steepAt = (x: number, z: number) => { const y = plain(x, z); return Math.hypot(plain(x + 1.2, z) - y, plain(x, z + 1.2) - y) / 1.2 > 1.05; };
@@ -277,6 +281,50 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
       if (!within[k] || far[k] < 0.8 || made(x, z)) continue;
       active[k] = 1;
     }
+    // Gullies. Water, and snow sliding in winter, run down a steep slope the way it falls and gather as they go, and where they gather
+    // they cut a gully, deeper the more ground drains into it: on a real mountainside these are what break the faces and the ledges
+    // into ribs and buttresses, and where the snow lies in streaks down the rock. The way each point drains is found over the land
+    // made a little uneven (by a metre and a half, over ten), or on a smooth slope every point would drain straight down beside its
+    // neighbour and nothing would gather; then each point passes what has reached it on to the lowest point about it, highest first,
+    // and the gully is cut as deep as the square root of the ground above it, less a little, so that nothing is cut where little has
+    // gathered; widened over a couple of metres; on what is steep; and kept off the paths and the edge of what is worn.
+    {
+      const H = land.data, N = H.length, rough = new Float32Array(N), gather = new Float32Array(N), cut = new Float32Array(N), toAct = new Float32Array(N);
+      const order: number[] = [];
+      for (let k = 0; k < N; k++) {
+        toAct[k] = active[k] ? 1e6 : 0;
+        if (!known[k]) continue;
+        const x = land.x0 + (k % nx) * CELL, z = land.z0 + Math.floor(k / nx) * CELL;
+        rough[k] = H[k] + (fbm2(x * 0.1 + reliefSeed * 0.031, z * 0.1 - 3.7, 2) - 0.5) * 3;
+        gather[k] = CELL * CELL;
+        order.push(k);
+      }
+      order.sort((a, b) => rough[b] - rough[a]);
+      const step8 = [-nx - 1, -nx, -nx + 1, -1, 1, nx - 1, nx, nx + 1], run8 = [D2, D1, D2, D1, D1, D2, D1, D2];
+      for (const k of order) {
+        let best = -1, fall = 0;
+        for (let q = 0; q < 8; q++) { const j = k + step8[q]; if (j < 0 || j >= N || !known[j]) continue; const f = (rough[k] - rough[j]) / run8[q]; if (f > fall) { fall = f; best = j; } }
+        if (best >= 0) gather[best] += gather[k];
+        // (On what is steep alone: on the gentle top water soaks away or runs in a rill too small to draw.)
+        cut[k] = Math.min(2.6, Math.max(0, Math.sqrt(gather[k]) - 3.2) * 0.17) * smooth((fall - 0.55) / 0.5);
+      }
+      // (How far each point is inside what is worn, so that a gully dies away before the edge of it and the paths.)
+      for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) { const k = j * nx + i; if (toAct[k]) toAct[k] = Math.min(toAct[k], toAct[k - 1] + D1, toAct[k - nx] + D1, toAct[k - nx - 1] + D2, toAct[k - nx + 1] + D2); }
+      for (let j = nz - 2; j > 0; j--) for (let i = nx - 2; i > 0; i--) { const k = j * nx + i; if (toAct[k]) toAct[k] = Math.min(toAct[k], toAct[k + 1] + D1, toAct[k + nx] + D1, toAct[k + nx + 1] + D2, toAct[k + nx - 1] + D2); }
+      // Widened: a gully is a few strides across and rounded in its bed, not a slot one point wide.
+      const wide = new Float32Array(N);
+      for (let pass = 0; pass < 4; pass++) {
+        wide.set(cut);
+        for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
+          const k = j * nx + i;
+          if (!known[k]) continue;
+          let s = 0;
+          for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) s = Math.max(s, wide[k + dj * nx + di] * (di || dj ? 0.8 : 1));
+          cut[k] = s;
+        }
+      }
+      for (let k = 0; k < N; k++) if (active[k]) H[k] -= cut[k] * smooth((toAct[k] - 0.4) / 3);
+    }
     // (Frost is harder on a mountain than by the sea or in a dell: more passes, and more of what falls is left lying.)
     erode({
       rock: land, loose, active, repose: 0.7, kept: 0.24, passes: 52,
@@ -335,14 +383,90 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
   }
   const stepBeds = Math.max(1, Math.round(1.3 / rockKind.bed)), stepped = Math.min(1, rockKind.bedded * 1.4);
 
+  // ---- where the player walks, and the rock they see close: the top, the way, the climb, the scramble and the gallery, and a stone's
+  // throw about them, 1 there and falling to 0 some thirty metres off. (Read on a lattice of two metres, blended between.)
+  const PLAY = 2, playNear = new Grid2(snap(area.x0, false, PLAY), snap(area.z0, false, PLAY), PLAY, Math.round((area.x1 - area.x0) / PLAY) + 2, Math.round((area.z1 - area.z0) / PLAY) + 2);
+  for (let j = 0; j < playNear.nz; j++) for (let i = 0; i < playNear.nx; i++) {
+    const x = playNear.x0 + i * PLAY, z = playNear.z0 + j * PLAY;
+    const off = Math.min(nearWay(x, z, 45), nearClimb(x, z, 45), nearOpen(x, z, 45), Math.max(0, -inside(m, x, z)));
+    playNear.data[j * playNear.nx + i] = 1 - smooth((off - 10) / 14);
+  }
+  // Finer fracture planes, near where the player is: some three metres across, standing out and set back from the great planes of
+  // nine, so that rock seen close breaks at more than one size. (With the great planes alone, a face seen from a stride off was a
+  // few flat sheets meeting in straight edges: the rock of a model made of card. Reckoned on a lattice of a metre, as the great ones
+  // are on one of a metre and a half, and only near the player, where they are seen; and from the eight cells about a point rather
+  // than twenty-seven, which is near enough at this size: with all twenty-seven, on a finer lattice and further out, the mountain
+  // took twice as long to build.)
+  const planes8 = (x: number, y: number, z: number, size: number, tall: number, seedP: number): number => {
+    const fx = x / size, fy = y / tall, fz = z / size, xi = Math.floor(fx - 0.5), yi = Math.floor(fy - 0.5), zi = Math.floor(fz - 0.5);
+    let best = -Infinity;
+    for (let dz = 0; dz <= 1; dz++) for (let dy = 0; dy <= 1; dy++) for (let dx = 0; dx <= 1; dx++) {
+      const cx = xi + dx, cy = yi + dy, cz = zi + dz;
+      let h = Math.imul(cx * 73856093 ^ cy * 19349663 ^ cz * 83492791 ^ seedP, 2654435761) >>> 0;
+      const r = () => { h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0; return (h >>> 8) / 16777216; };
+      const px = fx - (cx + 0.2 + 0.6 * r()), py = fy - (cy + 0.2 + 0.6 * r()), pz = fz - (cz + 0.2 + 0.6 * r());
+      let nx = r() * 2 - 1, ny = (r() * 2 - 1) * 0.45, nz = r() * 2 - 1;
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nx /= l; ny /= l; nz /= l;
+      const v = r() * 0.6 - (px * nx + py * ny + pz * nz) - (px * px + py * py + pz * pz) * 0.08;
+      if (v > best) best = v;
+    }
+    return best;
+  };
+  const smallPlanes = new Map<number, number>(), LAT2 = 1;
+  const smallPlanesAt = (ix: number, iy: number, iz: number): number => {
+    const key = ((ix + 8192) * 16384 + (iy + 8192)) * 16384 + (iz + 8192);
+    let v = smallPlanes.get(key);
+    if (v === undefined) { v = (planes8(ix * LAT2, iy * LAT2, iz * LAT2, 3.4, 4.6, reliefSeed + 202) - 0.25) * 1.5; smallPlanes.set(key, v); }
+    return v;
+  };
+  const smallPlanesBlended = (x0: number, y0: number, z0: number): number => {
+    const x = x0 / LAT2, y = y0 / LAT2, z = z0 / LAT2, ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), tx = x - ix, ty = y - iy, tz = z - iz;
+    const a000 = smallPlanesAt(ix, iy, iz), a100 = smallPlanesAt(ix + 1, iy, iz), a010 = smallPlanesAt(ix, iy + 1, iz), a110 = smallPlanesAt(ix + 1, iy + 1, iz);
+    const a001 = smallPlanesAt(ix, iy, iz + 1), a101 = smallPlanesAt(ix + 1, iy, iz + 1), a011 = smallPlanesAt(ix, iy + 1, iz + 1), a111 = smallPlanesAt(ix + 1, iy + 1, iz + 1);
+    const c00 = a000 + (a100 - a000) * tx, c10 = a010 + (a110 - a010) * tx, c01 = a001 + (a101 - a001) * tx, c11 = a011 + (a111 - a011) * tx;
+    const c0 = c00 + (c10 - c00) * ty, c1 = c01 + (c11 - c01) * ty;
+    return c0 + (c1 - c0) * tz;
+  };
+  const joint = new Float32Array(5);
+
   // ---- the land as a solid, as for the valley and the island
-  const spot = { x: NaN, z: NaN, rocky: 0, h: 0, steep: 1, slope: 0, ux: 0, uz: 0 };
+  const spot = { x: NaN, z: NaN, rocky: 0, h: 0, steep: 1, slope: 0, ux: 0, uz: 0, cliff: 0, bury: 0, beds: 1, bedsAmp: 1, shift: 0, near: 0 };
   const TREAD_MOST = 0.9, FINE_MOST = 1.5;
+  /**
+   * The beds of the rock step a face back ledge by ledge. They did so on all rock alike, on a slope of forty degrees as on a cliff, every
+   * ledge the same height and running unbroken round the hill, and with snow on each the top was ringed like a model of its contours.
+   * Now the ledges are cut only where the ground is a cliff, steeper than some fifty degrees; they come in groups of one to three
+   * beds as the rock has them, stronger here and weaker there; and the rock is cut by upright joints into blocks some paces across,
+   * each with its ledges set a little higher or lower than its neighbour's, so that a ledge runs a few strides and steps up or down.
+   * And in winter the snow lies over the gentler rock and fills its hollows: only what stands out of it shows, and the slope between
+   * is smooth, as a snowfield is.
+   */
+  const buried = (out: number): number => (spot.bury > 0 ? out + (Math.max(out * 0.6 - 0.35, -0.15) - out) * spot.bury : out);
+  // (How many beds go to a ledge, how strong the ledges are, how far a block's ledges are set up or down, and how near the player is:
+  // reckoned once for each point of the land's lattice, as first wanted, and read at the nearest, so that a block's edge is a joint
+  // and not a ramp. Reckoned afresh wherever the carving asked, they made it take a third as long again.)
+  const columns = new Float32Array(land.data.length * 4).fill(NaN);
   const landAir = (x: number, y: number, z: number): number => {
     if (x !== spot.x || z !== spot.z) {
       spot.x = x; spot.z = z;
       spot.rocky = rocky.at(x, z); spot.h = land.at(x, z); spot.steep = steepness.at(x, z);
-      if (spot.rocky >= 0.002) { spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1)); spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z); }
+      if (spot.rocky >= 0.002) {
+        spot.slope = Math.sqrt(Math.max(0.04, spot.steep * spot.steep - 1)); spot.ux = upX.at(x, z); spot.uz = upZ.at(x, z);
+        spot.cliff = smooth((spot.slope - 1.15) / 0.9);
+        spot.bury = winter ? smooth((1.3 - spot.slope) / 0.6) : 0;
+        const ci = Math.min(land.nx - 1, Math.max(0, Math.round((x - land.x0) / CELL))), cj = Math.min(land.nz - 1, Math.max(0, Math.round((z - land.z0) / CELL)));
+        const o = (cj * land.nx + ci) * 4;
+        if (Number.isNaN(columns[o])) {
+          const cx = land.x0 + ci * CELL, cz = land.z0 + cj * CELL;
+          columns[o] = stepBeds * (1 + Math.min(2, Math.max(0, Math.floor(fbm2(cx * 0.021 + reliefSeed * 0.01, cz * 0.021, 2) * 3.4 - 0.4))));
+          columns[o + 1] = 0.25 + 0.75 * smooth((fbm2(cx * 0.034 - 7.1, cz * 0.034 + reliefSeed * 0.013, 2) - 0.32) / 0.3);
+          cells3(cx / 6.5 + reliefSeed * 0.21, 0.5, cz / 6.5, reliefSeed + 77, 0.85, joint, 0);
+          columns[o + 2] = ((joint[2] + joint[3]) * 5.17) % 1;
+          columns[o + 3] = playNear.holds(cx, cz) ? playNear.at(cx, cz) : 0;
+        }
+        spot.beds = columns[o]; spot.bedsAmp = columns[o + 1]; spot.shift = columns[o + 2]; spot.near = columns[o + 3];
+      }
     }
     const d = (y - spot.h) / spot.steep;
     // (Further from the ground than the rock's breaks can shift its face, only which side of it a point is on matters, and that is
@@ -351,12 +475,16 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     if (spot.rocky < 0.002 || d > within || d < -within) return d;
     let out = Math.min(3.2, Math.max(-3.2, relief.broad(x, y, z)));
     const most = FINE_MOST * spot.rocky + 0.45;
-    if (Math.abs(d - out * spot.rocky) > most) return d - out * spot.rocky;
-    let fine = relief.fine(x, y, z);
-    const tread = strata.at(x, y, z) / stepBeds + 0.31, wb = tread - Math.floor(tread);
-    fine += Math.max(-TREAD_MOST, Math.min(TREAD_MOST, ((wb - 0.5) * stepBeds * rockKind.bed) / spot.slope)) * stepped;
+    if (Math.abs(d - buried(out) * spot.rocky) > most + 1.2 * spot.near) return d - buried(out) * spot.rocky;
+    if (spot.near > 0.01) out += spot.near * smallPlanesBlended(x, y, z);
+    // (The joints and blocks of the fine relief, and its beds, which are a cliff's, softer off the cliffs.)
+    let fine = relief.fine(x, y, z) * (0.45 + 0.55 * spot.cliff);
+    if (spot.cliff > 0.01) {
+      const tread = strata.at(x, y, z) / spot.beds + 0.31 + spot.shift, wb = tread - Math.floor(tread);
+      fine += Math.max(-TREAD_MOST, Math.min(TREAD_MOST, ((wb - 0.5) * spot.beds * rockKind.bed) / spot.slope)) * stepped * spot.cliff * spot.bedsAmp;
+    }
     out += Math.max(-FINE_MOST, Math.min(FINE_MOST, fine));
-    out *= spot.rocky;
+    out = buried(out) * spot.rocky;
     const sx = x + out * spot.ux, sz = z + out * spot.uz;
     return (y - land.at(sx, sz)) / steepness.at(sx, sz);
   };
@@ -597,8 +725,8 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
     lo = Math.min(lo, tileLow[j * tilesX + i]);
     carveRock(rockMesh, density, {
       // (Not below what the cloud hides: there the rock is closed off flat.)
-      min: V(c.x0, Math.floor(Math.max(lo - 2, HIDDEN) / CELL) * CELL, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CELL) * CELL, c.z1),
-      cell: CELL, uvScale: 0.4, otherUvScale: (mm) => (mm === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
+      min: V(c.x0, Math.floor(Math.max(lo - 2, HIDDEN) / CARVE) * CARVE, c.z0), max: V(c.x1, Math.ceil((hi + 2.8) / CARVE) * CARVE, c.z1),
+      cell: CARVE, uvScale: 0.4, otherUvScale: (mm) => (mm === screeMesh ? 0.55 : 2.3), fromSamples: true, occlusion: [0.3, 0.75], sharp: true, beyond: carved, edge: sheetEdge,
       // (A tunnel's floor is the rock it was cut in, whatever the ground is over it.)
       meshFor: (n, at) => (n.y > 0.74 && rocky.at(at.x, at.z) < 0.5 && !(runs.under.length && tunnelAir(at.x, at.y + 0.6, at.z) > 0) && !(H && (hallAir(at.x, at.y + 0.6, at.z) > 0 || stairAir(at.x, at.y + 0.6, at.z) > 0 && landAt(m, F, at.x, at.z, true) - at.y > 1.5)) ? (loose.at(at.x, at.z) > 0.25 ? screeMesh : turfMesh) : null),
       shade: (q, n, field, other, open) => {
