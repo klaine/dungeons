@@ -71,18 +71,37 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
   // it only speckles.)
   // (`billow` is how much of the smaller billows to take, 0 to 1: less far off, where only the broad shapes are seen, and where a
   // line of sight grazing the layer caught them at a different place from one point of the picture to the next.)
-  const cloudOf = (fine: boolean): N => Fn(([p, fineW, billow]: [N, N, N]) => {
+  // (`edge` is how soft its edge is, as the share of the noise's range over which it goes from none to whole: 0.1 for the cloud as
+  // seen, wider for its shadow, which is softened by the sun's breadth and the thin cloud at its rim.)
+  // (`weather` is the noise read at the large sizes about the point, from `weatherAt`: it changes only over kilometres, so where the
+  // cloud is asked about at several points close together, as for its shadow and the light that reaches into it, it is read once.)
+  // Cloud in flat banks is the same cloud drawn out one way, in a layer too thin to heap up.
+  const cloudQ = (p: N): N => p.mul(vec3(mix(1, 0.4, u.uCloudFlat), 1, mix(1, 1.2, u.uCloudFlat))).div(1150).add(u.uCloudDrift);
+  // The block of noise repeats every kilometre or so, and small heaps showed it, lying in rows towards the horizon, each like the
+  // last. So the same noise is read eight times larger as well (`x`): where it is high the heaps gather and stand closer, where it is
+  // low the sky opens, and the lesser noise is pushed about by it, so that no two kilometres are laid out alike. And larger still
+  // (`y`), for the weather over some kilometres: whether it is for scattered small heaps or great ones alone (see below).
+  const weatherAt = (p: N): N => {
+    const q0 = cloudQ(p).toVar();
+    return vec2(noise(q0.mul(vec3(0.13, 0.4, 0.13)).add(0.71)).r, noise(q0.mul(vec3(0.071, 0.3, 0.071)).add(vec3(0.37, 0.12, 0.83))).g);
+  };
+  const cloudOf = (fine: boolean): N => Fn(([p, fineW, billow, edge, weather]: [N, N, N, N, N]) => {
     const thick: N = float(0).toVar();
     const h: N = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase)).toVar();
     If(h.greaterThan(0).and(h.lessThan(1)), () => {
-      // Cloud in flat banks is the same cloud drawn out one way, in a layer too thin to heap up.
-      const q0: N = p.mul(vec3(mix(1, 0.4, u.uCloudFlat), 1, mix(1, 1.2, u.uCloudFlat))).div(1150).add(u.uCloudDrift).toVar();
-      // The block of noise repeats every kilometre or so, and small heaps showed it, lying in rows towards the horizon, each like
-      // the last. So the same noise is read eight times larger as well: where it is high the heaps gather and stand closer, where
-      // it is low the sky opens, and the lesser noise is pushed about by it, so that no two kilometres are laid out alike.
-      const big: N = noise(q0.mul(vec3(0.13, 0.4, 0.13)).add(0.71)).r.toVar();
+      const q0: N = cloudQ(p).toVar();
+      const big: N = weather.x, spread: N = weather.y;
       const q: N = q0.add(vec3(big.sub(0.5).mul(0.9), 0, big.sub(0.5).mul(-0.7))).toVar();
-      const shape: N = noise(q).r.add(big.sub(0.5).mul(0.24)).toVar();
+      // Nor are all heaps one size, as when the noise was read at one size alone: the heaps it makes are cells of a lattice, nine to a
+      // block, so all were alike and lay in ranks towards the horizon, as on a quilt. So the noise is read again, turned and at less
+      // than half the size, and the cloud is wherever either reading has it: lesser heaps, a few hundred metres across, scattered
+      // between the great ones and running into them, on lattices that never line up. How many of the lesser stand depends on the
+      // weather over some kilometres (`spread`): here fair-weather cumulus dot the sky, there great heaps stand alone with lanes of
+      // clear sky between; and how much of the sky is cloud there rises and falls with it too. (The last small number keeps the share
+      // of sky covered what it was with one reading, measured over forty kilometres of it.)
+      const turned: N = vec3(q.x.mul(0.8).sub(q.z.mul(0.6)), q.y, q.x.mul(0.6).add(q.z.mul(0.8))).mul(2.1).add(vec3(0.41, 0.17, 0.63));
+      const lesser: N = noise(turned).r.sub(mix(0.16, 0.03, smoothstep(0.3, 0.75, spread)));
+      const shape: N = max(noise(q).r, lesser).add(big.sub(0.5).mul(0.28)).add(spread.sub(0.5).mul(0.24)).add(0.01).toVar();
       // The more of the sky the day gives to cloud, the lower the bar a piece of air must clear to
       // be cloud. The bar rises with height, so a cloud is broad at its flat base and only its
       // strongest parts tower; and nothing hangs below the base.
@@ -91,7 +110,7 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
       If(shape.greaterThanEqual(bar.sub(0.1)), () => {
         // Smaller billows on the large ones give it the knobbly outline of a heap of cloud.
         shape.subAssign(one(noise(q.mul(3.9).add(0.37)).g).mul(0.2).sub(0.07).mul(billow));
-        const d: N = shape.sub(bar).div(0.1).toVar();
+        const d: N = shape.sub(bar).div(edge).toVar();
         // (Air near a cloud but not in it says so, as a whisker less than nothing, so that the walk can take short steps there and
         // not stride over a cloud's thin edge, which one point of the picture caught and the next missed, drawing it as a speckle.)
         if (fine) thick.assign(-1e-6);
@@ -107,19 +126,26 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
   const cloudFine = cloudOf(true), cloudCoarse = cloudOf(false);
 
   // The share of sunlight a cloud takes from a point on the land: 0 under clear sky.
-  const cloudShade: N = Fn(([p]: [N]) => {
+  // (Asked of the cloud at three heights in the layer, towards the sun; or at one, `thin`, for the air, which asks at six points along
+  // every line of sight and only wants the shafts of light between the heaps' shadows.)
+  const cloudShadeOf = (heights: number[]): N => Fn(([p]: [N]) => {
     const shade: N = float(0).toVar();
     If(u.uSunDir.y.greaterThanEqual(0.04), () => {
+      const toward = (f: number): N => p.add(u.uSunDir.mul(mix(u.uCloudBase, u.uCloudTop, f).sub(p.y).div(u.uSunDir.y)));
+      const weather: N = weatherAt(toward(0.44)).toVar();
       const through: N = float(0).toVar();
-      for (let j = 0; j < 3; j++) {
-        const h = mix(u.uCloudBase, u.uCloudTop, 0.22 + 0.22 * j);
-        through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(h.sub(p.y).div(u.uSunDir.y))), float(0), float(1)));
+      for (const f of heights) {
+        // (Read with a soft edge and fewer billows: the shadow of a cloud is not cut out sharp, as the cloud is against the sky. The sun
+        // is not a point, and the thin cloud at a heap's rim lets much of it through: under a heap a kilometre up, the shadow's edge is
+        // some tens of metres wide.)
+        through.addAssign(cloudCoarse(toward(f), float(0), float(0.4), float(0.34), weather));
       }
-      through.mulAssign(u.uCloudTop.sub(u.uCloudBase).div(3).div(max(u.uSunDir.y, 0.2)));
+      through.mulAssign(u.uCloudTop.sub(u.uCloudBase).div(heights.length).div(max(u.uSunDir.y, 0.2)));
       shade.assign(one(exp(through.mul(-1.1))));
     });
     return shade;
   });
+  const cloudShade = cloudShadeOf([0.22, 0.44, 0.66]), cloudShadeThin = cloudShadeOf([0.4]);
 
   // Clouds along a line of sight, as far as `reach`: the light they send, and the share of what
   // is behind them that still comes through.
@@ -147,7 +173,8 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
         Loop(Math.round(cloudSteps * 1.4), () => {
           const p: N = ro.add(rd.mul(t)).toVar();
           const billow: N = one(smoothstep(7000, 20000, t).mul(0.65));
-          const d: N = cloudFine(p, one(smoothstep(70, 160, stride)), billow).toVar();
+          const weather: N = weatherAt(p).toVar();
+          const d: N = cloudFine(p, one(smoothstep(70, 160, stride)), billow, float(0.1), weather).toVar();
           If(d.notEqual(0).and(shortened.lessThan(0.5)), () => {
             shortened.assign(1);
             clearFor.assign(0);
@@ -164,17 +191,18 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
             // its sunlit side: soft, even and white all over. The walk goes as much further as the layer is deeper, so that a tower
             // shades its own far side.)
             const through: N = float(0).toVar();
-            for (let j = 1; j <= 4; j++) through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(deepen.mul(14 * j * j))), float(0), billow).mul(deepen.mul(14 * (2 * j - 1))));
+            for (let j = 1; j <= 4; j++) through.addAssign(cloudCoarse(p.add(u.uSunDir.mul(deepen.mul(14 * j * j))), float(0), billow, float(0.1), weather).mul(deepen.mul(14 * (2 * j - 1))));
             const h = p.y.sub(u.uCloudBase).div(u.uCloudTop.sub(u.uCloudBase));
             // Light that has come so far through cloud has been scattered, and scattered again, many times: some of it still comes
             // on, more softly the deeper it has come, which is the glow in a heap's shaded side and the grey of its base. (Three
             // shares of it, each taken as through thinner cloud than the last.)
-            const sunT: N = exp(through.mul(-0.35)).mul(0.62).add(exp(through.mul(-0.1)).mul(0.28)).add(exp(through.mul(-0.03)).mul(0.1));
+            // (More of it than at first, which left a heap's inside a quarter as bright as its sunlit skin, and every cloud grey.)
+            const sunT: N = exp(through.mul(-0.3)).mul(0.5).add(exp(through.mul(-0.08)).mul(0.32)).add(exp(through.mul(-0.025)).mul(0.18));
             // (Where the sun's light has only just come in, at a heap's sunward skin, it has not yet been scattered towards the eye: seen
             // from away from the sun those edges are darker than what lies a little inside them, which is what draws each billow.)
             const powder: N = mix(1, min(one(exp(through.mul(-0.6))).mul(1.5), 1.1), away);
             // (And a heap is lit from the open sky above far more than from below: its flat base is the darkest of it.)
-            const light = u.uCloudSun.mul(phase).mul(powder).mul(sunT).add(u.uCloudAir.mul(h.mul(0.85).add(0.3)));
+            const light = u.uCloudSun.mul(phase).mul(powder).mul(sunT).add(u.uCloudAir.mul(h.mul(0.7).add(0.5)));
             const a: N = one(exp(d.mul(stride).negate())).toVar();
             lit.addAssign(light.mul(left).mul(a));
             left.mulAssign(one(a));
@@ -257,7 +285,7 @@ export function skyParts(u: Record<string, N>, cloudSteps: number) {
     return vec2(haze, mist);
   });
 
-  return { phaseHG, cloudShade, cloudMarch, cloudOver, cirrus, skyAfterDark, airColour, airAlong, airBeyond };
+  return { phaseHG, cloudShade, cloudShadeThin, cloudMarch, cloudOver, cirrus, skyAfterDark, airColour, airAlong, airBeyond };
 }
 
 export class Atmosphere {
@@ -774,7 +802,7 @@ export class Atmosphere {
             const s: N = float(0).toVar(), n: N = float(0).toVar();
             for (let k = 0; k < 6; k++) {
               const tk: N = float(90).mul(pow(2.1, dither.add(k))), inside: N = step(tk, upTo);
-              s.addAssign(one(sky.cloudShade(u.uCamPos.add(rd.mul(min(tk, upTo))))).mul(inside));
+              s.addAssign(one(sky.cloudShadeThin(u.uCamPos.add(rd.mul(min(tk, upTo))))).mul(inside));
               n.addAssign(inside);
             }
             sunlitAir.assign(select(n.greaterThan(0), s.div(max(n, 1)), float(1)));
