@@ -433,7 +433,9 @@ export class Atmosphere {
       const at = vec2(s.x.mul(0.5).add(0.5), s.y.mul(-0.5).add(0.5));
       const deep = gpu ? s.z : s.z.mul(0.5).add(0.5);
       const inside = abs(s.x).lessThan(1).and(abs(s.y).lessThan(1));
-      return select(inside, step(deep.sub(bias), (texture(map, at) as N).level(0)), 1);
+      // (Past the picture's far end, only what the picture holds between shades a point: its own depth there, compared with the empty
+      // picture behind everything, said it was shaded, and the air down-sun of the place's box was dark.)
+      return select(inside, step(min(deep, 1).sub(bias), (texture(map, at) as N).level(0)), 1);
     };
     const ign = (p: N): N => fract(fract(dot(p, vec2(0.06711056, 0.00583715))).mul(52.9829189));
 
