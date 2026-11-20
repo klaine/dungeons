@@ -205,6 +205,8 @@ export interface TreeOptions {
    * clear of it too. For a house beside a wood, whose walls a great tree's boughs would otherwise reach through and droop into its court.
    */
   keepOut?: (p: Vector3) => boolean;
+  /** In winter, without its leaves: one more order of twigs where it is near enough for them to show, which is what a bare crown is. */
+  bare?: boolean;
 }
 
 const UP = new Vector3(0, 1, 0);
@@ -367,7 +369,7 @@ function trunkGrowths(q: Rng, burrs: number, knots: number): NonNullable<LimbSha
  * Returns how far the crown reaches from the trunk.
  */
 export function growTree(planting: Planting, wood: MeshBuilder, x: number, base: number, z: number, height: number, girth: number, o: TreeOptions, rng: Rng): number {
-  const levels = o.detail > 0.6 ? 4 : o.detail > 0.25 ? 3 : 2;
+  const levels = (o.detail > 0.6 ? 4 : o.detail > 0.25 ? 3 : 2) + (o.bare && o.detail > 0.25 ? 1 : 0);
   const oak = o.kind === 'oak';
   const heart = new Vector3(x, base + height * 0.62, z);
   const open = o.shaded ? (y: number) => 0.95 - 0.5 * Math.min(1, Math.max(0, (y - base - height * 0.25) / (height * 0.35))) : null;
@@ -487,9 +489,16 @@ export function growTree(planting: Planting, wood: MeshBuilder, x: number, base:
       if (k) kept++;
       return k;
     });
-    const each = Math.max(1, Math.round(cards / Math.max(1, kept)));
+    // (Fewer leaves than twigs, as on a tree bare in winter, are hung on that many twigs, one spray to each, and none on the rest. Every
+    // twig had at least one: a bare tree, with an order of twigs more, came out in full leaf.)
+    if (cards < 0.5) return;
+    const each = Math.max(1, Math.round(cards / Math.max(1, kept))), thin = Math.min(1, cards / Math.max(1, kept));
+    let due = 0;
     list.forEach((tip, i) => {
       if (!keep[i]) return;
+      due += thin;
+      if (due < 0.999) return;
+      due -= 1;
       // (Smaller where it would reach into what it may not, and none at all inside it.)
       let r = Math.min(1.6, 0.3 + tip.reach * 0.55);
       if (o.keepOut) { r = roomFor(tip.at, r, size, o.keepOut); if (!r) return; }

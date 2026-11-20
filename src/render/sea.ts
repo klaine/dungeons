@@ -22,7 +22,7 @@ import { SeaDesc } from './scene';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Fn, abs, attribute, cameraFar, cameraNear, cameraViewMatrix, cos, fwidth, positionLocal, positionView, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize,
+  Fn, abs, attribute, cameraFar, cameraNear, cameraViewMatrix, cos, floor, fract, fwidth, step, positionLocal, positionView, cameraPosition, clamp, dot, exp, float, length, max, min, mix, normalize,
   perspectiveDepthToViewZ, positionWorld, pow, reflect, screenUV, select, sin, smoothstep, texture, uniform, uv, vec2, vec3, vec4, viewportDepthTexture, viewportSharedTexture,
 } = TSL as N;
 const one = (x: N): N => float(1).sub(x);
@@ -40,6 +40,28 @@ const SWELL: [number, number, number, number][] = [[0.11, 0.05, 1.08, 0.42], [-0
  */
 const WIND_WAY = Math.atan2(0.34, 0.94);
 const WIND: [number, number, number][] = [[0, 9.1, 0.13], [0.55, 5.3, 0.075], [-0.6, 3.1, 0.042], [0.25, 1.9, 0.024]];
+const smoothJS = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
+/** How far a point is from a lane given as a line of points. */
+function laneOff(lane: [number, number][], x: number, z: number): number {
+  let best = Infinity;
+  for (let i = 0; i + 1 < lane.length; i++) {
+    const [ax, az] = lane[i], bx = lane[i + 1][0] - ax, bz = lane[i + 1][1] - az, t = Math.min(1, Math.max(0, ((x - ax) * bx + (z - az) * bz) / (bx * bx + bz * bz || 1)));
+    best = Math.min(best, Math.hypot(x - ax - bx * t, z - az - bz * t));
+  }
+  return best;
+}
+/** The same in the program of the picture, the lane's points being fixed. */
+const laneOffN = (lane: [number, number][], p: N): N => {
+  let best: N = float(1e6);
+  for (let i = 0; i + 1 < lane.length; i++) {
+    const a = vec2(...lane[i]), ab = vec2(lane[i + 1][0] - lane[i][0], lane[i + 1][1] - lane[i][1]), l2 = Math.max(1e-6, (lane[i + 1][0] - lane[i][0]) ** 2 + (lane[i + 1][1] - lane[i][1]) ** 2);
+    const t = clamp(dot(p.sub(a), ab).div(l2), 0, 1);
+    best = min(best, length(p.sub(a.add(ab.mul(t)))));
+  }
+  return best;
+};
+/** A number between 0 and 1 for a cell of the lattice. */
+const cellHash = (c: N): N => fract(sin(dot(c, vec2(127.1, 311.7))).mul(43758.5453));
 /** How far off a point is, for how much the water bends what is seen through it (less far off, where a point of the picture is large). */
 const far0 = (P: N): N => length(cameraPosition.sub(P));
 
@@ -165,7 +187,9 @@ export class Sea {
       const h: N = SWELL.reduce((sum: N, [kx, kz, w, a]) => sum.sub(cos(p.x.mul(kx).add(p.z.mul(kz)).sub(t.mul(w))).mul(a)), float(0));
       // (Far out the rings are too far apart to carry it, and it is too far off to be seen rising: there the surface lies flat.)
       const out: N = length(p.xz.sub(vec2(this.desc.x, this.desc.z)));
-      return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4)).mul(one(smoothstep(this.reach, this.reach + 250, out)))), p.z);
+      // (Ice lies still: no swell lifts it, and in the lane between it the water is nearly calm.)
+      const ice = this.desc.ice, still: N = ice ? one(smoothstep(ice.reach - 60, ice.reach + 180, length(p.xz.sub(vec2(...ice.from))))).mul(0.85) : float(0);
+      return vec3(p.x, p.y.add(h.mul(smoothstep(0, 3, d).mul(0.6).add(0.4)).mul(one(smoothstep(this.reach, this.reach + 250, out))).mul(one(still))), p.z);
     })();
     /**
      * The surface at a point: which way it faces, how rough it is past what can be drawn, and how high the waves on it stand.
@@ -215,6 +239,34 @@ export class Sea {
         fade: exp(far.div(-260)),
       };
     };
+    /**
+     * Ice, in a harbour town's winter (`SeaDesc['ice']`): out to some three hundred metres from the quay the sea is one sheet of ice
+     * under snow, its edge ragged, and beyond it a belt of floes thinning out to open water; through it all a lane broken for the
+     * ships, from the quay out between the moles' heads, where the ice lies in floes a few metres across along its edges and in
+     * small broken pieces in the lane itself. The floes are the plane cut into cells, bent by noise so that they are not squares, each
+     * ice or water as much of the sea there is ice, with dark water in the gaps between them. Gives how much of a point is ice, how
+     * much of that is a floe's raw edge, and whether it is broken pieces in the lane.
+     */
+    const ice = this.desc.ice;
+    const iceAt = (P: N): { cover: N; rim: N } => {
+      if (!ice) return { cover: float(0), rim: float(0) };
+      const lane: N = laneOffN(ice.lane, P.xz).add(rip(P.xz.mul(0.07)).x.mul(1.8)).toVar();
+      const fromQ: N = length(P.xz.sub(vec2(...ice.from))).add(rip(P.xz.mul(0.011)).x.mul(45)).toVar();
+      const fast: N = one(smoothstep(ice.reach - 25, ice.reach + 25, fromQ)), pack: N = one(smoothstep(ice.reach, ice.reach + 170, fromQ));
+      const edge: N = smoothstep(ice.half - 1.5, ice.half + 2.5, lane).toVar(), broken: N = one(smoothstep(ice.half + 3, ice.half + 18, lane)).toVar();
+      const bend: N = vec2(rip(P.xz.mul(0.05)).x, rip(P.zx.mul(0.05)).y).mul(1.7);
+      // Floes along the lane and out in the pack, larger the further from the lane; small pieces in the lane itself.
+      // (Bent less for the small pieces, which are broken angular: bent as much as the floes, they were swirls of white, like marble.)
+      const floeAt = (size: N, share: N, crack: N, bent = 1): { on: N; rim: N } => {
+        const q: N = P.xz.add(bend.mul(bent)).div(size), f: N = fract(q), gap: N = min(min(f.x, one(f.x)), min(f.y, one(f.y)));
+        const on: N = step(cellHash(floor(q)), share).mul(smoothstep(crack, crack.mul(1.6), gap));
+        return { on, rim: on.mul(one(smoothstep(crack.mul(1.6), crack.mul(4), gap))) };
+      };
+      const sheet: N = fast.mul(one(broken.mul(0.4))), share: N = max(sheet, pack.mul(0.78)).toVar();
+      const floes = floeAt(mix(6, 2.6, broken), share, mix(0.07, 0.006, sheet.mul(one(broken))));
+      const brash = floeAt(float(1.15), float(0.28).mul(fast.max(pack)), float(0.12), 0.18);
+      return { cover: mix(brash.on, floes.on, edge), rim: mix(brash.on, floes.rim, edge) };
+    };
     // What it mirrors of what stands about it, the quay, the boats, the houses along the shore, is found in the picture by the air's
     // pass (`mirrored` in `post.ts`): the sea says how nearly a mirror it is, as the waves let it be, and which way it faces. Less where
     // it shoals to nothing at the shore, and less where it is rough.
@@ -222,7 +274,7 @@ export class Sea {
       const d: N = max(attribute('aDepth', 'float'), 0);
       const sf = surface(positionWorld, d);
       const n: N = cameraViewMatrix.mul(vec4(sf.normal, 0)).xyz;
-      return mirrorAs(n, smoothstep(0.1, 1.2, d).mul(0.75).mul(one(smoothstep(0.01, 0.06, sf.rough).mul(0.5))));
+      return mirrorAs(n, smoothstep(0.1, 1.2, d).mul(0.75).mul(one(smoothstep(0.01, 0.06, sf.rough).mul(0.5))).mul(one(iceAt(positionWorld).cover)));
     })();
     this.material.fragmentNode = Fn(() => {
       const P: N = positionWorld, d: N = max(attribute('aDepth', 'float'), 0).toVar();
@@ -282,12 +334,35 @@ export class Sea {
         .mul(smoothstep(-0.35, 0.35, churn.add(sin(t.mul(1.3).add(P.x.mul(0.21)).add(P.z.mul(0.17))).mul(0.3)))).mul(smoothstep(0.3, 1, d)).toVar();
       const foam: N = clamp(max(max(lines.mul(breakup), edge), lap.mul(0.7)).add(caps.mul(breakup)), 0, 1).toVar();
       colour = mix(colour, foamColour, foam.mul(0.9));
+      // Ice over it all, where there is ice: snow-covered and lit as the snow on the land is, by the sky and the sun; grey-blue at a
+      // floe's broken edge, where it is wet and seen into.
+      if (ice) {
+        const frozen = iceAt(P);
+        const snowLit: N = u.uSkyColor.mul(0.55).add(u.uSunColor.mul(max(u.uSunDir.y, 0)).mul(0.42)).mul(vec3(0.9, 0.93, 0.98));
+        const top: N = snowLit.mul(rip(P.xz.mul(0.33)).x.mul(0.08).add(rip(P.zx.mul(0.09)).y.mul(0.06)).add(0.92));
+        const iceColour: N = mix(top, snowLit.mul(vec3(0.5, 0.58, 0.64)), frozen.rim.mul(0.8));
+        // (And the open water is a winter sea's, dark grey-green, not the clear blue of a summer's shallows over sand.)
+        colour = mix(colour.mul(vec3(0.42, 0.5, 0.52)), iceColour, frozen.cover);
+      }
       return vec4(min(colour, vec3(12)), 1);
     })();
   }
 
   update(time: number): void {
     this.uTime.value = time;
+  }
+
+  /** Whether the sea is frozen about the town (`SeaDesc['ice']`). */
+  get iced(): boolean {
+    return !!this.desc.ice;
+  }
+
+  /** How much of the sea at a point is ice, 0 to 1 (see `SeaDesc['ice']`): for what floats on it, which the ice holds still. */
+  iceAt(x: number, z: number): number {
+    const ice = this.desc.ice;
+    if (!ice) return 0;
+    const lane = laneOff(ice.lane, x, z), fast = 1 - smoothJS((Math.hypot(x - ice.from[0], z - ice.from[1]) - ice.reach) / 120);
+    return Math.max(0, Math.min(1, fast * smoothJS((lane - ice.half) / 6)));
   }
 
   /** How deep the water is at a point: for hearing the surf. */

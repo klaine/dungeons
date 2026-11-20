@@ -26,7 +26,7 @@ import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../render/vegetation';
 import { tileGeometry } from '../render/geom/tiles';
-import { Water } from '../render/water';
+import { Water, waterUniforms } from '../render/water';
 import { Sea, swellAt } from '../render/sea';
 import { Birds } from '../render/birds';
 import { Flocks } from '../render/creatures';
@@ -361,10 +361,21 @@ async function start(): Promise<void> {
     if (params.has('mist')) site.setting.mist = Math.min(1, Math.max(0, Number(params.get('mist'))));
     if (params.has('haze')) site.setting.haze = Math.min(1, Math.max(0, Number(params.get('haze'))));
     if (params.has('layered')) site.setting.cloudForm = params.get('layered') === '0' ? 'heaped' : 'layered';
+    // And the season (`?season=winter`, `spring`, `summer`, `autumn`), whatever the seed gave: what grows, and what lies on the
+    // ground, are made by it.
+    const season = params.get('season');
+    if (season === 'spring' || season === 'summer' || season === 'autumn' || season === 'winter') site.setting.season = season;
+    // Winter's sun is low even at noon (a third of the way up the sky at most) and its light colder: in a valley or a town it is
+    // brought down towards the horizon before anything is lit by it. (Not at night, when what is in the sky is the moon.)
+    if (site.setting.season === 'winter' && !site.mountain && site.setting.hour !== 'night' && site.setting.hour !== 'dusk') {
+      const [x, y, z] = site.sun, flat = Math.hypot(x, z) || 1, up = Math.min(y, 0.12 + 0.3 * y), out = Math.sqrt(Math.max(0, 1 - up * up));
+      site.sun = [(x / flat) * out, up, (z / flat) * out];
+    }
   }
   // Windows with a lamp or a fire behind them glow once the light is going; by day they are glass like the rest.
   // (The eyes open wider as the light goes, so the lamps need not be brighter by night than at dusk to tell more.)
-  const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : 0;
+  // (In winter the light goes early: by the evening, lamps are lit.)
+  const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : site?.setting.season === 'winter' && site.setting.hour === 'evening' ? 0.3 : 0;
   // (By day a window that would be lit is glass like any other: its points carry the lamp's colour, which the glass must not take.)
   materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
   // (And in a building that can be entered, a lit room shows through its glass as a glow, without hiding the room.)
@@ -383,6 +394,10 @@ async function start(): Promise<void> {
   } else desc = buildCourtyardHall(seed);
   await stage('Gathering the geometry', 0.7);
   if (desc.far) { farUniforms.uFarWood.value.set(...desc.far.wood); farUniforms.uFarGrass.value.set(...desc.far.grass); }
+  // (A valley's or a town's winter lies over the far land too, not only on its heights.)
+  farUniforms.uFarSnow.value = site?.setting.season === 'winter' && !site.mountain ? 1 : 0;
+  // (And its still water is frozen.)
+  waterUniforms.uIce.value = site?.setting.season === 'winter' && !site.mountain ? 1 : 0;
   if (desc.far?.sward) groundUniforms.uSward.value.set(...desc.far.sward);
   if (desc.far?.bare) groundUniforms.uBare.value.set(...desc.far.bare);
   // Which way a town's paving is laid, for the ground's material: one more texture it reads, so only where the graphics card allows
@@ -441,6 +456,8 @@ async function start(): Promise<void> {
     SUN_COLOR = new Color(desc.sun.colour[0], desc.sun.colour[1], desc.sun.colour[2]);
     SUN_INTENSITY = desc.sun.intensity;
     SKY = desc.sun.sky;
+    // (A winter sun is paler and colder, and gives less: its light comes slantwise through more air.)
+    if (site?.setting.season === 'winter' && !site.mountain) { SUN_COLOR.multiply(new Color(0.96, 0.97, 1.04)); SUN_INTENSITY *= 0.82; }
   }
   const map = document.getElementById('map') as HTMLCanvasElement;
   map.hidden = !site;
@@ -1346,9 +1363,10 @@ async function start(): Promise<void> {
     sea?.update(time);
     for (const f of floats) {
       // (Tilted with the water's slope, but less: a hull spans the smaller waves. The cove is taken as deep.)
-      const s = swellAt(f.x, f.z, time, 3);
-      floatTilt.setFromUnitVectors(floatUp, floatN.set(-s.dx * 0.6, 1, -s.dz * 0.6).normalize());
-      f.mesh.matrix.makeTranslation(f.x, f.y + s.h, f.z).multiply(floatTurn.makeRotationFromQuaternion(floatTilt)).multiply(floatBack.makeTranslation(-f.x, -f.y, -f.z));
+      // (Held fast where the sea is frozen; in the lane broken through the ice, nearly still: see `iceAt`.)
+      const s = swellAt(f.x, f.z, time, 3), held = sea ? 1 - sea.iceAt(f.x, f.z) * 0.98 : 1, calm = sea?.iced ? 0.15 : 1;
+      floatTilt.setFromUnitVectors(floatUp, floatN.set(-s.dx * 0.6 * held * calm, 1, -s.dz * 0.6 * held * calm).normalize());
+      f.mesh.matrix.makeTranslation(f.x, f.y + s.h * held * calm, f.z).multiply(floatTurn.makeRotationFromQuaternion(floatTilt)).multiply(floatBack.makeTranslation(-f.x, -f.y, -f.z));
       f.mesh.matrixWorldNeedsUpdate = true;
     }
     birds?.update(time);
