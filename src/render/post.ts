@@ -346,6 +346,8 @@ export class Atmosphere {
       uHaze: uniform(new Vector3(0.0004, 300, 0)),
       uMist: uniform(new Vector3(0, 4, 0)),
       uMistFar: uniform(new Vector4(0, 10, 24, 170)),
+      // How much of the sun's own light the mist scatters, besides the air's colour (`?mistsun=`).
+      uMistSun: uniform(0.4),
       // (The mist has a floor: it lies on the valley's ground and does not sink into what is dug beneath it.)
       uMistLow: uniform(-1e6),
       uAirCentre: uniform(new Vector3()),
@@ -739,9 +741,11 @@ export class Atmosphere {
           // Still air indoors holds more dust than the open courtyard.
           const dens: N = u.uDensity.mul(mix(u.uIndoorDensity, 1, open3)).mul(exp(max(p.y, 0).mul(-0.06))).toVar();
           const light = u.uSunColor.mul(sun).mul(phase).add(u.uSkyColor.mul(open3).mul(0.0796)).add(held);
-          // Mist is out of doors only, and is a little darker where the house's shadow lies through it.
+          // Mist is out of doors only, and is a little darker where the house's shadow lies through it. And it scatters the sun itself,
+          // most of it forward: looking towards a low sun through mist it glows, and lies in shafts between the shadows of houses and
+          // trees. (Lit by the air's colour alone, a misty morning street looked clear, and the shafts were faint.)
           const mist: N = select(u.uAirOn.greaterThan(0.5), mistAt(p).mul(open3), 0).toVar();
-          scatter.addAssign(light.mul(dens).add(air.mul(mist).mul(mix(0.55, 1, sun))).mul(trans).mul(dt));
+          scatter.addAssign(light.mul(dens).add(air.mul(mist).mul(mix(0.55, 1, sun))).add(u.uSunColor.mul(sun).mul(phase).mul(mist).mul(u.uMistSun)).mul(trans).mul(dt));
           trans.mulAssign(exp(dens.add(mist).mul(dt).negate()));
           outside.assign(open3);
           t.addAssign(dt);

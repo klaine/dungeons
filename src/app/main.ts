@@ -876,6 +876,7 @@ async function start(): Promise<void> {
   sea?.attach(atmosphere);
   // (After the water and the sea have been given their programs, which they are given only now.)
   if (temporal) readyForSmoothing(scene);
+  atmosphere.uniforms.uMistSun.value = num('mistsun', 0.4);
   /**
    * The weather: how much of the sky is cloud and whether it heaps up or lies in banks, how much
    * mist lies in the low ground, and how thick the air is with distance. All of it is read by the
