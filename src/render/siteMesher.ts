@@ -26,6 +26,7 @@ import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene
 import { buildIsland } from './island';
 import { buildMountain } from './mountain';
 import { buildTown } from './town';
+import { layWall } from './walls';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -92,6 +93,46 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   // And rooks over a valley's woods, if it has any.
   let rookSpots: { x: number; y: number; z: number }[] | undefined;
   let fireflySpots: number[] | undefined;
+  // A valley's fields (`site.fields`): which one a point is in, -1 if none; or whether it is within `m` of one. (Looked up by their
+  // boxes first: this is asked of every point of the ground's sheet and of every tuft.)
+  const fieldList = (site.fields ?? []).map((f) => {
+    const xs = f.corners.map((c) => c[0]), zs = f.corners.map((c) => c[1]);
+    return { ...f, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+  });
+  const inPolygon = (c: [number, number][], x: number, z: number): boolean => {
+    let inside = false;
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) if ((c[i][1] > z) !== (c[j][1] > z) && x < ((c[j][0] - c[i][0]) * (z - c[i][1])) / (c[j][1] - c[i][1] || 1e-9) + c[i][0]) inside = !inside;
+    return inside;
+  };
+  const edgeOff = (c: [number, number][], x: number, z: number): number => {
+    let best = Infinity;
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+      const [ax, az] = c[j], [bx, bz] = c[i], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1, t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+      best = Math.min(best, Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t));
+    }
+    return best;
+  };
+  const fieldAt = (x: number, z: number, m = 0): number => {
+    for (let k = 0; k < fieldList.length; k++) {
+      const f = fieldList[k];
+      if (x < f.x0 - m || x > f.x1 + m || z < f.z0 - m || z > f.z1 + m) continue;
+      if (inPolygon(f.corners, x, z) || (m > 0 && edgeOff(f.corners, x, z) < m)) return k;
+    }
+    return -1;
+  };
+
+  /** The colour of a field's crop in the season, as a tint on the turf (as the town's fields have it). */
+  const cropTint = (crop: NonNullable<Site['fields']>[number]['crop']): Colour => {
+    const season = site.setting.season ?? 'spring', ripe = season === 'summer' ? 0.6 : season === 'autumn' ? 1 : 0;
+    switch (crop) {
+      case 'wheat': return ripe ? [1.25 + 0.25 * ripe, 1.05 + 0.1 * ripe, 0.45] : [0.85, 1.12, 0.6];
+      case 'barley': return ripe ? [1.35 + 0.2 * ripe, 1.2 + 0.05 * ripe, 0.6] : [0.92, 1.15, 0.66];
+      case 'oats': return ripe ? [1.15 + 0.2 * ripe, 1.1, 0.62] : [0.8, 1.05, 0.62];
+      case 'roots': return [0.6, 0.85, 0.45];
+      case 'fallow': return [0.9, 0.8, 0.6];
+      default: return [1, 1, 1];
+    }
+  };
 
   // ------------------------------------------------------------------ helpers
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
@@ -899,6 +940,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // down; not tilted across the track, which keeps the level the land has under its middle.)
       if (vale?.terrain) {
         const land = valleyLand(vale, p.floor, p, x, z), mid = graded ? graded(z) : valleyLand(vale, p.floor, p, pathAt(z), z), floor = land + (mid - land) * (1 - Math.min(1, fromPath / (grade ? grade.fade(z) : 6)));
+        // (About a castle, only its own ground is held level, and a few paces round it: held across the whole head of the valley,
+        // as about a house, the level met the land rising at the valley's sides in a bank, drawn as rock all round the head.)
+        const c = site.castle;
+        if (c) {
+          const off = Math.hypot(Math.max(c.x0 - x, 0, x - c.x1), Math.max(c.z0 - z, 0, z - c.z1));
+          return p.floor - 0.03 + (floor - p.floor) * smooth((off - 6) / 18) * level;
+        }
         return p.floor - 0.03 + (floor - p.floor) * smooth((z - p.z1 - 2) / 30) * level;
       }
       return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
@@ -1268,7 +1316,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           on[side][i] = Math.max(on[side][i], 1 - smooth((d - 2) / 18));
         }
       };
-      for (let i = 0; i < n; i++) on.w[i] = on.e[i] = 1 - smooth((zA + i - frontZ - 10) / 22);
+      // (Not about a castle, which stands free on the open ground at the valley's head: there the head's sides are the land's too.)
+      if (!site.castle) for (let i = 0; i < n; i++) on.w[i] = on.e[i] = 1 - smooth((zA + i - frontZ - 10) / 22);
       for (const q of grottoes) { const reach = q.hall ? q.hall.width / 2 + 6 : q.r * 1.3 + 5; near(q.side, q.z - reach, q.z + reach); }
       for (const t of terraces) near(t.side, Math.min(t.z0, t.z1) - t.run - 3, Math.max(t.z0, t.z1) + t.run + 3);
       for (const st of site.streams ?? []) if (st.from === 'fall' && st.course.length) {
@@ -1860,6 +1909,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (On a footpath, how far from its middle plus two hundred: the material for ground tells the one from the other.)
       const foot = offFoot(x, z);
       lay.track = Math.abs(off) < 6 ? 100 + off : foot < 3 ? 200 + foot : 0;
+      // In a field, its crop: ploughed earth where it lies fallow, and roots in rows with the earth between.
+      const fi = fieldList.length ? fieldAt(x, z) : -1;
+      if (fi >= 0) {
+        const f = fieldList[fi], tc = cropTint(f.crop), c = turfColour(x, z, s1);
+        if (f.crop === 'fallow') lay.bare = Math.max(lay.bare, 0.7 + 0.2 * fbm2(x * 0.3, z * 0.3, 2));
+        if (f.crop === 'roots') { const row = Math.abs((((x * 0.6 + z * 0.08) % 1.6) + 1.6) % 1.6 - 0.8); lay.bare = Math.max(lay.bare, smooth((row - 0.3) / 0.2) * 0.85); }
+        return [c[0] * tc[0], c[1] * tc[1], c[2] * tc[2]];
+      }
       return turfColour(x, z, s1);
     };
     const cliff = site.top - p.floor + 0.5;
@@ -2089,6 +2146,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // The time of year colours everything that grows: fresh greens and blossom in spring, deeper
     // greens and drier grass in summer, and in autumn gold, orange and rust with the grass gone to straw.
     const season = site.setting.season ?? 'spring';
+    // Nothing wild grows in the fields: their crops are planted by themselves, below. In a pasture, its grass only.
+    let cropping = false;
+    if (fieldList.length) planting.keepOut = (set, x, z) => {
+      if (cropping) return false;
+      const k = fieldAt(x, z);
+      return k >= 0 && (fieldList[k].crop !== 'pasture' || set !== planting.grass);
+    };
     // (And in winter the broadleaf trees are bare: what they keep is the brown of an oak's dead leaves, and far off the grey-brown haze
     // of their twigs; the grass is straw, mostly under the snow, and nothing flowers.)
     const winter = season === 'winter';
@@ -2527,6 +2591,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.98, 0.6, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number, pick?: { oak: boolean; roll: number; old?: boolean }) => {
+      // (Not in a field, nor so near one that its crown hangs over the wall.)
+      if (fieldList.length && fieldAt(x, z, 3) >= 0) return;
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
@@ -2586,16 +2652,22 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (A wood is close in its heart and thins out tree by tree towards its edge. Laid one to a cell wherever a patch said wood, with
     // the cells ten metres apart beyond the valley, the hills round about were planted as an orchard: young firs evenly spaced on a
     // lawn. Now a tree stands less often the nearer the patch's edge, and in its heart, now and then a second in the cell.)
+    // (In a castle's valley the woods are where the valley has them: a forest at its foot where the player comes in, thinning to a
+    // few trees about the fields and the village, and the castle's ground open. Leaned on the patches, so their edges stay ragged.)
+    const zones = site.zones;
+    const woodLean = (z: number): number => !zones ? 0
+      : z > zones.forest[0] ? 0.2 * smooth((z - zones.forest[0]) / 25) - 0.3 * (1 - smooth((z - zones.forest[0] + 6) / 18))
+      : z > zones.fields[0] ? -0.3 : z > zones.village[0] ? -0.32 : -0.45;
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x0 = gx + plant.range(0.1, 0.9) * step, z0 = gz + plant.range(0.1, 0.9) * step;
-        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3);
+        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3) + woodLean(z0);
         const pair = step > 8 && thick > 0.6 && own01(x0, z0, 51) < 0.5 ? 2 : 1;
         for (let k = 0; k < pair; k++) {
           const x = k ? gx + own01(x0, z0, 52) * step : x0, z = k ? gz + own01(x0, z0, 53) * step : z0;
           if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
           if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
-          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) : thick;
+          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) + woodLean(z) : thick;
           if (here < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
           if (step > 8 && own01(x, z, 54) < 0.85 * (1 - smooth((here - 0.46) / 0.12))) continue;
           // Full detail anywhere the player can stand, and for a stone's throw beyond, so that the wood the valley lies in goes on as
@@ -2796,6 +2868,40 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, straw([(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone], tone));
     }
     planting.muted = false;
+    // The fields: their crops, close in rows across them; and dry-stone walls about them, with a gateway on the side towards the track.
+    if (fieldList.length) {
+      const cq = rng.fork('crops');
+      cropping = true;
+      for (const [k, f] of fieldList.entries()) {
+        for (let gz = f.z0; gz < f.z1; gz += 0.62) for (let gx = f.x0; gx < f.x1; gx += 0.62) {
+          const x = gx + cq.range(0, 0.62), z = gz + cq.range(0, 0.62), yaw = cq.range(0, Math.PI * 2);
+          if (!inPolygon(f.corners, x, z) || edgeOff(f.corners, x, z) < 0.9) continue;
+          const y = ground(x, z);
+          if (f.crop === 'wheat' || f.crop === 'barley' || f.crop === 'oats') {
+            // (In winter the fields are stubble under the snow: a crop's tufts stand short and straw-coloured.)
+            const tc = cropTint(f.crop), tall = (f.crop === 'oats' ? 0.75 : 0.85) * (season === 'spring' ? 0.45 : winter ? 0.22 : 1) * cq.range(0.85, 1.1);
+            planting.tuft(planting.grass, x, y - 0.04, z, cq.range(0.5, 0.7), tall, yaw, [0.3 * tc[0], 0.3 * tc[1], 0.12 * tc[2]]);
+          } else if (f.crop === 'roots') {
+            const row = Math.abs((((x * 0.6 + z * 0.08) % 1.6) + 1.6) % 1.6 - 0.8);
+            if (row < 0.3 && !winter) planting.tuft(planting.herbs, x, y - 0.04, z, cq.range(0.5, 0.7), cq.range(0.3, 0.45), yaw, [0.1, 0.22, 0.06]);
+          } else if (f.crop === 'pasture' && cq.chance(0.5)) {
+            // (Grazed short, and in winter straw.)
+            planting.tuft(planting.grass, x, y - 0.04, z, cq.range(0.45, 0.7), cq.range(0.12, 0.22), yaw, winter ? [0.46, 0.36, 0.15] : [0.17 + 0.1 * parched, 0.3, 0.06]);
+          }
+        }
+        // Its wall: round the field in short lengths, with a gateway halfway along the side by the track.
+        const line: [number, number][] = [], gaps: [number, number][] = [], c = f.corners;
+        for (let e = 0; e < c.length; e++) {
+          const [ax, az] = c[e], [bx, bz] = c[(e + 1) % c.length], n = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.6));
+          const start = line.length;
+          for (let i = 0; i < n; i++) line.push([ax + ((bx - ax) * i) / n, az + ((bz - az) * i) / n]);
+          if (e === c.length - 1) gaps.push([start + Math.floor(n / 2) - 1, start + Math.floor(n / 2) + 1]);
+        }
+        line.push(c[0]);
+        layWall((m) => wild.mesh(m), { line, gaps, fallen: [], height: cq.range(0.95, 1.2) }, ground, [0.62 * (0.6 + 0.4 * stoneTint[0]), 0.6 * (0.6 + 0.4 * stoneTint[1]), 0.56 * (0.6 + 0.4 * stoneTint[2])], cq.fork(`wall${k}`));
+      }
+      cropping = false;
+    }
     // Down the middle of the track, between the ruts, grass in clumps: thick for a few strides, then none.
     {
       const strip = rng.fork('strip');
@@ -2979,7 +3085,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // ground not too steep. (A valley of pasture with nothing on it to graze it was a lawn kept by nobody.)
     {
       const q = rng.fork('flocks'), want = q.chance(0.8) ? q.int(1, 2) : 0, out: { x: number; z: number; r: number; count: number }[] = [];
-      for (let tries = 0; tries < 400 && out.length < want; tries++) {
+      // (Where the valley has a pasture, the sheep are in it, within its walls.)
+      for (const f of fieldList) if (f.crop === 'pasture') {
+        const cx = f.corners.reduce((a, c) => a + c[0], 0) / f.corners.length, cz = f.corners.reduce((a, c) => a + c[1], 0) / f.corners.length;
+        out.push({ x: cx, z: cz, r: Math.max(4, Math.min(12, edgeOff(f.corners, cx, cz) - 2)), count: q.int(5, 9) });
+      }
+      for (let tries = 0; tries < 400 && out.length < want && !fieldList.length; tries++) {
         const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1);
         if (!inGrounds(x, z, 10) || inHouse(x, z, 18) || offTrack(x, z) < 8 || offFoot(x, z) < 4 || shadeAt(x, z) > 0.12 || clearOfFeatures(x, z) < 8) continue;
         if (waterOver(x, z, ground(x, z)) > -1 || slopeOf(ground, x, z, 3) > 0.25 || out.some((f) => Math.hypot(f.x - x, f.z - z) < 50)) continue;
@@ -3351,6 +3462,58 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       finds.push({ at: V(cx - q.inw * 0.8, fy + 0.4, q.z + 0.5), what: 'a lamp of green glass, cold for years, on the floor of the grotto' });
     });
     for (const t of towers) buildTower(t, t.base);
+    // The castle's curtain wall: thick, of the house's stone, from below the ground to a walk at its full height, with a parapet and
+    // merlons on its outer edge; built in lengths of some seven metres, each as high over its own ground as the wall stands, so that
+    // on a slope it steps; broken by its towers, which stand astride it, and by the gate between the front two, over which it is
+    // carried on a lintel of dressed stone with the portcullis hanging under it, half raised.
+    if (site.castle) {
+      const c = site.castle, T2 = c.thick / 2, TWT = 0.9, castleTowers = towers.filter((t) => t.castle);
+      const wasGroup = wild.group;
+      wild.group = 'castle';
+      const gate = { x0: c.gate.x - c.gate.w / 2 + TWT, x1: c.gate.x + c.gate.w / 2 - TWT };
+      const blocked = (x: number, z: number) => castleTowers.some((t) => Math.abs(x - t.x) < t.half + TWT - 0.05 && Math.abs(z - t.z) < t.half + TWT - 0.05);
+      const sides: { along: 'x' | 'z'; at: number; from: number; to: number; out: 1 | -1 }[] = [
+        { along: 'x', at: c.z0, from: c.x0 - T2, to: c.x1 + T2, out: -1 }, { along: 'x', at: c.z1, from: c.x0 - T2, to: c.x1 + T2, out: 1 },
+        { along: 'z', at: c.x0, from: c.z0 + T2, to: c.z1 - T2, out: -1 }, { along: 'z', at: c.x1, from: c.z0 + T2, to: c.z1 - T2, out: 1 },
+      ];
+      const box = (along: 'x' | 'z', at: number, u0: number, u1: number, w0: number, w1: number, y0: number, y1: number, style: MasonryStyle, top: MasonryStyle, name: string) =>
+        along === 'x' ? wild.box('stone', V(u0, y0, at + w0), V(u1, y1, at + w1), style, top, name) : wild.box('stone', V(at + w0, y0, u0), V(at + w1, y1, u1), style, top, name);
+      for (const sd of sides) {
+        // The runs of wall between what breaks it, each cut in lengths.
+        const runs: [number, number][] = [];
+        let start: number | null = null;
+        for (let u = sd.from; u <= sd.to + 1e-6; u += 0.25) {
+          const x = sd.along === 'x' ? u : sd.at, z = sd.along === 'x' ? sd.at : u, open = blocked(x, z) || (sd.along === 'x' && sd.at === c.z1 && u > gate.x0 && u < gate.x1);
+          if (!open && start === null) start = u;
+          if ((open || u + 0.25 > sd.to + 1e-6) && start !== null) { if (u - start > 0.4) runs.push([start, open ? u : sd.to]); start = null; }
+        }
+        for (const [a, b] of runs) {
+          const n = Math.max(1, Math.round((b - a) / 7));
+          for (let i = 0; i < n; i++) {
+            const u0 = a + ((b - a) * i) / n, u1 = a + ((b - a) * (i + 1)) / n, um = (u0 + u1) / 2;
+            const at = (u: number) => (sd.along === 'x' ? swells(u, sd.at) : swells(sd.at, u));
+            const low = Math.min(at(u0), at(um), at(u1)), top = Math.round(((at(u0) + at(um) + at(u1)) / 3 + c.height) * 4) / 4;
+            box(sd.along, sd.at, u0, u1, -T2, T2, low - 0.8, top, ashlar, flag, 'curtain');
+            // The parapet on the outer edge, breast high, and merlons standing on it.
+            const p0 = sd.out > 0 ? T2 - 0.55 : -T2, p1 = sd.out > 0 ? T2 : -T2 + 0.55;
+            box(sd.along, sd.at, u0, u1, p0, p1, top, top + 1.05, ashlar, coping, 'parapet');
+            const teeth = Math.max(1, Math.round((u1 - u0) / 1.7));
+            for (let m = 0; m < teeth; m++) box(sd.along, sd.at, u0 + ((u1 - u0) * (m + 0.18)) / teeth, u0 + ((u1 - u0) * (m + 0.72)) / teeth, p0, p1, top + 1.05, top + 1.65, ashlar, coping, 'merlon');
+          }
+        }
+      }
+      // Over the gate: the wall carried across on a lintel, and the portcullis under it, half raised, its bars and rails of iron.
+      {
+        const y0 = Math.max(swells(gate.x0, c.z1), swells(gate.x1, c.z1)), top = Math.round((y0 + c.height) * 4) / 4;
+        box('x', c.z1, gate.x0, gate.x1, -T2, T2, y0 + 4.3, top, ashlar, flag, 'gate');
+        box('x', c.z1, gate.x0 - 0.05, gate.x1 + 0.05, -T2 - 0.05, T2 + 0.05, y0 + 4.05, y0 + 4.3, dressed, dressed, 'lintel');
+        box('x', c.z1, gate.x0, gate.x1, T2 - 0.55, T2, top, top + 1.05, ashlar, coping, 'parapet');
+        const iron: Colour = [0.13, 0.12, 0.11], made = solids((material) => wild.mesh(material));
+        for (let xb = gate.x0 + 0.25; xb < gate.x1 - 0.1; xb += 0.42) made.block('metal', V(xb - 0.045, y0 + 3.0, c.z1 - 0.1), V(xb + 0.045, y0 + 4.05, c.z1 + 0.1), iron);
+        for (const yb of [3.25, 3.75]) made.block('metal', V(gate.x0 + 0.05, y0 + yb - 0.045, c.z1 - 0.08), V(gate.x1 - 0.05, y0 + yb + 0.045, c.z1 + 0.08), iron);
+      }
+      wild.group = wasGroup;
+    }
     // Buildings by the track. (The first timber house of a row is its inn.)
     houses.forEach((b, i) => {
       wild.group = 'house';

@@ -24,7 +24,7 @@ Or as a battle map: the built world itself from straight above, roofs cut away, 
 
 <img src="docs/images/battle-map.jpg" alt="A battle map of the same place rendered from the 3D world: stone floors, furniture, trees and their shadows" width="640">
 
-You arrive outdoors at the far end of a valley, and walk up through woods to the meadow below the house. The whole valley can be walked, out to a rim of rock; hills and mountains lie beyond:
+You arrive outdoors at the foot of a valley, in a forest, and walk up past fields and a pasture with sheep, through a small village, to the castle at the valley's head: a curtain wall with a gate between two towers, a tower or two more at its back corners, and within it the house, its hall and keep, with a chapel among its rooms and a dungeon under them. The whole valley can be walked; its sides are the land it lies in, and hills and mountains lie beyond:
 
 ![Arriving: a fenced track through the woods, a tree in blossom, and the house wall at the head of the valley](docs/images/arrival.jpg)
 

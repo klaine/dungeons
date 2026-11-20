@@ -672,6 +672,8 @@ export interface Tower {
   half: number;
   storeys: number;
   door: 'e' | 'w';
+  /** One of the castle's towers, standing astride its curtain wall. */
+  castle?: boolean;
 }
 
 export interface Stream {
@@ -1055,6 +1057,20 @@ export interface Site {
    * against one another, of the kinds in `BrickWork`, and where there is room a church of brick.
    */
   settlement?: 'village' | 'hamlet' | 'manor' | 'town';
+  /**
+   * A valley's stretches from its head down, each as the range of `z` it spans: the castle about the house at the head, the
+   * village below it, then fields and a pasture, and the forest at the foot, where the player arrives.
+   */
+  zones?: { castle: [number, number]; village: [number, number]; fields: [number, number]; forest: [number, number] };
+  /**
+   * The castle at a valley's head, about the house, which is its hall and keep: a curtain wall of stone round a bailey, its sides
+   * (`x0` to `x1`, `z0` to `z1`, the front wall at `z1`), `height` from the ground to the wall-walk and `thick` through; the gate
+   * in the front wall at `gate.x`, `gate.w` broad, where the track goes out, between two towers; and its towers, in `towers`
+   * (marked `castle`): the two at the gate and at the back corners none, one or both. Each tower can be gone into and climbed.
+   */
+  castle?: { x0: number; x1: number; z0: number; z1: number; height: number; thick: number; gate: { x: number; w: number } };
+  /** The valley's fields, in their stretch on either side of the track: each its corners and its crop; a pasture among them for the sheep. */
+  fields?: Town['fields'];
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
    * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,
