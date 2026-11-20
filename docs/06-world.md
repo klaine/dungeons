@@ -862,6 +862,22 @@ leaves both the game and the walk working:
    `play.cjs` runs) walks every doorway of `ink-7` and `moss-3` both ways and wins.
    *Not yet:* the leaves' light is one light for every door, not the bake's at each (the game's `applyBake`); the game's hour, its
    relic and its secret are as the site has them, unchecked in the world; a place's game starts again when it is built again.
+
+   *Castles' valleys, merged in* (20 November 2026, from the default branch: every valley a castle over its village, with forest,
+   fields and pasture below; leaves thinned with distance; the game's resolution following its frame rate; the guided tour). A
+   valley head built in the world is a castle's valley too, laid out the same way on the world's land, its game with it (Strath
+   Norith: six doors, the gold key, the lever). The walk page paints the castle's coursed stone for the places, and the bake knows how
+   much light it gives back; the places' leaves thin as the game's do, `cullCards` being told where the walker is. What changes in
+   the world: the castle stands on the land's own high ground near where the valley head was found (`findSeat`), and the valley is
+   reckoned down from it, so the house moves. Strath Norith's stands 265 metres from where the world found it and 55 metres higher;
+   its land fills a square 1,574 metres across where it was 495, with 10.2 million triangles where there were 4.8, built in 66 to 98
+   seconds. The join still holds: no sky through it, meshed to five centimetres or to forty. But the town's way from Halhaven (and
+   Falyhaven's) is laid to the world's spot for the valley head, which is now out on the valley's side, 180 metres from its middle
+   and 190 below the castle, and the body walked along it does not come to its end (`tools/places.ts w0`, which now says where the body stopped: held among the trees of the valley's forest at its foot, 355 metres
+   short, where the way runs straight through the place's own wood and no road is cut for it). The ways must lead to the valley's
+   foot, where its own road begins: the first of this step's ways. Frames on the walk page, drawn back to back with Halhaven standing
+   too: 44 milliseconds by the castle's gate, 56 looking up the whole valley from the old spot, where each place's door had cost 31
+   to 38. The resolution following the frame rate is the game's page's alone; the walk page's is still fixed.
 5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
    (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
 6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.

@@ -48,14 +48,19 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
   let triangles = 0;
   const e = Math.min(1, cell * 0.5);
   const P = [0, 0, 0, 0].map(() => ({ x: 0, y: 0, z: 0, nx: 0, ny: 1, nz: 0 }));
-  const corner = (k: number, x: number, z: number) => {
-    const q = P[k];
-    if (o.warp) [x, z] = o.warp(x, z);
-    q.x = x; q.z = z;
-    q.y = height(x, z);
-    const dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e);
-    const l = Math.hypot(dx, 2 * e, dz);
-    q.nx = -dx / l; q.ny = (2 * e) / l; q.nz = -dz / l;
+  // (Each point of the lattice is reckoned once, and kept for the four cells about it: reckoned for each cell, the height function,
+  // which may be slow, was asked twenty times a cell where five do.)
+  const row = nx + 1, kept = new Float64Array((nx + 1) * (nz + 1) * 6), done = new Uint8Array((nx + 1) * (nz + 1));
+  const corner = (k: number, i: number, j: number) => {
+    const q = P[k], o6 = (j * row + i) * 6;
+    if (!done[j * row + i]) {
+      let x = area.x0 + i * cell, z = area.z0 + j * cell;
+      if (o.warp) [x, z] = o.warp(x, z);
+      const y = height(x, z), dx = height(x + e, z) - height(x - e, z), dz = height(x, z + e) - height(x, z - e), l = Math.hypot(dx, 2 * e, dz);
+      kept[o6] = x; kept[o6 + 1] = y; kept[o6 + 2] = z; kept[o6 + 3] = -dx / l; kept[o6 + 4] = (2 * e) / l; kept[o6 + 5] = -dz / l;
+      done[j * row + i] = 1;
+    }
+    q.x = kept[o6]; q.y = kept[o6 + 1]; q.z = kept[o6 + 2]; q.nx = kept[o6 + 3]; q.ny = kept[o6 + 4]; q.nz = kept[o6 + 5];
   };
   // (Each corner's steepness over `byCorners` metres, where asked: kept, since every corner is a corner of six triangles.)
   const steepKept = new Map<string, boolean>();
@@ -71,7 +76,7 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x0 = area.x0 + i * cell, z0 = area.z0 + j * cell;
     if (o.skip({ x0, x1: x0 + cell, z0, z1: z0 + cell })) continue;
-    corner(0, x0, z0); corner(1, x0 + cell, z0); corner(2, x0 + cell, z0 + cell); corner(3, x0, z0 + cell);
+    corner(0, i, j); corner(1, i + 1, j); corner(2, i + 1, j + 1); corner(3, i, j + 1);
     // Split along the diagonal that makes the flatter pair, which keeps ridges from saw-toothing.
     const split = Math.abs(P[0].y - P[2].y) < Math.abs(P[1].y - P[3].y) ? [[0, 3, 2], [0, 2, 1]] : [[0, 3, 1], [1, 3, 2]];
     for (const [a, b, c] of split) {
@@ -206,11 +211,16 @@ export function layMountains(
   inner?: HeightFn,
   /** The hills' own heights, where the land is not made up here: as for a valley that was found, whose hills are the land it was found in. */
   heights?: HeightFn,
+  /**
+   * Where its first ring lies, if not at `FAR_RING`: beyond everything laid nearer, which ends there. (It lay over what was laid
+   * nearer wherever that reached past it, the two at nearly the same height, and whichever stood the higher showed, cell by cell.)
+   */
+  ring = FAR_RING,
 ): void {
   // (A notch finer than first made: more points round each ring, and the rings closer.)
   const around = 1040;
   const radii: number[] = [];
-  for (let r = FAR_RING; r <= 3050; r += 3.4 + (r - FAR_RING) * 0.013) radii.push(r);
+  for (let r = ring; r <= 3050 + ring - FAR_RING; r += 3.4 + (r - ring) * 0.013) radii.push(r);
   const rings = radii.length;
   const height = heights ?? farHeights(cx, cz, base, seed);
   const H = new Float32Array(rings * around), X = new Float32Array(rings * around), Z = new Float32Array(rings * around);
@@ -218,7 +228,7 @@ export function layMountains(
     const a = (k / around) * Math.PI * 2, o = ri * around + k;
     X[o] = cx + Math.cos(a) * radii[ri]; Z[o] = cz + Math.sin(a) * radii[ri];
     H[o] = height(X[o], Z[o]);
-    if (inner && radii[ri] < FAR_RING + 70) { const t = Math.min(1, Math.max(0, (radii[ri] - FAR_RING) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
+    if (inner && radii[ri] < ring + 70) { const t = Math.min(1, Math.max(0, (radii[ri] - ring) / 70)), w = t * t * (3 - 2 * t); H[o] = inner(X[o], Z[o]) * (1 - w) + H[o] * w; }
   }
   const at = (ri: number, k: number) => Math.min(rings - 1, Math.max(0, ri)) * around + ((k + around) % around);
   // Rock does not stand in needles. Anything steeper than rock holds for long is worn down to

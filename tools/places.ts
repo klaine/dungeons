@@ -185,6 +185,8 @@ if (way) {
   }
   const end = pts[pts.length - 1], left = Math.hypot(end[0] - player.position.x, end[1] - player.position.z);
   console.log(`  the body along the way: ${left < 12 ? 'came to' : 'did NOT come to'} the house (${left.toFixed(0)} m short) in ${(frames / 60).toFixed(0)} s, into the place's square ${crossed < 0 ? 'never' : `after ${(crossed / 60).toFixed(0)} s`}; standing on the ground, at worst ${(sunk * 100).toFixed(0)} cm in it and ${(over * 100).toFixed(0)} cm over it`);
+  // (Where it stopped, to go and look: `__walk.goto(x, z)` on the walk page.)
+  if (left >= 12) console.log(`  (it stopped at ${player.position.x.toFixed(1)}, ${player.position.z.toFixed(1)}, ${player.position.y.toFixed(1)} high, ${inside(player.position.x, player.position.z) ? 'inside' : 'outside'} the place, heading for the way's point ${k} of ${pts.length}, ${pts[k][0].toFixed(1)}, ${pts[k][1].toFixed(1)})`);
   walked = left < 12;
 }
 // Whether the sky can be seen through the join: the squares across the place's edge meshed as the walk page meshes them, at the

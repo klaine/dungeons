@@ -471,6 +471,25 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
     }
     // Buildings by the track: shut, so drawn solid, with a paler line for the ridge of a steep roof.
     for (const b of site.buildings ?? []) {
+      // (One turned to face a road wherever it bends, as a village's houses are, is drawn turned: its ground, and its walls' line inside it.)
+      if (b.turn !== undefined && b.style !== 'brick' && b.style !== 'canal') {
+        const th = b.turn, c = Math.cos(th), sn = Math.sin(th);
+        const quad = (r: { u0: number; u1: number; v0: number; v1: number }, e: number) => {
+          ctx.beginPath();
+          ([[r.u0 + e, r.v0 + e], [r.u1 - e, r.v0 + e], [r.u1 - e, r.v1 - e], [r.u0 + e, r.v1 - e]] as const).forEach(([u, v], k) => {
+            const x = b.x + u * sn + (b.d / 2 - v) * c, z = b.z - u * c + (b.d / 2 - v) * sn;
+            if (k) ctx.lineTo(X(x), Z(z)); else ctx.moveTo(X(x), Z(z));
+          });
+          ctx.closePath();
+          ctx.fill();
+        };
+        ctx.fillStyle = INK;
+        for (const r of footprintOf(b)) quad(r, 0);
+        ctx.fillStyle = DARK;
+        for (const r of footprintOf(b)) quad(r, 0.35);
+        ctx.fillStyle = INK;
+        continue;
+      }
       if (b.plan) {
         // A building that can be gone into is drawn with its rooms, as they are at the level of the ground before its door.
         const turn = b.faces === 'w' ? 1 : -1;

@@ -46,7 +46,7 @@ import { placeSeed, siteFrame } from '../core/worldLand';
 /** What each texture recipe is called on the loading screen. */
 const TEXTURE_NAMES: Record<string, string> = {
   stone: 'dressed stone', wood: 'timber', moss: 'moss and leaf', rock: 'natural rock', ground: 'turf', scree: 'scree', bark: 'oak bark',
-  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', sand: 'sand',
+  barkAsh: 'ash bark', barkPine: 'pine bark', barkFir: 'fir bark', soil: 'soil', litter: 'leaf litter', plaster: 'plaster', thatch: 'thatch', tile: 'roof tiles', redBrick: 'red brick', buffBrick: 'buff brick', brick: 'brown brick', castle: 'castle stone', sand: 'sand',
 };
 import { Torch, TorchLights, gatherTorches } from '../render/torch';
 import { SunShadow } from '../render/sunShadow';
@@ -173,7 +173,7 @@ function toast(message: string): void {
 }
 
 // Mean diffuse reflectance of each texture recipe, used by the bake together with vertex tint.
-const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, castle: 0.58, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
 // Sun and sky, in the renderer's light units. The same numbers drive the real-time sun, the bake and the fog.
 let SUN_COLOR = new Color(1.0, 0.84, 0.64);
@@ -246,6 +246,8 @@ async function start(): Promise<void> {
   const redBrick = await paint('redBrick', texSize, 73), buffBrick = await paint('buffBrick', texSize, 79);
   // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
   const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
+  // (The coursed stone of a castle's walls and towers, in a valley.)
+  const castleStone = place === 'valley' ? await paint('castle', texSize, 89) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -280,6 +282,7 @@ async function start(): Promise<void> {
     // (Weathered as old roofs are: see `roof` there.)
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
     ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }) } : {}),
+    ...(castleStone ? { castle: makeSiteMaterial(castleStone, moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered }) } : {}),
     // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
     redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
     buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
@@ -945,7 +948,7 @@ async function start(): Promise<void> {
   const exportSource = () => ({
     statics,
     doors: game ? game.doors.map((d) => ({ node: d.group, way: d.desc.way, material: d.desc.material })) : [],
-    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
+    textures: { stone, floor: stone, slate: stone, rock, scree, bark, barkAsh, barkPine, barkFir, wood, turf: ground, leaf: moss, plaster, tile, redBrick, buffBrick, ...(brick ? { brick } : {}), ...(castleStone ? { castle: castleStone } : {}), metal: plaster, copper: plaster, glass: plaster, pane: plaster, paneLit: plaster },
   });
   const menu = document.getElementById('exportMenu')!;
   document.getElementById('export')!.addEventListener('click', () => (menu.hidden = !menu.hidden));
@@ -1166,6 +1169,15 @@ async function start(): Promise<void> {
   let last = performance.now();
   let frames = 0, fpsAt = last, drawn = 0;
   const fixedTime = params.has('time') ? Number(params.get('time')) : null;
+  // The picture's resolution follows how fast frames come (asked for: lighter frames; on a laptop the valley ran at eighteen to
+  // thirty-five frames a second). Where they come slower than forty a second, averaged over a second and a half, the pixel ratio is
+  // lowered a tenth at a time, down to some three fifths of the chosen detail's and never below three quarters; where they come at
+  // fifty-eight or more for three such spells, it is raised a tenth again, up to the chosen. Much of a frame is the overdraw of
+  // leaves and the air reckoned at every point of the picture, and both go with the number of points. The smoothing over frames keeps
+  // the picture whole at the lower ratios. (`?adapt=0` keeps the ratio fixed.)
+  const fullRatio = Math.min(window.devicePixelRatio, num('dpr', quality.dpr)), leastRatio = Math.min(fullRatio, Math.max(0.75, fullRatio * 0.6));
+  const adapt = params.get('adapt') !== '0';
+  let ratio = fullRatio, spellAt = last, spellFrames = 0, quick = 0;
 
   // (How far a point is outside the place the player may walk, once that is known: see `__dbg.beyond` below.)
   let beyondPlay: ((x: number, z: number) => number) | null = null;
@@ -1328,8 +1340,21 @@ async function start(): Promise<void> {
     // (The air's pictures likewise, a few times: they are the far sun's shadow in a large place, and whatever was not ready the first
     // time, the crowns drawn with their own materials above all, was missing from them.)
     if (drawn === 40 || drawn === 200 || drawn === 600) drawAirMaps();
+    if (adapt && !held && document.visibilityState === 'visible' && (window as any).__bakeDone !== undefined) {
+      spellFrames++;
+      if (now - spellAt > 1500) {
+        const each = (now - spellAt) / spellFrames;
+        // (A spell with a long gap in it, a tab hidden or the program busy, says nothing of how fast frames come.)
+        if (each < 250) {
+          if (each > 25 && ratio > leastRatio + 0.01) { ratio = Math.max(leastRatio, Math.round((ratio - 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); window.dispatchEvent(new Event('resize')); }
+          else if (each < 17.2 && ratio < fullRatio - 0.01 && ++quick >= 3) { ratio = Math.min(fullRatio, Math.round((ratio + 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); window.dispatchEvent(new Event('resize')); }
+          else if (each >= 17.2) quick = 0;
+        }
+        spellAt = now; spellFrames = 0;
+      }
+    }
     if (now - fpsAt > 500) {
-      document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps`;
+      document.getElementById('fps')!.textContent = `${Math.round((frames * 1000) / (now - fpsAt))} fps${ratio < fullRatio - 0.01 ? ` · ${ratio.toFixed(2)}×` : ''}`;
       frames = 0;
       fpsAt = now;
     }

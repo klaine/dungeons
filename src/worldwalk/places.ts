@@ -53,7 +53,7 @@ const MOST = 2, YIELD = 300;
 /** The kinds of place built into the world. (A mountain top's sea of cloud under it is not drawn: in a world it would lie over all of it.) */
 const KINDS: WorldPlace['kind'][] = ['valley', 'coast', 'island', 'mountain'];
 /** How light each kind of surface is on the whole, for the bake (as the game has it). */
-const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, castle: 0.58, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
 /** How bright the lamps and lit windows are at an hour, as the game has it (none by day). */
 export const lampsAt = (hour: Hour) => (hour === 'night' ? 0.5 : hour === 'dusk' ? 0.55 : hour === 'sunset' ? 0.4 : 0);
@@ -227,7 +227,7 @@ export class WorldPlaces {
     const frame = () => new Promise<void>((r) => setTimeout(r, 16)), size = this.o.texSize;
     this.painting = (async () => {
       const set: Record<string, ReturnType<typeof generateTextureSet>> = {};
-      for (const [name, seed, half] of [['moss', 9, true], ['stone', 3], ['wood', 5], ['rock', 13], ['scree', 23], ['plaster', 41], ['thatch', 47], ['tile', 43], ['redBrick', 73], ['buffBrick', 79], ['brick', 83], ['talus', 71], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number, boolean?][]) {
+      for (const [name, seed, half] of [['moss', 9, true], ['stone', 3], ['wood', 5], ['rock', 13], ['scree', 23], ['plaster', 41], ['thatch', 47], ['tile', 43], ['redBrick', 73], ['buffBrick', 79], ['brick', 83], ['castle', 89], ['talus', 71], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number, boolean?][]) {
         set[name] = generateTextureSet(name, half ? size / 2 : size, seed);
         await frame();
       }
@@ -257,6 +257,8 @@ export class WorldPlaces {
         buffBrick: makeSiteMaterial(set.buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, bond: 'wendish', weather: true }),
         // (The brown brick of a town's classical buildings, in running bond.)
         brick: makeSiteMaterial(set.brick, moss, { normalScale: 1.1, mossScale: 3, bond: 'running', weather: true }),
+        // (The coursed stone of a castle's walls and towers, which every valley now has.)
+        castle: makeSiteMaterial(set.castle, moss, { normalScale: 1.2, mossScale: 2.4, weather: true }),
         metal: makeSiteMaterial(set.plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
         copper: makeSiteMaterial(set.plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
         glass: makeSiteMaterial(set.plaster, moss, { normalScale: 0.12, roughness: 0.1 }),

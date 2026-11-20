@@ -122,8 +122,15 @@ export class Kit {
     return new Rng(`${this.seed}/${label}/${this.counter++}`);
   }
 
+  /**
+   * What material a patch laid in a given style is drawn with, if not the one asked for: so that a place built in another manner (a
+   * castle's, of plain faces of coursed stone and not stone by stone) can be had by changing its styles and nothing else.
+   */
+  materialFor: ((material: string, style: MasonryStyle) => string) | undefined;
+
   patch(material: string, surface: Surface, opts: Omit<PatchOptions, 'rng' | 'field'> & { field?: FieldFn }): void {
-    this.blocks += layMasonry(this.mesh(material), surface, { field: this.field, ...opts, rng: this.rng(material) });
+    const m = this.materialFor ? this.materialFor(material, opts.style) : material;
+    this.blocks += layMasonry(this.mesh(m), surface, { field: this.field, ...opts, rng: this.rng(material) });
   }
 
   mass(min: Vector3, max: Vector3): void {

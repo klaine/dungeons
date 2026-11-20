@@ -1,6 +1,6 @@
 import { Vector3 } from 'three';
 import { Rng } from '../core/rng';
-import { blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, groundOf, plinthOf, stepsUp, TIMBER, timberFloor, timberFront, timberStair, timberWindows, wingWindows } from '../core/building';
+import { chapelParts, blinded, buried, CLASSICAL, classicalArch, classicalEnds, classicalFront, classicalStairs, dressOf, entranceBays, floorOf, footprintOf, groundOf, plinthOf, stepsUp, TIMBER, timberFloor, timberFront, timberBackDoor, timberStair, timberWindows, wingWindows } from '../core/building';
 import { Building, ClassicalDress } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
@@ -285,6 +285,10 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
       // Which bays have windows: on the street as many as the house has, spread evenly; elsewhere every other bay, or one.
       const lit = new Set<number>(timberWindows(b, storey)[i].map(([s0]) => Math.round((s0 - 0.2) / pitch)));
       const gaps: Gap[] = [...lit].map((n) => ({ s0: n * pitch + 0.2, s1: (n + 1) * pitch - 0.2, y0: sill + 0.14, y1: head }));
+      // Over a half basement, a door in the back wall onto the ground there, which stands at this storey's floor: a bay of the frame,
+      // its sill the sill beam's top.
+      const bd = storey === 1 && i === 2 ? timberBackDoor(b) : null, back: Gap | null = bd ? { s0: bd.s0, s1: bd.s1, y0: y0 + 0.2, y1: Math.min(y0 + 2.15, y1 - 0.3) } : null;
+      if (back) gaps.push(back);
       // (Each layer of the frame stands at its own depth, a centimetre and more from the next, so that no two faces lie in one plane and
       // flicker against each other: posts and beams in front, rails and studs behind them, the braces behind those, the plaster at the back.)
       pierced(f, 'plaster', 0.05, f.L - 0.05, y0, y1, PANEL, T, b.colour, gaps);
@@ -297,9 +301,18 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
         const half = n === 0 || n === bays ? 0.11 : 0.085, s = Math.min(f.L - half, Math.max(half, n * pitch));
         on(f, 'wood', s - half, s + half, y0 + 0.2, y1 - 0.2, 0, 0.18, OAK, true);
       }
-      on(f, 'wood', 0.1, f.L - 0.1, sill, sill + 0.14, RAIL, 0.17, OAK, true);
+      for (const [ra, rb] of back ? [[0.1, back.s0], [back.s1, f.L - 0.1]] : [[0.1, f.L - 0.1]]) on(f, 'wood', ra, rb, sill, sill + 0.14, RAIL, 0.17, OAK, true);
       for (let n = 0; n < bays; n++) {
         const a = n * pitch + 0.09, c = (n + 1) * pitch - 0.09;
+        if (back && n === bd!.bay) {
+          // The door: upright boards in the colour of the shutters, two iron straps, a ring, and a head of oak over it.
+          const tones = [0.95, 1.05, 0.92, 1.08, 1.0], wide = (back.s1 - back.s0) / 5;
+          for (let m = 0; m < 5; m++) on(f, 'wood', back.s0 + m * wide, back.s0 + (m + 1) * wide - 0.008, back.y0, back.y1, 0.1, 0.16, shade(paint, tones[m]), true);
+          for (const y of [back.y0 + 0.3, back.y1 - 0.45]) on(f, 'metal', back.s0 + 0.05, back.s1 - 0.05, y, y + 0.07, 0.08, 0.1, [0.05, 0.05, 0.055]);
+          on(f, 'metal', back.s1 - 0.24, back.s1 - 0.17, back.y0 + 0.9, back.y0 + 1.05, 0.05, 0.1, [0.06, 0.06, 0.06]);
+          on(f, 'wood', a, c, back.y1, back.y1 + 0.14, RAIL, 0.17, OAK, true);
+          continue;
+        }
         if (lit.has(n)) {
           const g = gaps.find((q) => Math.abs(q.s0 - (n * pitch + 0.2)) < 0.01)!;
           on(f, 'wood', a, c, head, head + 0.13, RAIL, 0.17, OAK, true);
@@ -391,6 +404,22 @@ function timberHouse(b: Building, base: number, given: (material: string) => Mes
     box('stone', u - 0.42, u + 0.42, ridge + 0.75, ridge + 0.85, v - 0.38, v + 0.38, shade(stone, 0.6));
     for (const side of [-1, 1]) box('tile', u + side * 0.17 - 0.09, u + side * 0.17 + 0.09, ridge + 0.85, ridge + 1.12, v - 0.09, v + 0.09, [0.9, 0.8, 0.75]);
     tops?.push(at(u, ridge + 1.12, v));
+  }
+  // A cellar under it, where the land falls away behind it: walls of rough stone from under its floor down to the cellar's, a little
+  // proud of the walls over them, and in the back wall a door of boards in a frame of oak under a stone lintel, and a small window
+  // with iron bars beside it.
+  if (b.cellar) {
+    const C = b.cellar, under = shade(stone, 0.74), floor = -C;
+    box('stone', -W / 2 - 0.1, W / 2 + 0.1, floor - 0.35, 0.02, -0.1, D + 0.1, under);
+    const side = (b.door ?? 0.24) < 0.5 ? 1 : -1, du = side * W * 0.22, half = 0.5, top = floor + 1.9, dark: Colour = [0.03, 0.03, 0.035];
+    box('wood', du - half, du + half, floor, top, D + 0.1, D + 0.16, shade(paint, 0.9), true);
+    for (const e of [du - half - 0.12, du + half]) box('wood', e, e + 0.12, floor, top + 0.06, D + 0.1, D + 0.2, OAK, true);
+    for (const y of [floor + 0.35, top - 0.4]) box('metal', du - half + 0.05, du + half - 0.05, y, y + 0.07, D + 0.16, D + 0.18, [0.05, 0.05, 0.055]);
+    box('stone', du - half - 0.3, du + half + 0.3, top + 0.06, top + 0.32, D + 0.1, D + 0.24, shade(stone, 0.9));
+    const wu = du - side * 1.6;
+    box('metal', wu - 0.35, wu + 0.35, floor + 1.05, floor + 1.55, D + 0.1, D + 0.12, dark);
+    for (let m = -1; m <= 1; m++) box('metal', wu + m * 0.18 - 0.02, wu + m * 0.18 + 0.02, floor + 1.05, floor + 1.55, D + 0.12, D + 0.16, [0.05, 0.05, 0.055]);
+    box('stone', wu - 0.45, wu + 0.45, floor + 0.95, floor + 1.05, D + 0.1, D + 0.22, shade(stone, 0.9));
   }
   // ------------------------------------------------------------------ inside
   // The rooms are as the site document plans them. A hall along one side with the stair in it,
@@ -1424,6 +1453,151 @@ function woodenHouse(b: Building, base: number, mesh: (material: string) => Mesh
 }
 
 /** Plain solids for other builders to use: a block between two corners, a squared length between two points, a sheet of roof. */
+/**
+ * A village's church (style `chapel`): small, of stone, as the villages under castles have them. A nave under a steep roof of tiles, its
+ * gables of stone; a choir beyond one end of it, narrower and lower, under a roof of its own, ending where it has one in a half-round
+ * apse under a half cone; a square tower beyond the other end, rising over the ridge with paired openings for its bells near its top,
+ * under a pyramid, a tall spire of eight sides or a ridged roof between two gables, with an iron cross over it; tall narrow windows with
+ * pointed heads along the nave and in the choir; and the door in the front, under a pointed arch in a frame of dressed stone. Its walls
+ * are of the castle's coursed stone (`castle`), so that it is of the castle's building; its dressings of the country's stone.
+ */
+function chapelBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, stone: Colour): void {
+  const k = buildingTools(b, base, mesh), { at, box, poly, slope } = k;
+  const c = b.chapel!, W = b.w, D = b.d, H = b.heights[0], parts = chapelParts(b), { tower, choir, cw } = parts;
+  const wall: Colour = [0.92, 0.9, 0.86], dress = shade(stone, 1.05), dark: Colour = [0.03, 0.03, 0.035], iron: Colour = [0.05, 0.05, 0.055];
+  const roofTile: [string, Colour] = ['tile', [1.12, 1.04, 0.98]], slate: [string, Colour] = ['tile', [0.42, 0.44, 0.5]], under: Colour = shade(OAK, 0.8);
+  const out = (du: number, dv: number) => at(du, 0, dv).sub(at(0, 0, 0));
+  // A plinth a little proud of the walls, down into the ground.
+  for (const r of parts.rects) box('stone', r.u0 - 0.08, r.u1 + 0.08, -0.6, 0.35, r.v0 - 0.08, r.v1 + 0.08, shade(stone, 0.8));
+  // The nave: its walls, a cornice, its roof and its gables.
+  box('castle', -W / 2, W / 2, 0, H, 0, D, wall);
+  box('stone', -W / 2 - 0.12, W / 2 + 0.12, H - 0.18, H, -0.12, D + 0.12, dress);
+  const pitch = Math.tan((55 * Math.PI) / 180), eave = 0.4, rise = (D / 2 + eave) * pitch, top = H - eave * pitch + rise;
+  for (const [v0, v1] of [[-eave, D / 2], [D + eave, D / 2]]) slope([at(-W / 2 - 0.3, H - eave * pitch, v0), at(W / 2 + 0.3, H - eave * pitch, v0), at(W / 2 + 0.3, top, v1), at(-W / 2 - 0.3, top, v1)], roofTile, under);
+  box('tile', -W / 2 - 0.3, W / 2 + 0.3, top - 0.05, top + 0.08, D / 2 - 0.12, D / 2 + 0.12, [0.95, 0.85, 0.8]);
+  for (const e of [-1, 1]) poly('castle', [at((e * W) / 2, H, 0), at((e * W) / 2, H, D), at((e * W) / 2, top - 0.02, D / 2)], wall, out(e, 0));
+  // The choir, lower and narrower; and its apse, a half of twelve sides, under a half cone.
+  const ch = H - 1.2, cv0 = D / 2 - cw / 2, cv1 = D / 2 + cw / 2, crise = (cw / 2 + eave) * pitch, ctop = ch - eave * pitch + crise, away = c.end < 0 ? 1 : -1;
+  box('castle', choir.u0, choir.u1, 0, ch, cv0, cv1, wall);
+  box('stone', choir.u0 - (away < 0 ? 0.12 : 0), choir.u1 + (away > 0 ? 0.12 : 0), ch - 0.16, ch, cv0 - 0.1, cv1 + 0.1, dress);
+  const cu0 = away > 0 ? choir.u0 : choir.u0 - (parts.apse ? 0 : 0.3), cu1 = away > 0 ? choir.u1 + (parts.apse ? 0 : 0.3) : choir.u1;
+  for (const [v0, v1] of [[cv0 - eave, D / 2], [cv1 + eave, D / 2]]) slope([at(cu0, ch - eave * pitch, v0), at(cu1, ch - eave * pitch, v0), at(cu1, ctop, v1), at(cu0, ctop, v1)], roofTile, under);
+  const endU = away > 0 ? choir.u1 : choir.u0;
+  if (parts.apse) {
+    const R = cw / 2, n = 12, ring = (r: number, y: number) => Array.from({ length: n / 2 + 1 }, (_, i) => { const a = -Math.PI / 2 + (Math.PI * i) / (n / 2); return at(endU + away * Math.cos(a) * r, y, D / 2 + Math.sin(a) * r); });
+    const foot = ring(R, 0), head = ring(R, ch), eaveRing = ring(R + eave, ch - eave * pitch), apex = at(endU, ctop, D / 2);
+    for (let i = 0; i < n / 2; i++) {
+      const m = (Math.PI * (i + 0.5)) / (n / 2) - Math.PI / 2;
+      poly('castle', [foot[i], foot[i + 1], head[i + 1], head[i]], wall, out(away * Math.cos(m), Math.sin(m)));
+      poly('tile', [eaveRing[i], eaveRing[i + 1], apex], roofTile[1], out(away * Math.cos(m), Math.sin(m)).add(at(0, 1, 0).sub(at(0, 0, 0))), false, 0.62);
+      poly('wood', [eaveRing[i + 1], eaveRing[i], at(endU, ch - eave * pitch, D / 2)], under, at(0, -1, 0).sub(at(0, 0, 0)));
+    }
+    // (Its window, in the middle of the round.)
+    const mid = at(endU + away * (R + 0.02), 0, D / 2);
+    lancet(mid.x, mid.z, out(away, 0), 1.8, ch - 1.3, 0.5);
+  } else {
+    poly('castle', [at(endU, ch, cv0), at(endU, ch, cv1), at(endU, ctop - 0.02, D / 2)], wall, out(away, 0));
+    const mid = at(endU + away * 0.02, 0, D / 2);
+    lancet(mid.x, mid.z, out(away, 0), 1.8, ch - 1.2, 0.55);
+  }
+  // A window either side of the choir.
+  for (const v of [cv0 - 0.02, cv1 + 0.02]) { const p = at((choir.u0 + choir.u1) / 2, 0, v); lancet(p.x, p.z, out(0, v < D / 2 ? -1 : 1), 1.9, ch - 1.3, 0.45); }
+  // The tower.
+  const TH = c.height, tv0 = tower.v0, tv1 = tower.v1, tu0 = tower.u0, tu1 = tower.u1, T = c.tower;
+  box('castle', tu0, tu1, 0, TH, tv0, tv1, wall);
+  for (const y of [H + 0.4, TH - 0.25]) box('stone', tu0 - 0.1, tu1 + 0.1, y - 0.18, y, tv0 - 0.1, tv1 + 0.1, dress);
+  // Its corners dressed, stone by stone, long and short in turn.
+  for (const [cu, cvv] of [[tu0, tv0], [tu1, tv0], [tu0, tv1], [tu1, tv1]]) for (let y = 0.35, n = 0; y < TH - 0.6; y += 0.42, n++) {
+    const lu = n % 2 ? 0.55 : 0.3, lv = n % 2 ? 0.3 : 0.55, su = cu === tu0 ? 1 : -1, sv = cvv === tv0 ? 1 : -1;
+    box('stone', Math.min(cu - su * 0.03, cu + su * lu), Math.max(cu - su * 0.03, cu + su * lu), y, y + 0.38, Math.min(cvv - sv * 0.03, cvv + sv * lv), Math.max(cvv - sv * 0.03, cvv + sv * lv), shade(dress, 0.95 + 0.1 * (n % 3) / 2));
+  }
+  // The bells' openings: two to a face, near the top; and a slit or two lower down.
+  const tm = (tu0 + tu1) / 2, faces: [Vector3, Vector3][] = [[at(tm, 0, tv0 - 0.02), out(0, -1)], [at(tm, 0, tv1 + 0.02), out(0, 1)], [at(c.end < 0 ? tu0 - 0.02 : tu1 + 0.02, 0, D / 2), out(c.end < 0 ? -1 : 1, 0)]];
+  for (const [p, o] of faces) {
+    const side = new Vector3(-o.z, 0, o.x);
+    for (const s of [-0.42, 0.42]) lancet(p.x + side.x * s * (T / 4.2), p.z + side.z * s * (T / 4.2), o, TH - 2.4, TH - 0.75, 0.32);
+    lancet(p.x, p.z, o, H + 1.2, H + 2.2, 0.16);
+  }
+  // Its roof.
+  const ov = 0.35, ty = TH, ex0 = tu0 - ov, ex1 = tu1 + ov, ez0 = tv0 - ov, ez1 = tv1 + ov, ap = at(tm, ty + c.spireHeight, D / 2);
+  if (c.spire === 'saddle') {
+    // (A ridged roof between two gables, its ridge along the nave.)
+    const r2 = ty + c.spireHeight;
+    for (const [v0, v1] of [[ez0, D / 2], [ez1, D / 2]]) slope([at(ex0, ty, v0), at(ex1, ty, v0), at(ex1, r2, v1), at(ex0, r2, v1)], slate, under);
+    for (const u of [tu0, tu1]) poly('castle', [at(u, ty, tv0), at(u, ty, tv1), at(u, r2 - 0.05, D / 2)], wall, out(u === tu0 ? -1 : 1, 0));
+  } else {
+    const sides = c.spire === 'needle' ? 8 : 4, R = (T / 2 + ov) * (sides === 8 ? 1.0 : Math.SQRT2), ring = Array.from({ length: sides + 1 }, (_, i) => { const a = (Math.PI * 2 * i) / sides + (sides === 4 ? Math.PI / 4 : Math.PI / 8); return at(tm + Math.cos(a) * R, ty, D / 2 + Math.sin(a) * R); });
+    for (let i = 0; i < sides; i++) {
+      const m = (Math.PI * 2 * (i + 0.5)) / sides + (sides === 4 ? Math.PI / 4 : Math.PI / 8);
+      poly('tile', [ring[i], ring[i + 1], ap], slate[1], out(Math.cos(m), Math.sin(m)).add(at(0, 0.6, 0).sub(at(0, 0, 0))), false, 0.62);
+      poly('wood', [ring[i + 1], ring[i], at(tm, ty, D / 2)], under, at(0, -1, 0).sub(at(0, 0, 0)));
+    }
+    if (sides === 8) for (let i = 0; i < 4; i++) {
+      // (Where an eight-sided spire rises from a square tower, a little sloping roof at each corner of the tower.)
+      const a = (Math.PI / 2) * i + Math.PI / 4, cx2 = tm + Math.cos(a) * (T / 2 + ov) * Math.SQRT2 * 0.98, cz2 = D / 2 + Math.sin(a) * (T / 2 + ov) * Math.SQRT2 * 0.98;
+      const corner = at(cx2, ty, cz2), up = at((tm + cx2) / 2, ty + 1.1, (D / 2 + cz2) / 2), o = at(Math.cos(a), 1, Math.sin(a)).sub(at(0, 0, 0));
+      poly('tile', [ring[2 * i], corner, up], slate[1], o, false, 0.62);
+      poly('tile', [corner, ring[2 * i + 1], up], slate[1], o, false, 0.62);
+    }
+  }
+  // An iron cross at the top.
+  const crossY = c.spire === 'saddle' ? ty + c.spireHeight : ty + c.spireHeight - 0.15;
+  box('metal', tm - 0.04, tm + 0.04, crossY, crossY + 1.4, D / 2 - 0.04, D / 2 + 0.04, iron);
+  box('metal', tm - 0.04, tm + 0.04, crossY + 0.85, crossY + 0.95, D / 2 - 0.36, D / 2 + 0.36, iron);
+  // The nave's windows along its front and its back, three or four a side, tall and narrow, with pointed heads; none where the door is.
+  const doorU = (c.end * W) / 4, n = W > 12.5 ? 4 : 3;
+  for (const [v, o] of [[-0.02, out(0, -1)], [D + 0.02, out(0, 1)]] as [number, Vector3][]) for (let i = 0; i < n; i++) {
+    const u = -W / 2 + ((i + 0.5) * W) / n;
+    if (v < 0 && Math.abs(u - doorU) < 1.3) continue;
+    const p = at(u, 0, v);
+    lancet(p.x, p.z, o, 2.4, H - 1.0, 0.36);
+  }
+  // The door: boards in a pointed arch, under a frame of dressed stone a step out from the wall, up a step.
+  {
+    const p = at(doorU, 0, -0.02), o = out(0, -1), side = new Vector3(-o.z, 0, o.x), y0 = 0.35, y1 = y0 + 2.3, half = 0.65;
+    const P = (s: number, y: number, t: number) => new Vector3(p.x + side.x * s + o.x * t, base + y, p.z + side.z * s + o.z * t);
+    const panel = (s0: number, s1: number, lo: number, hi: number, t: number, colour: Colour, material: string) => poly(material, [P(s0, lo, t), P(s1, lo, t), P(s1, hi, t), P(s0, hi, t)], colour, o);
+    panel(-half, half, y0, y1, 0.01, shade(OAK, 0.75), 'wood');
+    poly('wood', [P(-half, y1, 0.01), P(half, y1, 0.01), P(0, y1 + half * 1.3, 0.01)], shade(OAK, 0.75), o);
+    for (const y of [y0 + 0.5, y1 - 0.5]) panel(-half + 0.05, half - 0.05, y, y + 0.07, 0.03, iron, 'metal');
+    for (const [a, e] of [[-half - 0.28, -half], [half, half + 0.28]]) box('stone', doorU + a, doorU + e, 0.3, y1 + 0.2, -0.22, 0.01, dress);
+    box('stone', doorU - half - 0.45, doorU + half + 0.45, y1 + 0.2, y1 + 0.2 + half * 1.4, -0.22, 0.01, dress);
+    box('stone', doorU - half - 0.4, doorU + half + 0.4, 0, 0.32, -0.9, 0.01, shade(stone, 0.9));
+  }
+  /** A tall window with a pointed head, its glass dark, set into a wall at (`x`, `z`) facing `o`, from `y0` to the head's spring `y1`, half `half` broad; its sill of stone. */
+  function lancet(x: number, z: number, o: Vector3, y0: number, y1: number, half: number): void {
+    const d = o.clone().setY(0).normalize(), side = new Vector3(-d.z, 0, d.x);
+    const P = (s: number, y: number, t: number) => new Vector3(x + side.x * s + d.x * t, base + y, z + side.z * s + d.z * t);
+    poly('metal', [P(-half, y0, 0.01), P(half, y0, 0.01), P(half, y1, 0.01), P(-half, y1, 0.01)], dark, d);
+    poly('metal', [P(-half, y1, 0.01), P(half, y1, 0.01), P(0, y1 + half * 1.5, 0.01)], dark, d);
+    // (A surround of dressed stone, a hand wide, standing a little out from the wall.)
+    for (const s of [-half - 0.12, half]) poly('stone', [P(s, y0, 0.04), P(s + 0.12, y0, 0.04), P(s + 0.12, y1, 0.04), P(s, y1, 0.04)], dress, d);
+    poly('stone', [P(-half - 0.2, y0 - 0.12, 0.06), P(half + 0.2, y0 - 0.12, 0.06), P(half + 0.2, y0, 0.06), P(-half - 0.2, y0, 0.06)], dress, d);
+  }
+}
+
+/**
+ * A shed of boards, as stand at the back of a village's yards: on a low footing of stone, walls of upright boards with battens over
+ * their joints, a roof of a single slope falling to its front, where its door is.
+ */
+function shedBuilding(b: Building, base: number, mesh: (material: string) => MeshBuilder, stone: Colour): void {
+  const { at, box, wedge, slope } = buildingTools(b, base, mesh);
+  const W = b.w, D = b.d, H = b.heights[0], back = H + 0.7, boards = b.colour, dark = shade(boards, 0.75);
+  box('stone', -W / 2 - 0.06, W / 2 + 0.06, -0.5, 0.18, -0.06, D + 0.06, shade(stone, 0.8));
+  box('wood', -W / 2, W / 2, 0.18, H, 0, D, boards, true);
+  // (The walls rise towards the back, under the slope.)
+  wedge(at(-W / 2, H, 0), at(-W / 2, H, D), at(-W / 2, back, D), at(W / 2, 0, 0).sub(at(-W / 2, 0, 0)), ['wood', boards], ['wood', boards]);
+  for (let u = -W / 2 + 0.3; u < W / 2 - 0.1; u += 0.55) {
+    box('wood', u - 0.035, u + 0.035, 0.18, H - 0.02, -0.03, 0, dark, true);
+    box('wood', u - 0.035, u + 0.035, 0.18, back - 0.05, D, D + 0.03, dark, true);
+  }
+  slope([at(-W / 2 - 0.25, H - 0.08, -0.4), at(W / 2 + 0.25, H - 0.08, -0.4), at(W / 2 + 0.25, back + 0.12, D + 0.3), at(-W / 2 - 0.25, back + 0.12, D + 0.3)], ['tile', [1.0, 0.92, 0.88]], shade(OAK, 0.8), 0.12);
+  // The door, of boards on two ledges, in the middle of the front.
+  const half = Math.min(0.6, W / 2 - 0.4);
+  box('wood', -half, half, 0.2, Math.min(2.0, H - 0.15), -0.06, 0, shade(boards, 0.85), true);
+  for (const y of [0.55, Math.min(1.65, H - 0.5)]) box('wood', -half + 0.04, half - 0.04, y, y + 0.1, -0.09, -0.06, dark, true);
+}
+
 export function solids(mesh: (material: string) => MeshBuilder) {
   const t = buildingTools({ x: 0, z: 0, w: 0, d: 0, faces: 'w' } as Building, 0, mesh);
   return { block: t.block, stick: t.stick, slope: t.slope };
@@ -1435,6 +1609,9 @@ export function buildBuilding(b: Building, base: number, mesh: (material: string
   // (Brick buildings and canal houses are shut, and seen only from outside: nothing in them is indoors.)
   if (b.style === 'brick') { buildBrick(b, base, mesh, rng, stone); return; }
   if (b.style === 'canal') { buildCanal(b, base, mesh, rng, stone, tops); return; }
+  // (A village's church and its sheds are shut, and seen only from outside.)
+  if (b.style === 'chapel') { chapelBuilding(b, base, mesh, stone); return; }
+  if (b.style === 'shed') { shedBuilding(b, base, mesh, stone); return; }
   // (What is built from here on is noted, mesh by mesh, so that it can be told afterwards which of it is indoors.)
   const begun = new Map<MeshBuilder, number>();
   // (A building that can be entered has glass that can be seen through, both ways; and a room lit after dark glows in it without hiding the room.)
