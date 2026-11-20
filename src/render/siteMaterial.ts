@@ -320,7 +320,10 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // the town is, from a noise some seventeen metres across, so that some houses are older than others.)
   const P: N = positionWorld, nG: N = normalize(normalWorldGeometry);
   const tH: N = normalize(vec2(nG.z.negate(), nG.x).add(vec2(1e-4, 0)));
-  const q: N = vec2(dot(P.xz, tH), P.y).toVar();
+  // (On a castle's walls, from its texture coordinates, which run a unit to two metres along a wall and up it: its walls are bent
+  // (`sway` in `castle.ts`), so the way a face looks turns a little from point to point, and a place along it reckoned from that and
+  // from how far it is from the world's middle swung by metres, and drew its streaks as the lines of a map.)
+  const q: N = (laid ? uv().mul(2) : vec2(dot(P.xz, tH), P.y)).toVar();
   const worn: N = smoothstep(0.35, 0.8, farNoise(P.xz.div(17).add(5.3))).toVar();
   if (o.render) {
     const share: N = worn.mul(0.09).add(0.012).add(one(smoothstep(0.25, 1.4, above)).mul(0.12)).mul(renderUniforms.uChips as N).mul(hasFoot).toVar();

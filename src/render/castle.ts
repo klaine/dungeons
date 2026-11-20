@@ -2,6 +2,7 @@ import { Vector3 } from 'three';
 import type { Castle, CastleTower } from '../core/castle';
 import { MeshBuilder } from './geom/meshBuilder';
 import { outdoorFieldAt } from './fields';
+import { valueNoise3 } from '../core/rng';
 
 type Colour = [number, number, number];
 type P3 = [number, number, number];
@@ -38,49 +39,93 @@ export function buildCastle(b: CastleBuild): void {
   const footOf = (x: number, z: number) => { const k = Math.round(x) * 100003 + Math.round(z); let y = feet.get(k); if (y === undefined) { y = ground(Math.round(x), Math.round(z)); feet.set(k, y); } return y; };
 
   /**
+   * How far the castle has moved since it was built (`sway`): no wall of rubble a few centuries old is a plane. A length of curtain
+   * bellies out between its towers, leans a little out or in, its face waves gently over a few metres, and the line of its walk and
+   * its merlons runs a little up and down. One smooth movement of the whole space the castle stands in, so that what touches stays
+   * touching and every solid stays closed: a hand or two at most along the ground, a few centimetres up and down above head height,
+   * none up or down at the bailey's floor, where barrels and the well stand on the ground. (Built true, every wall was a sheet of
+   * card with ruled edges, however its stone was drawn.)
+   */
+  const sway = (x: number, y: number, z: number, out: number[]): void => {
+    const lo = 1 / 7, hi = 1 / 2.6, up = Math.min(1, Math.max(0, (y - floor - 1.5) / 4));
+    out[0] = (valueNoise3(x * lo, y * lo, z * lo, 401) - 0.5) * 0.44 + (valueNoise3(x * hi, y * hi, z * hi, 409) - 0.5) * 0.1;
+    out[1] = (valueNoise3(x / 2.8, y / 2.8, z / 2.8, 419) - 0.5) * 0.12 * up;
+    out[2] = (valueNoise3(x * lo, y * lo, z * lo, 431) - 0.5) * 0.44 + (valueNoise3(x * hi, y * hi, z * hi, 439) - 0.5) * 0.1;
+  };
+  const W0 = [0, 0, 0], W1 = [0, 0, 0], W2 = [0, 0, 0], WA = [0, 0, 0], WB = [0, 0, 0], E = 0.05;
+  /** The slope of the movement across the face, in how much it turns a face looking along `n`: (the gradient of the movement) times `n`. */
+  const turn = (x: number, y: number, z: number, n: Vector3, axis: number): number => {
+    W1[0] = x; W1[1] = y; W1[2] = z; W1[axis] += E;
+    W2[0] = x; W2[1] = y; W2[2] = z; W2[axis] -= E;
+    sway(W1[0], W1[1], W1[2], WA); sway(W2[0], W2[1], W2[2], WB);
+    return ((WA[0] - WB[0]) * n.x + (WA[1] - WB[1]) * n.y + (WA[2] - WB[2]) * n.z) / (2 * E);
+  };
+  /** Faces are cut at most this far apart along every edge, so that they bend with the movement; and cut alike on either side of an edge. */
+  const SEG = 1.0;
+  /**
    * One flat face through its corners, facing away from `inside`. Its texture is laid along it: across a face that stands up, from
    * where along the wall it is (`u`, if given for each corner, else along the face's own line) and how high; on one that lies flat,
-   * from where it is. So courses run level and blocks keep their size at any bearing.
+   * from where it is. So courses run level and blocks keep their size at any bearing. It is cut into cells of a metre or so, then moved
+   * with the castle (`sway`), its texture where it was before it moved.
    */
-  const face = (material: string, pts: P3[], colour: Colour, inside: P3, us?: number[], cell = false): void => {
-    // (A large face that stands up, a length of the curtain or a tower's side, is cut into cells of a metre and a half or so, so that its
-    // weathering, which is reckoned at its corners, varies over it: moss and damp at its foot here and not there, a darker patch, a
-    // lighter one. Reckoned only at its four corners, a length of wall was one smooth wash from end to end.)
-    if (!cell && pts.length === 4 && !us) {
-      const [a, b, c2, d] = pts, wide = Math.hypot(b[0] - a[0], b[2] - a[2]), high = Math.max(Math.abs(d[1] - a[1]), Math.abs(c2[1] - b[1]));
-      const level = Math.abs(a[1] - b[1]) < 0.01 && Math.abs(c2[1] - d[1]) < 0.01 && Math.hypot(d[0] - a[0], d[2] - a[2]) < 0.01;
-      if (level && wide * high > 6) {
-        const nu = Math.max(1, Math.round(wide / 1.6)), nv = Math.max(1, Math.round(high / 1.6));
-        const at = (i: number, j: number): P3 => { const f = i / nu, g = j / nv, lo: P3 = [a[0] + (b[0] - a[0]) * f, a[1], a[2] + (b[2] - a[2]) * f]; return [lo[0], a[1] + (d[1] - a[1]) * g, lo[2]]; };
-        for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) face(material, [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)], colour, inside, undefined, true);
-        return;
-      }
-    }
-    const m = mesh(material);
+  const face = (material: string, pts: P3[], colour: Colour, inside: P3, us?: number[]): void => {
+    const m = mesh(material), k = pts.length;
     const [p0, p1, p2] = pts;
     let nx = (p1[1] - p0[1]) * (p2[2] - p0[2]) - (p1[2] - p0[2]) * (p2[1] - p0[1]);
     let ny = (p1[2] - p0[2]) * (p2[0] - p0[0]) - (p1[0] - p0[0]) * (p2[2] - p0[2]);
     let nz = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p1[1] - p0[1]) * (p2[0] - p0[0]);
     const l = Math.hypot(nx, ny, nz) || 1;
     nx /= l; ny /= l; nz /= l;
-    const mid = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+    const mid = pts.reduce((s, q) => [s[0] + q[0] / k, s[1] + q[1] / k, s[2] + q[2] / k], [0, 0, 0]);
     const flip = (mid[0] - inside[0]) * nx + (mid[1] - inside[1]) * ny + (mid[2] - inside[2]) * nz < 0;
-    const order = pts.map((_, k) => k);
-    if (flip) { order.reverse(); nx = -nx; ny = -ny; nz = -nz; }
+    if (flip) { nx = -nx; ny = -ny; nz = -nz; }
     const flat = Math.abs(ny) > 0.8, hl = Math.hypot(nx, nz) || 1, ux = nz / hl, uz = -nx / hl;
     N.set(nx, ny, nz);
-    const ids = order.map((k) => {
-      const q = pts[k];
-      const u = flat ? q[0] * 0.5 : (us ? us[k] : q[0] * ux + q[2] * uz) * 0.5, v = flat ? q[2] * 0.5 : q[1] * 0.5;
+    const tri = (a: number, b: number, c2: number) => (flip ? m.addTriangle(a, c2, b) : m.addTriangle(a, b, c2));
+    /** A point of the face, as shares of its corners. */
+    const vertex = (w: number[]): number => {
+      let x = 0, y = 0, z = 0, uu = 0;
+      for (let c2 = 0; c2 < k; c2++) if (w[c2]) { x += w[c2] * pts[c2][0]; y += w[c2] * pts[c2][1]; z += w[c2] * pts[c2][2]; if (us) uu += w[c2] * us[c2]; }
+      const u = flat ? x * 0.5 : (us ? uu : x * ux + z * uz) * 0.5, v = flat ? z * 0.5 : y * 0.5;
       // Weathered as the walls of the houses are: moss low on a wall and on what lies level, damp, and a tone that varies over the
       // wall (`outdoorFieldAt`, from the ground at its foot); and a face that stands up says how high that ground is, so that the
       // material raises damp in it to a ragged line, splashes its foot with dirt and runs rain down it in streaks. (Without, it was
-      // all of one clean grey from its foot to its battlements, as if built that morning.)
-      const foot = flat ? Math.min(q[1], floor) : Math.min(q[1], footOf(q[0], q[2]));
-      const t = outdoorFieldAt(foot, 1.25)(P.set(q[0], q[1], q[2]), N, F);
-      return m.addVertex(q[0], q[1], q[2], nx, ny, nz, u, v, colour[0] * t, colour[1] * t, colour[2] * t, F[0], F[1], F[2], flat || ny < -0.5 ? 0 : 1000 + foot);
-    });
-    for (let k = 1; k < ids.length - 1; k++) m.addTriangle(ids[0], ids[k], ids[k + 1]);
+      // all of one clean grey from its foot to its battlements, as if built that morning.) (Reckoned at every cell's corners, so that
+      // all that varies along a wall: reckoned at a length's four corners only, it was one wash from end to end.)
+      const foot = flat ? Math.min(y, floor) : Math.min(y, footOf(x, z));
+      const t = outdoorFieldAt(foot, 1.25)(P.set(x, y, z), N, F);
+      // (Moved, and its way of facing turned as the movement turns it there, so that the light shows the bellying.)
+      sway(x, y, z, W0);
+      const cx = turn(x, y, z, N, 0), cy = turn(x, y, z, N, 1), cz = turn(x, y, z, N, 2);
+      let mx = nx - cx, my = ny - cy, mz = nz - cz;
+      const ml = Math.hypot(mx, my, mz) || 1;
+      mx /= ml; my /= ml; mz /= ml;
+      return m.addVertex(x + W0[0], y + W0[1], z + W0[2], mx, my, mz, u, v, colour[0] * t, colour[1] * t, colour[2] * t, F[0], F[1], F[2], flat || ny < -0.5 ? 0 : 1000 + foot);
+    };
+    const corner = (c2: number, f: number, g = 0, d = 0): number[] => { const w = new Array(k).fill(0); w[c2] += f; if (g) w[d] += g; return w; };
+    // Each edge cut into as many equal pieces as its length asks, which the face on its other side asks too, so that the two meet.
+    const segs = pts.map((p, e) => { const q = pts[(e + 1) % k]; return Math.max(1, Math.round(Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) / SEG)); });
+    if (k === 4 && segs[0] === segs[2] && segs[1] === segs[3]) {
+      // A four-sided face: a lattice across it.
+      const nu = segs[0], nv = segs[1], ids: number[] = [];
+      for (let j = 0; j <= nv; j++) for (let i = 0; i <= nu; i++) {
+        const f = i / nu, g = j / nv;
+        ids.push(vertex([(1 - f) * (1 - g), f * (1 - g), f * g, (1 - f) * g]));
+      }
+      const at = (i: number, j: number) => ids[j * (nu + 1) + i];
+      for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { tri(at(i, j), at(i + 1, j), at(i + 1, j + 1)); tri(at(i, j), at(i + 1, j + 1), at(i, j + 1)); }
+      return;
+    }
+    if (segs.every((s) => s === 1)) {
+      const ids = pts.map((_, c2) => vertex(corner(c2, 1)));
+      for (let c2 = 1; c2 < k - 1; c2++) tri(ids[0], ids[c2], ids[c2 + 1]);
+      return;
+    }
+    // Any other: its edges cut, and a fan from its middle.
+    const rim: number[] = [];
+    for (let e = 0; e < k; e++) for (let s = 0; s < segs[e]; s++) { const f = s / segs[e]; rim.push(vertex(corner(e, 1 - f, f, (e + 1) % k))); }
+    const centre = vertex(new Array(k).fill(1 / k));
+    for (let r = 0; r < rim.length; r++) tri(centre, rim[r], rim[(r + 1) % rim.length]);
   };
   /** A closed solid on a ring of corners (`ring`, round in order), from `y0` to `y1`; narrowing to `narrow` times as broad at its top. */
   const prism = (material: string, ring: [number, number][], y0: number, y1: number, colour: Colour, narrow = 1, us?: number[]) => {
