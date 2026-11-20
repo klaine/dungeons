@@ -11,7 +11,7 @@
 // can be saved as a file of site documents and opened again.
 import {
   MOUSE, ACESFilmicToneMapping, Box3, BufferAttribute, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
-  InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Material, Matrix4, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
+  InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Float32BufferAttribute, Material, Matrix4, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
 } from 'three';
 import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
 import { rtt } from 'three/tsl';
@@ -35,6 +35,9 @@ import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
 import type { ClassicalDress } from '../src/core/site';
+import { BODIES } from '../src/figures/library';
+import { Solids } from '../src/figures/solids';
+import { Crew } from './figureCrew';
 
 type Tool = 'move' | 'extrude' | 'scale' | 'paint';
 type Colour = [number, number, number];
@@ -197,6 +200,9 @@ async function start(): Promise<void> {
     return t > 0 ? ray.origin.clone().addScaledVector(ray.direction, t) : null;
   };
   let press: { pointer: number; x: number; y: number; id: number | null; moved: boolean; height: number; grab: Vector3; from: [number, number] } | null = null;
+  // (A press on a figure, and a press that will give the chosen figures an order if it is let go of without moving.)
+  let figPress: { pointer: number; x: number; y: number; figure: import('../src/figures/figure').Figure; moved: boolean; shift: boolean } | null = null;
+  let orderPress: { pointer: number; x: number; y: number; right: boolean; moved: boolean } | null = null;
   let placing: number | null = null;
   // (Nothing is answered until the first buildings are built.)
   let ready = false;
@@ -246,6 +252,20 @@ async function start(): Promise<void> {
       return;
     }
     if (press) { if (press.id !== null) e.stopImmediatePropagation(); return; }
+    // Figures. A press on one chooses it (Shift: as well as those chosen), and dragging it moves it. With figures chosen, a click
+    // anywhere else gives them the order armed on the palette, and a click with the right button sends them there; a drag still turns
+    // or slides the view, and buildings are not taken up until the figures are let go of (Esc).
+    if (placing === null && (e.button === 0 || e.button === 2) && !figPress && !orderPress) {
+      const ray = rayAt(e.clientX, e.clientY), f = e.button === 0 ? crew.figureAt(ray) : null;
+      const b = f ? pick(ray) : null;
+      if (f && (!b || f.far <= b.point.distanceTo(ray.origin) + 0.3)) {
+        e.stopImmediatePropagation();
+        canvas.setPointerCapture(e.pointerId);
+        figPress = { pointer: e.pointerId, x: e.clientX, y: e.clientY, figure: f.figure, moved: false, shift: e.shiftKey };
+        return;
+      }
+      if (crew.chosen.length) { orderPress = { pointer: e.pointerId, x: e.clientX, y: e.clientY, right: e.button === 2, moved: false }; return; }
+    }
     if (e.button !== 0) return;
     const ray = rayAt(e.clientX, e.clientY);
     if (placing !== null) { e.stopImmediatePropagation(); placed(); return; }
@@ -272,6 +292,22 @@ async function start(): Promise<void> {
       return;
     }
     brushRing.visible = false;
+    if (figPress?.pointer === e.pointerId) {
+      if (Math.hypot(e.clientX - figPress.x, e.clientY - figPress.y) > 5) figPress.moved = true;
+      if (figPress.moved) {
+        // (Moved by hand: stood on whatever is under the pointer.)
+        const hit = solids.first(rayAt(e.clientX, e.clientY), 2000);
+        if (hit) crew.put(figPress.figure, hit.point);
+        canvas.style.cursor = 'grabbing';
+      }
+      return;
+    }
+    if (orderPress?.pointer === e.pointerId) { if (Math.hypot(e.clientX - orderPress.x, e.clientY - orderPress.y) > 5) orderPress.moved = true; return; }
+    if (!press && e.pointerType === 'mouse' && crew.figures.length && placing === null) {
+      const ray = rayAt(e.clientX, e.clientY);
+      if (crew.figureAt(ray)) { canvas.style.cursor = 'pointer'; return; }
+      if (crew.chosen.length) { canvas.style.cursor = 'crosshair'; return; }
+    }
     if (placing !== null && !press) {
       const p = levelAt(rayAt(e.clientX, e.clientY)), it = itemOf(placing);
       if (p && it) { it.x = snapped(p.x); it.z = snapped(p.z); placeItem(it); changed(false); reflect(); }
@@ -294,6 +330,22 @@ async function start(): Promise<void> {
     reflect();
   });
   const release = (e: PointerEvent) => {
+    if (figPress && e.pointerId === figPress.pointer) {
+      const p = figPress;
+      figPress = null;
+      canvas.style.cursor = '';
+      if (!p.moved) {
+        if (p.shift) crew.choose(crew.chosen.includes(p.figure) ? crew.chosen.filter((f) => f !== p.figure) : [...crew.chosen, p.figure], false);
+        else crew.choose([p.figure]);
+      }
+      return;
+    }
+    if (orderPress && e.pointerId === orderPress.pointer) {
+      const p = orderPress;
+      orderPress = null;
+      if (!p.moved && e.type === 'pointerup') crew.orderAt(rayAt(e.clientX, e.clientY), p.right);
+      return;
+    }
     if (looking !== null && e.pointerId === looking) {
       looking = null;
       if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -602,6 +654,70 @@ async function start(): Promise<void> {
     return best;
   };
 
+  // ------------------------------------------------------------------ what figures walk on and are stopped by
+  // Everything solid, for the figures: the paving, each thing set out (its tree of bounds made in its own frame, so that moving it makes
+  // nothing again), and the rock and plants painted. Made only once there are figures, and again for a thing only once it has been
+  // left alone for a moment after being built again, so that dragging a slider does not make one tree after another.
+  const solids = new Solids();
+  {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new Float32BufferAttribute([-400, 0, -400, 400, 0, 400, 400, 0, -400, -400, 0, -400, -400, 0, 400, 400, 0, 400], 3));
+    solids.set('paving', { bvh: new MeshBVH(g), matrix: new Matrix4(), level: true });
+  }
+  const solidFrom = new Map<unknown, unknown>();
+  /** One tree of bounds over meshes, in the frame they stand in. */
+  const treeOf = (meshes: Mesh[]): MeshBVH | null => {
+    let count = 0, tris = 0;
+    for (const m of meshes) { count += m.geometry.attributes.position.count; tris += m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count; }
+    if (!tris) return null;
+    const pos = new Float32Array(count * 3), index = new Uint32Array(tris), v = new Vector3();
+    let base = 0, at = 0;
+    for (const m of meshes) {
+      m.updateMatrix();
+      const p = m.geometry.attributes.position, idx = m.geometry.index;
+      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(m.matrix); pos.set([v.x, v.y, v.z], (base + i) * 3); }
+      const n = idx ? idx.count : p.count;
+      for (let i = 0; i < n; i++) index[at++] = base + (idx ? idx.getX(i) : i);
+      base += p.count;
+    }
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(pos, 3));
+    g.setIndex(new BufferAttribute(index, 1));
+    return new MeshBVH(g);
+  };
+  let solidsMs = 0;
+  const keepSolids = () => {
+    const now = performance.now();
+    for (const [id, b] of built) {
+      if (solidFrom.get(id) === b.at || now - b.at < 300) continue;
+      const bvh = treeOf(b.meshes);
+      if (bvh) solids.set(id, { bvh, matrix: b.holder.matrixWorld }); else solids.delete(id);
+      solidFrom.set(id, b.at);
+    }
+    for (const key of solids.keys()) if (typeof key === 'number' && !built.has(key)) { solids.delete(key); solidFrom.delete(key); }
+    const rock = layers.rock, plants = layers.plants;
+    if (solidFrom.get('rock') !== rock) {
+      solidFrom.set('rock', rock);
+      const bvh = rock ? ((rock.geometry as unknown as { boundsTree?: MeshBVH }).boundsTree ?? treeOf([rock])) : null;
+      if (bvh) solids.set('rock', { bvh, matrix: rock!.matrixWorld }); else solids.delete('rock');
+    }
+    if (solidFrom.get('plants') !== plants[0]) {
+      solidFrom.set('plants', plants[0]);
+      const bvh = plants.length ? treeOf(plants) : null;
+      if (bvh) solids.set('plants', { bvh, matrix: new Matrix4() }); else solids.delete('plants');
+    }
+    solids.refresh();
+    solidsMs += performance.now() - now;
+  };
+  const crew = new Crew({
+    // (Beside the lab, in the folder the tool publishes; a page made of the lab alone says where they are, or carries them itself.)
+    scene, camera, controls, solids, base: (window as unknown as { __figureBase?: string }).__figureBase ?? new URL('../figures/', location.href).href,
+    say: (text, kind, seconds) => say(text, kind, seconds),
+    chosen: () => { if (crew.chosen.length && state.selected !== null) { state.selected = null; remember(); } renderSelected(); fit(); },
+    viewCentre: () => { const c = viewCentre(); return new Vector3(c.x, 0, c.z); },
+  });
+  document.body.appendChild(crew.palette);
+
   // ------------------------------------------------------------------ light
   const sunDir = new Vector3();
   const sun = new DirectionalLight(0xffffff, 1);
@@ -691,6 +807,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ choosing, adding, taking away
   const select = (id: number | null) => {
+    if (id !== null && crew.chosen.length) crew.choose([]);
     if (state.selected === id) return;
     state.selected = id;
     renderSelected();
@@ -1338,6 +1455,24 @@ async function start(): Promise<void> {
   }
   renderPaint();
 
+  /** The panel for the figures chosen. */
+  function renderFigures() {
+    const list = crew.chosen, one = list.length === 1 ? list[0] : null;
+    el('h3', selBox, one ? BODIES.find((b) => b.id === crew.kinds.get(one))?.label ?? 'Figure' : `${list.length} figures`);
+    el('p', selBox, 'Orders are on the palette over the picture. Each finds its own way: round what stands in the way, through doors, up stairs, onto ledges and rocks.').className = 'note';
+    buttons(selBox, [
+      ['Let go', () => crew.choose([]), 'Esc'],
+      ['Look down', () => crew.lookDown(list[0]), 'F. The view turned to look down on it'],
+      ['Remove', () => { for (const f of [...list]) crew.remove(f); }, 'Delete or Backspace'],
+    ]);
+    checks(selBox, selRefreshers, [['the view follows', () => crew.follow, (v) => { crew.follow = v; }, 'The view goes along with the figure chosen first']]);
+  }
+
+  // Figures, added as buildings are.
+  el('h2', panel, 'Figures');
+  buttons(panel, BODIES.map((b): [string, (e: MouseEvent) => void, string] => [b.label, () => { void crew.add(b.id); }, `A ${b.label.toLowerCase()}, stood in the middle of the view. Click a figure to choose it and give it orders.`]));
+  el('p', panel, 'Click a figure to choose it, then give it orders from the palette over the picture: an order that wants a place waits for a click there. Right click sends it walking. Shift-click chooses more than one; drag one to move it; Esc lets go.').className = 'note';
+
   // The building chosen.
   el('h2', panel, 'Selected');
   const selBox = el('div', panel);
@@ -1347,7 +1482,8 @@ async function start(): Promise<void> {
     const it = selectedItem();
     shownLayout = layoutOf(it);
     sliding = false;
-    if (!it) { el('p', selBox, 'Nothing is selected. Tap a building, or add one.').className = 'note'; return; }
+    if (crew.chosen.length) { renderFigures(); return; }
+    if (!it) { el('p', selBox, 'Nothing is selected. Tap a building or a figure, or add one.').className = 'note'; return; }
     const R = RANGES, list = selRefreshers;
     el('h3', selBox, KINDS[it.kind].name);
     el('p', selBox, KINDS[it.kind].note).className = 'note';
@@ -1843,6 +1979,13 @@ async function start(): Promise<void> {
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (crew.chosen.length) {
+      // (With figures chosen, Esc first lets go of an order armed, then of the figures; the numbers arm orders.)
+      if (k === 'escape') { e.preventDefault(); if (!crew.disarm()) crew.choose([]); return; }
+      if (crew.key(e.key)) { e.preventDefault(); return; }
+      if (k === 'delete' || k === 'backspace') { e.preventDefault(); for (const f of [...crew.chosen]) crew.remove(f); return; }
+      if (k === 'f') { crew.lookDown(crew.chosen[0]); return; }
+    }
     if (k === 'escape') {
       if (placing !== null) { const id = placing; placing = null; state.items = state.items.filter((q) => q.id !== id); state.selected = null; sync(); renderSelected(); say('Taken back', 'dim', 2); commit(); }
       else select(null);
@@ -1885,6 +2028,15 @@ async function start(): Promise<void> {
     over.style.width = `${w}px`; over.style.height = `${h}px`;
     foot.style.bottom = h < window.innerHeight ? `${window.innerHeight - h + 10}px` : 'calc(10px + env(safe-area-inset-bottom, 0px))';
     foot.style.right = `${window.innerWidth - w + 12}px`;
+    placePalette();
+  };
+  /** The orders' palette along the foot of the picture, and the words at the foot above it while it is shown. */
+  const footAt = () => (screen.h < window.innerHeight ? `${window.innerHeight - screen.h + 10}px` : 'calc(10px + env(safe-area-inset-bottom, 0px))');
+  const placePalette = () => {
+    const pal = crew.palette;
+    pal.style.width = `${screen.w}px`;
+    pal.style.bottom = footAt();
+    foot.style.bottom = pal.hidden ? footAt() : `calc(${footAt()} + ${pal.offsetHeight + 8}px)`;
   };
   window.addEventListener('resize', fit);
   document.body.classList.toggle('bare', !state.panel);
@@ -1908,6 +2060,19 @@ async function start(): Promise<void> {
   paintLayers();
   setTool(state.tool);
   ready = true;
+  // The figures kept from last time; or, the first time the lab is opened with figures, three in front of the first building.
+  {
+    const kept = Crew.kept();
+    if (kept) void crew.bringBack(kept);
+    else if (!query.has('nofigures')) void (async () => {
+      keepSolids();
+      const front = state.items[0] ? new Vector3(state.items[0].x, 0, state.items[0].z + 12) : new Vector3(0, 0, 8);
+      await crew.add('base-woman', front.clone().add(new Vector3(-2.2, 0, 0)), Math.PI, false);
+      await crew.add('base-man', front.clone().add(new Vector3(0, 0, 1.2)), Math.PI, false);
+      await crew.add('mannequin', front.clone().add(new Vector3(2.2, 0, 0)), Math.PI, false);
+      say('Three figures stand in front of the building: click one to give it orders', 'good', 10);
+    })();
+  }
 
   // ------------------------------------------------------------------ the loop
   let last = performance.now(), fps = 60, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5, told = 0;
@@ -1951,6 +2116,13 @@ async function start(): Promise<void> {
       }
     }
     if (tick % 10 === 0) { findClashes(); neighbours(); }
+    // The figures: what they stand on kept up with what is built, then each moved on. (Their shadows move with them, so the sun's are
+    // drawn again every other frame while there are any.)
+    if (crew.figures.length) {
+      keepSolids();
+      crew.update(Math.min(dt, 0.05));
+      if (tick % 2 === 0) shadowsDue = Math.max(shadowsDue, 1);
+    }
     vegetationUniforms.uTime.value = now / 1000;
     if (allCards.size) cullCards([...allCards], camera.position);
     controls.update();
@@ -1976,6 +2148,7 @@ async function start(): Promise<void> {
     if (tick === 5) try { localStorage.removeItem(OPENING); } catch { /* storage refused */ }
     if (now - told > 300) {
       told = now;
+      placePalette();
       if (performance.now() > said.until) said.text = '';
       foot.innerHTML = '';
       if (said.text) el('div', foot, said.text).className = said.kind;
@@ -1989,7 +2162,7 @@ async function start(): Promise<void> {
         const what = it.kind === 'tree' ? `${s.tree!.kind}, ${s.tree!.height.toFixed(1)} m tall` : it.kind === 'boulder' ? `${s.boulder!.size.toFixed(1)} m across` : `${s.w.toFixed(1)} by ${s.d.toFixed(1)} m, ${it.kind === 'church' ? `${s.bays} bays` : `${s.storeys} storey${s.storeys > 1 ? 's' : ''}, ${s.bays} bays`}`;
         el('div', foot, `${KINDS[it.kind].name}: ${what}${scaled}; built in ${b.ms.toFixed(0)} ms, ${Math.round(b.triangles).toLocaleString()} triangles${b.cards.length ? ` and ${b.cards.reduce((n, m) => n + m.count, 0).toLocaleString()} cards` : ''}`);
       }
-      el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawn.triangles / 1e6).toFixed(2)} million triangles drawn · ${state.items.length} building${state.items.length === 1 ? '' : 's'} · ${state.hour}, ${state.stone}`).className = 'dim';
+      el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawn.triangles / 1e6).toFixed(2)} million triangles drawn · ${state.items.length} building${state.items.length === 1 ? '' : 's'}${crew.figures.length ? ` · ${crew.figures.length} figure${crew.figures.length === 1 ? '' : 's'}${crew.nav.lastMs ? `, last way found in ${crew.nav.lastMs.toFixed(0)} ms` : ''}` : ''} · ${state.hour}, ${state.stone}`).className = 'dim';
     }
   };
   renderer.setAnimationLoop((now: number) => { try { step(now); } catch (e) { console.error(e); } });
@@ -2018,6 +2191,15 @@ async function start(): Promise<void> {
       return ms;
     },
     remove, clear: () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); },
+    // (The figures: `crew` has them, `solids` what they stand on; `orderAt` gives the order `id` at a point as a click there would.)
+    crew, solids, keepSolids, solidsMs: () => solidsMs,
+    /** Every surface over (x, z) from `top` down: its height, and how much it faces the sky. */
+    surfaces: (x: number, z: number, top = 60) => solids.hits(new Ray(new Vector3(x, top, z), new Vector3(0, -1, 0)), top + 60).map((h) => [+h.point.y.toFixed(3), +h.up.toFixed(2)]),
+    orderAt: (id: string, at: number[], from?: number[]) => {
+      crew.armById(id);
+      const target = new Vector3(...at), eye = from ? new Vector3(...from) : target.clone().add(new Vector3(0, 30, 12));
+      return crew.orderAt(new Ray(eye, target.clone().sub(eye).normalize()));
+    },
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     pending: () => dirty.size,
     ready: true,

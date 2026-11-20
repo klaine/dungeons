@@ -1,6 +1,7 @@
 import { AnimationAction, AnimationClip, AnimationMixer, Group, LoopOnce, LoopRepeat, Vector2, Vector3 } from 'three';
 import { Player, type Colliders } from '../app/player';
 import { type Move, type Rigged, travelAt } from './library';
+import type { Route } from './nav';
 
 /**
  * A figure: a body that can be steered or sent somewhere, carried by the game's own body (`Player`: its capsule, its weight, the steps it
@@ -42,12 +43,15 @@ export interface FigureWorld {
   colliders: Colliders;
   /** The height of the highest thing solid under (`x`, `z`) and below `top`, or null where there is nothing. */
   heightAt(x: number, z: number, top: number): number | null;
+  /** A way from where a figure stands to where it is sent (`nav.ts`); without one, it goes straight. */
+  route?(from: Vector3, to: Vector3): Route | null;
 }
 
 /** Somewhere to sit or lie: where the feet go, and which way the figure faces there. A bedroll's figure lies with its head behind it. */
 export interface Spot { feet: Vector3; facing: number; lift?: number }
 
-interface Order { to: Vector3; pace: number; near: number; then: (() => void) | null; best: number; since: number }
+/** Being sent somewhere: the way there (each point in turn), how fast, how near is there, and what to do on arrival. */
+interface Order { path: Vector3[]; at: number; pace: number; near: number; then: (() => void) | null; best: number; since: number; hopped: number }
 
 /**
  * The climb onto a ledge (`ClimbUp_1m_RM`) is a vault from a run: it starts with the ledge's face this far ahead of the feet (where the
@@ -135,23 +139,61 @@ export class Figure {
     }
   }
 
-  /** Sends it to `to`, at `pace`; `then` is done on arrival, which is within `near` of it. */
-  goTo(to: Vector3, pace: Pace = 'walk', then: (() => void) | null = null, near = 0.1): void {
+  /**
+   * Sends it to `to`, at `pace`, by the way the world finds (round what stands in the way, through doors, up stairs, over ledges); `then`
+   * is done on arrival, which is within `near` of it. Where `to` cannot be reached it goes as near as it can, and does nothing there.
+   * Whether it can get there.
+   */
+  goTo(to: Vector3, pace: Pace = 'walk', then: (() => void) | null = null, near = 0.1): boolean {
     this.wake();
-    this.order = { to: to.clone(), pace: this.crouched ? PACES.crouch : PACES[pace], near, then, best: Infinity, since: 0 };
+    const r = this.world.route?.(this.body.position, to);
+    const path = r?.points.length ? r.points.map((q) => q.clone()) : [to.clone()];
+    // (A way that ends within some half a metre of the place, on its level, gets there: the place for the feet before a seat lies closer
+    // to it than the body can come, and is reached as the figure turns to sit.)
+    const end = path[path.length - 1], close = Math.hypot(end.x - to.x, end.z - to.z) < Math.max(near, 0.3) + 0.6 && Math.abs(end.y - to.y) < 0.45;
+    const reached = !r || r.reached || close;
+    this.order = { path, at: 0, pace: this.crouched ? PACES.crouch : PACES[pace], near: reached ? near : 0.3, then: reached ? then : () => { this.doing = 'as near as it could get'; }, best: Infinity, since: 0, hopped: 0 };
+    return reached;
+  }
+
+  /** Where it is going: the last point of its way. */
+  get goal(): Vector3 | null { return this.order ? this.order.path[this.order.path.length - 1] : null; }
+  /** The way it is going by, from where it is. */
+  get way(): Vector3[] { return this.order ? this.order.path.slice(this.order.at) : []; }
+
+  /** Goes to `spot`, turns to face as it says, and plays `clip` there (`then` instead, if given). */
+  doAt(spot: Spot, clip: string, pace: Pace = 'walk', then?: () => void): boolean {
+    return this.goTo(spot.feet, pace, () => this.align(spot, then ?? (() => this.play(clip))), 0.3);
+  }
+
+  /** Turns where it stands to face `facing`, and plays `clip`. */
+  doHere(facing: number, clip: string): void {
+    this.wake();
+    this.order = null;
+    if (this.state !== 'ground') this.toGround(0.2);
+    this.align({ feet: this.body.position.clone(), facing }, () => this.play(clip));
+  }
+
+  /** Stops whatever it is doing or going to, and stands; or gets up from where it sits or lies. */
+  stop(): void {
+    this.order = null;
+    this.want.set(0, 0);
+    if (this.crouched) this.crouched = false;
+    if (['seated', 'sitting', 'asleep', 'lyingDown'].includes(this.state)) this.standUp();
+    else if (this.state === 'act' || this.state === 'land') this.toGround(0.25);
   }
 
   /**
    * Goes to a seat and sits on it. (Its feet stand closer to the seat than the body, a post as broad as the figure, can come: it walks
    * up to the seat, and is then set where it is to stand, as it turns.)
    */
-  sitOn(seat: Spot, pace: Pace = 'walk'): void {
-    this.goTo(seat.feet, pace, () => this.align(seat, 'sitting'), 0.45);
+  sitOn(seat: Spot, pace: Pace = 'walk'): boolean {
+    return this.goTo(seat.feet, pace, () => this.align(seat, 'sitting'), 0.45);
   }
 
-  /** Goes to a bedroll and lies down on it, to sleep. */
-  lieOn(bed: Spot, pace: Pace = 'walk'): void {
-    this.goTo(bed.feet, pace, () => this.align(bed, 'lyingDown'), 0.3);
+  /** Goes to a bedroll, or any ground, and lies down there, to sleep. */
+  lieOn(bed: Spot, pace: Pace = 'walk'): boolean {
+    return this.goTo(bed.feet, pace, () => this.align(bed, 'lyingDown'), 0.3);
   }
 
   /** Gets up from where it sits or lies; or stops what it plays. */
@@ -209,8 +251,9 @@ export class Figure {
         break;
       case 'act': this.acting(steer); break;
       case 'align': this.aligning(dt); break;
-      case 'sitting': if (this.done()) { this.show(this.move('Sitting_Idle_Loop'), 0.25, LoopRepeat); this.enter('seated'); } break;
-      case 'rising': if (this.done()) { this.body.stand(this.body.position, this.facing); this.toGround(0.25); } break;
+      // (A seat higher or lower than the clips' raises or lowers the figure as it sits down, and back as it gets up.)
+      case 'sitting': this.lift = (this.spot?.lift ?? 0) * Math.min(1, this.stateTime / (this.clipTime() * 0.7)); if (this.done()) { this.show(this.move('Sitting_Idle_Loop'), 0.25, LoopRepeat); this.enter('seated'); } break;
+      case 'rising': this.lift = (this.spot?.lift ?? 0) * Math.max(0, 1 - this.stateTime / (this.clipTime() * 0.6)); if (this.done()) { this.lift = 0; this.body.stand(this.body.position, this.facing); this.toGround(0.25); } break;
       case 'lyingDown': this.lift = (this.spot?.lift ?? 0) * Math.min(1, this.stateTime / this.clipTime()); if (this.done()) this.enter('asleep'); break;
       case 'gettingUp': this.lift = (this.spot?.lift ?? 0) * Math.max(0, 1 - this.stateTime / (this.clipTime() * 0.5)); if (this.done()) { this.lift = 0; this.toGround(0.25); } break;
       case 'climb': this.climbing(); break;
@@ -262,23 +305,30 @@ export class Figure {
   private onGround(dt: number, steer: Vector2): void {
     const o = this.order;
     if (o) {
-      const p = this.body.position, dx = o.to.x - p.x, dz = o.to.z - p.z, d = Math.hypot(dx, dz);
-      if (d < o.near) {
+      const p = this.body.position;
+      // (On to the next point of the way once near enough this one, and on the same floor: a stair can pass under its own top.)
+      while (o.at < o.path.length - 1 && Math.hypot(o.path[o.at].x - p.x, o.path[o.at].z - p.z) < 0.45 && Math.abs(o.path[o.at].y - p.y) < 0.7) { o.at++; o.best = Infinity; o.since = 0; }
+      const to = o.path[o.at], last = o.at === o.path.length - 1, dx = to.x - p.x, dz = to.z - p.z, d = Math.hypot(dx, dz);
+      if (last && d < o.near) {
         this.order = null;
         o.then?.();
         return;
       }
       // (Slowing to a stop over the last metres, at most as fast as the pace and never so slow that it does not get there.)
-      const speed = Math.min(o.pace, Math.max(0.6, d * 1.6));
+      const speed = last ? Math.min(o.pace, Math.max(0.6, d * 1.6)) : o.pace;
       steer.set((dx / d) * speed, (dz / d) * speed);
-      // Stopped short by something: a ledge it can climb is climbed; anything else, it gives up after a while.
+      // Stopped short by something: a ledge it can climb is climbed, one a little too high to step onto is hopped onto; anything else,
+      // it gives up after a while.
       if (d < o.best - 0.05) { o.best = d; o.since = 0; } else o.since += dt;
-      if (o.since > 0.35 && this.climbIfLedge(Math.atan2(dx, dz))) return;
-      if (o.since > 1.5) { this.order = null; this.doing = 'stuck'; }
+      if (o.since > 0.3 && this.climbIfLedge(Math.atan2(dx, dz))) return;
+      if (o.since > 0.3 && o.hopped < 3 && this.hopIfStep(Math.atan2(dx, dz))) { o.hopped++; o.since = 0; return; }
+      if (o.since > 2) { this.order = null; this.doing = 'stuck'; }
     } else steer.copy(this.want);
     if (!this.body.grounded) {
       this.offGround += dt;
-      if (this.offGround > 0.15) { this.enter('air'); this.show(this.move('Jump_Loop'), 0.3, LoopRepeat); }
+      // (Going down a stair the body leaves each step for a moment: it is in the air only with the ground well below it, or for long.)
+      const p = this.body.position, below = this.offGround > 0.15 ? this.world.heightAt(p.x, p.z, p.y + 0.05) : null;
+      if (this.offGround > 0.15 && (below === null || p.y - below > 0.6 || this.offGround > 0.6)) { this.enter('air'); this.show(this.move('Jump_Loop'), 0.3, LoopRepeat); }
     } else this.offGround = 0;
     const s = Math.hypot(this.body.motion.x, this.body.motion.z);
     if (this.state === 'ground') this.doing = s < 0.2 ? (this.crouched ? 'crouching' : 'standing') : `${this.crouched ? 'creeping' : s < 2.2 ? 'walking' : s < 5.5 ? 'running' : 'sprinting'} ${s.toFixed(1)} m/s`;
@@ -287,7 +337,7 @@ export class Figure {
   private inAir(dt: number, steer: Vector2): void {
     const o = this.order;
     if (o) {
-      const p = this.body.position, dx = o.to.x - p.x, dz = o.to.z - p.z, d = Math.hypot(dx, dz) || 1;
+      const p = this.body.position, to = o.path[o.at], dx = to.x - p.x, dz = to.z - p.z, d = Math.hypot(dx, dz) || 1;
       steer.set((dx / d) * o.pace, (dz / d) * o.pace);
     } else steer.copy(this.want);
     this.fallSpeed = Math.max(this.fallSpeed, -this.body.motion.y);
@@ -326,14 +376,14 @@ export class Figure {
     if (a.loop === LoopOnce && this.done() && !this.stay) this.toGround(0.3);
   }
 
-  /** Comes to stand exactly where it sits or lies, facing the right way, before doing so. */
-  private align(spot: Spot, then: FigureState): void {
+  /** Comes to stand exactly where it sits or lies (or does anything at a spot), facing the right way, before doing so. */
+  private align(spot: Spot, then: FigureState | (() => void)): void {
     this.spot = spot;
     this.alignTo = then;
     this.enter('align');
     this.doing = 'turning';
   }
-  private alignTo: FigureState = 'sitting';
+  private alignTo: FigureState | (() => void) = 'sitting';
 
   private aligning(dt: number): void {
     const s = this.spot!, k = 1 - Math.exp(-dt * 12);
@@ -343,7 +393,8 @@ export class Figure {
     if (Math.abs(turn) < 0.05 || this.stateTime > 0.6) {
       this.facing = s.facing;
       this.body.stand(s.feet, this.facing);
-      this.enter(this.alignTo);
+      const then = this.alignTo;
+      if (typeof then === 'function') { this.toGround(0.1); then(); } else this.enter(then);
     }
   }
 
@@ -355,11 +406,16 @@ export class Figure {
       const h = this.world.heightAt(p.x + fx * d, p.z + fz * d, p.y + 2.2);
       if (h !== null && h - p.y > 0.45) { face = d; top = h - p.y; break; }
     }
+    // (A rock's side is rounded: its height is the highest it rises just beyond where its face begins, not where it first passes the knee.)
+    if (face >= 0) for (let d = face; d <= face + 0.5; d += 0.05) {
+      const h = this.world.heightAt(p.x + fx * d, p.z + fz * d, p.y + 2.2);
+      if (h !== null) top = Math.max(top, h - p.y);
+    }
     if (face < 0 || top < CLIMB.low || top > CLIMB.high) return false;
-    // (Something to stand on beyond the edge, level with it.)
+    // (Something to stand on beyond the edge, near enough level with it: on rock, a little up or down.)
     const beyond = this.world.heightAt(p.x + fx * (face + 0.5), p.z + fz * (face + 0.5), p.y + 2.2);
-    if (beyond === null || Math.abs(beyond - p.y - top) > 0.15) return false;
-    this.order = null;
+    if (beyond === null || beyond - p.y - top > 0.4 || beyond - p.y - top < -0.35) return false;
+    // (Sent somewhere, it goes on there once it has climbed.)
     this.facing = towards;
     this.climbFrom.copy(p);
     this.climbRise = top;
@@ -368,6 +424,22 @@ export class Figure {
     this.doing = 'climbing';
     this.show(this.move(CLIMB.clip), 0.1, LoopOnce);
     return true;
+  }
+
+  /** Hops, if there is a ledge ahead (towards `towards`) too high to step onto and too low to climb. Whether it did. */
+  private hopIfStep(towards: number): boolean {
+    const p = this.body.position, fx = Math.sin(towards), fz = Math.cos(towards);
+    for (let d = 0.3; d <= 0.8; d += 0.05) {
+      const h = this.world.heightAt(p.x + fx * d, p.z + fz * d, p.y + 1.6);
+      if (h === null || h - p.y < 0.25) continue;
+      if (h - p.y > 0.7) return false;
+      this.facing = towards;
+      this.body.jump();
+      this.enter('air');
+      this.show(this.move('Jump_Start'), 0.08, LoopOnce, 0.12);
+      return true;
+    }
+    return false;
   }
 
   private climbing(): void {

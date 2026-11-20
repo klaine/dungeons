@@ -74,6 +74,21 @@
     #foot .dim { opacity: .62; }
     #foot .bad { color: var(--bad); }
     #foot .good { color: var(--good); }
+    /* The orders a chosen figure can be given: a palette along the foot of the picture, in groups; the order armed in brass, those done
+       at once with a dashed edge, the key that arms one beside it; under them, what the figure is doing and what a click will do. */
+    #orders { position: fixed; left: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; pointer-events: none;
+      padding: 0 max(16px, env(safe-area-inset-left, 0px)); box-sizing: border-box; }
+    #orders[hidden] { display: none; }
+    #orders .groups { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; max-width: 100%; }
+    #orders .group { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; pointer-events: auto; }
+    #orders .label { font: 600 10px/1 var(--serif); letter-spacing: .12em; text-transform: uppercase; color: var(--brass); margin: 0 4px 0 3px; }
+    #orders button { padding: 1px 6px; font-size: 11px; }
+    #orders button.on { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+    #orders button.now { border-style: dashed; }
+    #orders kbd { font: 9px var(--sans); opacity: .55; margin-left: 4px; }
+    #orders button.on kbd { opacity: .8; }
+    #orders .hint { background: var(--sheet); border: 1px solid var(--rule); border-radius: 3px; padding: 3px 10px; max-width: 100%; text-align: center; color: var(--ink-strong); pointer-events: auto; }
+    @media (max-width: 720px) { #orders .label { display: none; } #orders .group { padding: 3px; } }
     /* On a narrow screen the panel is a sheet along the foot of the picture. */
     @media (max-width: 720px) {
       #panel { top: auto; left: 0; width: auto; height: 44vh; border-left: 0; border-top: 1px solid var(--rule);

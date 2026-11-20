@@ -38,6 +38,23 @@ export interface Rigged {
 
 const HIPS = 'pelvis', ROOT = 'root';
 
+/**
+ * A figure's file: from the page itself where it carries them; else fetched from the folder, as it is or, where a host serves only
+ * text beside a page (`__figureText`), written out as text (`clips.glb.txt`).
+ */
+async function loadFile(loader: GLTFLoader, base: string, name: string): Promise<GLTF> {
+  const g = globalThis as { __figureFiles?: Record<string, string>; __figureText?: boolean };
+  let text = g.__figureFiles?.[name];
+  if (!text && g.__figureText) {
+    const res = await fetch(base + name + '.txt');
+    if (!res.ok) throw new Error(`${name}: ${res.status}`);
+    text = await res.text();
+  }
+  if (!text) return loader.loadAsync(base + name);
+  const bytes = Uint8Array.from(atob(text.trim()), (c) => c.charCodeAt(0));
+  return loader.parseAsync(bytes.buffer, '');
+}
+
 /** The height of a model's hips as it stands rigged, at rest. */
 function hipsOf(model: Object3D): number {
   model.updateMatrixWorld(true);
@@ -54,10 +71,13 @@ export class FigureLibrary {
     this.sources.set('mannequin', Promise.resolve(mannequin));
   }
 
-  /** Loads the clips (with the male mannequin) from `base`, the folder that holds the figures' files. */
+  /**
+   * Loads the clips (with the male mannequin) from `base`, the folder that holds the figures' files. (A page that is one file, with no
+   * folder beside it, carries them in itself, written out in `__figureFiles`: see `tools/buildingLabPage.mjs`.)
+   */
   static async load(base: string): Promise<FigureLibrary> {
     const loader = new GLTFLoader();
-    const gltf = await loader.loadAsync(base + 'clips.glb');
+    const gltf = await loadFile(loader, base, 'clips.glb');
     return new FigureLibrary(base, loader, gltf.animations, hipsOf(gltf.scene), gltf);
   }
 
@@ -67,7 +87,7 @@ export class FigureLibrary {
   async body(id: string): Promise<Rigged> {
     const kind = BODIES.find((b) => b.id === id) ?? BODIES[0];
     let source = this.sources.get(kind.id);
-    if (!source) { source = this.loader.loadAsync(this.base + kind.file); this.sources.set(kind.id, source); }
+    if (!source) { source = loadFile(this.loader, this.base, kind.file); this.sources.set(kind.id, source); }
     const gltf = await source;
     const model = cloneRigged(gltf.scene);
     model.traverse((o) => {

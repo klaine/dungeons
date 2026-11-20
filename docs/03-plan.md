@@ -119,7 +119,7 @@ docs/
 - **Example viewer.** `examples/viewer/` reads an exported model and document without using any of the tool's code: it cuts the building open at a chosen height, names the rooms, and draws the solver's route through them.
 - **Gallery.** `gallery.html` generates places a dozen at a time and shows each as a plan with its description, loop count and route length. It can be asked for places with a court, a cave, a portcullis, a hidden chamber or a fallen roof, or for small or large ones. A dozen take about a fifth of a second, because only the document is generated; choosing one opens it in the explorer.
 - **Building lab.** `lab/buildings.html` is a square apart from the game where any kind of building the game builds can be added, moved, turned, scaled and reshaped by its measures or by dragging arrows on its faces, built by the game's own builders and drawn with its materials; what is set out can be undone, is kept in the browser and can be saved as site documents. See item 25 below and the README.
-- **Figure lab.** `lab/figures.html` is a stage apart from the game where figures are steered from behind or sent about by pointing: they walk, run, sprint, creep, jump, climb ledges, sit, lie down and get up, and play any of 85 clips. They are not yet in the game or the world. See item 53 below and the README.
+- **Figure lab.** `lab/figures.html` is a stage apart from the game where figures are steered from behind or sent about by pointing: they walk, run, sprint, creep, jump, climb ledges, sit, lie down and get up, and play any of 85 clips. They are also in the building lab, added as buildings are and given orders from a palette, finding their way through doors and up stairs. They are not yet in the game or the world. See items 53 and 54 below and the README.
 - **Range.** `npm run range` generates 2,000 sites and charts what came out: loops against route length, how often each feature appears, plan shapes, and rooms and unlit rooms per site. Each seed has a size to aim for, so houses run from five rooms to eleven.
 - **Map.** A plan of the site is drawn from the same document and shown as a minimap. Out of doors it takes in the whole valley, with the track, the pond and the stones; indoors it shows the house alone. It fills in as the player explores: places entered are drawn in full, places seen through an open doorway are sketched, the rest is left off. Shut doors and keys seen but not taken are marked.
 - **Light and dark.** Each place is lit by day, by torches, or deliberately left dark; the player carries a small light for the dark ones. The plan map shades unlit rooms.
@@ -448,6 +448,34 @@ The machine this is developed on now has a graphics card, and tablets were repor
     ladders and crawling (not in the free clips); feet set on sloping ground (they stand level on a slope); a way found round things
     when sent (a figure goes straight, and gives up when stopped); figures in one another's way; hair on the base characters; the figures
     in the game and in the world; and no frame was timed on a graphics card.
+
+54. **Figures in the building lab, given orders.** Asked: "create me an artifact where the view is from upwards angle and the player can
+    select the character and give it command (point & click style) from a palette of actions", then "can we merge this with the main lab
+    with buildings and plants etc.", "so the user can add a character to the environment, like they can add a building. but if they
+    choose the character, then they can issue actions", and "could they climb boulders or stairs if commanded to move to indoors location
+    or on top of rock formation?". *Done:* the building lab adds figures as it adds buildings (`lab/figureCrew.ts`); clicking one chooses
+    it, the view turns to look down on it from some sixty degrees and follows it, and a palette of orders comes up: ways of going (walk,
+    run, sneak), resting (sit on whatever is at a seat's height, sleep where clicked), work at a place (use, chop, plant, water, reap,
+    mend, open, lift, push), talking to another figure (which turns and talks back), fighting (a figure punched is hit, one struck at
+    with a sword blocks), and clips done at once; an order that wants a place waits for a click there, and a right click walks. The
+    figures find their way (`src/figures/nav.ts`) over everything solid the lab has built (`src/figures/solids.ts`: each building, tree and
+    stone a tree of bounds in its own frame, so that moving one makes nothing again; the painted rock and plants; the paving): a grid of
+    floors of 35 centimetres in layers, every surface facing the sky with 1.7 metres over it, so that storeys, stairs and landings are
+    floors of their own, joined where a figure could step (0.55), climb (0.75 to 1.3, with room on top) or drop (3.2), and where a slab
+    between two cells meets nothing solid up to a figure's height (rays at two heights went between a stair's balusters); floors too
+    narrow to stand on (a handrail's top) left out; searched by A*, leaning on the distance left, then pulled straight over open floor;
+    most places asked for are gone to straight, without a search. A figure follows its way point by point, climbs a ledge or hops onto a
+    low one when stopped at it, and goes as near as it can where it cannot get. What figures there are is kept in the browser. The lab as
+    one page (`tools/buildingLabPage.mjs`) carries the figures in it, or writes them as text beside it for a host that serves text but not
+    models; published so as the building lab's artifact. *Checked* (`tools/browser/crew.cjs`, headless Chromium in software, figures
+    stepped thirty times a second): round the classical building to behind it, the way found in some 400 milliseconds over 13,000 cells
+    in software; in at its door and up its stair of two flights and a landing to the first floor in 22 seconds, on to the second in 12,
+    and down and out again; onto rock painted 1.6 metres high (its rounded side climbed at the second try); onto the bench before a
+    timber house, sitting; talking, and a punch; all passed. A boulder 2.5 metres high is not climbed, nor rock that is a cliff of three
+    metres: they go as near as they can. Making every building solid took 184 milliseconds in all for the lab's ten. *Not yet:* ladders;
+    ways between figures (they walk through one another); a search in the background for long ways round, which can take half a second
+    on a slow machine; what is in the hands (an axe for chopping, a sword); and the orders' clips are the free libraries', so some
+    (talking, mending) are the same whatever is clicked.
 
 ## Risks
 
