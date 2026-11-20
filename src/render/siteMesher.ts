@@ -15,7 +15,7 @@ import { beam, plank, stoneStyles } from './geom/styles';
 import { FAR_RING, crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
-import { buildBuilding, solids } from './buildings';
+import { buildBuilding, buildingTools, solids } from './buildings';
 import { placeHouse } from './housePlacing';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
@@ -961,7 +961,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           const off = castleOff(c, x, z);
           if (off <= 0) return p.floor - 0.03;
           const low = floor - castleBasin(x, z);
-          return p.floor - 0.03 + (low - p.floor + 0.03) * smooth((off - 1.5) / 30) * level;
+          // (On a seat of its own, at the brow of the land over the valley, the ground about its wall comes back to the land within ten
+          // metres: drawn out over thirty, as about a hill made for it, it stood out from the brow as a terrace.)
+          return p.floor - 0.03 + (low - p.floor + 0.03) * smooth((off - 1.5) / (c.rise > 0 ? 30 : 10)) * level;
         }
         return p.floor - 0.03 + (floor - p.floor) * smooth((z - p.z1 - 2) / 30) * level;
       }
@@ -1397,6 +1399,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         if (d < r * 1.7) { const k = 1 - smooth((d - r * 0.9) / (r * 0.75)); y += (campBase - y) * k; even = Math.min(even, 1 - 0.9 * k); }
       }
       y += heapAt(x, z);
+      // (Where two houses' levelled ground meets, the nearer house's is the ground: laid one after the other, the later pulled the ground
+      // at the walls of the one before to its own level, and on a slope the earlier stood a metre over the ground at its side.)
+      let lay: { k: number; d: number; y: number } | null = null;
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
         // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
@@ -1412,9 +1417,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           if (v < -9 || aside > 14 || v > b.d + 38) continue;
           k = v < 0 ? 1 - smooth((Math.max(aside, -v - 2.4) - 0.9) / 3.2) : (1 - smooth((aside - 1.2) / 11)) * (1 - smooth((v - b.d - 22) / 16));
         }
-        y += (b.base + groundOf(b, v, u) - y) * k;
-        even = Math.min(even, 1 - k);
+        if (!lay || k > lay.k + 1e-6 || (k > lay.k - 1e-6 && d < lay.d)) lay = { k, d, y: b.base + groundOf(b, v, u) };
       }
+      if (lay) { y += (lay.y - y) * lay.k; even = Math.min(even, 1 - lay.k); }
       for (const t of towers) {
         const d = Math.max(Math.abs(x - t.x), Math.abs(z - t.z));
         if (d > t.half + 5) continue;
@@ -3541,9 +3546,26 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     houses.forEach((b, i) => {
       wild.group = 'house';
       // (Made in meshes of its own and then laid, so that its rooms can be marked as indoors and the feet of its walls damp: see `placeHouse`.)
-      const local = new Map<string, MeshBuilder>();
-      buildBuilding(b, b.base, (material) => { if (!local.has(material)) local.set(material, new MeshBuilder()); return local.get(material)!; }, rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0 && !b.wheel);
-      placeHouse(b, b.base, local, (material) => wild.mesh(material), { facing: b.turn ?? (b.faces === 'w' ? Math.PI : 0), foot: ground });
+      const local = new Map<string, MeshBuilder>(), into = (material: string) => { if (!local.has(material)) local.set(material, new MeshBuilder()); return local.get(material)!; };
+      // (A house turned to face a road wherever it bends is built facing west about its own middle and turned into place, as a town's
+      // are: built where it stands, the builder set it square to the valley, while its ground was levelled, and the ground's sheet cut
+      // away, for it as it was turned, and its corners stood out over the slope.)
+      const turned = b.turn !== undefined, own: Building = turned ? { ...b, x: 0, z: 0, faces: 'w', turn: undefined } : b, stone: Colour = [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]];
+      buildBuilding(own, b.base, into, rng.fork(`building${i}`), stone, i === 0 && !b.wheel);
+      // Its footing: where the ground about it lies below its floor, as it does on a slope, stone from under its floor down into the
+      // ground under its main block and its wings, as a town's houses have.
+      {
+        let low = b.base;
+        for (const r of b.rects) for (const [u, v] of [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1], [(r.u0 + r.u1) / 2, r.v0], [(r.u0 + r.u1) / 2, r.v1], [r.u0, (r.v0 + r.v1) / 2], [r.u1, (r.v0 + r.v1) / 2]]) {
+          const [x, z] = fromFront(b, u, v);
+          low = Math.min(low, ground(x, z));
+        }
+        if (low < b.base - 0.05) {
+          const { box } = buildingTools(own, b.base, into), tone: Colour = [stone[0] * 0.85, stone[1] * 0.85, stone[2] * 0.85];
+          for (const r of b.rects) box('stone', r.u0 - 0.05, r.u1 + 0.05, low - b.base - 0.6, 0.02, r.v0 - 0.05, r.v1 + 0.05, tone);
+        }
+      }
+      placeHouse(b, b.base, local, (material) => wild.mesh(material), { facing: b.turn ?? (b.faces === 'w' ? Math.PI : 0), foot: ground, ...(turned ? { turn: { angle: b.turn! - Math.PI, x: b.x, z: b.z } } : {}) });
       wild.group = 'wild';
       // A mill's waterwheel: two rims of short timbers, spokes from the hub to each, paddles between the rims, and the axle into the wall.
       if (b.wheel) {

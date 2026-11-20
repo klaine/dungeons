@@ -6,7 +6,7 @@ import { layOutTown as layOutHarbourTown } from './town';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { castleOff, layOutCastle } from './castle';
-import { armRise, armsOf, edgeAt, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
+import { armRise, armsOf, edgeAt, findSeat, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
 import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
@@ -316,7 +316,17 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
       if (spots.length) found = { seed, spot: spots[Math.min(spots.length - 1, q.int(0, 2))] };
     }
   }
-  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), { ...house, z0: back }, free, found);
+  // The castle's seat: the land's own high ground beside the valley's head, where it has any (`findSeat`). The castle stands on it, and
+  // the valley is reckoned from it: its south runs from the castle down the slope to the stream, and on down the stream; and its
+  // village stands along the way up. (Asked: the castle on the high ground beside the valley, the village planned along the slope under
+  // it, rather than on the valley's floor at its head on a hill made for it; and a larger play area, if that is what fits them.)
+  let seated = false, extra = 0;
+  if (found) {
+    const cx0 = Math.min(house.x0, meadow.x0), cx1 = Math.max(house.x1, meadow.x1), reach = Math.max(cx1 - cx0, meadow.z1 - back) / 2 + 11;
+    const seat = findSeat(found, reach, (meadow.x0 + meadow.x1) / 2 - (cx0 + cx1) / 2, (meadow.z0 + meadow.z1) / 2 - (back + meadow.z1) / 2, rng.fork('seat'));
+    if (seat) { found = { ...found, spot: seat.spot }; seated = true; extra = seat.extra; }
+  }
+  const { valley: v, middle } = shapeValley(meadow, rng.fork('shape'), { ...house, z0: back }, free, found, extra, seated);
   site.valley = v;
   const within = v.west.slice(0, Math.round((v.mouth - v.z0) / v.step) + 1), withinE = v.east.slice(0, within.length);
   // (The box that holds it, for whatever only needs to know how far it reaches.)
@@ -324,25 +334,37 @@ function layOutValley(site: Site, meadow: Place, doorX: number, rng: Rng, worn =
   site.grounds = g;
   // The castle about the house, on its hill: laid out first, so that the road can start at its gate.
   const castle = layOutCastle(site, meadow, { ...house, z0: back }, doorX, rng.fork('castle'));
+  // (On its seat it stands on the land's own height: no hill is made for it.)
+  if (seated) castle.rise = 0;
   site.castle = castle;
   // The track goes down it from the door to the gap, wandering, but never close under either side. (From the door it crosses the
   // bailey to the gate, goes out through it, and down the castle's hill on a slant, as a road up to a castle on a hill goes, turning
   // towards the middle of the valley; then on down the valley.)
   const track: [number, number][] = [[doorX, meadow.z0]];
+  // (Below a castle on its seat, the valley's middle line evened over thirty-odd metres: it turns where the way down the hillside meets
+  // the stream, and a road follows it round a bend, not a corner.)
+  const along_ = seated ? (z: number) => { let sum = 0; for (let k = -4; k <= 4; k++) sum += middle(z + k * 4); return sum / 9; } : middle;
   const g0 = castle.gate, ox = Math.cos(g0.out), oz = Math.sin(g0.out);
   track.push([round(doorX + (g0.x - doorX) * 0.5), round(meadow.z0 + (g0.z - 3 - meadow.z0) * 0.6)], [round(g0.x - ox * 3.5), round(g0.z - oz * 3.5)], [g0.x, g0.z], [round(g0.x + ox * 4), round(g0.z + oz * 4)]);
   {
     // The slant: some thirty metres at forty degrees or so off straight out, towards the valley's middle and always down it.
-    const mid = middle(g0.z + 30), side = Math.sign(mid - g0.x) || (rng.chance(0.5) ? 1 : -1), slant = rng.range(0.55, 0.8) * side;
+    // (Below a castle on its seat, the way the valley's middle line goes down the hillside: slanting the other way, the road crossed
+    // back over the slope in a stride where the two met.)
+    const mid = middle(g0.z + 30), side = (seated ? Math.sign(along_(g0.z + 40) - along_(g0.z + 4)) : Math.sign(mid - g0.x)) || (rng.chance(0.5) ? 1 : -1), slant = rng.range(0.55, 0.8) * side;
     let a = g0.out + slant, px = g0.x + ox * 4, pz = g0.z + oz * 4;
     if (Math.sin(a) < 0.35) a = Math.atan2(Math.max(0.35, Math.sin(a)), Math.cos(a));
-    for (let k = 0; k < 4; k++) { px += Math.cos(a) * 8; pz += Math.sin(a) * 8; a += (Math.PI / 2 - a) * 0.35; track.push([round(px), round(pz)]); }
+    // (Below a castle on its seat the road goes straight on into its way down the hillside, which it follows from the gate.)
+    if (!seated) for (let k = 0; k < 4; k++) { px += Math.cos(a) * 8; pz += Math.sin(a) * 8; a += (Math.PI / 2 - a) * 0.35; track.push([round(px), round(pz)]); }
   }
   let x = track[track.length - 1][0];
+  // (Below a castle on its seat the way follows the valley's middle line down the hillside, wandering some metres either side of it:
+  // wandering freely between the sides, it ran on down the slope and then crossed the hillside in a stride where the side came in.)
+  let off = x - along_(track[track.length - 1][1]);
   for (let z = Math.ceil((track[track.length - 1][1] + 6) / 2) * 2; z <= v.mouth - 5; z += 8) {
     if (z > meadow.z1 - 2) {
       const w = edgeAt(v, 'w', z) + 13, e = edgeAt(v, 'e', z) - 13;
-      x = w < e ? Math.min(e, Math.max(w, x + rng.range(-6.5, 6.5))) : (w + e) / 2;
+      if (seated) { off = off * 0.8 + rng.range(-6.5, 6.5) * 0.45; x = along_(z) + off; }
+      x = w < e ? Math.min(e, Math.max(w, seated ? x : x + rng.range(-6.5, 6.5))) : (w + e) / 2;
       // Towards the gap it draws in to the middle of it.
       const near = Math.min(1, Math.max(0, (z - (v.mouth - 30)) / 24));
       x += (middle(v.mouth) - x) * near * near;
@@ -1608,7 +1630,10 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
   const crossing = rng.fork('crossing'), crosses = crossing.chance(0.4) && !v.terrain;
   // (Below a castle's hill, where the land it was lowered by comes back to itself: a spring on its flank ran in a bed cut deep through
   // the hill to keep falling, a trench round the castle.)
-  const headZ = site.castle ? Math.max(...site.castle.wall.map((q) => q[1])) + 45 : meadow.z1 + 5;
+  // (Below a castle on its own high ground, below the village on the slope under it: rising on the slope, a stream ran down through the
+  // village in a bed cut deep to keep falling across the hillside, and undercut the houses beside it.)
+  const seated = !!site.castle && site.castle.rise === 0 && !!site.zones;
+  const headZ = seated ? site.zones!.village[1] + 10 : site.castle ? Math.max(...site.castle.wall.map((q) => q[1])) + 45 : meadow.z1 + 5;
   const over = (start: (towards: [number, number]) => [number, number], wide: number, but?: Feature): Stream | null => {
     for (let tries = 0; tries < 6; tries++) {
       const zc = crossing.range(meadow.z1 + 12, v.mouth - 26), xc = trackX(zc);
@@ -1686,6 +1711,26 @@ function layOutWater(site: Site, meadow: Place, fromTrack: (x: number, z: number
     }
     st.course.push(beside(v.mouth - 6), beside(v.mouth + 2), beside(v.mouth + 14), beside(v.mouth + 30), beside(v.mouth + 52));
     st.to = 'out';
+  }
+  // (In a valley found in the land, no water whose bed would be cut more than two and a half metres into the land to keep falling, nor
+  // whose banks, laid back by the depth of its cut, would reach under a building: its bed never rises, and where the land rose across
+  // its way it ran in a gully, cut away the ground a house was levelled on, and the house stood over the ice of it.)
+  if (v.terrain) {
+    const at = (x: number, z: number) => valleyLand(v, meadow.floor, meadow, x, z);
+    const sound = (st: Stream): boolean => {
+      let bed = Infinity;
+      for (let k = 0; k + 1 < st.course.length; k++) {
+        const [ax, az] = st.course[k], [bx, bz] = st.course[k + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2));
+        for (let j = 0; j < n; j++) {
+          const x = ax + ((bx - ax) * j) / n, z = az + ((bz - az) * j) / n, y = at(x, z);
+          bed = Math.min(bed, y - 0.3);
+          const cut = y - bed;
+          if (cut > 2.5 || (cut > 0.8 && !clearOfBuildings(site, x, z, st.width / 2 + 0.7 + cut * 1.3 + 1))) return false;
+        }
+      }
+      return true;
+    };
+    for (let k = streams.length - 1; k >= 0; k--) if (!sound(streams[k])) streams.splice(k, 1);
   }
   // Some of the water that rises under the rim comes over it instead, as a fall: the bigger the stream the likelier.
   const falls = rng.fork('falls');

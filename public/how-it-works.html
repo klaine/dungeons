@@ -432,7 +432,7 @@ footer.site a { margin: 0 6px; }
     <p>The same house, from the same seed, can stand in four kinds of setting. The setting is laid out after the house, each by a function of its own (<code>layOutValley</code>, <code>layOutIsland</code>, <code>layOutMountain</code>, <code>layOutHarbourTown</code>), and everything it puts down goes into the document too.</p>
   </div>
   <div class="cards">
-    <div class="card"><span class="tag">Default</span><h4>A valley head</h4><p>You arrive at the foot of a valley, in a forest, and walk up past walled fields and a pasture with sheep, through a small village, to a castle at its head: a curtain wall with its gate between two towers, a tower or two more at the back, and inside it the house as the castle's hall and keep. Two or three of standing stones, a pond with a landing stage and a ruin lie along the way, and perhaps a mill, a charcoal burners' camp or a mine. (<code>?settle=</code> still asks for a hamlet, a manor or a street of brick houses.)</p></div>
+    <div class="card"><span class="tag">Default</span><h4>A valley head</h4><p>You arrive at the foot of a valley, in a forest, and walk up past walled fields and a pasture with sheep, through a small village on the slope under it, to a castle on the high ground over the valley's head, at the brow where the land falls away to the stream: a curtain wall with its gate between two towers, a tower or two more at the back, and inside it the house as the castle's hall and keep. Two or three of standing stones, a pond with a landing stage and a ruin lie along the way, and perhaps a mill, a charcoal burners' camp or a mine. (<code>?settle=</code> still asks for a hamlet, a manor or a street of brick houses.)</p></div>
     <div class="card"><span class="tag"><code>?place=island</code></span><h4>An island</h4><p>The house on high ground over sea cliffs. You arrive at a cove with a jetty, below a fishing hamlet, with a lighthouse whose stair you can climb and now and then a castle; the mainland lies across the water.</p></div>
     <div class="card"><span class="tag"><code>?place=mountain</code></span><h4>A mountain top</h4><p>The house as a hospice in a saddle under the summit, above a sea of cloud. You come up a ridge out of the cloud, and a path winds on up to the summit's cairn. Summer or winter, even odds.</p></div>
     <div class="card"><span class="tag"><code>?place=town</code></span><h4>A harbour town</h4><p>The house on a terrace at the head of the market square. You arrive at the harbour, with its quay, moles and light; streets of classical, timber-framed and wooden houses, shacks and red storehouses along the shore, then fields, woods and an outlook on the headland.</p></div>
@@ -675,7 +675,7 @@ footer.site a { margin: 0 6px; }
   <div class="stats">
     <div class="stat"><b>≈ 14 ms</b><span>a frame at 1024 × 768 where you arrive in a castle's valley, in the forest</span></div>
     <div class="stat"><b>9.5–10 ms</b><span>the same, looking at the castle or standing in the village</span></div>
-    <div class="stat"><b>≈ 800,000</b><span>triangles of ground in a castle's valley, against 440,000 before valleys grew to hold one</span></div>
+    <div class="stat"><b>1.1–1.3 million</b><span>triangles of ground in a castle's valley, now that it runs down from the castle's seat on the high ground; 440,000 before valleys grew to hold one</span></div>
     <div class="stat"><b>≈ 1 GB</b><span>of video memory at ultra, whose textures take four times the painting</span></div>
   </div>
 </section>
@@ -702,7 +702,7 @@ footer.site a { margin: 0 6px; }
   <div class="stats">
     <div class="stat"><b>20–35 s</b><span>to make a world in its worker, in a headless browser</span></div>
     <div class="stat"><b>1–2 s</b><span>for each 5-metre tile of a world about the place</span></div>
-    <div class="stat"><b>39–44 s</b><span>to build a castle's valley without a browser, measured on three</span></div>
+    <div class="stat"><b>101–109 s</b><span>to build a castle's valley without a browser, measured on two, since its castle moved to the high ground (39–44 before)</span></div>
     <div class="stat"><b>33–36 s</b><span>to bake the light, measured in the browser on an island and a mountain top</span></div>
   </div>
 </section>
@@ -839,7 +839,7 @@ footer.site a { margin: 0 6px; }
       <tr><td>Rooms of any shape</td><td>Every room is a rectangle; caves are irregular hollows inside one</td></tr>
       <tr><td>Furniture recorded in the document</td><td>Furniture is chosen when the place is built, from each room's use, the one exception to "everything is decided in <code>src/core</code>"</td></tr>
       <tr><td>Furnished brick and canal houses; the sea cave in an island's mission</td><td>Their rooms are built, and empty; the sea cave can be explored but holds nothing needed</td></tr>
-      <tr><td>A keep that stands taller than the rest of the castle, stairs up to its wall-walk, a chapel that shows as one from outside, a dungeon furnished as one</td><td>The curtain wall, gate and towers; the chapel and the dungeon are rooms of the house</td></tr>
+      <tr><td>Stairs up to the castle's wall-walk, a chapel that shows as one from outside, a dungeon furnished as one, the village's houses set into the slope rather than levelled on it</td><td>The curtain wall, gate, towers and a keep taller than them, on the land's own high ground over the valley; the chapel and the dungeon are rooms of the house</td></tr>
       <tr><td>Sound that has been listened to</td><td>Levels measured in a headless browser</td></tr>
       <tr><td>Frames timed everywhere</td><td>Valleys and towns timed on a desktop graphics card; an island only seen running at the browser's cap in one person's browser; the WebGL 2 fallback not timed; an iPad not tried since the cliffs, trees, clouds and water went in</td></tr>
       <tr><td>The world as the game</td><td>Steps 1 and 2 of 6 (section 13); places are still entered one page at a time</td></tr>
