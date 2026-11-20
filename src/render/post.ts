@@ -1,10 +1,11 @@
 import {
-  CubeTexture, Data3DTexture, DepthTexture, DoubleSide, FloatType, Matrix4, MeshBasicMaterial, NearestFilter, Object3D,
+  CubeTexture, Data3DTexture, DepthTexture, DoubleSide, FloatType, MaterialBlending, Matrix4, MeshBasicMaterial, NearestFilter, Object3D,
   OrthographicCamera, PerspectiveCamera, RedFormat, Scene, UnsignedByteType, Vector3, Vector4, WebGPUCoordinateSystem,
 } from 'three';
-import { NodeMaterial, QuadMesh, RenderTarget, WebGPURenderer } from 'three/webgpu';
+import { BlendMode, NodeBuilder, NodeMaterial, QuadMesh, RenderTarget, WebGPURenderer } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { ao as gtao } from 'three/addons/tsl/display/GTAONode.js';
+import { traa } from 'three/addons/tsl/display/TRAANode.js';
 
 /**
  * Draws the scene, then follows each line of sight through the air to add fog that is lit by the
@@ -36,8 +37,8 @@ import { ao as gtao } from 'three/addons/tsl/display/GTAONode.js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type N = any;
 const {
-  Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getViewPosition, length, log2, max, min, mix, normalize, pass,
-  perspectiveDepthToViewZ, pow, reference, screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform,
+  Break, Fn, If, Loop, abs, clamp, cubeTexture, dot, exp, float, floor, fract, getScreenPosition, getViewPosition, length, log2, max, min, mix, mrt, normalize,
+  output, pass, perspectiveDepthToViewZ, positionPrevious, reflect, velocity, pow, reference, screenCoordinate, screenSize, screenUV, select, sin, smoothstep, sqrt, step, texture, texture3D, uniform,
   uniformArray, uv, vec2, vec3, vec4,
 } = TSL as N;
 
@@ -274,17 +275,42 @@ export class Atmosphere {
   private meterTarget = new RenderTarget(16, 9, { type: UnsignedByteType, depthBuffer: false });
   private meterQuad: QuadMesh;
 
+  /** Whether the picture is smoothed over the frames (`temporal`, below). */
+  readonly temporal: boolean;
+
   /**
    * `occlusion`: whether the light from all round is taken from what lies in the hollows of what is seen (see below); on unless asked not to.
+   *
+   * `temporal`: whether the finished picture is to be smoothed over the frames, each drawn from a fraction of a point aside from the
+   * last and laid over what went before (see `smoothOverFrames`). If so the scene is drawn once to each point of the picture, not four
+   * times, and with it how far each point has moved on the screen since the frame before; and whatever is reckoned from a pattern of
+   * noise across the picture, the steps through cloud and mist and the hollows of what is seen, takes a new pattern each frame, so that
+   * the patterns are averaged away. Otherwise each point is drawn four times, so that edges are smooth and leaves cut out by coverage.
    */
-  constructor(private scene: Scene, private camera: PerspectiveCamera, private renderer: WebGPURenderer, cloudSteps = 28, o: { occlusion?: boolean } = {}) {
-    // (Four samples to a point of the picture, so that edges are smooth and leaves can be cut out by coverage.)
-    this.scenePass = pass(scene, camera, { samples: 4 });
+  constructor(private scene: Scene, private camera: PerspectiveCamera, private renderer: WebGPURenderer, cloudSteps = 28, o: { occlusion?: boolean; temporal?: boolean; mirrors?: boolean } = {}) {
+    const temporal = (this.temporal = o.temporal === true);
+    this.scenePass = pass(scene, camera, { samples: temporal ? 0 : 4 });
+    // (And beside them, how nearly a mirror each point is and which way it faces, where its material says so: see `mirrors` below.)
+    const mirrors = temporal && o.mirrors !== false;
+    if (temporal) {
+      // (How nearly a mirror, as the length of the way it faces in the view: `mirrorOf`. Laid over what is under it as the material is,
+      // so that what is drawn through, rain, glass, smoke, which says nothing (and so says it with no opacity), leaves what is under it.)
+      const mirrorOf: N = Fn((builder: N) => builder.material?.userData?.mirror ?? vec4(0.5, 0.5, 0.5, 0))();
+      const outputs: N = mrt(mirrors ? { output, velocity, gloss: mirrorOf } : { output, velocity });
+      if (mirrors) outputs.setBlendMode('gloss', new BlendMode(MaterialBlending));
+      this.scenePass.setMRT(outputs);
+      if (mirrors) this.scenePass.getTexture('gloss').type = UnsignedByteType;
+    }
     this.sunDepth = depthTarget(2048);
     this.skyDepth = depthTarget(1024);
 
     const u: Record<string, N> = (this.uniforms = {
-      uInvProj: uniform(new Matrix4()),
+      // (Read as it is when the air is drawn: smoothed over the frames, the camera is moved a fraction of a point aside for each, while
+      // the picture is made, and the depths drawn so are to be read with the camera as it was drawn with.)
+      uInvProj: uniform(new Matrix4()).onRenderUpdate((_: unknown, self: N) => { self.value.copy(camera.projectionMatrixInverse); }),
+      uProj: uniform(new Matrix4()).onRenderUpdate((_: unknown, self: N) => { self.value.copy(camera.projectionMatrix); }),
+      // Whether wet ground mirrors what stands about it (see `mirrors`), 1 or 0.
+      uMirrors: uniform(1),
       uInvView: uniform(new Matrix4()),
       uSunVP: uniform(new Matrix4()),
       uSkyVP: uniform(new Matrix4()),
@@ -392,6 +418,8 @@ export class Atmosphere {
       hollows.thickness.value = 3;
       hollows.scale.value = 1.5;
       hollows.samples.value = 12;
+      // (Smoothed over the frames, its pattern of directions is turned each frame, and the frames average it out.)
+      hollows.useTemporalFiltering = temporal;
       const shade: N = hollows.getTextureNode();
       const near: N = reference('near', 'float', camera), far: N = reference('far', 'float', camera);
       const deep = (at: N): N => perspectiveDepthToViewZ(depthOf.sample(at).x, near, far).negate();
@@ -550,6 +578,60 @@ export class Atmosphere {
       });
       return { out, far };
     };
+    /**
+     * Mirrors in wet ground. Water standing in a rut or between setts, and wet setts and flags, mirror what stands about them: the
+     * houses across the street, the lamps, a lit window at dusk. The ground's material mirrored only the sky (the picture of it that
+     * lights everything), so that a wet street was a sheet of pale grey sheen with nothing in it. Now the material says, beside its
+     * colour, how nearly a mirror each point is and which way it faces (`mirror` in `makeGroundMaterial`), and here the line of sight
+     * is turned at each such point as a mirror turns it, and walked through the picture's depths, in steps that lengthen as it goes,
+     * until it passes behind what the picture shows: what is there is what the point mirrors. It is mixed in as much as such a surface
+     * mirrors at that angle (little looking down on it, much looking along it), in place of the sky the material put there. What is
+     * not in the picture, behind the eye or off its edge, is not mirrored, and the mirroring fades out towards the picture's edges. A
+     * surface not quite a mirror (wet stone, not water) has the way it faces stirred a little each frame, which the frames smooth
+     * into a blurred mirroring.
+     */
+    const mirrored = (col: N, view: N, depth: N, dither: N): void => {
+      const glossOf: N = this.scenePass.getTextureNode('gloss');
+      const near: N = reference('near', 'float', camera), far: N = reference('far', 'float', camera);
+      If(depth.lessThan(0.999999).and(u.uMirrors.greaterThan(0.5)), () => {
+        const g0: N = glossOf.sample(screenUV).level(0).rgb.mul(2).sub(1).toVar(), strength: N = length(g0).toVar();
+        If(strength.greaterThan(0.04), () => {
+          const g: N = vec4(g0.div(strength), min(strength, 1)).toVar();
+          const v: N = normalize(view).toVar();
+          const stir: N = vec3(ign(screenCoordinate.xy.add(u.uFrame.mul(7.13))), ign(screenCoordinate.xy.add(u.uFrame.mul(3.31)).add(17.7)), 0.5).sub(0.5);
+          const n: N = normalize(g.xyz.add(stir.mul(one(g.a).mul(0.22)))).toVar();
+          const r: N = reflect(v, n).toVar();
+          const hit: N = float(0).toVar(), at: N = vec2(0).toVar();
+          const t: N = float(0.06).add(dither.mul(0.12)).toVar(), stride: N = float(0.22).toVar();
+          Loop(30, () => {
+            const q: N = view.add(r.mul(t)).toVar();
+            If(q.z.greaterThan(near.negate()), () => { Break(); });
+            const s: N = getScreenPosition(q, u.uProj).toVar();
+            If(s.x.lessThan(0).or(s.x.greaterThan(1)).or(s.y.lessThan(0)).or(s.y.greaterThan(1)), () => { Break(); });
+            const behind: N = perspectiveDepthToViewZ(depthOf.sample(s).level(0).x, near, far).sub(q.z).toVar();
+            // (Behind what the picture shows, but not far behind: a line of sight that passes well behind a post has gone past it.)
+            If(behind.greaterThan(0).and(behind.lessThan(stride.mul(1.5).add(0.15))), () => {
+              hit.assign(1);
+              at.assign(s);
+              Break();
+            });
+            t.addAssign(stride);
+            stride.mulAssign(1.16);
+          });
+          If(hit.greaterThan(0.5), () => {
+            const edge: N = min(min(at.x, one(at.x)), min(at.y, one(at.y)));
+            const fade: N = smoothstep(0, 0.07, edge).mul(one(smoothstep(35, 70, t))).mul(smoothstep(0.25, -0.05, r.z));
+            const cosT: N = clamp(dot(v.negate(), n), 0, 1);
+            const fresnel: N = pow(one(cosT), 5).mul(0.98).add(0.02);
+            const seen: N = min(colourOf.sample(at).level(0).rgb, vec3(6));
+            // (What the material put there: the sky, as the air's colour that way is near enough to.)
+            const rw: N = u.uInvView.mul(vec4(r, 0)).xyz;
+            const sky0: N = select(u.uAirOn.greaterThan(0.5), sky.airColour(rw), u.uSkyColor.mul(0.5)).mul(0.6);
+            col.assign(max(col.add(seen.sub(sky0).mul(fresnel).mul(g.a).mul(fade)), vec3(0)));
+          });
+        });
+      });
+    };
     this.node = Fn(() => {
       // The sun's disc is thousands of times brighter than anything else; left alone, bloom spreads it over the whole view.
       const col: N = min(colourOf.rgb, vec3(6)).toVar();
@@ -571,7 +653,7 @@ export class Atmosphere {
         const dist: N = length(wp.sub(u.uCamPos)).toVar();
         const rd: N = wp.sub(u.uCamPos).div(dist).toVar();
         const open: N = depth.greaterThan(0.999999).toVar();
-        const dither: N = ign(screenCoordinate.xy).toVar();
+        const dither: N = ign(temporal ? screenCoordinate.xy.add(u.uFrame.mul(5.588)) : screenCoordinate.xy).toVar();
         // Where what stands against the sky meets it, a point of the picture is part sky and part what stands there in its colour, but
         // has one depth, the near thing's or the sky's; and the cloud is drawn only where the depth says sky. So the sky's share of the
         // one was left without its cloud, and the near thing's share of the other had cloud put over it: every roof and branch against
@@ -633,6 +715,7 @@ export class Atmosphere {
           const cloud: N = sky.cloudMarch(u.uCamPos, rd, dither, float(1e9)).toVar();
           col.addAssign(cloudOverSky(edgeCol, ci, cloud).mul(edgeSky));
         });
+        if (mirrors) mirrored(col, view, depth, dither);
         const tMax: N = min(dist, 45).toVar();
         const dt: N = tMax.div(STEPS).toVar();
         const t: N = dt.mul(ign(screenCoordinate.xy.add(u.uFrame.mul(5.588)))).toVar();
@@ -906,4 +989,68 @@ function blankNoise(): Data3DTexture {
   blank.format = RedFormat;
   blank.needsUpdate = true;
   return blank;
+}
+
+/**
+ * The finished picture smoothed over the frames (temporal anti-aliasing, three's `TRAANode`). Each frame is drawn from a fraction of
+ * a point aside from the last, in a round of thirty-two, and laid over what was drawn before, moved to where each point of it now is;
+ * where what was there before is not what is there now (something has come out from behind something else, or moved too far), the
+ * new frame is taken alone. So an edge is drawn at many places within its point and comes out smooth, a fine line of leaves or rail
+ * does not flicker in and out as the view moves, and the patterns of noise that the cloud, the mist and the hollows are reckoned
+ * through, a new one each frame, are averaged into a smooth whole: on a plain wall they showed as a fine stipple.
+ */
+export function smoothOverFrames(picture: N, atmosphere: Atmosphere, camera: PerspectiveCamera): N {
+  const p: N = atmosphere.scenePass;
+  return traa(picture, p.getTextureNode('depth'), p.getTextureNode('velocity'), camera);
+}
+
+/**
+ * Readies what is drawn to be smoothed over the frames (see `smoothOverFrames`): each point of the picture is drawn once, so nothing
+ * is cut out by coverage, which needs several (a leaf cut so is drawn as far out as its picture has any opacity at all, and the
+ * crowns came out heavy); it is cut at its edge instead, which the frames, each drawn a fraction of a point aside, then smooth. And
+ * what is moved into place by a program of its own (cards of leaves and grass set out on the land, birds, the sea's waves) is said
+ * to have been where it is now in the frame before as well: otherwise how far it had moved on the screen was reckoned from where its
+ * card lies before it is set out, nowhere near, and the frames before were thrown away there, which is where they are most needed.
+ * (The sway of a leaf in the wind from one frame to the next is far less than a point.) And what is coloured by a program of its own
+ * (water, the sea, spray, flames) has that program made its output, not the whole of what it draws: three gives such a program a
+ * picture of one colour to draw into, and drawn so into the scene, which now has two (the colour, and how far each point has moved),
+ * it was refused and nothing at all was drawn.
+ *
+ * (Nor is what is set out by such a program and drawn many times over, as the cards are, given three's copy of where each of its
+ * many was the frame before: it is not wanted, its place being said as above, and it cost a buffer more than the graphics card
+ * allows the sprigs of leaves, which then were not drawn, and a copy of every card's place on every frame.)
+ */
+export function readyForSmoothing(scene: Object3D): void {
+  const builder = NodeBuilder.prototype as N;
+  if (!builder.heldStillKnown) {
+    const was = builder.needsPreviousData;
+    builder.needsPreviousData = function (this: N): boolean {
+      return was.call(this) && !(this.object?.isInstancedMesh && this.material?.positionNode?.heldStill);
+    };
+    builder.heldStillKnown = true;
+  }
+  const seen = new Set<object>();
+  scene.traverse((o) => {
+    const list = (o as N).material;
+    for (const m of Array.isArray(list) ? list : list ? [list] : []) {
+      if (seen.has(m)) continue;
+      seen.add(m);
+      if (m.alphaToCoverage) { m.alphaToCoverage = false; m.needsUpdate = true; }
+      if (m.fragmentNode && !m.fragmentNode.isOutputStructNode) {
+        m.outputNode = m.fragmentNode;
+        m.fragmentNode = null;
+        m.needsUpdate = true;
+      }
+      const placed: N = m.positionNode;
+      if (placed && !placed.heldStill) {
+        const held: N = Fn(() => {
+          const at: N = vec3(placed).toVar();
+          positionPrevious.assign(at);
+          return at;
+        })();
+        held.heldStill = true;
+        m.positionNode = held;
+      }
+    }
+  });
 }

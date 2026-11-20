@@ -25,7 +25,7 @@ import type { PaveFrame } from './scene';
 type N = any;
 const {
   Break, Fn, If, Loop, abs, attribute, cameraPosition, clamp, cos, cross, dFdx, dFdy, dot, float, floor, fract, fwidth, ivec2, length, materialRoughness, max, min, mix,
-  normalMap, normalViewGeometry, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
+  normalMap, normalView, normalViewGeometry, normalWorld, normalWorldGeometry, normalize, positionView, positionWorld, pow, select, sin, smoothstep, step, texture, transformNormalToView,
   time, uniform, uv, vec2, vec3, vec4, vertexColor,
 } = TSL as N;
 
@@ -69,6 +69,12 @@ function nearFarCut(side: 'near' | 'far'): { opacity: N; test: N } {
   const far: N = select(on.and(inside.greaterThanEqual(0)).and(patch.lessThan(spread.sub(0.06))), float(0), float(1));
   return { opacity: side === 'near' ? near : far, test: float(0.5) };
 }
+/**
+ * What a material says of how nearly a mirror it is, beside its colour (`userData.mirror`, read by `mirrored` in `post.ts`): the way
+ * it faces in the view, as long as it is nearly a mirror, 0 to 1. (So written, and wholly opaque, it is laid over what is under it
+ * whole, as the sea must be; and whatever says nothing says it with no opacity, and leaves what is under it.)
+ */
+export const mirrorAs = (normal: N, amount: N): N => vec4(normalize(normal).mul(clamp(amount, 0, 1)).mul(0.5).add(0.5), 1);
 /** Lets a ground material be passed over into the far land, or the far land into the near ground, across the band (`nearFarUniforms`). */
 export function fadesAtNearEdge(m: MeshStandardNodeMaterial, side: 'near' | 'far'): MeshStandardNodeMaterial {
   const cut = nearFarCut(side);
@@ -193,7 +199,9 @@ class BakedLighting extends (PhysicalLightingModel as N) {
 
   indirect(builder: N): void {
     const c = builder.context;
-    c.irradiance.assign(this.o.irradiance);
+    // (And after dark, the street lamps' light where it falls: not indoors, where the bake says no sky is seen, nor in the rooms of a
+    // town's houses, which say they see a twentieth of it: see `main.ts`.)
+    c.irradiance.assign(lampsOn ? this.o.irradiance.add(lampLight(positionWorld, normalWorld).mul(smoothstep(0.06, 0.12, bakeOf().x))) : this.o.irradiance);
     c.iblIrradiance.assign(vec3(0));
     if (this.o.sky) c.radiance.mulAssign(this.o.sky);
     super.indirect(builder);
@@ -220,7 +228,7 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean; chips?: boolean; weather?: boolean; bond?: 'wendish' | 'running'; timber?: boolean } = {}): MeshStandardNodeMaterial {
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean; chips?: boolean; weather?: boolean; bond?: 'wendish' | 'running'; timber?: boolean; roof?: boolean } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
   const m = new MeshStandardNodeMaterial({
     normalMap: base.normalMap,
@@ -374,6 +382,53 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     woodEdge = (wear: N): N => wear.mul(isOut).mul(painted).mul(drift.mul(0.5).add(0.5));
     woodGrey = grey;
   }
+  // A roof of clay tiles (`roof`) as old roofs are, where from any height a town's roofs were a carpet of clean orange, every tile the
+  // same as its neighbour six along: each tile its own tone, fired darker or paler, some browner; patches mended with newer tiles of
+  // a cleaner orange; crusts of lichen on the tiles' faces, grey-green and some yellow-orange, more on old roofs; moss in the joints
+  // and laps, thick on a slope that faces north and the sun seldom dries, little on one facing south; dark streaks of the algae
+  // that the rain feeds, running down the slope; and on the oldest roofs, here and there, a tile gone.
+  let roofMatt: N = float(0);
+  if (o.roof) {
+    const plain: N = colour;
+    // (As the picture lays them, `tile` in `textures.ts`: six across and eight rows up to a unit of it, each row set half a tile along.
+    // The picture repeats every six by eight tiles; these do not.)
+    const t: N = uv(), row: N = floor(t.y.mul(8));
+    const id: N = vec2(floor(t.x.mul(6).add(fract(row.mul(0.5)))), row).toVar();
+    const h1: N = farHash(id.add(vec2(1.7, 3.1))), h2: N = farHash(id.add(vec2(5.3, 9.7))), h3: N = farHash(id.add(vec2(8.1, 2.9))), h4: N = farHash(id.add(vec2(4.6, 7.4)));
+    // (A tile is a hand or two across: where one is smaller than a point of the picture its own tone is left out, which would only speckle.)
+    const sharp: N = one(smoothstep(0.35, 0.9, length(fwidth(t.mul(vec2(6, 8)))))).toVar();
+    // (North is less z. A roof's slope, not the upright sides of its ridge or of a chimney's pots.)
+    const north: N = smoothstep(0.2, -0.6, nG.z).toVar(), slope: N = smoothstep(0.25, 0.5, nG.y).toVar();
+    const patch: N = farNoise(P.xz.div(4.3).add(7.7)).toVar(), age: N = worn.mul(0.6).add(farNoise(P.xz.div(9.1).add(1.9)).mul(0.4)).toVar();
+    const mended: N = step(0.64, patch).mul(step(0.4, h2)).toVar(), old: N = one(mended);
+    colour = colour.mul(mix(1, mix(0.78, 1.14, h1), sharp)).mul(mix(vec3(1), vec3(0.9, 0.84, 0.78), step(0.72, h3).mul(sharp)));
+    colour = mix(colour, colour.mul(vec3(1.2, 1.07, 0.9)), mended.mul(sharp).mul(0.85));
+    // (Old clay darkens all over with the dirt of the air and what grows on it too fine to see.)
+    colour = colour.mul(mix(1, 0.8, age.mul(old).mul(slope)));
+    // Moss in the joints and laps, where the picture's height says the tile is low or there is none.
+    // (And on a north slope it climbs out of them in cushions over the lower ends of the tiles.)
+    const lowIn: N = one(smoothstep(0.2, 0.55, stone.a));
+    const mossAt: N = smoothstep(0.4, 0.8, farNoise(P.xz.div(1.4).add(3.9)).mul(0.6).add(north.mul(0.5)).add(age.mul(0.3)).sub(0.12)).mul(slope).mul(old).toVar();
+    const cushion: N = farNoise(rot(t.mul(17)).add(6.2)).mul(0.65).add(farNoise(rot(t.mul(-52)).add(2.4)).mul(0.35));
+    const mossed: N = smoothstep(0.42, 0.62, lowIn.mul(mossAt).mul(0.9).add(mossAt.mul(cushion).mul(north.mul(0.5).add(0.25)))).toVar();
+    colour = mix(colour, mossTex.rgb.mul(vec3(0.8, 0.95, 0.6)).mul(mix(0.75, 1.15, cushion)).mul(mix(1, 0.6, wet)), mossed.mul(0.92));
+    // Lichen in crusts the size of a coin to a palm, on the tiles' faces, more where the roof is old and where the sun reaches; grey,
+    // and in some colonies yellow-orange; a little paler than the clay, not white.
+    const lv: N = farNoise(rot(t.mul(21)).add(3.3)).mul(0.7).add(farNoise(rot(t.mul(-67)).add(1.1)).mul(0.3)).toVar();
+    const lt: N = float(0.84).sub(age.mul(0.12).add(one(north).mul(0.04)).mul(slope).mul(old)).toVar();
+    const lichen: N = smoothstep(lt, lt.add(0.03), lv).mul(smoothstep(0.2, 0.4, stone.a)).mul(slope).mul(old).mul(sharp.mul(0.6).add(0.4)).toVar();
+    const orange: N = smoothstep(0.55, 0.62, farNoise(rot(t.mul(3.1)).add(5.5)).add(one(north).mul(0.08)));
+    colour = mix(colour, mix(vec3(0.4, 0.4, 0.34), vec3(0.52, 0.36, 0.1), orange).mul(mix(0.85, 1.1, lv)).mul(mix(1, 0.6, wet)), lichen.mul(0.6));
+    // Streaks of dark algae down the slope, thickest on a north slope.
+    const streak: N = smoothstep(0.55, 0.82, farNoise(vec2(dot(P.xz, vec2(nG.z, nG.x.negate())).mul(2.1), P.y.mul(0.35)).add(2.2))).mul(north.mul(0.7).add(0.3)).mul(age).mul(slope).mul(old);
+    colour = colour.mul(one(streak.mul(0.38)));
+    // (One tile in a few hundred, on the oldest roofs only.)
+    const gone: N = step(float(0.9985).add(one(age).mul(0.002)), h4).mul(smoothstep(0.15, 0.3, stone.a)).mul(slope).mul(sharp);
+    colour = mix(colour, vec3(0.03, 0.024, 0.02), gone);
+    // (`uChips` turns it off, as it does the walls' weathering, to compare.)
+    colour = mix(plain, colour, renderUniforms.uChips as N);
+    roofMatt = max(mossed, lichen.mul(0.7)).mul(renderUniforms.uChips as N);
+  }
   // Rain has run down the outer walls, in long streaks of grime from what stands out over them, darker in some places than others.
   if (o.weather) {
     const streak: N = smoothstep(0.52, 0.8, farNoise(vec2(q.x.mul(2.4), q.y.mul(0.16)).add(1.3)).mul(0.75).add(farNoise(vec2(q.x.mul(9.1), q.y.mul(0.5)).add(4.4)).mul(0.25)));
@@ -401,7 +456,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   }
   if (chipNormal) m.normalNode = chipNormal(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   m.colorNode = vec4(colour, 1);
-  m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(mossy, f.z)), 0.66, snowy);
+  m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(max(mossy, f.z), roofMatt)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
@@ -507,6 +562,57 @@ export const groundUniforms: { uGrassRange: { value: number }; uSward: { value: 
 };
 
 /**
+ * The light a town's street lamps throw after dark. There are a hundred or more of them, far more than lights the renderer can
+ * carry, and the streets between them were as dark as the fields, the lanterns glowing over nothing. So their places are kept in a
+ * lattice of eight metres, one lamp to a point of it, read without a filter (`setLamps`), and every surface lit by the bake's way
+ * (`lit`) adds the light of the lamps in the nine points about it: warm, falling off with distance and gone at eight metres, by
+ * how squarely the surface faces the lantern. No shadows: a lamp's light reaches round a corner a little way, as it would by what
+ * the walls throw back. Only where the graphics card can read one more texture, and only when the lamps are lit.
+ */
+const lampTex = new DataTexture(new Float32Array(4), 1, 1, RGBAFormat, FloatType);
+lampTex.magFilter = lampTex.minFilter = NearestFilter;
+lampTex.generateMipmaps = false;
+lampTex.needsUpdate = true;
+const lampNode: N = texture(lampTex);
+/** Where the lattice begins and how many points to a metre (x0, z0, 1/cell), and how bright the lamps are; how many points it has each way. */
+export const lampUniforms: { uLamps: { value: Vector4 }; uLampSize: { value: Vector2 } } = { uLamps: uniform(new Vector4(0, 0, 1 / 8, 0)) as N, uLampSize: uniform(new Vector2(1, 1)) as N };
+let lampsOn = false;
+const LAMP_CELL = 8, LAMP_REACH = 8;
+/** Gives the lit materials a town's lamps (`strength` 0 by day), before they are first drawn; or none. */
+export function setLamps(list: [number, number, number][] | undefined, strength: number, on = true): void {
+  lampsOn = !!list?.length && on && strength > 0;
+  if (!lampsOn || !list) { lampUniforms.uLamps.value.w = 0; return; }
+  // (Two empty points about the edge, so that what is read beyond it, clamped to the edge, finds nothing and not a lamp twice.)
+  const x0 = Math.min(...list.map((l) => l[0])) - 2 * LAMP_CELL, z0 = Math.min(...list.map((l) => l[2])) - 2 * LAMP_CELL;
+  const nx = Math.ceil((Math.max(...list.map((l) => l[0])) - x0) / LAMP_CELL) + 3, nz = Math.ceil((Math.max(...list.map((l) => l[2])) - z0) / LAMP_CELL) + 3;
+  const data = new Float32Array(nx * nz * 4);
+  for (const [x, y, z] of list) {
+    const k = (Math.floor((z - z0) / LAMP_CELL) * nx + Math.floor((x - x0) / LAMP_CELL)) * 4;
+    // (Lamps stand a dozen metres apart or more; should two fall to one point, the second is left out.)
+    if (data[k + 3] === 0) data.set([x, y, z, 1], k);
+  }
+  lampTex.dispose();
+  lampTex.image = { data, width: nx, height: nz } as N;
+  lampTex.needsUpdate = true;
+  lampUniforms.uLamps.value.set(x0, z0, 1 / LAMP_CELL, strength);
+  lampUniforms.uLampSize.value.set(nx, nz);
+}
+const lampLight = (P: N, n: N): N => {
+  const L: N = lampUniforms.uLamps, S: N = lampUniforms.uLampSize;
+  const c: N = floor(P.xz.sub(L.xy).mul(L.z)).toVar();
+  let sum: N = float(0);
+  for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+    const t: N = lampNode.load(ivec2(clamp(c.add(vec2(dx, dz)), vec2(0, 0), S.sub(1)))).toVar();
+    const d: N = t.xyz.sub(P), d2: N = max(dot(d, d), 0.01);
+    const window: N = clamp(one(d2.div(LAMP_REACH * LAMP_REACH)), 0, 1);
+    // (A lantern's cap shades what is above it: without that the roofs about a lamp glowed as if the house were afire.)
+    const capped: N = mix(1, 0.06, smoothstep(-0.2, 1.6, P.y.sub(t.y)));
+    sum = sum.add(t.w.mul(window.mul(window)).mul(capped).div(d2.mul(0.6).add(1)).mul(max(dot(n, d.mul(d2.inverseSqrt())), 0).mul(0.85).add(0.15)));
+  }
+  return vec3(1.0, 0.6, 0.28).mul(sum).mul(L.w);
+};
+
+/**
  * Which way a town's paving is laid (`PaveFrame`, made by the town), read point by point without a filter: a lattice of a metre,
  * holding at each point how far along and across its street (or square) it lies, which way that runs, and which it is. Between the
  * lattice's points each of the four about is carried on to this point the way its street runs, and the four are mixed by nearness;
@@ -522,6 +628,7 @@ export const paveUniforms: { uPave: { value: Vector4 }; uPaveSize: { value: Vect
 // (`uSun` is the way to the sun, for the shadows in the paving's joints.)
 /** Gives the ground's material a town's paving frame, or none (`on` false where the graphics card cannot read one more texture). */
 export function setPaving(f: PaveFrame | undefined, on = true): void {
+  paveFrameUsed = !!f && on;
   if (!f || !on) { paveUniforms.uPave.value.set(0, 0, 1, 0); return; }
   paveFrameTex.dispose();
   paveFrameTex.image = { data: f.data, width: f.nx, height: f.nz } as N;
@@ -529,7 +636,15 @@ export function setPaving(f: PaveFrame | undefined, on = true): void {
   paveUniforms.uPave.value.set(f.x0, f.z0, 1 / f.cell, 1);
   paveUniforms.uPaveSize.value.set(f.nx, f.nz);
 }
+/**
+ * Whether the lattice is read at all. Where it is not to be had (no town, or a graphics card that cannot read one more texture, as
+ * under WebGL 2, which allows sixteen to the ground's program), it is left out of the program altogether: read and then ignored, it
+ * was one texture too many there, the ground's program was refused, and a town's streets were drawn as nothing, the haze showing
+ * through. (Settled before the materials are first drawn, when their programs are made.)
+ */
+let paveFrameUsed = false;
 const paveFrameAt = (p: N): { c: N; a: N; d: N; e: N; id: N } => {
+  if (!paveFrameUsed) return { c: p.x.negate(), a: p.y, d: vec2(0, 1), e: vec2(-1, 0), id: float(0) };
   const P: N = paveUniforms.uPave, S: N = paveUniforms.uPaveSize;
   const gp: N = p.sub(P.xy).mul(P.z).toVar();
   const base: N = floor(gp).toVar(), w: N = gp.sub(base).toVar();
@@ -650,13 +765,13 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // split stone is. Setts are granite of the fields, each stone its own; a street in two of every four is laid in arcs.
   // (All of the paving is worked out only where there is paving: everywhere else, in every valley, on every island and mountain,
   // the ground's material would otherwise lay stones it does not show at every point of the picture.)
-  const pave: N = vec3(0, 0, 0).toVar(), paveNormal: N = vec3(0, 0, 1).toVar(), paveRough: N = float(0.9).toVar(), jointLit: N = float(1).toVar();
+  const pave: N = vec3(0, 0, 0).toVar(), paveNormal: N = vec3(0, 0, 1).toVar(), paveRough: N = float(0.9).toVar(), jointLit: N = float(1).toVar(), paveLow: N = float(0).toVar();
   // (The paving's own two ways are in metres, as the ground's are, so how fast they change across the picture is the ground's.)
   const aa: N = length(fwidth(at0)).mul(1.2).add(0.002).toVar(), byEdge: N = one(smoothstep(0.3, 1.6, paveSd)).toVar();
   // (Worked out where the ground's colour is, which is the first of what the material is made of: the relief, the roughness and the
   // sun's shadow in the joints are left in those variables for what is made after it to read.)
   const paving: N = Fn(() => {
-  pave.assign(vec3(0, 0, 0)); paveNormal.assign(vec3(0, 0, 1)); paveRough.assign(0.9); jointLit.assign(1);
+  pave.assign(vec3(0, 0, 0)); paveNormal.assign(vec3(0, 0, 1)); paveRough.assign(0.9); jointLit.assign(1); paveLow.assign(0);
   If(paved.greaterThan(0), () => {
     const pf = paveFrameAt(at0);
     const street: N = step(0.5, pf.id).mul(step(pf.id, 1000)), arcs: N = street.mul(step(0.5, farHash(vec2(pf.id, 2.71)))).mul(one(flagged));
@@ -761,6 +876,11 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
       return vec3(pf.e.mul(g.x).add(pf.d.mul(g.y)), 1);
     })());
     paveRough.assign(mix(mix(mix(0.66, 0.5, trod), 0.95, joint), mix(0.82, 0.6, trod), flagged));
+    // Where water stands on the paving in rain: in its joints, and over the stones in the hollows a street settles into, a stride or
+    // two across (more of them in the middle of a street, where the carts go). How much is wet is said outside.
+    // (Water in the joints is sunk below the stones and sees less of the sky: it is a dark wet line with a glint, not a bright one.)
+    const hollow: N = smoothstep(0.29, 0.23, farNoise(rot(pq.div(3.7)).add(8.3)).mul(0.75).add(farNoise(rot(pq.mul(0.9)).add(4.1)).mul(0.25)).sub(trod.mul(0.04)));
+    paveLow.assign(max(joint.mul(mix(0.35, 0.2, flagged)), hollow));
   });
   return pave;
   })().toVar();
@@ -891,7 +1011,9 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (Read at nearly twice the shingle's size it was cobbles; and its dark grit between the stones is lightened, as dust fills a walk.)
   const gravelAt: N = at0.mul(4.3).add(0.37), gGravel: N = (texture(shingle.map, gravelAt) as N).bias(blur);
   const gravel: N = mix(gGravel.rgb, vec3(0.5, 0.47, 0.41), 0.35).mul(vec3(1.3, 1.24, 1.1)).mul(mix(0.9, 1.06, macro)).mul(mix(0.82, 1, smoothstep(0, 0.4, paveSd))).toVar();
-  ground = mix(ground, mix(paving, gravel, gravelled), paved);
+  // Standing water on wet paving (`paveLow`): darker, as wet stone is, and smooth.
+  const paveWater: N = paveLow.mul(smoothstep(0.1, 0.45, wetV)).mul(paved).mul(one(gravelled)).toVar();
+  ground = mix(ground, mix(paving.mul(mix(1, 0.7, paveWater)), gravel, gravelled), paved);
   ground = mix(ground.mul(mix(1, 0.52, wetV)), mix(vec3(...SNOW).mul(mix(0.94, 1.04, macro)), vec3(0.5, 0.49, 0.47), trodSnow.mul(0.55)), snowy);
   m.colorNode = vec4(ground, 1);
   m.roughnessNode = mix(mix(float(0.96), 0.94, bare).mul(mix(1, 0.4, wetV.mul(bare))).mul(mix(1, 0.82, rutFloor.mul(bare))).mul(mix(1, 0.7, wetRim)), 0.09, puddle);
@@ -917,14 +1039,17 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
     // more texture took this material to seventeen, past the sixteen a stage may sample under WebGPU, which then drew none of the ground.)
     const ge = 0.003, gh: N = (texture(shingle.map, gravelAt) as N).bias(blur).a;
     const gG: N = vec3(gh.sub((texture(shingle.map, gravelAt.add(vec2(ge, 0))) as N).bias(blur).a).mul(4), gh.sub((texture(shingle.map, gravelAt.add(vec2(0, ge))) as N).bias(blur).a).mul(4), 1);
-    const laid: N = mix(vec3(n.xy.mul(steep), n.z), mix(paveNormal, gG, gravelled), paved);
+    const laid: N = mix(vec3(n.xy.mul(steep), n.z), mix(mix(paveNormal, vec3(0, 0, 1), paveWater), gG, gravelled), paved);
     m.normalNode = normalMap(vec3(laid.xy.mul(one(snowy.mul(0.85))).add(drifted.mul(snowy)), laid.z).mul(0.5).add(0.5));
   }
   // (And here and there a grain of it catches the sun: a glint, near the eye, from a crystal turned just so.)
   const glint: N = step(0.992, fract(sin(dot(floor(positionWorld.mul(26)), vec3(12.9898, 78.233, 37.719))).mul(43758.5453))).mul(one(smoothstep(4, 14, far))).toVar();
-  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(paveRough.mul(mix(1, 0.6, wetV)), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
+  m.roughnessNode = mix(mix(m.roughnessNode as N, mix(mix(paveRough.mul(mix(1, 0.6, wetV)), 0.07, paveWater), 0.95, gravelled), paved), mix(0.66, 0.08, glint), snowy);
+  // How nearly a mirror each point is, and which way it faces, for the air's pass to find what it mirrors in the picture (`mirrored`
+  // in `post.ts`): standing water most, wet setts and flags some, wet earth a little; nothing under snow.
+  (m.userData as N).mirror = mirrorAs(normalView, max(max(max(puddle, paveWater), wetV.mul(paved).mul(one(gravelled)).mul(0.75)), wetV.mul(bare).mul(0.2)).mul(one(snowy)));
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
-  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)).mul(mix(1, jointLit, paved)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), puddle.mul(1.15)), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)).mul(mix(1, jointLit, paved)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), max(puddle.mul(1.15), paveWater.mul(0.85))), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
   return fadesAtNearEdge(m, 'near');
 }
 

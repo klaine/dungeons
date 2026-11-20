@@ -10,11 +10,11 @@ import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
-import { Atmosphere } from '../render/post';
+import { Atmosphere, readyForSmoothing, smoothOverFrames } from '../render/post';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, renderUniforms, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
+import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, renderUniforms, lampUniforms, setLamps, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
@@ -298,7 +298,8 @@ async function start(): Promise<void> {
     // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
     // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
     plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8, render: weathered, weather: weathered }),
-    tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3 }),
+    // (Weathered as old roofs are: see `roof` there.)
+    tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
     ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }) } : {}),
     // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
     redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
@@ -387,6 +388,8 @@ async function start(): Promise<void> {
   // Which way a town's paving is laid, for the ground's material: one more texture it reads, so only where the graphics card allows
   // well over the sixteen (`?paveframe=0` lays the stones in rows along x everywhere, as before).
   setPaving(desc.paving, textureRoom >= 20 && num('paveframe', 1) > 0);
+  // The street lamps' light on what is about them, once they are lit (`?lamplight=0` leaves it out; a number scales it).
+  setLamps(desc.lamps, lamps * 16 * num('lamplight', 1), textureRoom >= 20);
   // Where the near ground passes into the far land, on a place that has one land for both (a mountain top on a world's summit); else nowhere.
   nearFarUniforms.uNearRect.value.set(...((desc.nearFar?.slice(0, 4) ?? [0, 0, 0, 0]) as [number, number, number, number]));
   nearFarUniforms.uNearBand.value = desc.nearFar?.[4] ?? 0;
@@ -506,6 +509,18 @@ async function start(): Promise<void> {
   // What lies beyond the site is drawn but not baked or collided with. Its share of sky is the
   // whole sky, written into the same attributes the bake fills for everything else.
   const scenic: Mesh[] = [];
+  /**
+   * The lamp lit in a room after dark, if any, from where a point of it is: rooms read as cells four metres across and a storey
+   * high, a share of them lit, each with a light of its own strength, yellow lamplight or a redder fire (as `litRoom` chooses for
+   * windows, though not the same rooms: a window's room is told from where it lies on its front before the house is turned).
+   */
+  const roomLamp = (at: BufferAttribute | InterleavedBufferAttribute, i: number): number[] | null => {
+    const x = Math.floor(at.getX(i) / 4), y = Math.floor(at.getY(i) / 2.8), z = Math.floor(at.getZ(i) / 4);
+    const h = (k: number) => { const v = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719 + k * 19.19) * 43758.5453; return v - Math.floor(v); };
+    if (h(0) > 0.45) return null;
+    const strength = 0.55 + 0.6 * h(1), fire = h(2);
+    return [strength, strength * (0.55 - 0.12 * fire), strength * (0.24 - 0.1 * fire)];
+  };
   const solidScenery: Mesh[] = [];
   // How large the tiles are that what lies beyond the site is cut into, in metres; `?tiles=0` leaves each material one mesh, as it was.
   const tiling = num('tiles', 64);
@@ -536,8 +551,11 @@ async function start(): Promise<void> {
       // Indoors (a share of sky less than nothing: the rooms of a town's houses, see `buildTurned`): a dim light come in at the windows,
       // from the sky and from the sunlit street and walls across the way, about a fifth of what a wall out of doors has in shade, and
       // as much from every side; and none of the sky's reflections, the rain's wetting or the snow, which go by the share of sky.
+      // After dark, a share of the rooms has a lamp or a fire lit in it, which lights the room warm and as much from every side
+      // (`roomLamp`): through clear glass from the street, and walking in, a room was as black as the night outside.
       if (builder.openAt(i) < 0) {
-        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]), 0, 0, 0);
+        const lamp = lamps ? roomLamp(geometry.getAttribute('position'), i) : null;
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]) + (lamp ? lamp[c] * lamps * 0.5 : 0), 0, 0, 0);
         bk.setXY(i, 0.05, 0.6);
         continue;
       }
@@ -838,11 +856,16 @@ async function start(): Promise<void> {
   // The picture is made in steps: the scene; the air put into it; the glow of what is very bright
   // added; and last the eye's adjustment to light and the screen's colours, which the pipeline does itself.
   const pipeline = new RenderPipeline(renderer);
-  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps), { occlusion: num('ao', quality.ao) > 0 });
+  // (Smoothed over the frames unless asked not to, `?taa=0`, when each point is drawn four times instead: see `smoothOverFrames`.)
+  const temporal = num('taa', 1) > 0;
+  // (Wet ground mirrors what stands about it, with the smoothing alone: `?mirrors=0` leaves it out.)
+  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps), { occlusion: num('ao', quality.ao) > 0, temporal, mirrors: num('mirrors', 1) > 0 });
   {
-    // (The air is drawn once into a picture of its own, which the glow then reads; otherwise it would be worked out twice.)
+    // (The air is drawn once into a picture of its own, which the smoothing and the glow then read; otherwise it would be worked out
+    // again for each. It is smoothed before the glow is added, so that the glow is of the smooth picture.)
     const aired = rtt(atmosphere.node);
-    pipeline.outputNode = num('bloom', quality.bloom) ? aired.add(bloom(aired, 0.14, 0.5, 1.8)) : aired;
+    const smooth: typeof aired = temporal ? smoothOverFrames(aired, atmosphere, camera) : aired;
+    pipeline.outputNode = num('bloom', quality.bloom) ? smooth.add(bloom(smooth, 0.14, 0.5, 1.8)) : smooth;
   }
   const skyMean = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
   atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
@@ -851,6 +874,8 @@ async function start(): Promise<void> {
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
   water.mirrorSky(atmosphere);
   sea?.attach(atmosphere);
+  // (After the water and the sea have been given their programs, which they are given only now.)
+  if (temporal) readyForSmoothing(scene);
   /**
    * The weather: how much of the sky is cloud and whether it heaps up or lies in banks, how much
    * mist lies in the low ground, and how thick the air is with distance. All of it is read by the
@@ -1415,7 +1440,7 @@ async function start(): Promise<void> {
     const hit = bvh.raycastFirst(new Ray(new Vector3(x, 200, z), new Vector3(0, -1, 0)), DoubleSide);
     return hit ? hit.point.y : 0;
   };
-  (window as any).__dbg = { edgeUniforms, renderUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
+  (window as any).__dbg = { edgeUniforms, renderUniforms, lampUniforms, sound, groundAt, materials, renderer, pipeline, atmosphere, water, sunShadow, player, camera, scene, torches, sun, bvh, sunDir, desc, site, lantern, toggleLantern, game, get exposure() { return exposure; } };
   // For checking that geometry matches the plan: walks the player's body through every door and
   // arch, in both directions, and reports the ways that could not be crossed.
   (window as any).__dbg.walkTest = () => {

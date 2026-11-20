@@ -3499,7 +3499,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   let groundLow = Infinity;
   // Where smoke rises out of doors.
   const smokes: { x: number; y: number; z: number; height: number }[] = [];
-  let paving: SceneDescription['paving'];
+  let paving: SceneDescription['paving'], lamps: SceneDescription['lamps'];
   /**
    * Whether a point lies outside what the sun's shadow and the open sky are reckoned over (the box of the house and the valley: see
    * the scene's `bounds`). Rock out there that is under the hill cannot be shadowed, and would stand in full sun; so it is made of
@@ -3674,6 +3674,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
     smokes.push(...made.smokes);
     paving = made.paving;
+    lamps = made.lamps;
     arrival.spawn = made.spawn;
     arrival.track = made.track;
     farCover = made.far;
@@ -4515,6 +4516,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     ...(groundLow < Infinity ? { groundLow } : {}),
     smokes,
     ...(paving ? { paving } : {}),
+    ...(lamps?.length ? { lamps } : {}),
     sunShafts,
     landmarks: landmarkSpots,
     sunDir: V(site.sun[0], site.sun[1], site.sun[2]),

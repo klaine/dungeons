@@ -82,7 +82,7 @@ const Z = { wild: 0, street: 1, flags: 2, built: 3, yard: 4, track: 5, path: 6, 
 /** What a way of the town is laid with: its own surface, or its kind's usual one (setts for a street or lane, earth for a track, a trodden line for a path). */
 const surfaceOf = (s: Town['streets'][number]) => s.surface ?? (s.kind === 'street' || s.kind === 'lane' ? 'setts' : s.kind === 'track' ? 'dirt' : 'foot');
 
-export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[]; paving: PaveFrame } {
+export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number; y: number; z: number; height: number }[]; paving: PaveFrame; lamps: [number, number, number][] } {
   const { site, p, kit, wild } = b;
   const t = site.town!, F = p.floor, sea = t.sea, g = site.grounds!, L = t.land;
   const rng = b.rng.fork('town');
@@ -1033,8 +1033,11 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   // ---- the furniture of the streets: iron lamps along them, on the waterfront and round the square, whose lanterns are lit after dark
   // (their glass is the window's, and glows as a lit window does); benches along the square's sides; and on the square's axis
   // towards the harbour an obelisk of the country's stone on stepped plinths, with a gilt ball on its point.
+  // (Where each lantern is, for the light it throws on the street after dark: see `setLamps`.)
+  const lamps: [number, number, number][] = [];
   const lampAt = (x: number, z: number, h: Rng) => {
     const y = ground(x, z), iron: Colour = [0.05, 0.05, 0.055], at = frame(x, z, y, h.range(0, Math.PI * 2));
+    lamps.push([x, y + 3.72, z]);
     box(at, 'metal', -0.16, 0.16, -0.1, 0.5, -0.16, 0.16, iron);
     box(at, 'metal', -0.11, 0.11, 0.5, 0.62, -0.11, 0.11, iron);
     box(at, 'metal', -0.055, 0.055, 0.62, 3.35, -0.055, 0.055, iron);
@@ -1083,6 +1086,133 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       solid('stone', [at(-0.5, 2.5, -0.5), at(0.5, 2.5, -0.5), at(0.5, 2.5, 0.5), at(-0.5, 2.5, 0.5), at(-0.32, 9.6, -0.32), at(0.32, 9.6, -0.32), at(0.32, 9.6, 0.32), at(-0.32, 9.6, 0.32)], shade(granite, 0.98));
       solid('stone', [at(-0.32, 9.6, -0.32), at(0.32, 9.6, -0.32), at(0.32, 9.6, 0.32), at(-0.32, 9.6, 0.32), at(0, 10.15, 0), at(0, 10.15, 0), at(0, 10.15, 0), at(0, 10.15, 0)], shade(granite, 0.98));
       for (let k = 0; k < 8; k++) { const a0 = (k / 8) * Math.PI * 2, a1 = ((k + 1) / 8) * Math.PI * 2; for (const [y0, y1, r0, r1] of [[10.12, 10.32, 0.04, 0.22], [10.32, 10.52, 0.22, 0.04]]) solid('metal', [at(0, y0, 0), at(Math.cos(a0) * r0, y0, Math.sin(a0) * r0), at(Math.cos(a1) * r0, y0, Math.sin(a1) * r0), at(0, y0, 0), at(0, y1, 0), at(Math.cos(a0) * r1, y1, Math.sin(a0) * r1), at(Math.cos(a1) * r1, y1, Math.sin(a1) * r1), at(0, y1, 0)], [0.85, 0.66, 0.24]); }
+    }
+  }
+
+  // ---- what shows that people live here (asked for: the town was empty and swept, as if no one lived in it). Washing hung out across
+  // the lanes and narrow streets from the upper storeys, on lines from iron brackets; signs hung out over the doors of shops; and a
+  // handcart left by a door or a stall here and there.
+  {
+    const h = rng.fork('life');
+    const near = (x: number, z: number, r: number) => t.buildings.filter((bd) => Math.abs(bd.x - x) < r + 20 && Math.abs(bd.z - z) < r + 20);
+    /** Going out from a street's middle along (ox, oz), the first building met within `reach`, and how far out its wall is. */
+    const wallOut = (x: number, z: number, ox: number, oz: number, reach: number): { bd: Building; at: number } | null => {
+      const list = near(x, z, reach);
+      for (let s = 0.5; s < reach; s += 0.2) {
+        const bd = list.find((b0) => outsideBuilt(b0, x + ox * s, z + oz * s) === 0);
+        if (bd) return { bd, at: s - 0.2 };
+      }
+      return null;
+    };
+    const cloths: Colour[] = [[0.86, 0.85, 0.8], [0.9, 0.88, 0.83], [0.82, 0.8, 0.72], [0.55, 0.62, 0.72], [0.62, 0.24, 0.17], [0.72, 0.67, 0.5], [0.38, 0.44, 0.56], [0.86, 0.85, 0.8]];
+    const iron: Colour = [0.06, 0.06, 0.065];
+    /** A line along `at` (from 0 to 1), as thick as a cord, in pieces. */
+    const cord = (at: (s: number) => P3) => {
+      const n = 8, r = 0.009;
+      for (let k = 0; k < n; k++) {
+        const p = at(k / n), q = at((k + 1) / n);
+        solid('wood', [[p[0] - r, p[1] - r, p[2]], [p[0] + r, p[1] - r, p[2]], [p[0] + r, p[1] + r, p[2]], [p[0] - r, p[1] + r, p[2]], [q[0] - r, q[1] - r, q[2]], [q[0] + r, q[1] - r, q[2]], [q[0] + r, q[1] + r, q[2]], [q[0] - r, q[1] + r, q[2]]], [0.55, 0.5, 0.4]);
+      }
+    };
+    for (const st of t.streets) {
+      if (!(st.kind === 'lane' || (st.kind === 'street' && st.width <= 8.5))) continue;
+      let since = h.range(6, 20);
+      for (let k = 1; k < st.line.length; k++) {
+        const [ax, az] = st.line[k - 1], [bx, bz] = st.line[k], run = Math.hypot(bx - ax, bz - az);
+        since += run;
+        if (since < 22 || run < 0.1 || !h.chance(0.55)) continue;
+        const px = -(bz - az) / run, pz = (bx - ax) / run;
+        const left = wallOut(bx, bz, -px, -pz, st.width / 2 + 3), right = wallOut(bx, bz, px, pz, st.width / 2 + 3);
+        if (!left || !right || left.bd === right.bd) continue;
+        // (Strung at the sills of the first storey up, on brackets standing half a metre out from the walls, clear of any jetty.)
+        const up = Math.min(left.bd.heights[0], right.bd.heights[0]) + 0.95, base = Math.max(ground(bx - px * left.at, bz - pz * left.at), ground(bx + px * right.at, bz + pz * right.at));
+        if (left.bd.storeys < 2 || right.bd.storeys < 2) continue;
+        const y = base + up, out = 0.5 + Math.max(left.bd.jetty ?? 0, right.bd.jetty ?? 0);
+        const e0: P3 = [bx - px * (left.at - out), y, bz - pz * (left.at - out)], e1: P3 = [bx + px * (right.at - out), y, bz + pz * (right.at - out)];
+        const span = Math.hypot(e1[0] - e0[0], e1[2] - e0[2]);
+        if (span < 2 || span > 11) continue;
+        const sag = span * 0.045, lineAt = (s: number): P3 => [e0[0] + (e1[0] - e0[0]) * s, y - sag * 4 * s * (1 - s), e0[2] + (e1[2] - e0[2]) * s];
+        for (const [e, sx, at0] of [[e0, -1, left.at], [e1, 1, right.at]] as [P3, number, number][]) {
+          // The bracket: an iron arm from the wall out to the line, with a small wheel at its end for the line to run on.
+          const w0: P3 = [bx + px * sx * at0, y + 0.05, bz + pz * sx * at0], r = 0.02;
+          solid('metal', [[w0[0] - r, w0[1] - r, w0[2] - r], [w0[0] + r, w0[1] - r, w0[2] + r], [w0[0] + r, w0[1] + r, w0[2] + r], [w0[0] - r, w0[1] + r, w0[2] - r], [e[0] - r, e[1] + 0.05 - r, e[2] - r], [e[0] + r, e[1] + 0.05 - r, e[2] + r], [e[0] + r, e[1] + 0.05 + r, e[2] + r], [e[0] - r, e[1] + 0.05 + r, e[2] - r]], iron);
+          box(frame(e[0], e[2], e[1], Math.atan2(pz, px)), 'metal', -0.05, 0.05, -0.02, 0.1, -0.05, 0.05, iron);
+        }
+        cord(lineAt);
+        // What hangs on it: sheets, shirts, cloths, in a row with gaps, each pegged at its top and hanging straight.
+        const along = Math.atan2(e1[2] - e0[2], e1[0] - e0[0]);
+        for (let s = h.range(0.3, 0.8); s < span - 0.4;) {
+          const w = h.chance(0.25) ? h.range(0.9, 1.5) : h.range(0.35, 0.75);
+          if (s + w > span - 0.3) break;
+          if (h.chance(0.9)) {
+            const mid = lineAt((s + w / 2) / span), drop = w > 0.9 ? h.range(0.8, 1.25) : h.range(0.4, 0.8), col = shade(h.pick(cloths), h.range(0.9, 1.05));
+            const at = frame(mid[0], mid[2], mid[1] - 0.01, along - Math.PI / 2);
+            box(at, 'plaster', -0.006, 0.006, -drop, 0, -w / 2, w / 2, col);
+          }
+          s += w + h.range(0.05, 0.25);
+        }
+        since = 0;
+      }
+    }
+    // Signs hung out over the doors of shops, on the streets and the square: an iron arm from the wall, braced below, and a board
+    // hanging from it on two rings, square to the wall so that it is seen along the street, painted on both faces with a gilt emblem.
+    const paints: Colour[] = [[0.42, 0.12, 0.09], [0.14, 0.26, 0.2], [0.16, 0.22, 0.38], [0.62, 0.48, 0.18], [0.12, 0.12, 0.12]];
+    for (const [n, bd] of t.buildings.entries()) {
+      const q = h.fork(`sign${n}`);
+      if (bd.turn === undefined || bd.storeys < 2 || !q.chance(0.32)) continue;
+      const fx = Math.cos(bd.turn), fz = Math.sin(bd.turn), cx = bd.x + fx * (bd.d / 2), cz = bd.z + fz * (bd.d / 2);
+      const doorA = bd.door !== undefined ? bd.w / 2 - bd.door * bd.w : q.range(-bd.w * 0.3, bd.w * 0.3);
+      const a = Math.max(-bd.w / 2 + 0.5, Math.min(bd.w / 2 - 0.5, doorA + (doorA > 0 ? -0.95 : 0.95)));
+      const at0 = frame(cx, cz, 0, bd.turn), foot = at0(a, 0, 1.2);
+      // (Only where there is street before it to hang over.)
+      if (zoneAt(foot[0], foot[2]) !== Z.street) continue;
+      const y = ground(at0(a, 0, 0.05)[0], at0(a, 0, 0.05)[2]), hb = Math.min(bd.heights[0] - 0.3, 3.1), at = frame(cx, cz, y, bd.turn), j = bd.jetty ?? 0;
+      box(at, 'metal', a - 0.02, a + 0.02, hb - 0.02, hb + 0.02, -0.05, 1.0 + j, iron);
+      solid('metal', [at(a - 0.015, hb - 0.5, -0.05), at(a + 0.015, hb - 0.5, -0.05), at(a + 0.015, hb - 0.47, -0.05), at(a - 0.015, hb - 0.47, -0.05), at(a - 0.015, hb - 0.02, 0.62 + j), at(a + 0.015, hb - 0.02, 0.62 + j), at(a + 0.015, hb + 0.01, 0.62 + j), at(a - 0.015, hb + 0.01, 0.62 + j)], iron);
+      const f0 = 0.32 + j, f1 = 0.92 + j, top = hb - 0.1, bottom = hb - q.range(0.5, 0.65), paint = q.pick(paints);
+      for (const f of [f0 + 0.06, f1 - 0.06]) box(at, 'metal', a - 0.012, a + 0.012, top, hb - 0.02, f - 0.012, f + 0.012, iron);
+      box(at, 'wood', a - 0.022, a + 0.022, bottom, top, f0, f1, [0.2, 0.14, 0.09], 0.9);
+      box(at, 'plaster', a - 0.028, a + 0.028, bottom + 0.05, top - 0.05, f0 + 0.05, f1 - 0.05, paint);
+      const fm = (f0 + f1) / 2, hm = (top + bottom) / 2;
+      solid('metal', [at(a - 0.034, hm, fm - 0.11), at(a + 0.034, hm, fm - 0.11), at(a + 0.034, hm, fm - 0.11), at(a - 0.034, hm, fm - 0.11), at(a - 0.034, hm + 0.11, fm), at(a + 0.034, hm + 0.11, fm), at(a + 0.034, hm - 0.11, fm), at(a - 0.034, hm - 0.11, fm)], [0.85, 0.66, 0.24]);
+      solid('metal', [at(a - 0.034, hm + 0.11, fm), at(a + 0.034, hm + 0.11, fm), at(a + 0.034, hm - 0.11, fm), at(a - 0.034, hm - 0.11, fm), at(a - 0.034, hm, fm + 0.11), at(a + 0.034, hm, fm + 0.11), at(a + 0.034, hm, fm + 0.11), at(a - 0.034, hm, fm + 0.11)], [0.85, 0.66, 0.24]);
+    }
+    // A handcart left here and there: a bed of boards on two spoked wheels, its shafts resting on the street, and something in it.
+    let carts = 0;
+    for (const st of t.streets) {
+      if (st.kind !== 'street' && st.kind !== 'lane') continue;
+      for (let k = 1; k < st.line.length && carts < 14; k++) {
+        const [ax, az] = st.line[k - 1], [bx, bz] = st.line[k], run = Math.hypot(bx - ax, bz - az);
+        if (run < 0.1 || !h.chance(0.045)) continue;
+        const side = h.chance(0.5) ? 1 : -1, px = -(bz - az) / run, pz = (bx - ax) / run, off = st.width / 2 - 0.85;
+        const x = bx + px * side * off, z = bz + pz * side * off;
+        if (zoneAt(x, z) !== Z.street || lamps.some((l) => Math.hypot(l[0] - x, l[2] - z) < 2.5) || t.stalls.some((s0) => Math.hypot(s0.x - x, s0.z - z) < 3)) continue;
+        if (wallOut(x, z, px * side, pz * side, 3.5)) {
+          const turn = Math.atan2(bz - az, bx - ax) + (h.chance(0.5) ? Math.PI : 0) + h.range(-0.25, 0.25), y = ground(x, z), at = frame(x, z, y, turn);
+          const R = 0.45, wood: Colour = shade([0.4, 0.29, 0.18], h.range(0.8, 1.1));
+          for (const sa of [-0.52, 0.52]) {
+            for (let s = 0; s < 10; s++) {
+              const a0 = (s / 10) * Math.PI * 2, a1 = ((s + 1) / 10) * Math.PI * 2;
+              solid('wood', [at(sa - 0.03, R + Math.sin(a0) * R, Math.cos(a0) * R), at(sa + 0.03, R + Math.sin(a0) * R, Math.cos(a0) * R), at(sa + 0.03, R + Math.sin(a1) * R, Math.cos(a1) * R), at(sa - 0.03, R + Math.sin(a1) * R, Math.cos(a1) * R),
+                at(sa - 0.03, R + Math.sin(a0) * (R - 0.06), Math.cos(a0) * (R - 0.06)), at(sa + 0.03, R + Math.sin(a0) * (R - 0.06), Math.cos(a0) * (R - 0.06)), at(sa + 0.03, R + Math.sin(a1) * (R - 0.06), Math.cos(a1) * (R - 0.06)), at(sa - 0.03, R + Math.sin(a1) * (R - 0.06), Math.cos(a1) * (R - 0.06))], wood);
+            }
+            // (Five spokes through the hub, each a bar across the wheel.)
+            for (let s = 0; s < 5; s++) {
+              const a0 = (s / 5) * Math.PI, dh = Math.sin(a0), df = Math.cos(a0), L = R - 0.05, w = 0.016;
+              solid('wood', [at(sa - 0.015, R + dh * L + df * w, df * L - dh * w), at(sa + 0.015, R + dh * L + df * w, df * L - dh * w), at(sa + 0.015, R + dh * L - df * w, df * L + dh * w), at(sa - 0.015, R + dh * L - df * w, df * L + dh * w),
+                at(sa - 0.015, R - dh * L + df * w, -df * L - dh * w), at(sa + 0.015, R - dh * L + df * w, -df * L - dh * w), at(sa + 0.015, R - dh * L - df * w, -df * L + dh * w), at(sa - 0.015, R - dh * L - df * w, -df * L + dh * w)], wood);
+            }
+          }
+          box(at, 'wood', -0.6, 0.6, R - 0.04, R + 0.04, -0.04, 0.04, [0.1, 0.09, 0.08]);
+          box(at, 'wood', -0.46, 0.46, R + 0.06, R + 0.1, -0.7, 0.55, wood, 0.9);
+          for (const sa of [-0.46, 0.43]) box(at, 'wood', sa, sa + 0.03, R + 0.1, R + 0.38, -0.7, 0.55, wood, 0.9);
+          for (const sf of [-0.7, 0.52]) box(at, 'wood', -0.46, 0.46, R + 0.1, R + 0.38, sf, sf + 0.03, wood, 0.9);
+          for (const sa of [-0.38, 0.38]) solid('wood', [at(sa - 0.03, R + 0.04, 0.5), at(sa + 0.03, R + 0.04, 0.5), at(sa + 0.03, R + 0.1, 0.5), at(sa - 0.03, R + 0.1, 0.5), at(sa - 0.025, 0.02, 1.85), at(sa + 0.025, 0.02, 1.85), at(sa + 0.025, 0.07, 1.85), at(sa - 0.025, 0.07, 1.85)], wood);
+          const goods: Colour[] = [[0.6, 0.52, 0.36], [0.45, 0.32, 0.2], [0.55, 0.5, 0.42]];
+          for (let g = 0; g < h.int(1, 3); g++) { const ga = h.range(-0.25, 0.25), gf = h.range(-0.45, 0.3); box(at, 'plaster', ga - 0.17, ga + 0.17, R + 0.1, R + 0.1 + h.range(0.2, 0.36), gf - 0.14, gf + 0.14, h.pick(goods)); }
+          carts++;
+        }
+      }
     }
   }
 
@@ -1655,6 +1785,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   return {
     smokes,
     torches,
+    lamps,
     paving: { x0: zx0, z0: zz0, cell: ZC, nx: znx, nz: znz, data: laidBy },
     spawn: V(sx, lm.y + 1.75, sz),
     yaw: Math.atan2(-look.x, -look.z),

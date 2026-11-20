@@ -746,6 +746,15 @@ function layVessel(wild: Kit, mesh: (m: string) => MeshBuilder, bt: { x: number;
     beam(0, 0, hb + 0.18, hb + 0.3, f0 - 0.4, f0 - bl * 0.92, sail, 0.2);
     beam(0, 0, h0 + tall * 0.62, h0 + tall * 0.62 + bl * 0.35, f0 - tall * 0.62 * rake - 0.2, f0 - bl * 0.75, spars, 0.065);
   }
+  // A pennant at each masthead, long and narrow, streaming the way the wind blows (the same way over every vessel in the harbour),
+  // drooping a little towards its tail.
+  const pennant: Colour = rng.fork('pennant').pick([[0.62, 0.1, 0.08], [0.85, 0.83, 0.76], [0.12, 0.2, 0.42]] as Colour[]);
+  for (const top of tops) {
+    const wx = 0.94, wz = 0.34, len = 1.2 + bt.length * 0.04, t0 = 0.012;
+    const tip: P3 = [top[0] + wx * len, top[1] - 0.22, top[2] + wz * len];
+    solid('plaster', [[top[0] - wz * t0, top[1] - 0.24, top[2] + wx * t0], [top[0] + wz * t0, top[1] - 0.24, top[2] - wx * t0], [top[0] + wz * t0, top[1] - 0.02, top[2] - wx * t0], [top[0] - wz * t0, top[1] - 0.02, top[2] + wx * t0],
+      [tip[0] - wz * t0, tip[1] - 0.01, tip[2] + wx * t0], [tip[0] + wz * t0, tip[1] - 0.01, tip[2] - wx * t0], [tip[0] + wz * t0, tip[1] + 0.01, tip[2] - wx * t0], [tip[0] - wz * t0, tip[1] + 0.01, tip[2] + wx * t0]], pennant);
+  }
   // The bowsprit, and the stays: forestays from the foremost masthead to the bowsprit's end, shrouds to either side.
   const bowF = L * 0.98, sprit = at(0, deckY(L) + 0.4, bowF + bt.length * 0.18);
   {

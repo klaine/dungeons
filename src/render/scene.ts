@@ -150,6 +150,8 @@ export interface SceneDescription {
   smokes?: { x: number; y: number; z: number; height: number }[];
   /** Which way a town's paving is laid (see `PaveFrame`). */
   paving?: PaveFrame;
+  /** Where the lanterns of a town's street lamps are, which light the street about them after dark (see `setLamps`). */
+  lamps?: [number, number, number][];
   /** The lowest open ground of the valley: mist lies no lower than a little under this. */
   groundLow?: number;
   /** The lowest floor there is anywhere, if it is lower than the places' own floors and the halls under the hill: nobody has fallen out of the world who is above it. */
