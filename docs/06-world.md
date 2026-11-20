@@ -618,6 +618,39 @@ nothing marks the corridor's edge on the ground (the panel and the small map say
 since its tussocks and rills would be laid on the bed too; a way crosses a river where it must without a bridge drawn, and goes round
 lakes; and only a way from a town to a valley head is laid for walking, though `layRoute` lays one between any two places over land.
 
+## The world as the game
+
+Asked: "so adapt the game engine to this, as this would eventually become the game (instead of current single locations)". The
+game builds one place at a time, whole (`src/app/main.ts`: a site laid out, meshed, its light baked, walked by the body in its one
+mesh), and goes from one to another by loading a page. The world as the game is the walk over the world's land streamed in at a metre
+(`src/worldwalk/`), with the places built into it as one comes to them, and the game's rules in each. It is made in steps, each of which
+leaves both the game and the walk working:
+
+1. **The game's body in the world.** *Done:* the walk and route pages move the game's own body (`Player`: its pace, 3.2 metres a second
+   and 6.5 running, its weight, the steps it climbs, its jump, `V` to fly), not a camera slid over the ground. What it walks on and is
+   stopped by is a set of meshes asked in turn (`Colliders`, which a site's one mesh is too), here `WorldColliders`
+   (`src/worldwalk/body.ts`): a patch of ground 64 metres across at a metre about the body, from the land as it is drawn, made again when
+   the body has gone a quarter of the way to its edge or land under it has come in finer; and the trunks of the trees on it, each a
+   six-sided post (bushes and young trees stop nobody, as in the game). The page keeps the body in the world, in the way's corridor on
+   the route page, out of the sea (which stops one at the depth of a knee), and never under the ground. Touch drives the same body.
+   *Checked* without a browser (`npx tsx tools/body.ts w0`): the body ran the whole way from Halhaven to Strath Norith, 0.93 kilometres,
+   in 141 seconds against 143 at its running pace, never stopped; then straight through a wood 160 metres deep and back, coming no nearer
+   a trunk's bark than its own breadth; never more than 6 centimetres under the ground or 14 over it; a patch takes some 5 milliseconds
+   (43 at most).
+2. **Places built into the world.** As one comes within a kilometre or so of a place, its layout made in a worker (as the route page
+   already does, `placesWorker.ts`), its meshes built in steps that do not hold up the picture (`meshSiteSteps` moved into a worker, or
+   cut finer), its light baked in workers as now; its own far land left out, since the world's is there; its ground laid in place of the
+   squares under it (the squares cut away within its footprint, `footprintOf`, and the seam closed), and its meshes added to the body's
+   colliders. Its buildings, rock, water and planting then stand in the world, and are let go of far off.
+3. **One renderer.** The game's sky, real clouds, sea, ambient occlusion, levels of detail, lamps and night, used by the world as by the
+   place, rather than the walk page's own copies (`dress.ts`'s `makeLight`).
+4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
+   place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
+   a boat for the sea legs; and something faster than walking for the kilometres between.
+5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
+   (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
+6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.
+
 ## Where next: the land, and places that fit it
 
 Asked: "do we need better noise/fractal/erosion algorithm for terrain? also we should adapt the

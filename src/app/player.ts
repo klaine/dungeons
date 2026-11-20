@@ -4,7 +4,12 @@ import { MeshBVH } from 'three-mesh-bvh';
 /**
  * First-person walking: gravity and a capsule that slides along the site geometry. Mouse and keyboard
  * are handled here; other inputs (touch) drive it through `analog`, `look` and `jump`.
+ *
+ * What it walks on and is stopped by is anything that can be asked for the triangles near the body
+ * (`Colliders`): a site's one mesh (`MeshBVH`), or, walking a world streamed in, a set of them that
+ * changes as one goes (`src/worldwalk/body.ts`).
  */
+export type Colliders = Pick<MeshBVH, 'shapecast'>;
 
 const RADIUS = 0.28;
 const HEIGHT = 1.8;
@@ -30,6 +35,15 @@ export class Player {
   flying = false;
   /** Below this the player has fallen out of the world, and is put back where they came in. Lower where there is ground far down: a hall under the hill, a chasm. */
   fallTo = -8;
+  /** How fast one flies, metres a second, and running: a world is kilometres across, a site a few hundred metres. */
+  flySpeed: [number, number] = [9, 28];
+  /** Up or down while flying, from a touch control, 1 to -1. */
+  analogRise = 0;
+  /**
+   * Called on where the body stands after each move, to keep it where it may be: within a way's corridor, out of the sea. It may
+   * move the point. (Nothing by default.)
+   */
+  constrain: ((at: Vector3) => void) | null = null;
   /** Boxes that stop the player while active, such as shut doors. */
   readonly blockers: { min: Vector3; max: Vector3; active: boolean }[] = [];
   private jumpQueued = false;
@@ -45,7 +59,7 @@ export class Player {
   private triPoint = new Vector3();
   private capPoint = new Vector3();
 
-  constructor(private camera: PerspectiveCamera, private dom: HTMLElement, private bvh: MeshBVH) {
+  constructor(private camera: PerspectiveCamera, private dom: HTMLElement, private bvh: Colliders) {
     dom.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && !this.locked) dom.requestPointerLock?.();
     });
@@ -127,6 +141,7 @@ export class Player {
       this.position.copy(this.spawn);
       this.velocity.set(0, 0, 0);
     }
+    this.constrain?.(this.position);
     this.syncCamera();
   }
 
@@ -140,8 +155,8 @@ export class Player {
     if (this.keys.has('Space') || this.jumpQueued) up += 1;
     if (this.keys.has('KeyC')) up -= 1;
     this.jumpQueued = false;
-    fx += this.analog.x; fz += this.analog.y;
-    const speed = fast ? 28 : 9;
+    fx += this.analog.x; fz += this.analog.y; up += this.analogRise;
+    const speed = this.flySpeed[fast ? 1 : 0];
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw), sp = Math.sin(this.pitch), cp = Math.cos(this.pitch);
     // Forward is along the line of sight; sideways stays level.
     const wx = (fx * cy + fz * sy * cp) * speed, wy = (-fz * sp + up) * speed, wz = (-fx * sy + fz * cy * cp) * speed;
@@ -152,6 +167,7 @@ export class Player {
     this.position.addScaledVector(this.velocity, dt);
     this.onGround = false;
     this.running = false;
+    this.constrain?.(this.position);
     this.syncCamera();
   }
 

@@ -398,6 +398,15 @@ The machine this is developed on now has a graphics card, and tablets were repor
     the next way out. *Not checked:* how the hand-over looks in motion, which only a
     graphics card can show; the game's far material is not used, since it paints woods of its own rather than the world's.
 
+51. **The world becomes the game.** Asked: "so adapt the game engine to this, as this would eventually become the game (instead of
+    current single locations)". Planned in six steps in [document 6](06-world.md), *The world as the game*: the game's body in the
+    world; places built into it as one comes to them; one renderer; the game's rules, maps, sound and ways in it; the world's own
+    light, water and rock; and the world the default page. *Done, the first:* the walk and route pages move the game's own body
+    (`Player`, now asking a set of colliders, `Colliders`), on a patch of ground about it made from the land as drawn, stopped by tree
+    trunks (`src/worldwalk/body.ts`). *Checked:* `tools/body.ts w0` (the route run end to end at the body's pace, a wood crossed and
+    crossed back, no trunk entered, never under the ground); the route page in headless Chromium at 480 by 270 (see below). The game
+    itself is unchanged: its body still asks its one mesh.
+
 ## Risks
 
 | Risk | Mitigation |
