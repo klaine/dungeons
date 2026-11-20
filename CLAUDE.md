@@ -16,6 +16,7 @@ on every push to the default branch.
 - `docs/05-site-format.md`: the site document and what is exported.
 - `docs/06-world.md`: the world, one country holding every kind of place; what it holds, how it is made, and the plan for joining the places to it.
 - `README.md`: how to run it, controls, URL parameters.
+- `public/how-it-works.html`: a guided tour of the whole for readers new to it, with diagrams and figures that run (published as `how-it-works.html`, its pictures in `public/how-it-works/`). It quotes numbers from the documents above; when a change makes one of its sections untrue, mend that section too.
 
 Keep these up to date in the same commit as the change they describe.
 

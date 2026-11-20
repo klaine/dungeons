@@ -4,7 +4,7 @@ A browser tool for generating places for adventure and exploring them: a 3D worl
 
 "Dungeon" here means any bounded place worth exploring: crypts and caverns, castles, towns, and locations in open country.
 
-The project is at an early stage. The design is written down in `docs/`. In the browser, each seed generates a small walled house — rooms arranged in loops, sometimes with a court open to the sky — built stone by stone, with procedural materials and baked light. Each has a locked sanctum to reach: keys to find, sometimes a second lock, sometimes a door barred from its far side or a portcullis with a lever beyond it, and a map that fills in as you explore. Every generated place is proven completable before it is shown.
+The project is at an early stage. The design is written down in `docs/`; [How it works](public/how-it-works.html), published beside the tool as `how-it-works.html` and linked from its top row, is a guided tour of the whole, with diagrams. In the browser, each seed generates a small walled house — rooms arranged in loops, sometimes with a court open to the sky — built stone by stone, with procedural materials and baked light. Each has a locked sanctum to reach: keys to find, sometimes a second lock, sometimes a door barred from its far side or a portcullis with a lever beyond it, and a map that fills in as you explore. Every generated place is proven completable before it is shown.
 
 A generated place (seed `check-0`): its cloister court, its sanctum, and its plan.
 
@@ -174,6 +174,7 @@ A fantastic site is a place with a past, a shape you can learn and a rhythm you 
 
 ## Documents
 
+- [How it works](public/how-it-works.html) — a guided tour with diagrams, from the seed to the stones, for readers new to the project (published beside the tool as `how-it-works.html`)
 - [1. What makes it fantastic](docs/01-what-makes-it-fantastic.md) — design principles for sites and biomes, and the tests output is judged by
 - [2. How to generate it](docs/02-generation.md) — the pipeline, site grammars, the data model and the quality model
 - [3. The tool and the plan](docs/03-plan.md) — what gets built, technology, milestones, risks and decisions
