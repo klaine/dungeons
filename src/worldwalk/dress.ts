@@ -3,7 +3,7 @@ import { MeshStandardNodeMaterial, PMREMGenerator, WebGPURenderer } from 'three/
 import { attribute, mix, positionLocal, step } from 'three/tsl';
 import { airPipeline, Daylight, driftClouds, lightAir, skyMean, skyMesh, Weather, weatherOf } from '../render/air';
 import { Rain } from '../render/rain';
-import { SunShadow } from '../render/sunShadow';
+import { SunPicture, SunShadow } from '../render/sunShadow';
 import { fbm2, Rng } from '../core/rng';
 import { Hour, SKIES, Stone } from '../core/site';
 import { COVER } from '../core/world';
@@ -134,7 +134,7 @@ export function woodDepth(cover: Uint8Array, nx: number, nz: number, x0: number,
  * drawn over a square about the walker instead, as before.
  */
 export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, hour: Hour, o: {
-  weather: Weather; clouds: number; occlusion: boolean; temporal: boolean; bloom: boolean; nearShadow: boolean; box: { min: Vector3; max: Vector3 }; seed: string;
+  weather: Weather; clouds: number; occlusion: boolean; temporal: boolean; bloom: boolean; nearShadow: boolean; middleShadow?: boolean; box: { min: Vector3; max: Vector3 }; seed: string;
 }) {
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -190,8 +190,12 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
   // The game's sun shadow, near and far.
   const gpu = (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend === true;
   const box = o.box.max.clone().sub(o.box.min).length() / 2;
+  // (And between the two a finer picture from the sun about the walker, a kilometre square at half a metre a point, of the places
+  // standing in the world and the land about the walker: the air's picture is the whole world's, some 5.7 metres a point, of its land
+  // alone, and beyond the near square the places threw no shadow. See `SunPicture`.)
+  const middle = o.nearShadow && o.middleShadow !== false && gpu ? new SunPicture(512, 2048, 3000) : null;
   const sunShadow = o.nearShadow && gpu
-    ? new SunShadow(sun, camera, { reach: 64, size: 2048, radius: R, far: { ...atmosphere.sunMap, deep: 2 * box + 0.5, point: (2 * box) / (atmosphere.sunMap.depth.image.width ?? 2048), gpu } })
+    ? new SunShadow(sun, camera, { reach: 64, size: 2048, radius: R, far: { ...atmosphere.sunMap, deep: 2 * box + 0.5, point: (2 * box) / (atmosphere.sunMap.depth.image.width ?? 2048), gpu }, middle: middle ?? undefined })
     : null;
   if (sunShadow) (sun.shadow as unknown as { shadowNode: unknown }).shadowNode = sunShadow;
   // (The air's pictures drawn empty at once, over the world, until its land is in to be drawn into them (`land`): never drawn, the
@@ -202,7 +206,9 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
   if (rain) scene.add(rain.mesh);
   let shadowAt = new Vector3(1e9, 0, 0), shadowsDue = 3;
   return {
-    sunDir, sun, atmosphere, pipeline, sunShadow,
+    sunDir, sun, atmosphere, pipeline, sunShadow, middle,
+    /** Draws the finer picture from the sun about a point (the walker's), if there is one: what is on its layer (`SunPicture.LAYER`). */
+    drawMiddle(at: Vector3) { middle?.draw(renderer, scene, at, sunDir); },
     /** Asks for the shadows to be drawn again, a few times, as what casts them comes in. */
     redraw() { if (sunShadow) sun.shadow.needsUpdate = true; else shadowsDue = 3; },
     /** Each frame: the clouds drifted, the rain moved with the eye; and, without the game's near shadow, the sun's own map over the ground about the walker, moved with them, drawn again when they have gone far or something has come in. */

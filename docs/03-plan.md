@@ -438,9 +438,13 @@ The machine this is developed on now has a graphics card, and tablets were repor
     and far, the mountain's edge, the town's sea): on an M2 Pro laptop at 1103 by 955, the route page with a town and a valley head
     standing took 51 milliseconds a frame, 32 of them with nothing in the scene; the two places filled the page's heap to 4.1 of its
     4.4 gigabytes; a place throws no shadow beyond the near square. Mended on the way: the world's flat sea showing through the swell in
-    ringed ovals, and flickering in a town's terrace walls and basement windows (the game's builders). Figures and the reasons in
-    [document 6](06-world.md), *The world as the game*, step 3. *Not yet looked at:* the mountain's edge and the walk page to Elith
-    Fell.
+    ringed ovals, and flickering in a town's terrace walls and basement windows (the game's builders). Then (asked: "continue ...
+    start with your last identified list"): a place's points let go of in the page once on the card (the page's process 3.4 gigabytes
+    with two places, not 5.9); a third picture from the sun about the walker, so that places throw their shadows beyond the near square;
+    and the terrace's walls built astride its edge the right way about, with the ground made sharp there. The walk page to Elith Fell:
+    31 to 38 milliseconds a frame at each place. Figures and the reasons in [document 6](06-world.md), *The world as the game*, step 3.
+    *Found, not yet mended:* gaps at a mountain top's edge where the sky shows between the world's land and the place's carved rock;
+    the place's warm stone against the world's grey there; the bake's six workers each holding a whole house.
 
 ## Risks
 

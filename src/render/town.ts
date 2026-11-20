@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { Building, Site, Town } from '../core/site';
-import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, riverAt, squareY, townGround, townLand } from '../core/town';
+import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, riverAt, squareY, terraceWalls, townGround, townLand } from '../core/town';
 import { footprintOf } from '../core/building';
 import { lakeLevelAt } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
@@ -568,9 +568,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       y += hgt;
     }
     // (The joints behind: one dark block the whole of the face, set back, so no light comes through between the stones. Set in from
-    // their backs as from their faces: its back lay in one plane with theirs, and where a wall shows its back, as the house's terrace
-    // does to the square, the dark block came through the stones in patches that flickered.)
-    box(at, 'stone', a0, a1, y0, y1, 0.04, deep - 0.04, shade(colour, 0.35), 0.4);
+    // their backs and their ends as from their faces: its back lay in one plane with theirs, and where a wall showed its back, as the
+    // house's terrace once did to the square, the dark block came through the stones in patches that flickered; and at a wall's end
+    // it stood out past them, a dark face.)
+    box(at, 'stone', a0 + 0.04, a1 - 0.04, y0, y1, 0.04, deep - 0.04, shade(colour, 0.35), 0.4);
   };
 
   // ---- the harbour: the quay's face and coping, its bollards and steps; the moles; the light
@@ -929,35 +930,55 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     });
   }
 
-  // ---- the house's terrace over the square: a wall of dressed stone along its front, with a balustrade, and the stair down
+  // ---- the house's terrace over the square: walls of dressed stone along its front and down its sides, with a balustrade, and the stair down
   {
-    const h = rng.fork('terrace'), sq = t.square, lv = t.level, st = t.stair;
+    const h = rng.fork('terrace'), sq = t.square, lv = t.level, st = t.stair, walls = terraceWalls(t, F);
     const yN = sq.yN, front = lv.z1;
-    // The wall: from the square's ground up to the terrace's floor, either side of the stair, and round the terrace's front corners.
-    for (const [a0, a1] of [[lv.x0, st.x0], [st.x1, lv.x1]]) {
-      if (a1 - a0 < 0.3) continue;
-      const at = frame((a0 + a1) / 2, front, 0, Math.PI / 2);
-      masonry((aa, hh, ff) => at(-aa, hh, ff - 0.05), -(a1 - a0) / 2, (a1 - a0) / 2, Math.min(yN, squareY(t, front + 1)) - 0.8, F - 0.02, 1.2, h.fork(`wall${a0}`), stone);
-      // The balustrade: a plinth, turned balusters, a rail.
-      box(at, 'stone', -(a1 - a0) / 2, (a1 - a0) / 2, F, F + 0.18, -0.35, 0.02, shade(stone, 1.05));
-      for (let a = -(a1 - a0) / 2 + 0.25; a < (a1 - a0) / 2 - 0.15; a += 0.32) {
-        const [bx, , bz] = at(a, 0, -0.17);
+    // The walls stand astride the terrace's edge, their dressed faces out, `OUT` beyond it and as far within. The ground is made sharp
+    // at the edge (`terraceGround`), the floor within and the square's or the lane's level without, but its sheet is laid in triangles
+    // of 1.2 metres, and the one that crosses the edge slopes from the one to the other within a triangle's breadth either side: the
+    // wall stands over all of that. (Built at first the wrong way about, out into the square with the backs of its stones to it, it
+    // flickered where the dark block of joints behind them lay in one plane with them; and the ground stood up to two thirds of a metre
+    // against its foot in front, and dipped up to a metre behind the balustrade.) Their tops are coped, the balustrade at their outer edge.
+    const OUT = 1.25, west = walls.west <= front, east = walls.east <= front;
+    // (Frames: along the front `a` is x and `f` runs out into the square; down a side `a` is z and `f` runs out from it.)
+    const fr = (a: number, hh: number, ff: number): P3 => [a, hh, front + ff];
+    const sideFrame = (side: number) => (a: number, hh: number, ff: number): P3 => [side < 0 ? lv.x0 - ff : lv.x1 + ff, hh, a];
+    /** Coping stones along a frame from `a0` to `a1`, `f0` to `f1` across: over the wall's top, a few centimetres over the floor. */
+    const coping = (at: (a: number, hh: number, ff: number) => P3, a0: number, a1: number, f0: number, f1: number, q: Rng) => {
+      for (let a = a0; a < a1 - 0.05;) { const e = Math.min(a1, a + q.range(1.1, 1.9)); box(at, 'stone', a + 0.01, e - 0.01, F - 0.06, F + 0.04, f0, f1, shade(stone, q.range(0.95, 1.1)), 0.4, 0.02); a = e; }
+    };
+    // (The forecourt is flagged from wall to wall, a little in from the sides: within it the coping stops where its flags begin.)
+    const flagged = (x0: number, x1: number): [number, number][] => [[x0, Math.min(x1, p.x0 + 0.1)], [Math.max(x0, p.x1 - 0.1), x1]].filter(([a, b]) => b - a > 0.05) as [number, number][];
+    // Along the front, either side of the stair: ending a little inside the stair's cheeks, whose faces they would lie in, and at a
+    // corner where a side wall stands, inside that, whose dressed side is what is seen there.
+    for (const [x0, x1, w0, w1] of [[lv.x0, st.x0 - 0.3, west, false], [st.x1 + 0.3, lv.x1, false, east]] as [number, number, boolean, boolean][]) {
+      if (x1 - x0 < 0.3) continue;
+      const q = h.fork(`wall${x0}`);
+      masonry((aa, hh, ff) => fr(aa, hh, OUT - ff), x0, x1, Math.min(yN, squareY(t, front + 1)) - 0.8, F - 0.02, 2 * OUT, q, stone);
+      const c0 = x0 + (w0 ? OUT : 0), c1 = x1 - (w1 ? OUT : 0);
+      coping(fr, c0, c1, -0.05, 0.92, q);
+      for (const [a, b] of flagged(c0, c1)) coping(fr, a, b, -OUT, -0.05, q);
+      // The balustrade: a plinth, turned balusters, a rail; round a corner to the side wall's face.
+      const b0 = x0 - (w0 ? OUT + 0.04 : 0), b1 = x1 + (w1 ? OUT + 0.04 : 0);
+      box(fr, 'stone', b0, b1, F, F + 0.18, 0.92, 1.29, shade(stone, 1.05));
+      for (let a = b0 + 0.25; a < b1 - 0.15; a += 0.32) {
+        const [bx, , bz] = fr(a, 0, 1.1);
         baluster(bx, bz, F + 0.18, 0.66);
       }
-      box(at, 'stone', -(a1 - a0) / 2 - 0.04, (a1 - a0) / 2 + 0.04, F + 0.84, F + 1.0, -0.39, 0.06, shade(stone, 1.1));
-      for (const a of [-(a1 - a0) / 2 + 0.2, (a1 - a0) / 2 - 0.2]) box(at, 'stone', a - 0.24, a + 0.24, F, F + 1.08, -0.42, 0.06, shade(stone, 1.02));
+      box(fr, 'stone', b0 - 0.04, b1 + 0.04, F + 0.84, F + 1.0, 0.88, 1.33, shade(stone, 1.1));
+      for (const a of [b0 + 0.2, b1 - 0.2]) box(fr, 'stone', a - 0.24, a + 0.24, F, F + 1.08, 0.85, 1.33, shade(stone, 1.02));
     }
-    // Down its sides, as far back as the lanes beside it are lower than it.
+    // Down its sides, as far back as the lanes beside it are lower than it: on past the corner to the front wall's face.
     for (const side of [-1, 1]) {
-      const x = side < 0 ? lv.x0 : lv.x1;
-      let z1 = front;
-      while (z1 > lv.z0 + 1 && F - ground(x + side * 1.2, z1 - 1) > 0.3) z1 -= 1;
-      if (front - z1 < 1) continue;
-      // (In the frame facing out from the side, `a` runs towards the front on the west and away from it on the east: the wall reaches
-      // on past the corner by the front wall's thickness, at the front's end.)
-      const at = frame(x, (front + z1) / 2, 0, side < 0 ? Math.PI : 0), L2 = (front - z1) / 2, a0 = side < 0 ? -L2 - 1.2 : -L2, a1 = side < 0 ? L2 : L2 + 1.2;
-      masonry((aa, hh, ff) => at(aa, hh, ff - 0.05), a0, a1, Math.min(...[0, 0.5, 1].map((k) => ground(x + side * 1.2, z1 + (front - z1) * k))) - 0.8, F - 0.02, 1.2, h.fork(`side${side}`), stone);
-      box(at, 'stone', a0, a1, F, F + 0.35, -0.1, 0.5, shade(stone, 1.05));
+      const z1 = side < 0 ? walls.west : walls.east;
+      if (z1 > front) continue;
+      const at = sideFrame(side), x = side < 0 ? lv.x0 : lv.x1, q = h.fork(`side${side}`);
+      const foot = Math.min(...[0, 0.5, 1].map((k) => ground(x + side * OUT, z1 + (front + OUT - z1) * k))) - 0.8;
+      masonry((aa, hh, ff) => at(aa, hh, OUT - ff), z1, front + OUT, foot, F - 0.02, 2 * OUT, q, stone);
+      coping(at, z1, front + 0.92, -OUT, 0.75, q);
+      // (A low parapet along its outer edge, into the front balustrade's plinth at the corner, and inside its corner post.)
+      box(at, 'stone', z1, front + 0.95, F, F + 0.35, 0.75, 1.29, shade(stone, 1.05));
     }
     // The stair: steps of stone from the terrace down into the square, as broad as the stair, between cheeks that carry the balustrade on down.
     // (Down to the square's ground at the stair's foot, not at the square's top edge: where the square falls steeply to the sea, the last
@@ -971,7 +992,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     }
     for (const side of [-1, 1]) {
       box(at, 'stone', side < 0 ? -half - 0.6 : half, side < 0 ? -half : half + 0.6, foot - 0.6, F + 0.2, -0.1, st.z1 - st.z0, shade(stone, 0.95));
-      box(at, 'stone', side < 0 ? -half - 0.66 : half - 0.06, side < 0 ? -half + 0.06 : half + 0.66, F + 0.2, F + 0.32, -0.1, 0.4, shade(stone, 1.1));
+      // (Its cap where the balustrade comes down onto it, at the walls' outer edge.)
+      box(at, 'stone', side < 0 ? -half - 0.66 : half - 0.06, side < 0 ? -half + 0.06 : half + 0.66, F + 0.2, F + 0.32, 0.85, 1.35, shade(stone, 1.1));
       // (A post at the foot of each cheek, with a ball on it.)
       box(at, 'stone', side < 0 ? -half - 0.65 : half - 0.05, side < 0 ? -half + 0.05 : half + 0.65, foot, foot + 1.2, st.z1 - st.z0 - 0.7, st.z1 - st.z0, shade(stone, 1.02));
     }

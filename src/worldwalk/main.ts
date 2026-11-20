@@ -15,6 +15,7 @@ import { Player } from '../app/player';
 import { WorldColliders } from './body';
 import { WorldPlaces } from './places';
 import { SEA_RING, WorldSea } from './worldSea';
+import { SunPicture } from '../render/sunShadow';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
 
@@ -122,7 +123,7 @@ async function start(): Promise<void> {
   const weather = { cloud: clamp01(num('cloud', 0.4)), layered: params.get('layered') === '1', mist: clamp01(num('mist', 0)), haze: clamp01(num('haze', 0.4)), rain: clamp01(num('rain', 0)) };
   const light = makeLight(renderer, scene, camera, hour, {
     weather, clouds: Math.round(num('clouds', quality.clouds)), occlusion: num('ao', quality.ao) > 0, temporal: num('taa', 1) > 0, bloom: num('bloom', quality.bloom) > 0,
-    nearShadow: room > 17 && num('nearshadow', 1) > 0, box: { min: new Vector3(-grid.hx, -150, -grid.hz), max: new Vector3(grid.hx, 900, grid.hz) }, seed,
+    nearShadow: room > 17 && num('nearshadow', 1) > 0, middleShadow: num('midshadow', 1) > 0, box: { min: new Vector3(-grid.hx, -150, -grid.hz), max: new Vector3(grid.hx, 900, grid.hz) }, seed,
   });
   // (The houses' grounds, fitted to the land: made on it in every square they reach.)
   const grounds = W.places.flatMap((q) => (q.ground ? [q.ground] : []));
@@ -146,6 +147,11 @@ async function start(): Promise<void> {
   sea.rotation.x = -Math.PI / 2; sea.position.y = -0.6; sea.receiveShadow = true;
   scene.add(sea);
   const drop = (meshes: (Mesh | InstancedMesh)[]) => { for (const m of meshes) { scene.remove(m); m.geometry.dispose(); } };
+  /** A square's land, which also throws its shadow into the finer picture from the sun about the walker (`SunPicture`). */
+  const landMesh = (b: MeshBuilder, material: Material) => { const m = meshOf(b, material, hour); m.layers.enable(SunPicture.LAYER); return m; };
+  // (That picture is drawn again when the walker has gone a hundred metres, and when land or a place has come or gone within its
+  // reach, then no oftener than every three seconds: squares come in a few a frame, and each drawing costs about a frame.)
+  let middleDirty = true, middleDrawn = -Infinity;
 
   // ---- tiles and squares, from the workers
   const tiles = new Map<string, TileData>(), tileWait = new Map<string, Promise<TileData>>(), tileResolve = new Map<string, (t: TileData) => void>();
@@ -321,7 +327,7 @@ async function start(): Promise<void> {
   let landVersion = 0;
   const colliders = new WorldColliders(heightAt, (x0, z0, x1) => treesIn(x0, z0, x1 - x0, treesHere, heightAt, W.plan.n, depthAt).map((t) => ({ x: t.x, z: t.z, r: Math.max(0.2, t.girth * 1.1) })), (x, z) => placesBuilt.inside(x, z, 0.5));
   // Places built into the world as one comes to them (`WorldPlaces`, step 2): every kind. `?places=0` builds none.
-  const placesBuilt = new WorldPlaces({ seed, size, scene, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
+  const placesBuilt = new WorldPlaces({ seed, size, scene, renderer, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
   /** Where a square's triangles are left out, under a place standing in the world: only for a square that reaches into one. */
   const underPlace = (x0: number, z0: number, size: number) => {
     const near = placesBuilt.holes().some((h) => Math.hypot(Math.max(0, x0 - h.cx, h.cx - x0 - size), Math.max(0, z0 - h.cz, h.cz - z0 - size)) < Math.hypot(h.hx, h.hz));
@@ -334,6 +340,7 @@ async function start(): Promise<void> {
   // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
   // let be), the far land, what grows (none inside a place), and the body's ground.
   placesBuilt.onHoles = (h) => {
+    middleDirty = true;
     const r = Math.hypot(h.hx, h.hz) + 160, cx = h.cx, cz = h.cz, near = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - cx, cx - x0 - s), Math.max(0, z0 - cz, cz - z0 - s)) < r;
     for (const [k, sq] of squares) if (near(sq.x0, sq.z0, SQUARE.size)) {
       drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []);
@@ -509,8 +516,8 @@ async function start(): Promise<void> {
   };
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
-    /** The scene, the eye and the renderer, for looking into from the browser's console. */
-    three: { scene, camera, renderer },
+    /** The scene, the eye, the renderer and the places standing (with how many let go of have been collected, `WorldPlaces.collected`), for looking into from the browser's console. */
+    three: { scene, camera, renderer, placesBuilt, WorldPlaces },
     /** The places standing in the world, and how they came in. */
     places: () => ({ status: placesBuilt.status, built: placesBuilt.report() }),
     /** On the route page: opens or closes the ink map of the stretch. */
@@ -593,7 +600,7 @@ async function start(): Promise<void> {
           const level = levelFor(distRect(p.x0, p.z0, FINE.size));
           if (level === p.level || budget <= 0) continue;
           const m = squareBuilders(p.x0, p.z0, p.heights, p.errors, LEVELS[level], look, 0.72, FINE.cell, underPlace(p.x0, p.z0, FINE.size));
-          const meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
+          const meshes = [landMesh(m.turf, materials.turf), landMesh(m.rock, materials.rock)];
           drop(p.meshes ?? []);
           if (sq.fineShown) for (const mesh of meshes) scene.add(mesh);
           p.meshes = meshes; p.level = level; p.triangles = m.triangles;
@@ -614,7 +621,8 @@ async function start(): Promise<void> {
       if (level !== sq.level || !sq.meshes) {
         const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look, 0.72, 1, underPlace(sq.x0, sq.z0, SQUARE.size));
         if (sq.meshes) drop(sq.meshes); else if (!sq.fineShown) farDirty.add(blockOf(sq.i, sq.j));
-        sq.meshes = [meshOf(m.turf, materials.turf, hour), meshOf(m.rock, materials.rock, hour)];
+        sq.meshes = [landMesh(m.turf, materials.turf), landMesh(m.rock, materials.rock)];
+        if (q.d < 600) middleDirty = true;
         for (const mesh of sq.meshes) scene.add(mesh);
         sq.level = level; sq.triangles = m.triangles;
         budget--; rebuilt++;
@@ -661,6 +669,10 @@ async function start(): Promise<void> {
     const cards = [...[...lows.values()].flat(), ...[...nears.values(), ...mids.values()].flat().filter((m): m is InstancedMesh => (m as InstancedMesh).isInstancedMesh)];
     cullCards([...cards, ...placesBuilt.cards()], camera.position);
     light.follow(me, groundY, now / 1000, dt);
+    if (light.middle && (Math.hypot(me.x - light.middle.at.x, me.z - light.middle.at.z) > 100 || (middleDirty && now - middleDrawn > 3000))) {
+      light.drawMiddle(new Vector3(me.x, groundY, me.z));
+      middleDirty = false; middleDrawn = now;
+    }
     light.atmosphere.update();
     light.pipeline.render();
     // The eye adjusts to the picture, as in the game.

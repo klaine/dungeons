@@ -725,7 +725,13 @@ leaves both the game and the walk working:
    have (139 megabytes before the places came), its process 5.9 and the browser's graphics process 3.5, and with other programs open
    the machine was eleven gigabytes into its swap. Every point of a place's meshes is kept in the page after it has gone to the card,
    with its light, some 124 bytes a point at about two points to a triangle: a gigabyte and a half for Halhaven alone, and as much
-   again on the card. (A frame first timed at a millisecond and a half: three's count of frames had not gone on, so only the last of
+   again on the card. *Mended:* each mesh's points now go to the card as it is made, as drawing it first would send them, and the
+   page's copies are let go of (`toCard` in `places.ts`; the house's once its light is baked); only the index is kept, which the view
+   of the triangles needs. With the same two places standing the page's process then held 3.4 gigabytes, not 5.9. Each place still
+   keeps its solid part and its tree of bounds for the body, some 130 megabytes for a valley head and 320 for Halhaven. (Chrome's own
+   count of the heap, `performance.memory`, takes in the page's workers too: it rose to six gigabytes while a house's light was baked,
+   each of the six bake workers holding the house and its bounds, and the next place was built in its own worker at the same time, and
+   fell back after. Places let go of are collected: a count of them, `WorldPlaces.collected`, went up by one each time.) (A frame first timed at a millisecond and a half: three's count of frames had not gone on, so only the last of
    the picture's steps was drawn again. And the page's own frame time then read thirteen milliseconds, the timing's frames left in its
    average.)
 
@@ -733,7 +739,14 @@ leaves both the game and the walk working:
    paving. Far off, the places throw none: from 110 metres nothing in Halhaven's square threw a shadow that had from 50. The air's
    picture from the sun, which the shadow is read from beyond the near square, is drawn once, when the far land is first all in, over
    the whole world at some 5.7 metres a point, and holds only the world's land; a place that comes later is never drawn into it, nor is
-   the far land as it changes.
+   the far land as it changes. *Mended:* a third picture from the sun lies between the two (`SunPicture` in `sunShadow.ts`): a
+   kilometre square about the walker, 2048 points across, half a metre a point as the game's town has it, of what is on its layer, the
+   places standing and the squares of land near the walker. It is drawn again when the walker has gone a hundred metres, and when a
+   place or land within its reach has come or gone, then no oftener than every three seconds; and read, without a filter as the far
+   picture is, between the near square and its own edge, where it can only darken the far picture's reading, which still holds the
+   mountain whose shadow falls from kilometres off. From 110 metres the obelisk, the fountain, the stalls and the lamp posts of
+   Halhaven's square throw their shadows again. It costs no more than a millisecond or two a frame, within the measure's noise
+   (`?midshadow=0` leaves it out). Trees are not in it yet: their crowns are cards.
 
    Found and mended. *The sea:* the world's flat sheet of sea lay 0.6 metres under the game's sea over all of it, and the swell's
    troughs go down 0.82 metres, so the dark sheet showed through in ovals, each ringed with the foam the sea draws against anything
@@ -742,9 +755,16 @@ leaves both the game and the walk working:
    person who asked: the house's terrace walls are built the wrong way about (their frame faces out into the square, where `masonry`
    wants it facing into the wall, as the quay's and the moles' do), so the square sees the backs of the stones, which lay in one plane
    with the back of the dark block of joints behind them, and the block came through in patches that changed from frame to frame. The
-   block now stops short of the stones' backs as it does of their faces. The walls still stand 1.15 metres out into the square faced
-   with their stones' backs: turned about, they would uncover the land at the terrace's edge, which falls to the square over the 0.8
-   metres outside it. And the glass of a classical building's basement windows lay in one plane with the block of stone under its
+   block now stops short of the stones' backs and ends as it does of their faces. And the walls are built again, the right way about.
+   Measured on thirteen towns, the ground at the terrace's edge had never been sharp: read smoothly from a lattice of a metre and a half,
+   it fell to the square over some three metres about the edge, and stood up to 0.66 metres over the square against the wall's foot
+   in front, and lay up to 0.96 metres under the floor just behind the balustrade. The ground is now made sharp where the terrace is
+   walled (`terraceGround` and `terraceWalls` in `core/town.ts`, read by `townGround`, which the drawing and the maps read and the
+   layout does not): the floor within, and without, the land carried straight in from four metres out, as it slopes there. Its sheet
+   is still laid in triangles of 1.2 metres, so the one across the edge slopes within that either side; the walls stand astride the
+   edge over all of it, 1.25 metres out and as far in, their dressed faces to the square and the lanes, coped on top, the balustrade
+   at their outer edge and round the corners, the front's walls ending inside the stair's cheeks. The ground at the walls' faces is
+   now level with the square and the floor, in all thirteen towns. And the glass of a classical building's basement windows lay in one plane with the block of stone under its
    ground floor, 0.2 metres in; it is now 0.15 in, before the block and behind the bars. Both are the game's own builders, so the game's
    towns had them too. Still flickering a little: some three thousand small pieces of stone lying flush on one large stone face beside
    that same building, not yet traced.
@@ -756,11 +776,23 @@ leaves both the game and the walk working:
    check` passes every valley head and island and fails two mountain tops (`peak-check-48`, `-49`: the gallery way breaks, rising 3.8
    and 2.3 metres over two) and two towns (`town-check-13`, `-14`: a building in the street); `tools/buildingLab.ts 300` fails one
    classical building and two canal houses (a point that is not a number). None is of this work: the lab's three fail alike on the
-   state before it, and the check's four are in code this branch has not changed from the default branch's.
+   state before it, and the check's four are in code this branch has not changed from the default branch's. After the terrace's ground and walls
+   were changed: the towns' part of the check (`tools/sites.ts 200 town`, 25 towns) fails the same two and no more; `tools/town.ts`
+   builds sound; `tools/places.ts w0 coast 1`, Halhaven's land within 2 centimetres of the world's at its edge on the whole and 6 at
+   worst, as before.
 
-   *Not yet looked at:* the mountain's edge where the world's land meets it, and the walk page as far as Elith Fell (the pane was hidden,
-   and a hidden page's workers are held back); how the picture's 32 milliseconds divide among its steps, and the other levels of
-   detail.
+   *The walk page to Elith Fell*, pressing P from place to place, with all the above: Strath Norith stood and was baked 40 seconds
+   after it was asked for, Norishdale 86 (6.2 million triangles; the worker was building another meanwhile), Strath Talston, Haledale
+   and Elith Fell some 40 each, the mountain's light baked in 32. A frame drawn back to back at each place's door: 38, 38, 36, 38 and
+   31 milliseconds, two places standing at most of them. (In the same run the route page's frame at Halhaven's quay took 57 to 58,
+   against 51 earlier: the machine was by then twelve gigabytes into its swap.) *The mountain's edge:* the two lands meet without
+   ledges, but along the top of the face below Elith Fell's south-western rim the sky shows through in small gaps between the world's
+   land and the place's carved rock: the hole that follows a mountain's land is found looking straight down on it, and where the
+   place's carved face stands off the world's land seen from the side, nothing closes the gap. Close under that rim the world's land in
+   the band is near upright and its material stretched into stripes over large flat triangles. And the place's rock is the site's own
+   warm bedded stone, the world's a cooler grey, so a line runs round under the plateau where one meets the other. Not yet mended.
+   Still to look at: how the picture's 32 milliseconds divide among its steps, and the other levels of detail; a small flicker on the
+   front of one timber-framed house some sixty metres across Halhaven's square, not yet traced.
 4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
    place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
    a boat for the sea legs; and something faster than walking for the kilometres between.

@@ -163,8 +163,58 @@ export function townLand(t: Town, floor: number): HeightField {
 /** The height of the ground at a point of the site: the town's land where it was made, the frame's beyond. */
 export function townGround(t: Town, floor: number, x: number, z: number): number {
   const f = townLand(t, floor);
-  if (f.holds(x, z)) return f.smoothAt(x, z);
-  return frameAt(t, floor, x, z);
+  if (!f.holds(x, z)) return frameAt(t, floor, x, z);
+  return terraceGround(t, floor, f, x, z) ?? f.smoothAt(x, z);
+}
+
+/**
+ * How far from the house's terrace's walled edges the ground is made sharp, metres: past where the land's smooth reading of its
+ * lattice (two cells either way, three metres) and the house's ease outside its edge (0.8 metres) reach.
+ */
+const SHARP = 4;
+
+/**
+ * The ground at the house's terrace's walled edges, made sharp: its floor inside, and outside the land carried straight in from
+ * `SHARP` out, as it slopes there, to the edge. (The land is a lattice of a metre and a half read smoothly, and the ground under the
+ * terrace's wall fell to the square over three metres about its edge: in front of the wall's foot it stood up to two thirds of a
+ * metre over the square, and behind the balustrade up to a metre under the floor.) Nothing where the point is not near such an edge.
+ */
+function terraceGround(t: Town, floor: number, f: HeightField, x: number, z: number): number | null {
+  const lv = t.level;
+  if (x < lv.x0 - SHARP || x > lv.x1 + SHARP || z < lv.z0 || z > lv.z1 + SHARP) return null;
+  const w = terraceWalls(t, floor);
+  // (Carried in along the edge's normal from `SHARP` and a cell further, by no more than half a metre either way.)
+  const carried = (ex: number, ez: number, dx: number, dz: number, u: number) => {
+    const a = f.smoothAt(ex + dx * SHARP, ez + dz * SHARP), b = f.smoothAt(ex + dx * (SHARP + f.cell), ez + dz * (SHARP + f.cell));
+    return a + Math.max(-0.5, Math.min(0.5, ((a - b) * (SHARP - u)) / f.cell));
+  };
+  if (z > lv.z1) return carried(x, lv.z1, 0, 1, z - lv.z1);
+  if (x < lv.x0) return z >= w.west ? carried(lv.x0, z, -1, 0, lv.x0 - x) : null;
+  if (x > lv.x1) return z >= w.east ? carried(lv.x1, z, 1, 0, x - lv.x1) : null;
+  return lv.z1 - z < SHARP || (z >= w.west && x - lv.x0 < SHARP) || (z >= w.east && lv.x1 - x < SHARP) ? floor : null;
+}
+
+const WALLS = new WeakMap<Town, { field: HeightField; walls: { west: number; east: number } }>();
+/**
+ * Where the house's terrace is walled: all along its front, and down each side from the front back to `west` and `east` (z), as
+ * far as the land beside it lies lower than its floor by a third of a metre, a metre and a fifth out (where a side has no wall, its z
+ * lies past the front). The town's builder stands its walls there, and the ground is made sharp there (`terraceGround`). (Kept with
+ * the land it was read from, which is made again when the town changes.)
+ */
+export function terraceWalls(t: Town, floor: number): { west: number; east: number } {
+  const lv = t.level, f = townLand(t, floor), had = WALLS.get(t);
+  if (had && had.field === f) return had.walls;
+  const back = (side: number) => {
+    const x = side < 0 ? lv.x0 : lv.x1;
+    // (The land beside read as `terraceGround` reads it there, carried in from `SHARP` out.)
+    const beside = (z: number) => { const a = f.smoothAt(x + side * SHARP, z), b = f.smoothAt(x + side * (SHARP + f.cell), z); return a + Math.max(-0.5, Math.min(0.5, ((a - b) * (SHARP - 1.2)) / f.cell)); };
+    let z1 = lv.z1;
+    while (z1 > lv.z0 + 1 && floor - beside(z1 - 1) > 0.3) z1 -= 1;
+    return lv.z1 - z1 < 1 ? lv.z1 + 1 : z1;
+  };
+  const walls = { west: back(-1), east: back(1) };
+  WALLS.set(t, { field: f, walls });
+  return walls;
 }
 
 /** The ground of the square at a point: falling from its north side to its south. */

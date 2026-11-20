@@ -1,5 +1,6 @@
 import { BufferAttribute, BufferGeometry, Color, DoubleSide, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Material, Mesh, Ray, Scene, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
+import type { WebGPURenderer } from 'three/webgpu';
 import { worldShelf, WorldShelf } from '../app/worldStore';
 import { Hour, SKIES } from '../core/site';
 import { Hole, holeAt } from '../core/stream';
@@ -11,6 +12,7 @@ import type { SeaDesc } from '../render/scene';
 import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
 import { Water } from '../render/water';
+import { SunPicture } from '../render/sunShadow';
 import placesWorker from '../worldmap/placesWorker?worker&url';
 import { WorldColliders } from './body';
 import { cardsOf } from './dress';
@@ -52,6 +54,9 @@ interface Built {
 }
 
 export class WorldPlaces {
+  /** How many places let go of have been collected, for checking that none is held on to (`letGo`). */
+  static collected = 0;
+  private static readonly gone = new FinalizationRegistry<string>(() => { WorldPlaces.collected++; });
   private worker: Worker | null = null;
   private queue: { build?: string[]; only?: string[] }[] = [];
   private busy = false;
@@ -71,7 +76,7 @@ export class WorldPlaces {
   onSea: ((sea: SeaDesc | null) => void) | null = null;
   private t0 = performance.now();
 
-  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
+  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; renderer: WebGPURenderer; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
     this.shelf = worldShelf(o.seed);
   }
 
@@ -261,14 +266,39 @@ export class WorldPlaces {
     mesh.castShadow = !['pane', 'paneLit', 'glass', 'window'].includes(p.material);
     mesh.receiveShadow = true;
     mesh.matrixAutoUpdate = false;
-    mesh.userData.packed = p;
+    // (And into the finer picture from the sun about the walker, so that it throws its shadow beyond the near square too.)
+    if (mesh.castShadow) mesh.layers.enable(SunPicture.LAYER);
     this.o.scene.add(mesh);
     b.meshes.push(mesh);
+    // (What the bake reads is kept until it is done; the rest goes to the card now, its light being all it will have.)
+    if (p.baked) mesh.userData.packed = p; else this.toCard(mesh);
+  }
+
+  /**
+   * Sends a mesh's points to the card now, as drawing it first would, and lets the page's copies of them go. Kept in the page once the
+   * card had them, a place's points (some 124 bytes each, with their light, and about two to a triangle) came to a gigabyte and a half
+   * for a harbour town, and two places standing filled the page's heap to within a tenth of its limit. Each array is left as an empty
+   * one of its kind, which is all three reads of it from then on (the kind gives the format the card reads it in). The index is kept:
+   * the view of the triangles makes its edges from it. (Three's WebGPU renderer does nothing with `onUpload`; the call is the one its
+   * drawing makes, `Attributes.update`, which sends a buffer the first time and again whenever its version has gone on.)
+   */
+  private toCard(mesh: Mesh): void {
+    const sent = (this.o.renderer as unknown as { _attributes: { update(buffer: BufferAttribute | InterleavedBuffer, type: number): void } })._attributes;
+    const seen = new Set<BufferAttribute | InterleavedBuffer>();
+    for (const a of Object.values(mesh.geometry.attributes)) {
+      const buffer = (a as InterleavedBufferAttribute).isInterleavedBufferAttribute ? (a as InterleavedBufferAttribute).data : (a as BufferAttribute);
+      if (seen.has(buffer) || !buffer.array.length) continue;
+      seen.add(buffer);
+      sent.update(buffer, 1 /* AttributeType.VERTEX */);
+      buffer.array = new (buffer.array.constructor as new (n: number) => typeof buffer.array)(0);
+    }
   }
 
   /** Its meshes all in: its cards, its water, its solid part for the body, its hole in the world's land; then its house's light baked. */
   private finish(spec: string, b: Built): void {
     for (const c of cardsOf(b.pack.cards)) { this.o.scene.add(c); b.cards.push(c); b.meshes.push(c); }
+    // (The pack's own lists of them let go of: the meshes and cards hold what they need.)
+    b.pack.meshes = []; b.pack.cards = [];
     const S = SKIES[this.o.hour];
     if (b.pack.water?.length || b.pack.streams?.length) {
       b.water = new Water(b.pack.water ?? [], b.pack.streams ?? [], {
@@ -325,7 +355,9 @@ export class WorldPlaces {
       (label, f) => { this.status = `${b.place.name}: ${label.toLowerCase()} ${Math.round(f * 100)}%`; },
       apply,
     ).then((r) => { apply(r); b.baked = 'done'; this.status = `${b.place.name} stands in the world, its light baked in ${((performance.now() - started) / 1000).toFixed(0)} s.`; })
-      .catch((e) => { console.error(e); b.baked = 'failed'; this.status = `${b.place.name} stands in the world; its light could not be baked.`; });
+      .catch((e) => { console.error(e); b.baked = 'failed'; this.status = `${b.place.name} stands in the world; its light could not be baked.`; })
+      // (Its light final, the house's meshes go to the card as the rest went, unless the place was let go of meanwhile.)
+      .finally(() => { if (this.built.get(b.spec) !== b) return; for (const m of parts) { delete m.userData.packed; this.toCard(m); } });
   }
 
   /** Lets a place go: its meshes, its solid part, its hole. (It is built again if one comes back.) */
@@ -335,6 +367,7 @@ export class WorldPlaces {
     if (k >= 0) this.o.colliders.others.splice(k, 1);
     this.built.delete(spec);
     this.asked.delete(spec);
+    WorldPlaces.gone.register(b.pack, spec);
     this.onHoles?.(b.pack.hole);
     // (Its sea goes with it; another standing place's, if there is one, is drawn instead.)
     if (b.pack.sea) this.onSea?.([...this.built.values()].find((o) => o.pack.sea && o.todo.length === 0)?.pack.sea ?? null);
