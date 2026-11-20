@@ -10,7 +10,7 @@ import type { Colliders } from '../app/player';
  *    or their quarters at half a metre, or the world's lattice where no square is in yet), made again when the walker has gone a quarter
  *    of the way to its edge, or when land under it has come in or changed;
  *  - the trunks of the trees standing on it, each a six-sided post (bushes and young trees stop nobody, as in the game);
- *  - and anything else given (`others`): a place built into the world, later.
+ *  - and anything else given (`others`): a place built into the world (`WorldPlaces`), whose ground the patch leaves out (`skip`).
  */
 
 /** A trunk to be stopped by: where it stands, how thick, and the ground at its foot. */
@@ -26,7 +26,8 @@ export class WorldColliders implements Colliders {
   lastMs = 0;
   made = 0;
 
-  constructor(private readonly heightAt: (x: number, z: number) => number, private readonly trunksIn: (x0: number, z0: number, x1: number, z1: number) => Trunk[]) {}
+  /** `skip`: where the patch leaves the ground out, to something else that is there instead (a place standing in the world, in `others`). */
+  constructor(private readonly heightAt: (x: number, z: number) => number, private readonly trunksIn: (x0: number, z0: number, x1: number, z1: number) => Trunk[], private readonly skip: (x: number, z: number) => boolean = () => false) {}
 
   shapecast(callbacks: Parameters<MeshBVH['shapecast']>[0]): boolean {
     if (this.patch) this.patch.bvh.shapecast(callbacks);
@@ -49,6 +50,7 @@ export class WorldColliders implements Colliders {
       pos[k * 3] = px; pos[k * 3 + 1] = this.heightAt(px, pz); pos[k * 3 + 2] = pz;
     }
     for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+      if (this.skip(x0 + (i + 0.5) * CELL, z0 + (j + 0.5) * CELL)) continue;
       const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
       index.push(a, c, b, b, c, d);
     }
@@ -67,6 +69,8 @@ export class WorldColliders implements Colliders {
         index.push(a, b, c, b, d, c);
       }
     });
+    // (A patch wholly inside a place has no triangles of its own; the tree of bounds wants one, so a speck far under the ground.)
+    if (!index.length) { pos.set([x0, -1e4, z0, x0 + 0.01, -1e4, z0, x0, -1e4, z0 + 0.01], 0); index.push(0, 1, 2); }
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(pos, 3));
     g.setIndex(index);

@@ -73,7 +73,7 @@ export interface GroundLook {
  * skirts. Each mesh shares its points among its triangles. `cell` is how far apart its points lie: a
  * metre, or half a metre for the finer squares near the walker (`refineSquare`).
  */
-export function squareBuilders(x0: number, z0: number, heights: Float32Array, errors: Float32Array, maxError: number, look: GroundLook, bare = 0.72, cell = 1): { turf: MeshBuilder; rock: MeshBuilder; triangles: number } {
+export function squareBuilders(x0: number, z0: number, heights: Float32Array, errors: Float32Array, maxError: number, look: GroundLook, bare = 0.72, cell = 1, skip?: (x: number, z: number) => boolean): { turf: MeshBuilder; rock: MeshBuilder; triangles: number } {
   const size = SQUARE.n, last = size - 1, { triangles } = meshTriangles(errors, maxError);
   const turf = new MeshBuilder(), rock = new MeshBuilder();
   const ids = { turf: new Int32Array(size * size).fill(-1), rock: new Int32Array(size * size).fill(-1) };
@@ -101,6 +101,8 @@ export function squareBuilders(x0: number, z0: number, heights: Float32Array, er
     let a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
     const ax = a % size, az = (a - ax) / size, bx = b % size, bz = (b - bx) / size, cx = c % size, cz = (c - cx) / size;
     if ((bz - az) * (cx - ax) - (bx - ax) * (cz - az) < 0) { const s = b; b = c; c = s; }
+    // (Left out where something else is drawn in its place: a place built into the world, over its own land. Judged by the middle.)
+    if (skip && skip(x0 + ((ax + bx + cx) / 3) * cell, z0 + ((az + bz + cz) / 3) * cell)) continue;
     // (Which mesh: by the triangle's own slope, as the valley's sheet is laid.)
     const ix = [a % size, b % size, c % size], px = ix.map((v) => v * cell), pz = [(a - ix[0]) / size, (b - ix[1]) / size, (c - ix[2]) / size].map((v) => v * cell), py = [heights[a], heights[b], heights[c]];
     const ux = px[1] - px[0], uy = py[1] - py[0], uz = pz[1] - pz[0], vx = px[2] - px[0], vy = py[2] - py[0], vz = pz[2] - pz[0];

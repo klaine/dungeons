@@ -637,11 +637,36 @@ leaves both the game and the walk working:
    in 141 seconds against 143 at its running pace, never stopped; then straight through a wood 160 metres deep and back, coming no nearer
    a trunk's bark than its own breadth; never more than 6 centimetres under the ground or 14 over it; a patch takes some 5 milliseconds
    (43 at most).
-2. **Places built into the world.** As one comes within a kilometre or so of a place, its layout made in a worker (as the route page
-   already does, `placesWorker.ts`), its meshes built in steps that do not hold up the picture (`meshSiteSteps` moved into a worker, or
-   cut finer), its light baked in workers as now; its own far land left out, since the world's is there; its ground laid in place of the
-   squares under it (the squares cut away within its footprint, `footprintOf`, and the seam closed), and its meshes added to the body's
-   colliders. Its buildings, rock, water and planting then stand in the world, and are let go of far off.
+2. **Places built into the world.** *Done, for valley heads* (`src/worldwalk/places.ts`, `src/render/placePack.ts`): within 1.5
+   kilometres of a valley head the walk and route pages have it laid out and built in a worker of their own (`placesWorker.ts`, which
+   keeps its world between requests: the world made there once), meshed as the game meshes it (`meshSite`), its far land and the
+   painted trees on it left out, and everything turned into the world's coordinates (its frame: a turn about its forecourt, and its
+   heights shifted to the world's), so that light baked in the world's directions reads as it should; its solid part gathered there into
+   one mesh with its tree of bounds, sent as numbers; and the height of its land read all round the edge of the square it was laid over
+   (its sheet of turf), every two metres; what stands about its house cut into tiles of 64 metres there, as the game cuts it, so that what
+   is out of view is not drawn. On the page its meshes are made with the game's materials, some six milliseconds' worth a frame, lit as the game
+   lights what it does not bake, with its grass, flowers, leaves and water; then its house's light is baked as the game bakes it, in
+   workers, its lamps and fires baked in. It is built in the page's season and at its hour, whatever its own seed gave it (its leaves
+   came out autumn's in a summer world). The world's squares are made with the place's hole (`Hole`, `withHole` in `stream.ts`):
+   inside its square a little under the place's own land and not drawn (`squareBuilders`'s `skip`), outside it brought to the place's
+   land at the edge over a band of thirty metres and three times more the height the place's land stands off the world's at that point
+   of the edge (`gap`, measured in the worker: behind a valley's head it stands up to some thirty metres over the world's, and over
+   thirty metres it was a cliff; taken from each point's own height instead, a way's bed and the grass beside it were brought in by
+   different shares, and the way stood up as a causeway). A way through the band is graded again on the land as the place leaves it
+   (`wayThroughHoles`), its bed the land's own near the edge, and the squares meet the place first and cut the way in after, the bed
+   fading out over the last twenty-five metres (the place's land can fall steeply across a way's breadth, and a level bed stood off it
+   by metres). The far land, what grows and the body's ground patch leave the square to the place; the body walks on the place's solid
+   part there; and the way's corridor gives way to it. Past
+   2.3 kilometres it is let go of, and all about it made again. The layouts are kept as the world page keeps them, so that the game,
+   entering the place from the route page, does not lay it out again. *Checked* without a browser (`npx tsx tools/places.ts w0`): Strath
+   Norith laid out and built in 35 seconds (31 of them meshing), 4.8 million triangles, over a square 495 metres a side; 27 squares about
+   it with its hole still meet exactly; along the square's edge the world's land stands within 3 centimetres of the place's on the whole
+   and 47 at worst; the band is nowhere steeper than the land was of itself (133% at most against 159%), and much steeper than one in
+   two over 0.6% of it; the way through it tilts across its bed by 5 centimetres at most over four metres; the body, walked from
+   Halhaven's quay along the way, crossed into the valley after 104 seconds and came to the house in 142, never more than a few
+   centimetres into or over what it stood on. In the browser (headless, drawing in software, at 480 by 270), the valley was built in the
+   worker within two minutes of the page opening, its 54 meshes put in a few a frame, its light baked; no fault reported. Islands, towns and mountain tops are not built in yet: each
+   brings a sea, a coast or cloud the walk does not yet draw.
 3. **One renderer.** The game's sky, real clouds, sea, ambient occlusion, levels of detail, lamps and night, used by the world as by the
    place, rather than the walk page's own copies (`dress.ts`'s `makeLight`).
 4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the

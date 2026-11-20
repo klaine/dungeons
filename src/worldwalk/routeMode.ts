@@ -1,5 +1,4 @@
 import { Vector3 } from 'three';
-import { worldShelf } from '../app/worldStore';
 import { RouteEnd } from '../core/route';
 import { Site } from '../core/site';
 import { SQUARE, squareCount, squareOrigin, TileGrid } from '../core/stream';
@@ -7,7 +6,7 @@ import { trackField, Way, WayIndex } from '../core/way';
 import { COVER } from '../core/world';
 import { drawFootprint, Footprint, footprintOf } from '../maps/footprint';
 import { drawInkWorld, inkFrame, InkArea, WorldMap } from '../maps/inkWorld';
-import placesWorker from '../worldmap/placesWorker?worker&url';
+import type { WorldPlaces } from './places';
 
 /**
  * The walk page as the route page (`lab/route.html`; asked: "lets try this with one traversable path from a town to a valley"): one
@@ -51,6 +50,7 @@ export class RouteWalk {
   /** How the laying out of the two places for the game goes, as said to the walker; and which are ready. */
   ahead = '';
   ready = new Set<string>();
+  private builder: WorldPlaces | null = null;
   /** The places laid out ahead, as footprints for the ink map; the ink map's sheet once drawn, and the stretch it shows. */
   private prints: Footprint[] = [];
   private inkBase: HTMLCanvasElement | null = null;
@@ -128,7 +128,7 @@ export class RouteWalk {
       `${this.from.name} to ${this.to.name}: ${km(this.length)}${c ? `, up ${Math.round(c.up)} m and down ${Math.round(c.down)} m, at steepest ${(c.steepest * 100).toFixed(0)}%` : ''}`,
       this.arrived ? `You have come to ${this.to.name}.` : `${km(this.s)} walked, ${km(left)} to go: ${mins(left, PACE.walk)} walking, ${mins(left, PACE.run)} running`,
       this.held ? `The corridor is ${Math.round(this.half * 2)} m broad: this is its edge.` : `${Math.round(this.off)} m off the way, in a corridor ${Math.round(this.half * 2)} m broad`,
-      this.ahead,
+      [this.to, this.from].some((e) => this.ready.has(`${e.kind}${e.n}`)) ? `Laid out for the game: ${[this.to, this.from].filter((e) => this.ready.has(`${e.kind}${e.n}`)).map((e) => e.name).join(' and ')}.` : '',
     ].filter(Boolean);
   }
 
@@ -160,43 +160,20 @@ export class RouteWalk {
   markArrival(): void { document.getElementById('enter-to')?.classList.toggle('ready', this.arrived); }
 
   /**
-   * Lays out both places for the game while one walks, the place the way goes to first, in a worker of their own: the world made again
-   * there as the game makes it (half a minute), then each place's layout, kept in the browser with the world and its tiles, where the
-   * game finds them (`worldStore.ts`). Not in development, where nothing is kept.
+   * Lays out both places for the game while one walks, the place the way goes to first, in the worker that builds places into the world
+   * (`WorldPlaces`: the world made there once, for both), and keeps them in the browser with the world and its tiles, where the game finds
+   * them (`worldStore.ts`). The valley head at the way's end is built into the world besides, as one comes near it, and laid out then;
+   * here only what is not. Each layout is drawn on the ink map as it comes. (In development nothing is kept.)
    */
-  async layOutAhead(): Promise<void> {
-    const shelf = await worldShelf(this.o.seed), name = (e: RouteEnd) => e.name;
-    const t0 = performance.now(), secs = () => Math.round((performance.now() - t0) / 1000);
-    // (Where nothing can be kept, in development or where the browser refuses, the places are laid out all the same, for the ink map.)
-    let keeping: Promise<unknown> = Promise.resolve();
-    const keep = (what: string, value: unknown) => { if (shelf) keeping = keeping.then(() => shelf.set(what, value)); };
-    const worker = new Worker(placesWorker, { type: 'module' });
-    this.ahead = `Laying out ${name(this.to)} and ${name(this.from)} for the game, ahead of you…`;
-    worker.onmessage = (e) => {
-      const m = e.data;
-      if (m.type === 'progress') { this.ahead = `For the game, ahead of you: ${m.text.charAt(0).toLowerCase()}${m.text.slice(1)}… ${secs()} s`; return; }
-      if (m.type === 'world') { keep('world', m.world); return; }
-      if (m.type === 'tile') { keep(`${m.tile.i},${m.tile.j}`, m.tile); return; }
-      if (m.type === 'site') {
-        keep(`site:${m.kind}${m.n}`, { seed: m.seed, site: m.site });
-        if (m.site) {
-          this.ready.add(`${m.kind}${m.n}`);
-          try { const fp = footprintOf(m.site as Site); if (fp) { this.prints.push(fp); this.composeInk(); } } catch { /* (no footprint: the map does without) */ }
-        }
-        return;
-      }
-      if (m.type === 'done') {
-        void keeping.then(() => {
-          const both = [this.to, this.from].filter((q) => this.ready.has(`${q.kind}${q.n}`)).map(name);
-          this.ahead = !both.length ? 'The places could not be laid out ahead; the game will try when entered.'
-            : shelf ? `${both.join(' and ')} laid out ahead in ${secs()} s: entering ${both.length > 1 ? 'either' : 'it'} now builds without laying out.`
-            : `${both.join(' and ')} laid out ahead in ${secs()} s, for the map; nothing is kept here (in development), so the game lays them out again.`;
-          worker.terminate();
-        });
-      }
+  layOutAhead(builder: WorldPlaces): void {
+    this.builder = builder;
+    const was = builder.onSite;
+    builder.onSite = (kind, n, site) => {
+      was?.(kind, n, site);
+      this.ready.add(`${kind}${n}`);
+      try { const fp = footprintOf(site as Site); if (fp) { this.prints.push(fp); this.composeInk(); } } catch { /* (no footprint: the map does without) */ }
     };
-    worker.onerror = () => { this.ahead = 'The places could not be laid out ahead; the game will lay them out when entered.'; worker.terminate(); };
-    worker.postMessage({ seed: this.o.seed, size: this.o.size, only: [`${this.to.kind}${this.to.n}`, `${this.from.kind}${this.from.n}`] });
+    builder.layOut([`${this.to.kind}${this.to.n}`, `${this.from.kind}${this.from.n}`]);
   }
 
   /** The small map: the corridor, the way, its two ends, and the walker, north up. */
