@@ -443,8 +443,18 @@ The machine this is developed on now has a graphics card, and tablets were repor
     with two places, not 5.9); a third picture from the sun about the walker, so that places throw their shadows beyond the near square;
     and the terrace's walls built astride its edge the right way about, with the ground made sharp there. The walk page to Elith Fell:
     31 to 38 milliseconds a frame at each place. Figures and the reasons in [document 6](06-world.md), *The world as the game*, step 3.
-    *Found, not yet mended:* gaps at a mountain top's edge where the sky shows between the world's land and the place's carved rock;
-    the place's warm stone against the world's grey there; the bake's six workers each holding a whole house.
+    *Found, not yet mended:* at a mountain top's edge the world's land raised along a crag as a comb, steep and stretched in the band,
+    and the place's warm stone against the world's grey (what looked like gaps there was the arrival's pale stone seen through the
+    comb; `tools/places.ts` now looks for the sky through the join and finds it at one point in some three thousand at most); the
+    bake's six workers each holding a whole house.
+    Then what lives and burns in a place, brought into the world with it: smoke, birds, sheep and goats, torches' flames, the
+    lighthouse's beam, fireflies, and the street lamps' light after dark (`PlaceLife`, `living` in `places.ts`; see document 6).
+    Then, from pictures, mended: the patchwork of rock and turf on the world's steep slopes (judged by corners); dark walls and a
+    blot on a gable where the bake's masses, turned with a place, stood out past its walls; loose stones standing clear of a steep
+    slope; a place's rock in another stone than the world's (document 6); and holes in the ground at a valley's edge seen from afar,
+    where coarse triangles across the edge were left out with the place (the land kept about every edge). Then step 4's first part:
+    each place's own game in the world, its doors, locks, keys, levers and goal, played there by the walker's body (`PlaceGame`,
+    `playing` in `places.ts`); Strath Norith played through in the browser, from the locked door to the sanctum (document 6).
 
 ## Risks
 

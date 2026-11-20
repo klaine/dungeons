@@ -5,6 +5,10 @@ import { Hole, HoleGrid } from '../core/stream';
 import { siteFrame, SiteFrame } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
 import { CardSet, SceneDescription, SeaDesc } from './scene';
+import { stoneStyles } from './geom/styles';
+
+/** The stone of the world's own rock (`groundLook` in the walk page colours it so). */
+const WORLD_STONE = 'greystone';
 import { meshSite } from './siteMesher';
 
 /**
@@ -58,9 +62,56 @@ export interface PlacePack {
   lights: { pos: number[]; intensity: number[]; range: number; size: number; keep?: boolean }[];
   /** How many of the heights round its square's edge found no land under them, and took the one before. */
   misses: number;
+  /** What lives and burns in it, in the world (`PlaceLife`). */
+  life: PlaceLife;
+  /** What its game is played with (`PlaceGame`). */
+  game: PlaceGame;
   /** How long it took, milliseconds: laying out was before; meshing, and making ready. */
   ms: { mesh: number; pack: number };
   triangles: number;
+}
+
+/**
+ * What lives and burns in a place, in the world, as the game has it in its scene's description: smoke over its chimneys and fires,
+ * birds wheeling off its cliffs, flocks grazing, its torches and candles, its street lamps and its lighthouse's lamp, fireflies'
+ * homes. Points as plain numbers, for handing over from the worker. Flocks are kept out of the house's rooms, which are given in the
+ * site's own ways (`rooms`, x0 x1 z0 z1) with the frame to take a point of the world there (`frame`).
+ */
+export interface PlaceLife {
+  smokes: { x: number; y: number; z: number; height: number }[];
+  birds: { x: number; y: number; z: number }[];
+  birdKind?: SceneDescription['birdKind'];
+  flocks: { x: number; z: number; r: number; count: number }[];
+  flockKind?: SceneDescription['flockKind'];
+  torches: { position: [number, number, number]; out: [number, number, number]; fire?: number; flames?: [number, number, number][] }[];
+  lamps: [number, number, number][];
+  fireflies: number[];
+  beacon?: { x: number; y: number; z: number };
+  rooms: [number, number, number, number][];
+  frame: SiteFrame;
+}
+
+/**
+ * What the game's rules need of a place (`Game` in `src/app/game.ts`), in the site's own ways, as the game has them; the page plays
+ * them in the place's frame (`life.frame`). The site itself only as far as the rules read it (its places, ways, keys, levers and which
+ * place is the start, the goal and the hidden one), its doors with each leaf's geometry as arrays, where each of its places is
+ * anchored, and the small things left about to be found.
+ */
+export interface PlaceGame {
+  site: Pick<Site, 'places' | 'ways' | 'items' | 'levers' | 'start' | 'goal' | 'secret'>;
+  doors: {
+    way: number; hinge: [number, number, number]; yaw: number; swing: number; halfWidth: number; spring: number; thickness: number;
+    material: 'wood' | 'stone'; blocker: { min: [number, number, number]; max: [number, number, number] }; centre: [number, number, number]; barSide: number;
+    leaf: { position: Float32Array; normal: Float32Array; uv: Float32Array; color: Float32Array; field: Float32Array; edge: Uint8Array; index: Uint32Array } | null;
+  }[];
+  anchors: [number, number, number, number][];
+  finds: { at: [number, number, number]; what: string }[];
+}
+
+/** A point of the world into a site's own ways: its frame's turn undone about its point (`frameMover`'s inverse, on the level). */
+export function intoSite(f: SiteFrame, x: number, z: number): [number, number] {
+  const c = Math.cos(f.turn), s = Math.sin(f.turn), dx = x - f.u, dz = z - f.v;
+  return [f.hx + c * dx + s * dz, f.hz - s * dx + c * dz];
 }
 
 /** A site's points in the world: a turn about its frame's point, and its heights shifted to the world's. */
@@ -176,6 +227,13 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
     const m = packBuilder(k, b, mv, false, within);
     if (m.index.length) meshes.push(...tilePacked(m, 64));
   }
+  // Its own rock (its cliffs, its sheet of rock, its scree, its loose stones) in the world's grey stone, as the world's rock is
+  // coloured (`groundLook`): coloured with the place's stone, a warm sandstone or a pale limestone, it met the world's land along a
+  // line of another rock, round under a mountain top's plateau. The house's masonry keeps its stone.
+  if (site.setting.stone !== WORLD_STONE) {
+    const from = stoneStyles(site.setting.stone).tint, to = stoneStyles(WORLD_STONE).tint, k = [0, 1, 2].map((c) => to[c] / Math.max(0.05, from[c]));
+    for (const m of meshes) if (m.material === 'rock' || m.material === 'rockSheet' || m.material === 'scree') for (let i = 0; i < m.color.length; i += 3) for (let c = 0; c < 3; c++) m.color[i + c] *= k[c];
+  }
   // Its land's height all round the edge of that square, a little inside it, where the sheet surely is: found by looking down on the
   // land alone (not its trees, rock or buildings).
   const STEP = 2, inset = 1.5;
@@ -274,24 +332,73 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
       spray: d.sea.spray?.map((q) => { const [x, , z] = mv.point(q.x, 0, q.z), [nx2, , nz2] = mv.dir(q.nx, 0, q.nz); return { x, z, nx: nx2, nz: nz2 }; }),
     };
   }
-  // For the bake: the house's masses as boxes in the world (each box's corners turned, and the box about them), and its lamps.
+  // For the bake: the house's masses as boxes square to the world's axes, which is all the bake takes (`bake.ts`), and its lamps.
+  // Turned with the place, a box was given as the box about it, larger by as much as the turn: at a turn of eleven degrees a wall's
+  // mass stood out past its own outer face, and the bake, finding the face inside stone, drew a dark blot on a gable outside. So where
+  // the place is turned off the axes, each mass is cut into near-square pieces and each given as the largest box square to the world's
+  // axes that lies within it: a little short of the mass between pieces, which the walls' own faces close, and never past it.
   const masses: number[] = [];
-  for (const m of d.masses) {
-    let a = [Infinity, Infinity, Infinity], b = [-Infinity, -Infinity, -Infinity];
-    for (const cx of [m.min.x, m.max.x]) for (const cz of [m.min.z, m.max.z]) for (const cy of [m.min.y, m.max.y]) {
-      const p = mv.point(cx, cy, cz);
-      a = a.map((v, k) => Math.min(v, p[k])); b = b.map((v, k) => Math.max(v, p[k]));
+  {
+    const ca = Math.abs(Math.cos(f.turn)), sa = Math.abs(Math.sin(f.turn)), square = Math.min(ca, sa) < 0.017;
+    for (const m of d.masses) {
+      const y0 = m.min.y + mv.dy, y1 = m.max.y + mv.dy;
+      if (square) {
+        const p = mv.point(m.min.x, 0, m.min.z), q2 = mv.point(m.max.x, 0, m.max.z);
+        masses.push(Math.min(p[0], q2[0]), y0, Math.min(p[2], q2[2]), Math.max(p[0], q2[0]), y1, Math.max(p[2], q2[2]));
+        continue;
+      }
+      const L = m.max.x - m.min.x, D = m.max.z - m.min.z, side = Math.max(0.5, Math.min(L, D)), ni = Math.max(1, Math.ceil(L / side)), nj = Math.max(1, Math.ceil(D / side));
+      for (let i = 0; i < ni; i++) for (let j = 0; j < nj; j++) {
+        const a = L / ni / 2, b = D / nj / 2, [cx, , cz] = mv.point(m.min.x + (i + 0.5) * 2 * a, 0, m.min.z + (j + 0.5) * 2 * b);
+        // (The half-breadths along the world's x and z of the largest box within a piece of half-breadths a and b turned: solving
+        // u ca + v sa = a, u sa + v ca = b, the site's x lying nearer the world's x; else the same with the two turned about. Where that
+        // has no answer, near forty-five degrees, a square within the piece's lesser half-breadth.)
+        const [p, q2] = ca >= sa ? [a, b] : [b, a], det = Math.abs(ca * ca - sa * sa), hi = Math.max(ca, sa), lo = Math.min(ca, sa);
+        let u = det > 0.2 ? (p * hi - q2 * lo) / det : 0, v = det > 0.2 ? (q2 * hi - p * lo) / det : 0;
+        if (!(u > 0.02 && v > 0.02)) u = v = Math.min(a, b) / (ca + sa);
+        masses.push(cx - u, y0, cz - v, cx + u, y1, cz + v);
+      }
     }
-    masses.push(...a, ...b);
   }
   const lights = d.torches.map((t) => {
     // (Where the game's torch puts its light: out from the wall and up a little; on an open fire, over it.)
     const at = t.fire ? t.position.clone().add(new Vector3(0, 0.55, 0)) : t.position.clone().addScaledVector(t.out, 0.36).add(new Vector3(0, 0.26, 0));
     return { pos: mv.point(at.x, at.y, at.z), intensity: [3.2, 1.92, 0.96], range: 30, size: 0.12, keep: true };
   });
+  // What lives and burns in it, moved into the world as the rest is; only what is within its square.
+  const at = (x: number, y: number, z: number) => mv.point(x, y, z), v3 = (q: Vector3) => at(q.x, q.y, q.z);
+  const life: PlaceLife = {
+    smokes: (d.smokes ?? []).filter((q) => within(q.x, q.z)).map((q) => { const [x, y, z] = at(q.x, q.y, q.z); return { x, y, z, height: q.height }; }),
+    birds: (d.birds ?? []).filter((q) => within(q.x, q.z)).map((q) => { const [x, y, z] = at(q.x, q.y, q.z); return { x, y, z }; }),
+    birdKind: d.birdKind,
+    flocks: (d.flocks ?? []).filter((q) => within(q.x, q.z)).map((q) => { const [x, , z] = at(q.x, 0, q.z); return { x, z, r: q.r, count: q.count }; }),
+    flockKind: d.flockKind,
+    torches: d.torches.filter((t) => within(t.position.x, t.position.z)).map((t) => ({ position: v3(t.position), out: mv.dir(t.out.x, t.out.y, t.out.z), fire: t.fire, flames: t.flames?.map(v3) })),
+    lamps: (d.lamps ?? []).filter((q) => within(q[0], q[2])).map((q) => at(q[0], q[1], q[2])),
+    fireflies: (() => { const o: number[] = []; const ff = d.fireflies ?? []; for (let k = 0; k + 2 < ff.length; k += 3) if (within(ff[k], ff[k + 2])) o.push(...at(ff[k], ff[k + 1], ff[k + 2])); return o; })(),
+    beacon: d.beacon && within(d.beacon.x, d.beacon.z) ? (() => { const [x, y, z] = at(d.beacon.x, d.beacon.y, d.beacon.z); return { x, y, z }; })() : undefined,
+    rooms: site.places.map((q) => [q.x0, q.x1, q.z0, q.z1] as [number, number, number, number]),
+    frame: f,
+  };
+  // What its game is played with, in its own ways (`PlaceGame`).
+  const v = (q: Vector3): [number, number, number] => [q.x, q.y, q.z];
+  const game: PlaceGame = {
+    site: { places: site.places, ways: site.ways, items: site.items, levers: site.levers, start: site.start, goal: site.goal, secret: site.secret },
+    doors: (d.doors ?? []).map((o) => {
+      const g = o.leaf?.build();
+      const arr = (name: string) => g!.getAttribute(name).array;
+      return {
+        way: o.way, hinge: v(o.hinge), yaw: o.yaw, swing: o.swing, halfWidth: o.halfWidth, spring: o.spring, thickness: o.thickness, material: o.material,
+        blocker: { min: v(o.blocker.min), max: v(o.blocker.max) }, centre: v(o.centre), barSide: o.barSide,
+        leaf: g ? { position: arr('position') as Float32Array, normal: arr('normal') as Float32Array, uv: arr('uv') as Float32Array, color: arr('color') as Float32Array, field: arr('aField') as Float32Array, edge: arr('aEdge') as Uint8Array, index: g.getIndex()!.array as Uint32Array } : null,
+      };
+    }),
+    anchors: [...(d.anchors ?? new Map<number, Vector3>())].map(([id, q]) => [id, q.x, q.y, q.z]),
+    finds: (d.finds ?? []).map((q) => ({ at: v(q.at), what: q.what })),
+  };
   const triangles = meshes.reduce((s, m) => s + m.index.length / 3, 0);
   return {
-    ...info, title: d.title ?? '', meshes, cards, hole, water, sea, streams, falls, masses: Float32Array.from(masses), lights,
+    ...info, title: d.title ?? '', meshes, cards, hole, water, sea, streams, falls, masses: Float32Array.from(masses), lights, life, game,
     solid: { position: sPos, index: sIdx, bvh: MeshBVH.serialize(solidBvh) },
     ms: { mesh: t1 - t0, pack: performance.now() - t1 }, triangles, misses,
   };
@@ -330,20 +437,31 @@ function gridHole(meshes: PackedMesh[], worldLand?: (x: number, z: number) => nu
   const geo = new BufferGeometry();
   geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setIndex(new BufferAttribute(idx, 1));
   const bvh = new MeshBVH(geo), ray = new Ray(new Vector3(), new Vector3(0, -1, 0));
+  // (And its land alone, under its rock: see `meets`.)
+  const landGeo = new BufferGeometry();
+  landGeo.setAttribute('position', new BufferAttribute(pos, 3)); landGeo.setIndex(new BufferAttribute(idx.slice(0, landTris * 3), 1));
+  const landBvh = new MeshBVH(landGeo);
   // Looked down on over its land's extent, a point beyond it all round.
   const ix0 = Math.floor(x0 / C) - 1, iz0 = Math.floor(z0 / C) - 1, inx = Math.ceil(x1 / C) + 2 - ix0, inz = Math.ceil(z1 / C) + 2 - iz0;
   const found = new Float32Array(inx * inz).fill(NaN);
+  // (The height the world's land is brought to at the edge: the place's land, and under its rock the land at the rock's foot where
+  // there is any, not the rock's top. Brought to the top of a crag wherever the crag was taken for the place's land, a metre on and a
+  // metre off along it, the world's land stood along a mountain's rim as a comb of spikes.)
+  const meets = new Float32Array(inx * inz).fill(NaN);
   for (let j = 0; j < inz; j++) for (let i = 0; i < inx; i++) {
     const x = (ix0 + i) * C, z = (iz0 + j) * C;
     ray.origin.set(x, 1e4, z);
     const hit = bvh.raycastFirst(ray, 2);
     if (!hit) continue;
-    if ((hit.faceIndex ?? 0) >= landTris && worldLand) { const off = hit.point.y - worldLand(x, z); if (off > 12 || off < -40) continue; }
+    const onRock = (hit.faceIndex ?? 0) >= landTris;
+    if (onRock && worldLand) { const off = hit.point.y - worldLand(x, z); if (off > 12 || off < -40) continue; }
     found[j * inx + i] = hit.point.y;
+    const under = onRock ? landBvh.raycastFirst(ray, 2) : null;
+    meets[j * inx + i] = under && under.point.y < hit.point.y + 0.1 ? under.point.y : hit.point.y;
   }
   // How far it stands off the world's land at its edge, which sets how far out the lattice must reach: the broadest band, and a little.
   // (Not past three hundred metres: past that, the band is drawn in to fit.)
-  const edgeGap = (k: number, nxx: number, ox: number, oz: number) => (worldLand ? found[k] - worldLand((ox + (k % nxx)) * C, (oz + Math.floor(k / nxx)) * C) : 0);
+  const edgeGap = (k: number, nxx: number, ox: number, oz: number) => (worldLand ? meets[k] - worldLand((ox + (k % nxx)) * C, (oz + Math.floor(k / nxx)) * C) : 0);
   let most = 0;
   for (let j = 1; j < inz - 1; j++) for (let i = 1; i < inx - 1; i++) {
     const k = j * inx + i;
@@ -352,7 +470,7 @@ function gridHole(meshes: PackedMesh[], worldLand?: (x: number, z: number) => nu
   const reach = Math.min(300, 30 + 3 * most + 8), M = Math.ceil(reach / C), gapMost = (reach - 38) / 3;
   const ox = ix0 - M, oz = iz0 - M, nx = inx + 2 * M, nz = inz + 2 * M, n = nx * nz;
   const y = new Float32Array(n).fill(NaN);
-  for (let j = 0; j < inz; j++) y.set(found.subarray(j * inx, (j + 1) * inx), (j + M) * nx + M);
+  for (let j = 0; j < inz; j++) y.set(meets.subarray(j * inx, (j + 1) * inx), (j + M) * nx + M);
   // Taken in by a point all round; then what is enclosed filled.
   const cover = new Uint8Array(n);
   for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {

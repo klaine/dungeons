@@ -712,8 +712,49 @@ leaves both the game and the walk working:
    beyond that read from the air's picture taken from the sun over the whole world, so that a mountain's shadow falls on the valley
    under it. What differs is said where it is called: the world's air is thinner (the eye sees ten kilometres, not one), its floor is the
    sea, its sky twice as large. The places' water mirrors the sky and cloud as the game's does. The world's weather is fair unless the
-   address says otherwise (`?cloud=`, `?layered=1`, `?mist=`, `?haze=`, `?rain=`). *Not yet:* the town's street lamps and the rooms'
-   lamps as lights, night's own lights, smoke, birds and sheep; the game's tone choices; its lantern.
+   address says otherwise (`?cloud=`, `?layered=1`, `?mist=`, `?haze=`, `?rain=`; `?hour=` for another hour than morning).
+
+   *What lives and burns in a place* (asked: "the places' lamps as lights, smoke, birds, sheep"): a place's pack now carries it, moved
+   into the world as the rest is (`PlaceLife` in `placePack.ts`), and the page makes it as the game does (`living` in `places.ts`):
+   smoke over its chimneys and fires (drawn with its water); birds, gulls off a coast's cliffs, rooks over a valley's woods, choughs off
+   a mountain's precipices; sheep, or on a mountain goats, standing on the place's solid part and kept out of its rooms (taken back
+   into the site's own ways, `intoSite`), its ponds and its sea; its torches, candles and fires, their flames flickering; at dusk and
+   by night its lighthouse's turning beam, and on a warm evening its fireflies. Its street lamps light the ground and walls about them
+   after dark, all the places' lamps in the one lattice the game uses (`setLamps`), switched on before anything is drawn, since
+   whether a material reads them is settled when it is first drawn (`lightLamps`). The lamps and fires inside are baked into the
+   house's light, as before, not lit. Seen in the browser: Halhaven at dusk with 37 smokes over its chimneys, gulls, a flock of
+   eight sheep, 27 torches, its lighthouse's beam, and at night its 45 street lamps lit along the lanes; `tools/places.ts` reports
+   what each place brings (Strath Norith rooks, three sheep, 24 torches and 863 fireflies' homes; Elith Fell two smokes, choughs,
+   five goats, 39 torches). *Not yet:* lit windows' haze after dark (`WindowGlow`), the boats riding the swell, the sheep's bleating
+   and every other sound; the game's tone choices; its lantern.
+
+   *Mended from pictures of the mountain tops and of the country between* (asked: "first solve spotted issues like the patchwork"):
+   - *The patchwork.* The world's squares were laid as rock or turf a triangle at a time by each triangle's own slope, as the valley's
+     fine sheet is; meshed to a distance, a square's triangles are large, and on a slope near the line they tipped one way or the other
+     at random, a hillside of grey and brown triangles. Each corner is now judged by how steep the ground is about it over three metres
+     (`STEEP_REACH` in `streamMesh.ts`), and a triangle is rock when two of its corners are, so neighbours agree and the two lie in
+     patches; the world's far land the same, over 24 metres (`layTerrain`'s `byCorners`). The places' own sheets are as they were.
+     The patches' edges still follow the triangles.
+   - *Dark walls.* The bake takes the house's solid masses as boxes square to the axes; a place turned off them (Elith Fell by 168.7
+     degrees) gave each mass as the box about it turned, which stood out past the walls' own faces, and the bake, finding those faces
+     inside stone, drew them dark: a black blot on a gable and fronts nearly black in shade, with blocky light about the windows. Each
+     mass is now cut into near-square pieces and given as the largest box square to the axes within each (`packPlace`), never past it.
+     (The sun's near shadow is also drawn again when a place comes or goes, which it was not.)
+   - *A slab in the air.* A mountain top's loose stones were laid level at the height of the ground under their middle; on a world's
+     summit, steeper than the tops they were laid on, the larger stood clear of the slope on its downhill side. Each corner now stands
+     on the ground under it (`mountain.ts`), in the game's mountains too.
+   - *Another stone.* A place's own rock, its cliffs, sheet of rock, scree and loose stones, is now coloured with the world's grey
+     stone (`packPlace`), not its site's sandstone or limestone; its house keeps its stone. The line round under a mountain top's
+     plateau where the two met is gone.
+   - *The comb along a rim.* Where a crag is taken for the place's land, the world's land is brought to the land at the crag's foot,
+     not its top (`gridHole`'s `meets`); on Elith Fell that is 55 of 1,564 cells of the edge, and what remains of the comb from below is
+     mostly the arrival's walls standing over the rim's low points.
+   - *The sky through a valley's edge.* The walk page leaves out a triangle whose middle lies well inside a place; meshed coarsely, a
+     triangle across the edge had its middle inside, and its part outside went with it, a hole in the ground at the place's edge seen
+     from a hundred metres and more (`tools/places.ts` found it at Strath Norith's edge once it looked from the side). The land within
+     four metres either side of a place's edge is now kept in every mesh (`EDGE_KEEP` in `stream.ts`). The check finds no sky through
+     the join at Strath Norith or Elith Fell, meshed to five centimetres or to forty, from under the ground or from the side.
+   - The small flickers in Halhaven were not seen again from the views they were seen from.
 
    *Looked at with a graphics card* (20 November 2026: an Apple M2 Pro laptop, its 16 gigabytes shared by the processor and the card,
    in the app's embedded browser at 1103 by 955, WebGPU on Metal; the route page on `w0` from Halhaven's quay, at the high level of
@@ -786,16 +827,41 @@ leaves both the game and the walk working:
    and Elith Fell some 40 each, the mountain's light baked in 32. A frame drawn back to back at each place's door: 38, 38, 36, 38 and
    31 milliseconds, two places standing at most of them. (In the same run the route page's frame at Halhaven's quay took 57 to 58,
    against 51 earlier: the machine was by then twelve gigabytes into its swap.) *The mountain's edge:* the two lands meet without
-   ledges, but along the top of the face below Elith Fell's south-western rim the sky shows through in small gaps between the world's
-   land and the place's carved rock: the hole that follows a mountain's land is found looking straight down on it, and where the
-   place's carved face stands off the world's land seen from the side, nothing closes the gap. Close under that rim the world's land in
-   the band is near upright and its material stretched into stripes over large flat triangles. And the place's rock is the site's own
-   warm bedded stone, the world's a cooler grey, so a line runs round under the plateau where one meets the other. Not yet mended.
+   ledges or holes. Seen from below Elith Fell's south-western rim there seemed to be gaps, pale patches along the top of the face;
+   rays taken through them in the browser and followed in `tools/places.ts` (`RAYS=`) met the house's own stone and plaster a few
+   metres inside the place's edge, at its arrival, seen through notches in the world's land. Along a crag the place's carved rock
+   counts as its land only where it stands within twelve metres of the world's (`gridHole`), so from one metre to the next the world's
+   land is brought up to the rock's top or not, and stands along the rim as a comb. `tools/places.ts` now also sends rays up from under
+   the ground across the edge and in at it from the side, with the squares meshed as the walk page meshes them: none gets through at
+   the finest meshing; at the coarser, one point in some three thousand. Close under that rim the world's land in the band is near
+   upright and its material stretched into stripes over large flat triangles; and the place's rock is the site's own warm bedded
+   stone, the world's a cooler grey, so a line runs round under the plateau where one meets the other. Not yet mended: the comb, the
+   steep band and the stone. The arrival stands at the rim over that band, which no one could climb: a way to it is step 4.
    Still to look at: how the picture's 32 milliseconds divide among its steps, and the other levels of detail; a small flicker on the
    front of one timber-framed house some sixty metres across Halhaven's square, not yet traced.
 4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
    place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
    a boat for the sea legs; and something faster than walking for the kilometres between.
+
+   *Each place's game: done.* A place built in the world brings its game with it: the worker sends what the game needs of its site
+   (its rooms, ways, keys, levers, start, goal and secret), its doors with each leaf's mesh as numbers, and where its keys, levers,
+   finds and goal stand (`PlaceGame` in `placePack.ts`). The page gives each standing place the game's own rules (`Game`, unchanged) in
+   a group turned and lifted by the place's frame, so that doors, keys and levers stand where the site put them, and tells it where
+   the walker is in the site's own measures (`intoSite`) each frame (`playing` in `places.ts`). A door's shut leaf stops the body as
+   the game's does: its box is the site's, square to the site's axes, and the body is pushed out of it in those axes (`Player`'s
+   blockers may carry a frame, `BlockerFrame`). The leaves take the rooms' light (`leafGeometry`). What the game says comes up low in
+   the view, as in the game, and the keys held are in the panel by place (`gameUi` in `main.ts`). A place let go of takes its game,
+   its doors and their boxes with it.
+   *Played in the browser* (20 November 2026, `walk.html?world=w0&at=valley1`): at Strath Norith the body walked into the gold door,
+   stopped 0.37 metres from its middle and was told it wants a gold key; the lever in the west passage raised the portcullis; the
+   gold key was taken in the cave's last chamber and named in the panel; the door opened as the body walked into it, and in the
+   sanctum the place said it was reached. Halhaven's house (seven doors, a key) and Elith Fell's (eight doors, one of them secret, a
+   gold lock and a lever) have their games too; Elith Fell's gold door, turned with the place nearly half round, stands true in its
+   doorway. `tools/body.ts w0` walks as it did, and `tools/places.ts w0` (and `w0 mountain 1`) finds no sky through either join. The
+   game's own doors, which carry no frame, stop the body as before: its play-through (`__dbg.walkTest` and `playthrough`, what
+   `play.cjs` runs) walks every doorway of `ink-7` and `moss-3` both ways and wins.
+   *Not yet:* the leaves' light is one light for every door, not the bake's at each (the game's `applyBake`); the game's hour, its
+   relic and its secret are as the site has them, unchecked in the world; a place's game starts again when it is built again.
 5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
    (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
 6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.

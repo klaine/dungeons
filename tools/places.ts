@@ -8,6 +8,8 @@
  *   npx tsx tools/places.ts [world seed] [kind: valley, coast, island, mountain] [number]
  *
  * With no kind, the valley head at the end of the shortest town's way, which the body is walked to; for another place, the join alone.
+ * And whether the sky can be seen through the join, from under the ground and from the side, with the squares meshed as the walk
+ * page meshes them.
  */
 (globalThis as Record<string, unknown>).document = { addEventListener() {}, body: { classList: { toggle() {} } } };
 (globalThis as Record<string, unknown>).window = { addEventListener() {} };
@@ -19,6 +21,7 @@ import { townValleyRoutes, wayOf } from '../src/core/route';
 import { holeAt, makeSquare, Square, SQUARE, squareCount, TileData, TileGrid, tilesAt, tilesFor, wayThroughHoles } from '../src/core/stream';
 import { TILE, world, worldTile } from '../src/core/world';
 import { packPlace } from '../src/render/placePack';
+import { squareBuilders } from '../src/render/streamMesh';
 import { WorldColliders } from '../src/worldwalk/body';
 
 const seed = process.argv[2] ?? 'w0', kindAsked = process.argv[3] as 'valley' | 'coast' | 'island' | 'mountain' | undefined, nAsked = Number(process.argv[4] ?? 1);
@@ -37,6 +40,10 @@ const pack = packPlace(site, { kind: q.kind, n: q.n, name: q.name }, (x, z) => t
 const h = pack.hole;
 const gaps = h.grid ? h.grid.gap : h.gap;
 console.log(`${seed}: ${q.name} laid out and built in ${((Date.now() - t) / 1000).toFixed(0)} s (meshed ${(pack.ms.mesh / 1000).toFixed(0)}), ${(pack.triangles / 1e6).toFixed(2)} million triangles; its square ${(2 * h.hx).toFixed(0)} by ${(2 * h.hz).toFixed(0)} m; ${pack.misses} of ${h.profile.length} heights round its edge found no land${h.grid ? `, so its hole follows its land, a lattice ${h.grid.nx} by ${h.grid.nz} at ${h.grid.cell} m` : ''}; the place's land stands off the world's at its edge by ${(gaps ? gaps.reduce((a, v) => Math.max(a, Math.abs(v)), 0) : 0).toFixed(1)} m at most`);
+{
+  const l = pack.life;
+  console.log(`  what lives and burns in it: ${l.smokes.length} smokes, ${l.birds.length} places of ${l.birdKind ?? 'gull'}s, ${l.flocks.reduce((n, f) => n + f.count, 0)} ${l.flockKind ?? 'sheep'} in ${l.flocks.length} flocks, ${l.torches.length} torches and fires, ${l.lamps.length} street lamps, ${l.fireflies.length / 3} fireflies' homes${l.beacon ? ', a lighthouse' : ''}`);
+}
 // The squares about it, made as the page's workers make them, with the way and the place's hole.
 const tileData = new Map<string, TileData>(), squares = new Map<string, Square>(), grounds = w.places.flatMap((o) => (o.ground ? [o.ground] : []));
 const tile = (i: number, j: number): TileData => {
@@ -180,6 +187,99 @@ if (way) {
   console.log(`  the body along the way: ${left < 12 ? 'came to' : 'did NOT come to'} the house (${left.toFixed(0)} m short) in ${(frames / 60).toFixed(0)} s, into the place's square ${crossed < 0 ? 'never' : `after ${(crossed / 60).toFixed(0)} s`}; standing on the ground, at worst ${(sunk * 100).toFixed(0)} cm in it and ${(over * 100).toFixed(0)} cm over it`);
   walked = left < 12;
 }
+// Whether the sky can be seen through the join: the squares across the place's edge meshed as the walk page meshes them, at the
+// distances it meshes them to from some thirty metres off to five hundred, with what lies under the place left out as it leaves it out;
+// then rays sent up and out from a metre under the ground all across the edge, every two metres. On a closed surface none gets out.
+const solidGeo = new BufferGeometry();
+solidGeo.setAttribute('position', new BufferAttribute(pack.solid.position, 3)); solidGeo.setIndex(new BufferAttribute(pack.solid.index, 1));
+const solidBvh = MeshBVH.deserialize(pack.solid.bvh, solidGeo, { setIndex: true });
+const look = { turf: () => [0.5, 0.5, 0.5, 0, 0, 0, 0], rock: (): [number, number, number] => [0.5, 0.5, 0.5] };
+const across: [number, number][] = [];
+{
+  const bx = h.grid ? [h.grid.x0, h.grid.x0 + h.grid.nx * h.grid.cell, h.grid.z0, h.grid.z0 + h.grid.nz * h.grid.cell] : [h.cx - h.hx - 50, h.cx + h.hx + 50, h.cz - h.hz - 50, h.cz + h.hz + 50];
+  for (let z = bx[2]; z <= bx[3]; z += 2) for (let x = bx[0]; x <= bx[1]; x += 2) { const o = holeAt(h, x, z).out; if (o > -2.5 && o < 4) across.push([x, z]); }
+}
+// (Every way upward: a ray from under the ground that meets nothing at all has got out through a gap. One that meets the ground from
+// below, however far off, has crossed it; the squares meshed reach three hundred metres past the place's square, beyond any ray's
+// rise under the land.)
+const waysUp = [new Vector3(0, 1, 0), ...[0.35, 0.9, 1.35].flatMap((e) => [0, 1, 2, 3, 4, 5, 6, 7].map((k) => new Vector3(Math.cos(e) * Math.cos(k * 0.785), Math.sin(e), Math.cos(e) * Math.sin(k * 0.785))))];
+const leaksAt = (skip: (x: number, z: number, ax: number, az: number, bx: number, bz: number, cx: number, cz: number) => boolean, err: number) => {
+  const pos: number[] = [], idx: number[] = [];
+  for (const sq of squares.values()) {
+    if (sq.x0 > h.cx + h.hx + 300 || sq.x0 + SQUARE.size < h.cx - h.hx - 300 || sq.z0 > h.cz + h.hz + 300 || sq.z0 + SQUARE.size < h.cz - h.hz - 300) continue;
+    // (Meshed whole, and each triangle judged here by its middle and its corners: `squareBuilders` asks only of the middle.)
+    const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, err, look, 0.72, 1);
+    for (const b of [m.turf, m.rock]) {
+      const g = b.build(), P = g.getAttribute('position').array as Float32Array, I = g.getIndex()!.array;
+      for (let t3 = 0; t3 < I.length; t3 += 3) {
+        const a = I[t3], b2 = I[t3 + 1], c3 = I[t3 + 2];
+        if (skip((P[a * 3] + P[b2 * 3] + P[c3 * 3]) / 3, (P[a * 3 + 2] + P[b2 * 3 + 2] + P[c3 * 3 + 2]) / 3, P[a * 3], P[a * 3 + 2], P[b2 * 3], P[b2 * 3 + 2], P[c3 * 3], P[c3 * 3 + 2])) continue;
+        const o = pos.length / 3;
+        for (const v of [a, b2, c3]) pos.push(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]);
+        idx.push(o, o + 1, o + 2);
+      }
+    }
+  }
+  const wg = new BufferGeometry();
+  wg.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3)); wg.setIndex(idx);
+  const wb = new MeshBVH(wg), r = new Ray(new Vector3(), new Vector3());
+  // Seen from the side, as the eye sees the edge from below its rim: from 170 metres out, level, at points of the edge a metre, three
+  // and six under the place's land there; a ray that comes to such a point and goes on thirty metres more meeting nothing has passed
+  // through a gap. (Looked at from the walk page, the sky showed in notches under a mountain top's rim.)
+  let side = 0, sideAt = '';
+  const T = new Vector3(), C = new Vector3();
+  for (const [x, z, ox, oz] of edgePoints) {
+    const top = placeLand(x - ox * 0.5, z - oz * 0.5);
+    if (!Number.isFinite(top)) continue;
+    for (const d of [1, 3, 6]) {
+      // (The eye kept over the ground there: where the land outside rises above the edge it stood inside a hill, and a ray from
+      // under the ground to under the ground met nothing and was taken for a gap.)
+      T.set(x - ox * 0.5, top - d, z - oz * 0.5); C.set(T.x + ox * 170, 0, T.z + oz * 170); C.y = Math.max(T.y + 10, heightAt(C.x, C.z) + 3);
+      r.origin.copy(C); r.direction.copy(T).sub(C).normalize();
+      const far = C.distanceTo(T) + 30, hw = wb.raycastFirst(r, 2), hp = solidBvh.raycastFirst(r, 2);
+      if ((!hw || hw.distance > far) && (!hp || hp.distance > far)) {
+        side++; if (!sideAt) sideAt = `${x.toFixed(0)}, ${z.toFixed(0)}, ${d} m under`;
+        break;
+      }
+    }
+  }
+  // (Rays given before the command, `RAYS="x,y,z;dx,dy,dz;..."`, as taken in the browser from the eye through points of the picture:
+  // each told where it meets the world's land and the place's, and which of the place's meshes. What looked like the sky through a
+  // gap under a mountain top's rim was found so to be the pale stone of its arrival, seen through notches in the world's land.)
+  if (process.env.RAYS && err === 0.4) {
+    const [o, ...ds] = process.env.RAYS.split(';').map((v) => v.split(',').map(Number));
+    const allGeo = new BufferGeometry(), ap: number[] = [], ai: number[] = [], ends: [number, string][] = [];
+    for (const m of pack.meshes) { const b0 = ap.length / 3; for (const v of m.position) ap.push(v); for (const v of m.index) ai.push(v + b0); ends.push([ai.length / 3, `${m.key} (${m.material})`]); }
+    allGeo.setAttribute('position', new BufferAttribute(new Float32Array(ap), 3)); allGeo.setIndex(ai);
+    const allBvh = new MeshBVH(allGeo);
+    for (const d of ds) {
+      r.origin.set(o[0], o[1], o[2]); r.direction.set(d[0], d[1], d[2]).normalize();
+      const hw = wb.raycastFirst(r, 2), hp = solidBvh.raycastFirst(r, 2), ha = allBvh.raycastFirst(r, 2);
+      const at = (t: number) => { const q = r.origin.clone().addScaledVector(r.direction, t); return `${t.toFixed(1)} m at ${q.x.toFixed(1)}, ${q.y.toFixed(1)}, ${q.z.toFixed(1)} (out ${holeAt(h, q.x, q.z).out.toFixed(1)})`; };
+      console.log(`    ray ${d.join(',')}: world ${hw ? at(hw.distance) : 'none'}; place's solid ${hp ? at(hp.distance) : 'none'}; place drawn ${ha ? at(ha.distance) + ' ' + ends.find(([e]) => (ha.faceIndex ?? 0) < e)![1] + ` facing ${ha.face?.normal.toArray().map((v) => v.toFixed(2))}` : 'none'}`);
+    }
+  }
+  let leaks = 0, worstLeak = '';
+  for (const [x, z] of across) {
+    r.origin.set(x, heightAt(x, z) - 1, z);
+    for (const d of waysUp) {
+      r.direction.copy(d);
+      const hw = wb.raycastFirst(r, 2), hp = solidBvh.raycastFirst(r, 2);
+      if (!hw && !hp) {
+        leaks++; if (!worstLeak) worstLeak = `${x.toFixed(0)}, ${z.toFixed(0)}`;
+        break;
+      }
+    }
+  }
+  return { leaks, worstLeak, side, sideAt };
+};
+const seen: string[] = [];
+// (`INBY=2.5,6` before the command tries leaving out what lies further in under the place than the page does, 2.5 metres.)
+for (const inBy of (process.env.INBY ?? '2.5').split(',').map(Number)) for (const err of [0.05, 0.4]) {
+  const a = leaksAt((cx, cz) => holeAt(h, cx, cz).out < -inBy, err);
+  seen.push(`left out ${inBy} m in, meshed to ${err} m: from under the ground ${a.leaks}${a.worstLeak ? ` (${a.worstLeak})` : ''}, from the side ${a.side} of ${edgePoints.length}${a.sideAt ? ` (${a.sideAt})` : ''}`);
+}
+console.log(`  the sky seen through the join:\n    ${seen.join('\n    ')}`);
 // (Where the hole follows a place's land, its edge runs along the feet of carved crags here and there, which a lattice of a metre does
 // not follow exactly: there a point or two in a hundred may lie further apart, so long as none is far.)
 const edgeHeld = h.grid ? edgeOff <= 0.02 * edgeN && edgeWorst < 4 : edgeWorst < 1;

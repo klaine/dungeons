@@ -1342,7 +1342,9 @@ export function* buildMountain(b: MountainBuild): Generator<MeshStage, MountainR
       if (!q.chance(Math.min(1, 0.08 + 0.5 * lay.bare * smooth((drift - 0.42) / 0.2) + 1.2 * rk))) continue;
       const y = ground(x, z), size = q.range(0.1, 0.34) * (q.chance(0.08) ? 2.2 : 1), yaw = q.range(0, Math.PI), c = Math.cos(yaw), sn = Math.sin(yaw);
       const w = size * q.range(0.7, 1.4), dd = size * q.range(0.6, 1.1), h = size * q.range(0.35, 0.8), tw = q.range(0.45, 0.85), tx = q.range(-0.25, 0.25) * w, tz = q.range(-0.25, 0.25) * dd;
-      const at = (a: number, f: number, up: number): P3 => [x + c * a - sn * f, y - 0.05 + up, z + sn * a + c * f];
+      // (Each corner on the ground under it, so that a stone lies with the slope. Laid level at the height of its middle, on a world's
+      // summit, steeper than the tops they were laid on before, the larger stood clear of the ground on the downhill side, slabs in the air.)
+      const at = (a: number, f: number, up: number): P3 => { const px = x + c * a - sn * f, pz = z + sn * a + c * f; return [px, Math.min(ground(px, pz), y + 0.3) - 0.06 + up, pz]; };
       const tone = q.range(0.75, 1.25);
       solid('rock', [at(-w, -dd, 0), at(w, -dd, 0), at(w, dd, 0), at(-w, dd, 0),
         at(-w * tw + tx, -dd * tw + tz, h * q.range(0.7, 1)), at(w * tw + tx, -dd * tw + tz, h), at(w * tw + tx, dd * tw + tz, h * q.range(0.6, 1)), at(-w * tw + tx, dd * tw + tz, h * q.range(0.8, 1))], rockColour(tone * 0.95), 0.4);

@@ -7,13 +7,14 @@ import { HeightField } from '../core/terrain';
 import { COVER, WORLD_SIZE, WorldPlace } from '../core/world';
 import { MeshBuilder } from '../render/geom/meshBuilder';
 import { layTerrain } from '../render/landscape';
-import { squareBuilders } from '../render/streamMesh';
+import { squareBuilders, STEEP_REACH } from '../render/streamMesh';
 import { cullCards, treeGrownMap, treeLevels, vegetationUniforms } from '../render/vegetation';
 import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn, woodDepth } from './dress';
 import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { Player } from '../app/player';
 import { WorldColliders } from './body';
-import { WorldPlaces } from './places';
+import { lightLamps, WorldPlaces } from './places';
+import type { GameUi } from '../app/game';
 import { SEA_RING, WorldSea } from './worldSea';
 import { SunPicture } from '../render/sunShadow';
 import { RouteReply, RouteWalk } from './routeMode';
@@ -91,6 +92,8 @@ async function start(): Promise<void> {
     ...(room > 16 ? { requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(room, 32) } } : {}),
   });
   await renderer.init();
+  // (The street lamps' light, if they are lit at this hour: settled before anything is drawn. See `lightLamps`.)
+  lightLamps(hour, room);
   renderer.setPixelRatio(Math.min(devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(innerWidth, innerHeight);
   const scene = new Scene(), camera = new PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 14000);
@@ -259,7 +262,7 @@ async function start(): Promise<void> {
       if (sq && (sq.meshes || sq.fineShown)) continue;
       const [x0, z0] = squareOrigin(grid, i, j);
       layTerrain(turf, rock, low, {
-        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, skip: (c) => placesBuilt.inside((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
+        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, byCorners: Math.max(STEEP_REACH, FAR * 0.75), skip: (c) => placesBuilt.inside((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
         colour: (x, z) => look.turf(x, z, field.smoothAt(x, z), Math.hypot(field.smoothAt(x + 8, z) - field.smoothAt(x - 8, z), field.smoothAt(x, z + 8) - field.smoothAt(x, z - 8)) / 16),
         rock: (tone) => { const c = look.rock(0, 0, 0); return [c[0] * tone * 1.6, c[1] * tone * 1.6, c[2] * tone * 1.6]; },
       });
@@ -327,7 +330,20 @@ async function start(): Promise<void> {
   let landVersion = 0;
   const colliders = new WorldColliders(heightAt, (x0, z0, x1) => treesIn(x0, z0, x1 - x0, treesHere, heightAt, W.plan.n, depthAt).map((t) => ({ x: t.x, z: t.z, r: Math.max(0.2, t.girth * 1.1) })), (x, z) => placesBuilt.inside(x, z, 0.5));
   // Places built into the world as one comes to them (`WorldPlaces`, step 2): every kind. `?places=0` builds none.
-  const placesBuilt = new WorldPlaces({ seed, size, scene, renderer, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
+  // The places' games speak through a line low in the view, as the game's own does (its `toast`), and the keys held are in the panel.
+  const toastLine = document.createElement('div');
+  Object.assign(toastLine.style, { position: 'fixed', left: '50%', bottom: '22%', transform: 'translateX(-50%)', maxWidth: 'min(80vw, 34em)', textAlign: 'center', padding: '8px 16px', borderRadius: '4px', background: 'rgba(11, 10, 9, .62)', color: '#ece6da', font: '15px/1.4 ui-serif, Georgia, serif', pointerEvents: 'none', opacity: '0', transition: 'opacity .35s', zIndex: '4' });
+  toastLine.setAttribute('role', 'status');
+  document.body.appendChild(toastLine);
+  let toastTimer = 0;
+  const toast = (message: string) => { toastLine.textContent = message; toastLine.style.opacity = '1'; clearTimeout(toastTimer); toastTimer = window.setTimeout(() => { toastLine.style.opacity = '0'; }, 4200); };
+  const keysHeld = new Map<string, string[]>();
+  const gameUi = (name: string): GameUi => ({
+    toast,
+    keysChanged: (keys) => keysHeld.set(name, keys),
+    won: (seconds) => toast(`You reached the heart of ${name} in ${seconds >= 60 ? `${Math.floor(seconds / 60)} min ` : ''}${Math.round(seconds % 60)} s.`),
+  });
+  const placesBuilt = new WorldPlaces({ seed, size, scene, renderer, lamps: room >= 20, keep: params.get('keep') === '1', ui: gameUi, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
   /** Where a square's triangles are left out, under a place standing in the world: only for a square that reaches into one. */
   const underPlace = (x0: number, z0: number, size: number) => {
     const near = placesBuilt.holes().some((h) => Math.hypot(Math.max(0, x0 - h.cx, h.cx - x0 - size), Math.max(0, z0 - h.cz, h.cz - z0 - size)) < Math.hypot(h.hx, h.hz));
@@ -340,7 +356,9 @@ async function start(): Promise<void> {
   // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
   // let be), the far land, what grows (none inside a place), and the body's ground.
   placesBuilt.onHoles = (h) => {
-    middleDirty = true;
+    // (The sun's shadow drawn again, near and in the finer picture, with the place in or out: drawn before it came, the near map kept
+    // the shadow of what stood there then, a dark blot on a gable where nothing threw one.)
+    middleDirty = true; light.redraw();
     const r = Math.hypot(h.hx, h.hz) + 160, cx = h.cx, cz = h.cz, near = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - cx, cx - x0 - s), Math.max(0, z0 - cz, cz - z0 - s)) < r;
     for (const [k, sq] of squares) if (near(sq.x0, sq.z0, SQUARE.size)) {
       drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []);
@@ -363,6 +381,8 @@ async function start(): Promise<void> {
     }
   };
   const player = new Player(camera, canvas, colliders);
+  // (The places' games stop the body at their shut doors: see `WorldPlaces.playing`.)
+  placesBuilt.player = player;
   player.flySpeed = [40, 160];
   player.fallTo = -1e4;
   const EYE = 1.68, me = player.position;
@@ -691,7 +711,8 @@ async function start(): Promise<void> {
         `squares ${st.squares} (${st.pending} coming), ${st.squareTriangles.toLocaleString()} triangles; a square ${st.squareMsMiddle.toFixed(0)} ms in a worker (${cores} at work)\n` +
         (fineOn ? `at half a metre ${st.fine} (${st.finePending} coming), ${st.fineTriangles.toLocaleString()} triangles; four ${st.fineMsMiddle.toFixed(0)} ms\n` : '') +
         `grass in ${st.lowBlocks} blocks · ${st.treeBlocks} blocks of whole trees, ${st.midBlocks} of simpler · ${st.farTreeCards.toLocaleString()} painted trees\n` +
-        `at ${me.x.toFixed(0)}, ${me.z.toFixed(0)}, ground ${groundY.toFixed(1)} m${player.flying ? ', flying' : ''}`;
+        `at ${me.x.toFixed(0)}, ${me.z.toFixed(0)}, ground ${groundY.toFixed(1)} m${player.flying ? ', flying' : ''}` +
+        [...keysHeld].filter(([, k]) => k.length).map(([name, k]) => `\n${name}: ${k.map((key) => `the ${key} key`).join(', ')}`).join('');
     }
   };
   const loop = (now: number) => { try { frame(now); } catch (e) { hud.textContent = `Fault: ${(e as Error).message}`; console.error(e); } };

@@ -73,6 +73,9 @@ export interface GroundLook {
  * skirts. Each mesh shares its points among its triangles. `cell` is how far apart its points lie: a
  * metre, or half a metre for the finer squares near the walker (`refineSquare`).
  */
+/** How far about each corner the ground's steepness is judged, for rock or turf, metres (`squareBuilders`, `layTerrain`'s `byCorners`). */
+export const STEEP_REACH = 3;
+
 export function squareBuilders(x0: number, z0: number, heights: Float32Array, errors: Float32Array, maxError: number, look: GroundLook, bare = 0.72, cell = 1, skip?: (x: number, z: number) => boolean): { turf: MeshBuilder; rock: MeshBuilder; triangles: number } {
   const size = SQUARE.n, last = size - 1, { triangles } = meshTriangles(errors, maxError);
   const turf = new MeshBuilder(), rock = new MeshBuilder();
@@ -96,6 +99,16 @@ export function squareBuilders(x0: number, z0: number, heights: Float32Array, er
     const ai = a % size, aj = (a - ai) / size, bi = b % size, bj = (b - bi) / size;
     return (ai === 0 && bi === 0) || (ai === last && bi === last) || (aj === 0 && bj === 0) || (aj === last && bj === last);
   };
+  // Rock or turf, judged by how steep the ground is about each corner over some metres (`STEEP_REACH`); a triangle is rock when two
+  // of its corners are. (Judged by each triangle's own face, as the valley's fine sheet is, the large triangles of a square meshed to a
+  // distance tipped one way or the other at random on a slope near the line, and a hillside was a patchwork of grey and brown triangles.
+  // Neighbours share corners, so now the two lie in patches.)
+  const reach = Math.max(1, Math.round(STEEP_REACH / cell)), steep = new Uint8Array(size * size);
+  for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+    const l = Math.max(0, i - reach), r = Math.min(last, i + reach), u = Math.max(0, j - reach), d = Math.min(last, j + reach);
+    const gx = (heights[j * size + r] - heights[j * size + l]) / ((r - l) * cell), gz = (heights[d * size + i] - heights[u * size + i]) / ((d - u) * cell);
+    steep[j * size + i] = 1 / Math.hypot(gx, 1, gz) < bare ? 1 : 0;
+  }
   let count = 0;
   for (let t = 0; t < triangles.length; t += 3) {
     let a = triangles[t], b = triangles[t + 1], c = triangles[t + 2];
@@ -103,11 +116,8 @@ export function squareBuilders(x0: number, z0: number, heights: Float32Array, er
     if ((bz - az) * (cx - ax) - (bx - ax) * (cz - az) < 0) { const s = b; b = c; c = s; }
     // (Left out where something else is drawn in its place: a place built into the world, over its own land. Judged by the middle.)
     if (skip && skip(x0 + ((ax + bx + cx) / 3) * cell, z0 + ((az + bz + cz) / 3) * cell)) continue;
-    // (Which mesh: by the triangle's own slope, as the valley's sheet is laid.)
-    const ix = [a % size, b % size, c % size], px = ix.map((v) => v * cell), pz = [(a - ix[0]) / size, (b - ix[1]) / size, (c - ix[2]) / size].map((v) => v * cell), py = [heights[a], heights[b], heights[c]];
-    const ux = px[1] - px[0], uy = py[1] - py[0], uz = pz[1] - pz[0], vx = px[2] - px[0], vy = py[2] - py[0], vz = pz[2] - pz[0];
-    const fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx, fl = Math.hypot(fx, fy, fz);
-    const which = Math.abs(fy) / Math.max(1e-9, fl) < bare ? 'rock' : 'turf', mesh = which === 'turf' ? turf : rock;
+    // (Which mesh: by its corners, above.)
+    const which = steep[a] + steep[b] + steep[c] >= 2 ? 'rock' : 'turf', mesh = which === 'turf' ? turf : rock;
     const A = vertex(which, a), B = vertex(which, b), C = vertex(which, c);
     // (Wound as the valley's sheet is, so that it faces up.)
     mesh.addTriangle(A, B, C);

@@ -1,4 +1,8 @@
-import { BufferAttribute, BufferGeometry, Color, DoubleSide, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Material, Mesh, Ray, Scene, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Color, DoubleSide, Group, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Material, Mesh, Object3D, Ray, Scene, Vector3 } from 'three';
+import { Game, GameUi } from '../app/game';
+import type { BlockerFrame, Player } from '../app/player';
+import type { Site } from '../core/site';
+import type { DoorDesc, SceneDescription } from '../render/scene';
 import { MeshBVH } from 'three-mesh-bvh';
 import type { WebGPURenderer } from 'three/webgpu';
 import { worldShelf, WorldShelf } from '../app/worldStore';
@@ -7,9 +11,14 @@ import { Hole, holeAt } from '../core/stream';
 import { WorldPlace } from '../core/world';
 import { bake } from '../render/bake/bake';
 import type { Atmosphere } from '../render/post';
-import type { PackedMesh, PlacePack } from '../render/placePack';
+import { intoSite, type PackedMesh, type PlaceGame, type PlacePack } from '../render/placePack';
+import { Birds } from '../render/birds';
+import { Beacon } from '../render/beacon';
+import { Flocks } from '../render/creatures';
+import { Fireflies } from '../render/fireflies';
+import { gatherTorches, Torch } from '../render/torch';
 import type { SeaDesc } from '../render/scene';
-import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms } from '../render/siteMaterial';
+import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, setLamps, windowUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
 import { Water } from '../render/water';
 import { SunPicture } from '../render/sunShadow';
@@ -46,9 +55,27 @@ const KINDS: WorldPlace['kind'][] = ['valley', 'coast', 'island', 'mountain'];
 /** How light each kind of surface is on the whole, for the bake (as the game has it). */
 const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
+/** How bright the lamps and lit windows are at an hour, as the game has it (none by day). */
+export const lampsAt = (hour: Hour) => (hour === 'night' ? 0.5 : hour === 'dusk' ? 0.55 : hour === 'sunset' ? 0.4 : 0);
+
+/**
+ * The street lamps' light on what is about them, switched on before anything is drawn when they are lit at the hour: whether a material
+ * reads them is settled when it is first drawn (`setLamps`), and the places with lamps come later. Where they lie is given as places
+ * come and go (`WorldPlaces`); until then, one lamp far off. Only where the card can read one more texture, as in the game.
+ */
+export function lightLamps(hour: Hour, room: number): void {
+  if (lampsAt(hour) && room >= 20) setLamps([[1e7, 0, 1e7]], lampsAt(hour) * 16, true);
+}
+
+/** What lives and burns in a place standing in the world, made from its pack (`PlaceLife`): moved each frame, let go of with it. */
+interface Living { birds: Birds | null; flocks: Flocks | null; torches: Torch[]; flames: Object3D | null; beacon: Beacon | null; fireflies: Fireflies | null }
+
+/** A place's game as it is played in the world (`playing`): the rules, the group they are drawn in, and who stands in for the walker. */
+interface Playing { game: Game; group: Group; proxy: { position: Vector3; blockers: Player['blockers'] }; frame: BlockerFrame }
+
 interface Built {
   spec: string; place: WorldPlace; pack: PlacePack;
-  meshes: (Mesh | InstancedMesh)[]; cards: InstancedMesh[]; water: Water | null; bvh: MeshBVH;
+  meshes: (Mesh | InstancedMesh)[]; cards: InstancedMesh[]; water: Water | null; bvh: MeshBVH; life: Living | null; play: Playing | null;
   /** The meshes still to be made and put in, a few a frame; and how the bake goes. */
   todo: PackedMesh[]; baked: 'waiting' | 'baking' | 'done' | 'failed';
 }
@@ -68,6 +95,8 @@ export class WorldPlaces {
   private keeping: Promise<unknown> = Promise.resolve();
   /** What is being done, for the page's panel. */
   status = '';
+  /** The walker's body, whose position the places' games read and whose blocks their shut doors are (`playing`). */
+  player: Player | null = null;
   /** Called with each place's layout as it comes, whether built or only laid out (for the route page's ink map and links). */
   onSite: ((kind: string, n: number, site: unknown) => void) | null = null;
   /** Called when the holes change: the page makes again the squares and what grows about them. */
@@ -76,7 +105,7 @@ export class WorldPlaces {
   onSea: ((sea: SeaDesc | null) => void) | null = null;
   private t0 = performance.now();
 
-  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; renderer: WebGPURenderer; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
+  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; renderer: WebGPURenderer; lamps?: boolean; keep?: boolean; ui?: (place: string) => GameUi; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
     this.shelf = worldShelf(o.seed);
   }
 
@@ -138,6 +167,13 @@ export class WorldPlaces {
 
   /** Each frame: what to build and let go of, the meshes of a place coming in, its water. */
   update(me: Vector3, now: number, camera: Parameters<Water['update']>[1], viewHeight: number): void {
+    this.updateBody(me, now, camera, viewHeight);
+    this.lastLife = now / 1000;
+  }
+  /** When the living things were last moved, seconds. */
+  private lastLife = 0;
+
+  private updateBody(me: Vector3, now: number, camera: Parameters<Water['update']>[1], viewHeight: number): void {
     // The nearest place not built within reach, one at a time.
     let want: WorldPlace | null = null, best = NEAR;
     for (const q of this.o.places) {
@@ -169,6 +205,19 @@ export class WorldPlaces {
         if (!b.todo.length) this.finish(spec, b);
       }
       b.water?.update(now / 1000, camera, viewHeight);
+      const l = b.life, t = now / 1000;
+      if (b.play) {
+        // (The walker taken into the place's own ways, where its rules are played.)
+        const [sx, sz] = intoSite(b.pack.life.frame, me.x, me.z);
+        b.play.proxy.position.set(sx, me.y - b.play.frame.dy, sz);
+        b.play.game.update(Math.min(0.1, Math.max(0, t - this.lastLife)), t);
+      }
+      if (l) {
+        l.birds?.update(t); l.beacon?.update(t);
+        l.flocks?.update(Math.min(0.1, Math.max(0, t - this.lastLife)), t, me);
+        for (const torch of l.torches) torch.update(t);
+        l.fireflies?.update(t, camera as unknown as Parameters<Fireflies['update']>[1], true, Math.min(0.1, Math.max(0, t - this.lastLife)));
+      }
     }
   }
 
@@ -183,7 +232,7 @@ export class WorldPlaces {
         await frame();
       }
       const moss = set.moss, hour = this.o.hour;
-      const lamps = hour === 'night' ? 0.5 : hour === 'dusk' ? 0.55 : hour === 'sunset' ? 0.4 : 0;
+      const lamps = lampsAt(hour);
       windowUniforms.uLit.value = lamps;
       // (As the game makes them, `src/app/main.ts`; to be one set for both when the world and the place share one renderer, step 3.)
       const m: Record<string, Material> = {
@@ -230,7 +279,7 @@ export class WorldPlaces {
     geo.setAttribute('position', new BufferAttribute(pack.solid.position, 3));
     geo.setIndex(new BufferAttribute(pack.solid.index, 1));
     const bvh = MeshBVH.deserialize(pack.solid.bvh, geo, { setIndex: true });
-    this.built.set(spec, { spec, place, pack, meshes: [], cards: [], water: null, bvh, todo: [...pack.meshes], baked: 'waiting' });
+    this.built.set(spec, { spec, place, pack, meshes: [], cards: [], water: null, bvh, life: null, play: null, todo: [...pack.meshes], baked: 'waiting' });
   }
 
   /** One mesh of a place, made and put in, lit as the game lights what it does not bake (the house's light baked afterwards). */
@@ -283,6 +332,8 @@ export class WorldPlaces {
    * drawing makes, `Attributes.update`, which sends a buffer the first time and again whenever its version has gone on.)
    */
   private toCard(mesh: Mesh): void {
+    // (`?keep=1` keeps them, for looking into a place's meshes from the console.)
+    if (this.o.keep) return;
     const sent = (this.o.renderer as unknown as { _attributes: { update(buffer: BufferAttribute | InterleavedBuffer, type: number): void } })._attributes;
     const seen = new Set<BufferAttribute | InterleavedBuffer>();
     for (const a of Object.values(mesh.geometry.attributes)) {
@@ -299,10 +350,10 @@ export class WorldPlaces {
     for (const c of cardsOf(b.pack.cards)) { this.o.scene.add(c); b.cards.push(c); b.meshes.push(c); }
     // (The pack's own lists of them let go of: the meshes and cards hold what they need.)
     b.pack.meshes = []; b.pack.cards = [];
-    const S = SKIES[this.o.hour];
-    if (b.pack.water?.length || b.pack.streams?.length) {
+    const S = SKIES[this.o.hour], life = b.pack.life;
+    if (b.pack.water?.length || b.pack.streams?.length || life.smokes.length) {
       b.water = new Water(b.pack.water ?? [], b.pack.streams ?? [], {
-        mirror: 0, zenith: S.zenith, horizon: S.horizon, falls: b.pack.falls,
+        mirror: 0, zenith: S.zenith, horizon: S.horizon, falls: b.pack.falls, smokes: life.smokes,
         land: S.ground.map((v) => v * 0.45),
         foam: [0, 1, 2].map((c) => 0.6 * S.horizon[c] + 0.12 * S.colour[c] * S.intensity),
         deep: [(0.55 * S.zenith[0] + 0.45 * S.horizon[0]) * 0.06 + 0.002, (0.55 * S.zenith[1] + 0.45 * S.horizon[1]) * 0.17 + 0.003, (0.55 * S.zenith[2] + 0.45 * S.horizon[2]) * 0.11 + 0.003],
@@ -311,11 +362,108 @@ export class WorldPlaces {
       b.water.mirrorSky(this.o.atmosphere);
       for (const m of b.water.meshes) { this.o.scene.add(m); b.meshes.push(m); }
     }
+    b.life = this.living(b);
+    b.play = this.playing(b);
     this.o.colliders.others.push(b.bvh);
     this.onHoles?.(b.pack.hole);
+    this.lamps();
     if (b.pack.sea) this.onSea?.(b.pack.sea);
     this.status = `${b.place.name} stands in the world (${(b.pack.triangles / 1e6).toFixed(1)} million triangles); its light being baked…`;
     this.bakeHouse(b);
+  }
+
+  /**
+   * A place's game, played in the world as the game plays it (`Game`): its doors that open, are locked, barred or hidden, its keys to
+   * pick up, its levers, the goal at its heart, its hidden relic and what lies about to be found. The rules are the game's own and run
+   * in the site's own ways: they are drawn in a group set in the place's frame, the walker taken into those ways each frame for them
+   * (a stand-in with the walker's position there), and the doors' blocks handed to the walker's body with the frame they lie in.
+   */
+  private playing(b: Built): Playing | null {
+    const player = this.player, g = b.pack.game, materials = this.materials;
+    if (!player || !g || !materials) return null;
+    const f = b.pack.life.frame, frame: BlockerFrame = { u: f.u, v: f.v, hx: f.hx, hz: f.hz, turn: f.turn, dy: f.base - f.floor };
+    // (The group's own turn and offset are the frame's: a point of the site, turned about the frame's point and set down at its place.)
+    const group = new Group(), c = Math.cos(f.turn), sn = Math.sin(f.turn);
+    group.rotation.y = -f.turn;
+    group.position.set(f.u - (c * f.hx - sn * f.hz), frame.dy, f.v - (sn * f.hx + c * f.hz));
+    this.o.scene.add(group);
+    const V = (q: [number, number, number]) => new Vector3(q[0], q[1], q[2]);
+    const doors: DoorDesc[] = g.doors.map((o) => ({
+      way: o.way, hinge: V(o.hinge), yaw: o.yaw, swing: o.swing, halfWidth: o.halfWidth, spring: o.spring, thickness: o.thickness, material: o.material,
+      blocker: { min: V(o.blocker.min), max: V(o.blocker.max) }, centre: V(o.centre), barSide: o.barSide,
+      leaf: o.leaf ? ({ build: () => this.leafGeometry(o.leaf!) } as unknown as DoorDesc['leaf']) : null,
+    }));
+    const desc = { doors, anchors: new Map(g.anchors.map(([id, x, y, z]) => [id, new Vector3(x, y, z)])), finds: g.finds.map((q) => ({ at: V(q.at), what: q.what })) } as unknown as SceneDescription;
+    const proxy = { position: new Vector3(), blockers: [] as Player['blockers'] };
+    const ui = this.o.ui?.(b.place.name) ?? { toast: () => undefined, keysChanged: () => undefined, won: () => undefined };
+    const game = new Game(g.site as Site, desc, group as unknown as Scene, materials, proxy as unknown as Player, ui);
+    for (const k of proxy.blockers) { k.frame = frame; player.blockers.push(k); }
+    return { game, group, proxy, frame };
+  }
+
+  /** A door's leaf from its arrays, lit as what is indoors is lit in the world (`make`): it is never baked. */
+  private leafGeometry(l: NonNullable<PlaceGame['doors'][number]['leaf']>): BufferGeometry {
+    const g = new BufferGeometry(), n = l.position.length / 3;
+    g.setAttribute('position', new BufferAttribute(l.position, 3));
+    g.setAttribute('normal', new BufferAttribute(l.normal, 3));
+    g.setAttribute('uv', new BufferAttribute(l.uv, 2));
+    g.setAttribute('color', new BufferAttribute(l.color, 3));
+    g.setAttribute('aField', new BufferAttribute(l.field, 4));
+    g.setAttribute('aEdge', new BufferAttribute(l.edge, 4, true));
+    const S = SKIES[this.o.hour], L = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]), up = Math.max(0, this.o.sunDir.y);
+    const G = [0, 1, 2].map((c) => (0.2 * (0.6 * S.intensity * S.colour[c] * up + Math.PI * 0.9 * L[c])) / Math.PI);
+    const light = new InterleavedBuffer(new Float32Array(n * 14), 14), a = light.array as Float32Array;
+    for (let i = 0; i < n; i++) { for (let c = 0; c < 3; c++) a[i * 14 + c * 4] = 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]); a[i * 14 + 12] = 0.05; a[i * 14 + 13] = 0.6; }
+    g.setAttribute('aSHr', new InterleavedBufferAttribute(light, 4, 0));
+    g.setAttribute('aSHg', new InterleavedBufferAttribute(light, 4, 4));
+    g.setAttribute('aSHb', new InterleavedBufferAttribute(light, 4, 8));
+    g.setAttribute('aBake', new InterleavedBufferAttribute(light, 2, 12));
+    g.setIndex(new BufferAttribute(l.index, 1));
+    return g;
+  }
+
+  /**
+   * What lives and burns in a place, as the game makes it (`src/app/main.ts`): its smoke is drawn with its water (`finish`); here its
+   * birds, gulls off a coast's cliffs or choughs off a mountain's precipices; its sheep or goats, stood on the place's solid part and
+   * kept out of its rooms, its ponds and its sea; its torches, candles and fires, their flames flickering (their light is baked in, as
+   * none is lit here); and at dusk and by night its lighthouse's beam and, on a warm evening, its fireflies.
+   */
+  private living(b: Built): Living {
+    const l = b.pack.life, S = SKIES[this.o.hour], scene = this.o.scene, seed = `${this.o.seed}/${b.spec}`;
+    const birds = l.birds.length ? new Birds(l.birds, seed, S.intensity * 0.55 + 0.4, l.birdKind) : null;
+    if (birds) scene.add(birds.mesh);
+    let flocks: Flocks | null = null;
+    if (l.flocks.length) {
+      const down = new Ray(new Vector3(), new Vector3(0, -1, 0));
+      const groundAt = (x: number, z: number) => { down.origin.set(x, 5000, z); return b.bvh.raycastFirst(down, DoubleSide)?.point.y ?? -1000; };
+      const rooms = l.rooms.map(([x0, x1, z0, z1]) => [x0 - 2, x1 + 2, z0 - 2, z1 + 2]), water = b.pack.water ?? [], sea = b.pack.sea?.level;
+      const free = (x: number, z: number) => {
+        const [sx, sz] = intoSite(l.frame, x, z);
+        if (rooms.some((r) => sx > r[0] && sx < r[1] && sz > r[2] && sz < r[3])) return false;
+        if (water.some((w) => Math.hypot(x - w.x, z - w.z) < w.r + 1.5)) return false;
+        return sea === undefined || groundAt(x, z) > sea + 0.8;
+      };
+      flocks = new Flocks(l.flocks, seed, groundAt, free, l.flockKind);
+      scene.add(flocks.group);
+    }
+    const torches = l.torches.map((t, i) => new Torch(new Vector3(...t.position), new Vector3(...t.out), i * 0.37 + 0.1, t.fire, t.flames?.map((q) => new Vector3(...q))));
+    const flames = torches.length ? gatherTorches(torches) : null;
+    if (flames) scene.add(flames);
+    const lit = this.o.hour === 'night' ? 0.22 : this.o.hour === 'dusk' ? 0.1 : this.o.hour === 'sunset' ? 0.035 : 0;
+    const beacon = l.beacon && lit ? new Beacon(l.beacon, lit) : null;
+    if (beacon) scene.add(beacon.group);
+    const warm = (this.o.hour === 'dusk' || this.o.hour === 'night') && (this.o.season === 'spring' || this.o.season === 'summer');
+    const fireflies = warm && l.fireflies.length ? new Fireflies(l.fireflies, seed, this.o.hour === 'night' ? 1.6 : 2.4) : null;
+    if (fireflies) scene.add(fireflies.mesh);
+    return { birds, flocks, torches, flames, beacon, fireflies };
+  }
+
+  /** The street lamps of every place standing, for their light on what is about them (`lightLamps`), when they are lit. */
+  private lamps(): void {
+    const level = lampsAt(this.o.hour);
+    if (!level || !this.o.lamps) return;
+    const all = [...this.built.values()].filter((b) => b.life).flatMap((b) => b.pack.life.lamps);
+    setLamps(all.length ? all : [[1e7, 0, 1e7]], level * 16, true);
   }
 
   /** The house's light, baked as the game bakes it: in workers, the place's own lamps and fires baked in, since none is lit here. */
@@ -363,11 +511,18 @@ export class WorldPlaces {
   /** Lets a place go: its meshes, its solid part, its hole. (It is built again if one comes back.) */
   private letGo(spec: string, b: Built): void {
     for (const m of b.meshes) { this.o.scene.remove(m); (m as Mesh).geometry?.dispose(); }
+    if (b.life) for (const o of [b.life.birds?.mesh, b.life.flocks?.group, b.life.flames, b.life.beacon?.group, b.life.fireflies?.mesh]) if (o) this.o.scene.remove(o);
+    if (b.play) {
+      this.o.scene.remove(b.play.group);
+      const blockers = this.player?.blockers;
+      if (blockers) for (const k of b.play.proxy.blockers) { const i = blockers.indexOf(k); if (i >= 0) blockers.splice(i, 1); }
+    }
     const k = this.o.colliders.others.indexOf(b.bvh);
     if (k >= 0) this.o.colliders.others.splice(k, 1);
     this.built.delete(spec);
     this.asked.delete(spec);
     WorldPlaces.gone.register(b.pack, spec);
+    this.lamps();
     this.onHoles?.(b.pack.hole);
     // (Its sea goes with it; another standing place's, if there is one, is drawn instead.)
     if (b.pack.sea) this.onSea?.([...this.built.values()].find((o) => o.pack.sea && o.todo.length === 0)?.pack.sea ?? null);

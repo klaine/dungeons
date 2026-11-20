@@ -44,8 +44,11 @@ export class Player {
    * move the point. (Nothing by default.)
    */
   constrain: ((at: Vector3) => void) | null = null;
-  /** Boxes that stop the player while active, such as shut doors. */
-  readonly blockers: { min: Vector3; max: Vector3; active: boolean }[] = [];
+  /**
+   * Boxes that stop the player while active, such as shut doors. A box may lie in a frame of its own (`frame`: a place built into the
+   * world, turned about its point `hx`, `hz` and set down at `u`, `v`, its heights raised by `dy`), and is then tried in that frame.
+   */
+  readonly blockers: { min: Vector3; max: Vector3; active: boolean; frame?: BlockerFrame }[] = [];
   private jumpQueued = false;
   private velocity = new Vector3();
   private onGround = false;
@@ -200,32 +203,27 @@ export class Player {
       },
     });
 
-    // Shut doors and the like: push the body out sideways.
+    // Shut doors and the like: push the body out sideways. (A box in a frame of its own is tried there: the segment and where it came
+    // from taken into the frame, pushed there, and the push turned back.)
     for (const b of this.blockers) {
-      if (!b.active || seg.start.y - RADIUS > b.max.y || seg.end.y + RADIUS < b.min.y) continue;
-      const nx = Math.min(b.max.x, Math.max(b.min.x, seg.start.x));
-      const nz = Math.min(b.max.z, Math.max(b.min.z, seg.start.z));
-      let dx = seg.start.x - nx, dz = seg.start.z - nz;
-      const d = Math.hypot(dx, dz);
-      if (d >= RADIUS) continue;
-      if (d < 1e-5) {
-        // Inside the box: leave by the nearer face across its thin dimension.
-        const thinX = b.max.x - b.min.x < b.max.z - b.min.z;
-        const mid = thinX ? (b.min.x + b.max.x) / 2 : (b.min.z + b.max.z) / 2;
-        const out = (thinX ? from.x : from.z) >= mid ? 1 : -1;
-        const half = (thinX ? b.max.x - b.min.x : b.max.z - b.min.z) / 2 + RADIUS;
-        if (thinX) { dx = mid + out * half - seg.start.x; dz = 0; } else { dz = mid + out * half - seg.start.z; dx = 0; }
-        seg.start.x += dx; seg.end.x += dx; seg.start.z += dz; seg.end.z += dz;
-      } else {
-        const push = (RADIUS - d) / d;
-        seg.start.x += dx * push; seg.end.x += dx * push; seg.start.z += dz * push; seg.end.z += dz * push;
+      const f = b.frame;
+      if (f) {
+        const c = Math.cos(f.turn), s = Math.sin(f.turn);
+        const local = (p: Vector3) => { const dx = p.x - f.u, dz = p.z - f.v; return new Vector3(f.hx + c * dx + s * dz, p.y - f.dy, f.hz - s * dx + c * dz); };
+        const ls = { start: local(seg.start), end: local(seg.end) }, lf = local(from), was = ls.start.clone();
+        pushOut(b, ls, lf);
+        const px = ls.start.x - was.x, pz = ls.start.z - was.z, wx = c * px - s * pz, wz = s * px + c * pz;
+        seg.start.x += wx; seg.end.x += wx; seg.start.z += wz; seg.end.z += wz;
+        continue;
       }
+      pushOut(b, seg, from);
     }
     return seg.start.clone().sub(before);
   }
 
   private step(dt: number): void {
     const start = this.position.clone(), wasGround = this.onGround, wantX = this.velocity.x, wantZ = this.velocity.z;
+
     this.velocity.y += (this.onGround ? -2 : -GRAVITY) * dt;
     this.position.addScaledVector(this.velocity, dt);
 
@@ -296,5 +294,30 @@ export class Player {
   private syncCamera(): void {
     this.camera.position.set(this.position.x, this.position.y + EYE, this.position.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+  }
+}
+
+/** A frame a blocker may lie in (`Player.blockers`): a place built into the world, turned about its point and set down. */
+export interface BlockerFrame { u: number; v: number; hx: number; hz: number; turn: number; dy: number }
+
+/** Pushes a body's segment out of a box, sideways, if it is in it or nearer than its breadth. */
+function pushOut(b: { min: Vector3; max: Vector3; active: boolean }, seg: { start: Vector3; end: Vector3 }, from: Vector3): void {
+  if (!b.active || seg.start.y - RADIUS > b.max.y || seg.end.y + RADIUS < b.min.y) return;
+  const nx = Math.min(b.max.x, Math.max(b.min.x, seg.start.x));
+  const nz = Math.min(b.max.z, Math.max(b.min.z, seg.start.z));
+  let dx = seg.start.x - nx, dz = seg.start.z - nz;
+  const d = Math.hypot(dx, dz);
+  if (d >= RADIUS) return;
+  if (d < 1e-5) {
+    // Inside the box: leave by the nearer face across its thin dimension.
+    const thinX = b.max.x - b.min.x < b.max.z - b.min.z;
+    const mid = thinX ? (b.min.x + b.max.x) / 2 : (b.min.z + b.max.z) / 2;
+    const out = (thinX ? from.x : from.z) >= mid ? 1 : -1;
+    const half = (thinX ? b.max.x - b.min.x : b.max.z - b.min.z) / 2 + RADIUS;
+    if (thinX) { dx = mid + out * half - seg.start.x; dz = 0; } else { dz = mid + out * half - seg.start.z; dx = 0; }
+    seg.start.x += dx; seg.end.x += dx; seg.start.z += dz; seg.end.z += dz;
+  } else {
+    const push = (RADIUS - d) / d;
+    seg.start.x += dx * push; seg.end.x += dx * push; seg.start.z += dz * push; seg.end.z += dz * push;
   }
 }

@@ -26,6 +26,12 @@ export interface TerrainOptions {
   rock?: (tone: number) => [number, number, number];
   /** How level a triangle must be to hold turf, as the upward part of its normal; steeper is rock. */
   bare?: number;
+  /**
+   * Judged by its corners instead, the ground's steepness about each over `byCorners` metres, a triangle rock when two of its corners
+   * are: so that on a slope near the line, coarse triangles lie in patches of rock and of turf and do not tip each its own way, a
+   * patchwork of grey and brown (the world's far land). By its own face if not given, as the places' fine sheets are.
+   */
+  byCorners?: number;
   /** Texture repeats per metre, for turf and for rock. */
   turfScale: number;
   rockScale: number;
@@ -51,6 +57,17 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
     const l = Math.hypot(dx, 2 * e, dz);
     q.nx = -dx / l; q.ny = (2 * e) / l; q.nz = -dz / l;
   };
+  // (Each corner's steepness over `byCorners` metres, where asked: kept, since every corner is a corner of six triangles.)
+  const steepKept = new Map<string, boolean>();
+  const steepAround = (x: number, z: number, r: number) => {
+    const key = `${x},${z}`;
+    let s = steepKept.get(key);
+    if (s === undefined) {
+      const dx = height(x + r, z) - height(x - r, z), dz = height(x, z + r) - height(x, z - r);
+      steepKept.set(key, (s = (2 * r) / Math.hypot(dx, 2 * r, dz) < (o.bare ?? 0.74)));
+    }
+    return s;
+  };
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const x0 = area.x0 + i * cell, z0 = area.z0 + j * cell;
     if (o.skip({ x0, x1: x0 + cell, z0, z1: z0 + cell })) continue;
@@ -64,7 +81,7 @@ export function layTerrain(turf: MeshBuilder, rock: MeshBuilder, height: HeightF
       const fl = Math.hypot(fx, fy, fz);
       if (fl < 1e-6) continue;
       // Only what is really steep is bare: a hillside of forty degrees holds turf.
-      const steep = fy / fl < (o.bare ?? 0.74);
+      const steep = o.byCorners ? [A, B, C].filter((q) => steepAround(q.x, q.z, o.byCorners!)).length >= 2 : fy / fl < (o.bare ?? 0.74);
       const mesh = steep ? rock : turf;
       const ids: number[] = [];
       for (const q of [A, B, C]) {

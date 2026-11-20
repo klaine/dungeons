@@ -104,6 +104,8 @@ export const SQUARE = { size: 256, n: 257 };
 const APRON = 24, FADE = 20;
 /** What a point of a way's bed counts as for the mesh, in metres: kept in every mesh of a square within some 250 metres (`LEVELS` in the walk page). */
 const WAY_KEEP = 0.5;
+/** How far either side of a place's edge the land is kept in every mesh, metres, and to what distance: past the coarsest the walk page meshes to (1.6 metres). */
+const EDGE_BAND = 4, EDGE_KEEP = 2;
 
 /** What a square needs of the world's tiles: each tile's lattice and where its middle lies (`ox`, `oz`). */
 export interface TileData { i: number; j: number; ox: number; oz: number; x0: number; z0: number; cell: number; nx: number; nz: number; data: Float32Array }
@@ -231,6 +233,16 @@ export function makeSquare(g: TileGrid, tiles: TileData[], i: number, j: number,
   if (grounds.length) for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
     const k = jj * SQUARE.n + ii;
     out[k] = withGrounds(grounds, x0 + ii, z0 + jj, out[k]);
+  }
+  // And every point within a few metres of a place's edge, kept in every mesh at whatever distance (`EDGE_KEEP`): the walk page leaves
+  // out a triangle whose middle lies well inside a place, and meshed coarsely, a triangle across the edge has its middle inside and its
+  // part outside left out with it, a hole in the ground at the place's edge seen from a hundred metres or more.
+  if (nearHoles.length) {
+    keep ??= new Float32Array(SQUARE.n * SQUARE.n);
+    for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
+      const x = x0 + ii, z = z0 + jj;
+      for (const h of nearHoles) { const o = holeAt(h, x, z).out; if (o > -EDGE_BAND && o < EDGE_BAND) { keep[jj * SQUARE.n + ii] = EDGE_KEEP; break; } }
+    }
   }
   return { i, j, x0, z0, heights: out, errors: errorsOf(out, keep), ms: performance.now() - t0 };
 }
