@@ -77,6 +77,9 @@ export function swellAt(x: number, z: number, time: number, depth: number): { h:
   return { h: h * scale, dx: dx * scale, dz: dz * scale };
 }
 
+/** How far out from its middle the sea's disc of rings reaches, metres. */
+export const SEA_EDGE = 3400;
+
 export class Sea {
   readonly mesh: Mesh;
   private readonly material = new NodeMaterial();
@@ -96,8 +99,8 @@ export class Sea {
     };
     // Rings: a metre and a half apart over the lattice of the sea bed, then further and further apart out to the edge.
     const reach = (this.reach = Math.hypot(bed.nx * bed.cell, bed.nz * bed.cell) / 2 + 20), radii: number[] = [0];
-    for (let r = 1.5; r < 3400; r += r < reach ? 1.5 : (r - reach) * 0.06 + 1.5) radii.push(r);
-    radii.push(3400);
+    for (let r = 1.5; r < SEA_EDGE; r += r < reach ? 1.5 : (r - reach) * 0.06 + 1.5) radii.push(r);
+    radii.push(SEA_EDGE);
     const around = 540, position: number[] = [], depth: number[] = [], index: number[] = [];
     for (const r of radii) for (let k = 0; k < around; k++) {
       const a = (k / around) * Math.PI * 2, x = desc.x + Math.cos(a) * r, z = desc.z + Math.sin(a) * r;

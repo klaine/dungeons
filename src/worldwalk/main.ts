@@ -1,4 +1,4 @@
-import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector2, Vector3 } from 'three';
+import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, RingGeometry, Scene, Vector2, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { QUALITY, qualityChosen, textureRoom } from '../render/air';
 import { Hour, SKIES } from '../core/site';
@@ -14,7 +14,7 @@ import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { Player } from '../app/player';
 import { WorldColliders } from './body';
 import { WorldPlaces } from './places';
-import { WorldSea } from './worldSea';
+import { SEA_RING, WorldSea } from './worldSea';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
 
@@ -137,9 +137,12 @@ async function start(): Promise<void> {
   const growHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : growCover(x, z));
   const treesHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : treeCover(x, z));
   // The sea far off: one sheet at its level, out beyond the world's edge, smooth enough to show the sky; a little under the game's own
-  // sea, which is drawn about the walker (`WorldSea`, below) and covers it within three and a half kilometres.
+  // sea, which is drawn about the walker (`WorldSea`, below) out to three and a half kilometres, and only beyond it: a ring about the
+  // game's sea's middle, which `WorldSea` moves with it. (A whole sheet under it showed through where the swell's troughs, 0.8 metres
+  // deep, went below it, in ovals ringed with foam; and the game's sea, drawn as seen into, saw the dark sheet 0.6 metres under it
+  // everywhere instead of its bed.)
   const water = new MeshStandardNodeMaterial({ color: 0x0b2430, roughness: 0.07, metalness: 0 });
-  const sea = new Mesh(new PlaneGeometry(grid.hx * 2 + 24000, grid.hz * 2 + 24000), water);
+  const sea = new Mesh(new RingGeometry(SEA_RING, Math.hypot(grid.hx, grid.hz) + 24000, 256, 1), water);
   sea.rotation.x = -Math.PI / 2; sea.position.y = -0.6; sea.receiveShadow = true;
   scene.add(sea);
   const drop = (meshes: (Mesh | InstancedMesh)[]) => { for (const m of meshes) { scene.remove(m); m.geometry.dispose(); } };
@@ -326,7 +329,7 @@ async function start(): Promise<void> {
   };
   const drawn = new Vector2();
   // The game's own sea, about the walker, or a standing place's own (`WorldSea`).
-  const worldSea = new WorldSea({ scene, atmosphere: light.atmosphere, field, hour });
+  const worldSea = new WorldSea({ scene, atmosphere: light.atmosphere, field, hour, sheet: sea });
   placesBuilt.onSea = (d) => worldSea.override(d);
   // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
   // let be), the far land, what grows (none inside a place), and the body's ground.
@@ -506,6 +509,8 @@ async function start(): Promise<void> {
   };
   (window as unknown as { __walk: unknown }).__walk = {
     stats, wireframe,
+    /** The scene, the eye and the renderer, for looking into from the browser's console. */
+    three: { scene, camera, renderer },
     /** The places standing in the world, and how they came in. */
     places: () => ({ status: placesBuilt.status, built: placesBuilt.report() }),
     /** On the route page: opens or closes the ink map of the stretch. */
@@ -523,6 +528,27 @@ async function start(): Promise<void> {
     },
     /** What is not yet in, of what `settled` waits for (for scripts that find it waiting). */
     unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: paintedMissing().length, far: farDirty.size }),
+    /** Draws `n` frames back to back, each waited for on the graphics card, and says what they took: the middle, the mean and the
+     *  worst, in milliseconds. The page's own frame time is the time between the browser's frames, which a screen's rate caps. */
+    time: async (n = 60) => {
+      renderer.setAnimationLoop(null);
+      // (WebGPU's queue says when what was sent is done; under WebGL 2 reading a point back waits for the drawing.)
+      const device = (renderer.backend as unknown as { device?: GPUDevice }).device;
+      const done = device ? () => device.queue.onSubmittedWorkDone() : async () => { const gl = (renderer.backend as unknown as { gl: WebGL2RenderingContext }).gl; gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); };
+      // (What is drawn once a frame, the scene's own pass and the shadows among it, is drawn again only when the frame's count goes on,
+      // which three's loop does before calling ours; without it only the last picture of the steps was drawn again, in a millisecond.)
+      const nodeFrame = (renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
+      const took: number[] = [];
+      try {
+        await done();
+        for (let i = 0; i < n; i++) { const t = performance.now(); nodeFrame.update(); (renderer.info as { frame: number }).frame = nodeFrame.frameId; frame(t); await done(); took.push(performance.now() - t); }
+      } finally {
+        // (Its frames are not the browser's: left in the page's own average they made it look three times as fast as it was.)
+        frames.length = 0; last = performance.now(); renderer.setAnimationLoop(loop);
+      }
+      const sorted = [...took].sort((a, b) => a - b);
+      return { middle: sorted[Math.floor(n / 2)], mean: took.reduce((a, b) => a + b, 0) / n, worst: sorted[n - 1], webgpu: !!device, size: [canvas.width, canvas.height] };
+    },
     settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && paintedMissing().length === 0 && farDirty.size === 0,
   };
   const frame = (now: number) => {
@@ -656,7 +682,8 @@ async function start(): Promise<void> {
         `at ${me.x.toFixed(0)}, ${me.z.toFixed(0)}, ground ${groundY.toFixed(1)} m${player.flying ? ', flying' : ''}`;
     }
   };
-  renderer.setAnimationLoop((now: number) => { try { frame(now); } catch (e) { hud.textContent = `Fault: ${(e as Error).message}`; console.error(e); } });
+  const loop = (now: number) => { try { frame(now); } catch (e) { hud.textContent = `Fault: ${(e as Error).message}`; console.error(e); } };
+  renderer.setAnimationLoop(loop);
 }
 
 start().catch((e) => { hud.textContent = `Could not start: ${(e as Error).message}`; console.error(e); });

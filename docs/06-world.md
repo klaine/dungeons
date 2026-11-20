@@ -714,6 +714,53 @@ leaves both the game and the walk working:
    sea, its sky twice as large. The places' water mirrors the sky and cloud as the game's does. The world's weather is fair unless the
    address says otherwise (`?cloud=`, `?layered=1`, `?mist=`, `?haze=`, `?rain=`). *Not yet:* the town's street lamps and the rooms'
    lamps as lights, night's own lights, smoke, birds and sheep; the game's tone choices; its lantern.
+
+   *Looked at with a graphics card* (20 November 2026: an Apple M2 Pro laptop, its 16 gigabytes shared by the processor and the card,
+   in the app's embedded browser at 1103 by 955, WebGPU on Metal; the route page on `w0` from Halhaven's quay, at the high level of
+   detail). With Halhaven and Strath Norith standing and their light baked, a frame drawn back to back and waited for on the card
+   (`__walk.time()`) took 51 milliseconds, some 11 of them the program's and 41 the card's, and the browser's own frames came as far
+   apart. With every mesh in the scene hidden it still took 32: the picture's own steps (the clouds, the air, the hollows, the
+   smoothing, the glow, the sun's maps), not yet told apart. The places' meshes were some 16 (Halhaven's, in view; Strath Norith lay
+   behind) and the cards 4. Two places standing are too heavy for such a machine: the page's heap held 4.1 of the 4.4 gigabytes it may
+   have (139 megabytes before the places came), its process 5.9 and the browser's graphics process 3.5, and with other programs open
+   the machine was eleven gigabytes into its swap. Every point of a place's meshes is kept in the page after it has gone to the card,
+   with its light, some 124 bytes a point at about two points to a triangle: a gigabyte and a half for Halhaven alone, and as much
+   again on the card. (A frame first timed at a millisecond and a half: three's count of frames had not gone on, so only the last of
+   the picture's steps was drawn again. And the page's own frame time then read thirteen milliseconds, the timing's frames left in its
+   average.)
+
+   The sun's shadow near the eye is right: in the near square every stall, tree and fountain and the obelisk throws its shadow on the
+   paving. Far off, the places throw none: from 110 metres nothing in Halhaven's square threw a shadow that had from 50. The air's
+   picture from the sun, which the shadow is read from beyond the near square, is drawn once, when the far land is first all in, over
+   the whole world at some 5.7 metres a point, and holds only the world's land; a place that comes later is never drawn into it, nor is
+   the far land as it changes.
+
+   Found and mended. *The sea:* the world's flat sheet of sea lay 0.6 metres under the game's sea over all of it, and the swell's
+   troughs go down 0.82 metres, so the dark sheet showed through in ovals, each ringed with the foam the sea draws against anything
+   standing in it; and the game's sea, drawn as seen into, saw the sheet under it everywhere instead of its bed. The sheet is now a ring
+   beyond the sea's disc of 3.4 kilometres, moved with its middle (`SEA_RING` in `worldSea.ts`). *Flickering in a town*, seen by the
+   person who asked: the house's terrace walls are built the wrong way about (their frame faces out into the square, where `masonry`
+   wants it facing into the wall, as the quay's and the moles' do), so the square sees the backs of the stones, which lay in one plane
+   with the back of the dark block of joints behind them, and the block came through in patches that changed from frame to frame. The
+   block now stops short of the stones' backs as it does of their faces. The walls still stand 1.15 metres out into the square faced
+   with their stones' backs: turned about, they would uncover the land at the terrace's edge, which falls to the square over the 0.8
+   metres outside it. And the glass of a classical building's basement windows lay in one plane with the block of stone under its
+   ground floor, 0.2 metres in; it is now 0.15 in, before the block and behind the bars. Both are the game's own builders, so the game's
+   towns had them too. Still flickering a little: some three thousand small pieces of stone lying flush on one large stone face beside
+   that same building, not yet traced.
+
+   *Checked again without a browser, the same day:* `tools/places.ts w0` as before (Strath Norith's land within 3 centimetres of the
+   world's at its edge on the whole and 47 at worst; the body into the valley after 104 seconds and to the house in 142), and
+   `w0 mountain 1` as before (Elith Fell's within 10 centimetres on the whole and 3.3 metres at worst, 4 of 400 points of the edge more
+   than a metre off, the band steeper than one in two over 8.4% of it), built in 54 seconds; `tools/town.ts 3`, all sound. `npm run
+   check` passes every valley head and island and fails two mountain tops (`peak-check-48`, `-49`: the gallery way breaks, rising 3.8
+   and 2.3 metres over two) and two towns (`town-check-13`, `-14`: a building in the street); `tools/buildingLab.ts 300` fails one
+   classical building and two canal houses (a point that is not a number). None is of this work: the lab's three fail alike on the
+   state before it, and the check's four are in code this branch has not changed from the default branch's.
+
+   *Not yet looked at:* the mountain's edge where the world's land meets it, and the walk page as far as Elith Fell (the pane was hidden,
+   and a hidden page's workers are held back); how the picture's 32 milliseconds divide among its steps, and the other levels of
+   detail.
 4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
    place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
    a boat for the sea legs; and something faster than walking for the kilometres between.

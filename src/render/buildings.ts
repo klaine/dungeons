@@ -677,7 +677,8 @@ function imperialHouse(b: Building, base: number, mesh: (material: string) => Me
     });
     pierced(f, 'stone', k0, k1, g0, PLINTH, -0.07, T, granite, [...rows[0].filter((g) => g.kind === 'arch'), ...cellar]);
     for (const g of cellar) {
-      on(f, 'glass', g.s0, g.s1, g.y0, g.y1, 0.2, 0.23, PANE);
+      // (The glass before the block of stone under the ground floor, whose face is 0.2 in: laid at 0.2, the two flickered.)
+      on(f, 'glass', g.s0, g.s1, g.y0, g.y1, 0.15, 0.18, PANE);
       for (let i = 1; i < 4; i++) on(f, 'metal', g.s0 + (i * (g.s1 - g.s0)) / 4 - 0.015, g.s0 + (i * (g.s1 - g.s0)) / 4 + 0.015, g.y0, g.y1, 0.1, 0.13, [0.05, 0.05, 0.055]);
     }
     // (A building of one storey is all principal storey: smooth, not rusticated, and its windows dressed as the principal storey's are.)

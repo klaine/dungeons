@@ -1,9 +1,9 @@
-import { Scene, Vector3 } from 'three';
+import { Mesh, Scene, Vector3 } from 'three';
 import { Hour, SKIES } from '../core/site';
 import { HeightField } from '../core/terrain';
 import { Atmosphere } from '../render/post';
 import { SeaDesc } from '../render/scene';
-import { Sea } from '../render/sea';
+import { Sea, SEA_EDGE } from '../render/sea';
 
 /**
  * The world's sea, drawn as the game draws a place's (`Sea`: the swell lifting it, a road of glitter, light through the crests, the
@@ -13,9 +13,11 @@ import { Sea } from '../render/sea';
  * world's lattice of eight metres), and laid again when the walker has gone `MOVE` from its middle. Where a place with a sea of its
  * own stands in the world (a harbour town, an island: `override`), that place's sea is drawn instead, about the place, with its
  * harbour's and its cliffs' own bed and spray. Beyond the disc, three and a half kilometres out, the world's flat sheet is left,
- * a little under it.
+ * a little under it: a ring about the disc's middle, moved with it (`sheet`), so that nothing lies under the disc but the bed.
  */
 const BED = 1600, MOVE = 600;
+/** Where the world's flat sheet of sea begins, metres from the game's sea's middle: a little inside the disc's edge, under it. */
+export const SEA_RING = SEA_EDGE - 20;
 
 export class WorldSea {
   private sea: Sea | null = null;
@@ -25,7 +27,7 @@ export class WorldSea {
   /** How long laying the sea last took, milliseconds. */
   lastMs = 0;
 
-  constructor(private readonly o: { scene: Scene; atmosphere: Atmosphere; field: HeightField; hour: Hour }) {}
+  constructor(private readonly o: { scene: Scene; atmosphere: Atmosphere; field: HeightField; hour: Hour; sheet: Mesh }) {}
 
   /** A place's own sea to draw instead of the world's, or none (the place let go of). */
   override(desc: SeaDesc | null): void { this.placeSea = desc; }
@@ -59,6 +61,7 @@ export class WorldSea {
     });
     this.sea.attach(this.o.atmosphere);
     this.o.scene.add(this.sea.mesh);
+    this.o.sheet.position.set(desc.x, this.o.sheet.position.y, desc.z);
     this.built = place ? desc : null;
     this.at.set(me.x, 0, me.z);
     this.lastMs = performance.now() - t0;

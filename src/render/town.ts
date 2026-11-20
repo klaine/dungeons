@@ -567,8 +567,10 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       }
       y += hgt;
     }
-    // (The joints behind: one dark block the whole of the face, set back, so no light comes through between the stones.)
-    box(at, 'stone', a0, a1, y0, y1, 0.04, deep, shade(colour, 0.35), 0.4);
+    // (The joints behind: one dark block the whole of the face, set back, so no light comes through between the stones. Set in from
+    // their backs as from their faces: its back lay in one plane with theirs, and where a wall shows its back, as the house's terrace
+    // does to the square, the dark block came through the stones in patches that flickered.)
+    box(at, 'stone', a0, a1, y0, y1, 0.04, deep - 0.04, shade(colour, 0.35), 0.4);
   };
 
   // ---- the harbour: the quay's face and coping, its bollards and steps; the moles; the light

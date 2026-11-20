@@ -433,7 +433,14 @@ The machine this is developed on now has a graphics card, and tablets were repor
     Norith were built in the worker (6.0 and 4.8 million triangles), put in and their light baked, the third place in reach (Falyhaven)
     held back; the walker stood on the quay among the town's houses, the harbour, its boats and the game's sea and clouds about it; no
     fault. (Before the fixes the walker, sent to the quay, stood on the harbour's floor under the water.) *Not yet:* lamps and lights
-    of the places, smoke, birds and sheep; and no frame of the world drawn the game's way has been timed on a graphics card.
+    of the places, smoke, birds and sheep.
+    *Looked at with a graphics card* (asked: check frame times and whether two standing places are too heavy, the sun's shadow near
+    and far, the mountain's edge, the town's sea): on an M2 Pro laptop at 1103 by 955, the route page with a town and a valley head
+    standing took 51 milliseconds a frame, 32 of them with nothing in the scene; the two places filled the page's heap to 4.1 of its
+    4.4 gigabytes; a place throws no shadow beyond the near square. Mended on the way: the world's flat sea showing through the swell in
+    ringed ovals, and flickering in a town's terrace walls and basement windows (the game's builders). Figures and the reasons in
+    [document 6](06-world.md), *The world as the game*, step 3. *Not yet looked at:* the mountain's edge and the walk page to Elith
+    Fell.
 
 ## Risks
 
