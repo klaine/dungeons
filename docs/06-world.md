@@ -637,8 +637,8 @@ leaves both the game and the walk working:
    in 141 seconds against 143 at its running pace, never stopped; then straight through a wood 160 metres deep and back, coming no nearer
    a trunk's bark than its own breadth; never more than 6 centimetres under the ground or 14 over it; a patch takes some 5 milliseconds
    (43 at most).
-2. **Places built into the world.** *Done, for valley heads* (`src/worldwalk/places.ts`, `src/render/placePack.ts`): within 1.5
-   kilometres of a valley head the walk and route pages have it laid out and built in a worker of their own (`placesWorker.ts`, which
+2. **Places built into the world.** *Done, for every kind* (`src/worldwalk/places.ts`, `src/render/placePack.ts`): within 1.5
+   kilometres of a valley head, a harbour town, an island or a mountain top the walk and route pages have it laid out and built in a worker of their own (`placesWorker.ts`, which
    keeps its world between requests: the world made there once), meshed as the game meshes it (`meshSite`), its far land and the
    painted trees on it left out, and everything turned into the world's coordinates (its frame: a turn about its forecourt, and its
    heights shifted to the world's), so that light baked in the world's directions reads as it should; its solid part gathered there into
@@ -665,10 +665,55 @@ leaves both the game and the walk working:
    two over 0.6% of it; the way through it tilts across its bed by 5 centimetres at most over four metres; the body, walked from
    Halhaven's quay along the way, crossed into the valley after 104 seconds and came to the house in 142, never more than a few
    centimetres into or over what it stood on. In the browser (headless, drawing in software, at 480 by 270), the valley was built in the
-   worker within two minutes of the page opening, its 54 meshes put in a few a frame, its light baked; no fault reported. Islands, towns and mountain tops are not built in yet: each
-   brings a sea, a coast or cloud the walk does not yet draw.
-3. **One renderer.** The game's sky, real clouds, sea, ambient occlusion, levels of detail, lamps and night, used by the world as by the
-   place, rather than the walk page's own copies (`dress.ts`'s `makeLight`).
+   worker within two minutes of the page opening, its 54 meshes put in a few a frame, its light baked; no fault reported.
+
+   *Then towns, islands and mountain tops.* A harbour town and an island bring their sea: the world's sea is now the game's (`Sea`, in
+   `worldSea.ts`: the swell, the road of glitter, light through the crests, the shallows seen into, white where it breaks), laid in rings
+   about the walker over the world's own land as its bed, 1.6 kilometres square, and laid again when the walker has gone 600 metres;
+   where a place with a sea of its own stands, its sea is drawn instead, about it, with its harbour's and its cliffs' own bed (turned into
+   the world's axes in the worker) and spray. A town brings the brown brick of its classical buildings, and a mountain top its frost-split
+   talus, which the places' materials now have. A mountain top's land does not fill the square it was laid over: it stops where the game's
+   cloud would hide it (some 34 metres under the cloud's top) and where its rock is carved, and below that the world's land must go on;
+   round Elith Fell's square, 792 of 886 heights found no land of the place's under them. So a place whose edge is not all land has a
+   hole that follows its land instead (`HoleGrid` in `stream.ts`, made by `gridHole` in the worker): a lattice of a metre in the
+   world's own axes, each point holding how far it lies outside the place's land, the place's height there, and how far that stands off
+   the world's land at the nearest point of its edge; read for every point of a square as the square's edge is (`holeAt`), so the same
+   `withHole` brings the world's land in. The land is found by looking down on the place's sheet, scree and carved rock (its rock only
+   where it stands no more than twelve metres over the world's land: a mountain's needles stand out of its cloud on nothing the world has,
+   and the world's land drawn up to their tops made cones of them; below, down to forty, for the place's land is worn deeper than the
+   world's by ten metres and more in places, and cut off at twelve both ways the rock counted in patches); taken in by a point all round, so that the world's land runs in under the
+   place's; its hollows filled (where the house stands, the sheet is left out). Just outside, the place's height is carried on down the
+   world's own slope (held level from the edge, the world's land was brought up to a shelf on a mountainside; read every two metres,
+   the edge could not follow a carved cliff). *Checked* (`npx tsx tools/places.ts w0 mountain 1`, the join alone; the edge now measured
+   as how far the world's land lies from the nearest of the place's within a metre and a half, not straight up, which on a slope four
+   times as steep as it is broad differs by four): Elith Fell laid out and built in 110 seconds, 3.5 million triangles; its land stands
+   off the world's at its edge by up to 13 metres (worn on its own lattice, lower than the world's by four and a half on the whole), and
+   the world's land lies within 10 centimetres of it on the whole; 4 of 400 points of the edge lie more than a metre from it, at worst
+   3.3, at the foot of a carved crag where the rock stands over the land. The band about it is steeper than one in two, and half as
+   steep again as the land was, over 8.4% of it: the land is brought down some metres over a band some tens of metres broad on slopes
+   already steep. Halhaven (`w0 coast 1`, 6.0 million triangles over a square 919 by 525 metres) and Selrin Island (`w2 island 1`, 2.7
+   million, 458 by 275) join as a valley does: 2 centimetres on the whole, 6 and 8 at worst, the band nowhere much steeper than the land.
+   Strath Norith's join and the body's walk into it are as before (2 centimetres on the whole, 46 at worst; the house reached in 142
+   seconds).
+
+   At most two places stand in the world at once, the nearest: a nearer one wanted takes the place of the furthest, once that one is
+   in and lies 300 metres further off than it (`MOST`, `YIELD` in `places.ts`). On the route page's first world, from Halhaven's quay,
+   three came within reach together, Halhaven, Strath Norith and Falyhaven, two towns and a valley head of 6.0, 4.8 and 5.2 million
+   triangles: more than a modest machine holds.
+3. **One renderer.** *Done, for the sky and the air.* The game's sky, its air and its weather are now one code (`src/render/air.ts`),
+   which the game and the walk and route pages both call: the sky painted for the hour (`skyMesh`); the picture made in steps
+   (`airPipeline`: the air put into the scene with the game's clouds, the hollows of what is seen darkened, wet ground mirroring, smoothed
+   over the frames, the glow of what is bright); the air lit for the hour (`lightAir`); the weather (`weatherOf`: cloud heaped or in
+   banks and how much, mist, haze, rain); and the clouds drifting (`driftClouds`). So the world now has what the game was given while
+   the world was being made: clouds of many sizes, heaped high or in banks, with soft-edged shadows on the land, ice cloud over them,
+   mist that glows towards a low sun, the frames smoothed into one another, rain with its rings on water and wet ground. The levels of
+   detail are the game's (`QUALITY`, chosen on the game's opening card and remembered; `?quality=` and each of its settings in the
+   address), and the sun's shadow is the game's (`SunShadow`): drawn finely in a square of 128 metres about the eye wherever it goes, and
+   beyond that read from the air's picture taken from the sun over the whole world, so that a mountain's shadow falls on the valley
+   under it. What differs is said where it is called: the world's air is thinner (the eye sees ten kilometres, not one), its floor is the
+   sea, its sky twice as large. The places' water mirrors the sky and cloud as the game's does. The world's weather is fair unless the
+   address says otherwise (`?cloud=`, `?layered=1`, `?mist=`, `?haze=`, `?rain=`). *Not yet:* the town's street lamps and the rooms'
+   lamps as lights, night's own lights, smoke, birds and sheep; the game's tone choices; its lantern.
 4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
    place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
    a boat for the sea legs; and something faster than walking for the kilometres between.

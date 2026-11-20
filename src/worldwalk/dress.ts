@@ -1,8 +1,9 @@
-import { ACESFilmicToneMapping, BufferAttribute, CubeCamera, DirectionalLight, HalfFloatType, InstancedMesh, LinearMipmapLinearFilter, Material, Mesh, PCFShadowMap, PerspectiveCamera, RenderTarget, Scene, SRGBColorSpace, Texture, Vector3 } from 'three';
-import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { attribute, mix, positionLocal, rtt, step } from 'three/tsl';
-import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
-import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { ACESFilmicToneMapping, BufferAttribute, Color, DirectionalLight, InstancedMesh, Material, Mesh, Object3D, PCFShadowMap, PerspectiveCamera, RenderTarget, Scene, SRGBColorSpace, Texture, Vector3 } from 'three';
+import { MeshStandardNodeMaterial, PMREMGenerator, WebGPURenderer } from 'three/webgpu';
+import { attribute, mix, positionLocal, step } from 'three/tsl';
+import { airPipeline, Daylight, driftClouds, lightAir, skyMean, skyMesh, Weather, weatherOf } from '../render/air';
+import { Rain } from '../render/rain';
+import { SunShadow } from '../render/sunShadow';
 import { fbm2, Rng } from '../core/rng';
 import { Hour, SKIES, Stone } from '../core/site';
 import { COVER } from '../core/world';
@@ -10,9 +11,9 @@ import { MeshBuilder } from '../render/geom/meshBuilder';
 import { stoneStyles } from '../render/geom/styles';
 import { turfColour } from '../render/landscape';
 import { Colour, growConifer, growTree, Planting } from '../render/planting';
-import { Atmosphere } from '../render/post';
+import { readyForSmoothing } from '../render/post';
 import { CardSet } from '../render/scene';
-import { groundUniforms, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms } from '../render/siteMaterial';
+import { groundUniforms, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, weatherUniforms } from '../render/siteMaterial';
 import { GroundLook } from '../render/streamMesh';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { makeCards, paintCards, TreeLevel, treeShare, vegetationRange, vegetationUniforms } from '../render/vegetation';
@@ -123,45 +124,51 @@ export function woodDepth(cover: Uint8Array, nx: number, nz: number, x0: number,
 }
 
 /**
- * The sky, the sun with its shadows over the ground about the walker, and the air (the game's
- * `Atmosphere`: haze with distance and the light in it), drawn through the game's pipeline.
+ * The sky, the sun with its shadows, and the air, as the game draws them about a place (`render/air.ts`: one renderer, `docs/06-world.md`,
+ * *The world as the game*, step 3): the sky painted for the hour; the clouds, heaped or in banks, drifting, with their shadows on the
+ * land; the hollows of what is seen darkened; the picture smoothed over frames; the glow of what is bright; the weather, rain with it.
+ * The air's floor, that cloud and mist are reckoned from, is the sea; the haze is thinner than a valley's (`thin`), for here the eye
+ * sees ten kilometres, not one. The sun's shadow is the game's (`SunShadow`): drawn finely in a square about the eye wherever it goes,
+ * and beyond that read from the air's picture taken from the sun over the whole world (`land`), so that a mountain shades the valley
+ * under it kilometres off; where the graphics card cannot read the one more texture that needs (or with WebGL), the sun's own map is
+ * drawn over a square about the walker instead, as before.
  */
-export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, hour: Hour, haze: number) {
+export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, hour: Hour, o: {
+  weather: Weather; clouds: number; occlusion: boolean; temporal: boolean; bloom: boolean; nearShadow: boolean; box: { min: Vector3; max: Vector3 }; seed: string;
+}) {
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = PCFShadowMap;
   const S = SKIES[hour], d = S.sun, dl = Math.hypot(d[0], d[1], d[2]), sunDir = new Vector3(d[0] / dl, d[1] / dl, d[2] / dl);
-  const sun = new DirectionalLight(0xffffff, S.intensity);
-  sun.color.setRGB(S.colour[0], S.colour[1], S.colour[2]);
+  const daylight: Daylight = { colour: new Color(S.colour[0], S.colour[1], S.colour[2]), intensity: S.intensity, sky: { zenith: S.zenith, horizon: S.horizon }, disc: S.disc, night: S.night ?? 0 };
+  const sun = new DirectionalLight(daylight.colour, daylight.intensity);
   sun.castShadow = true;
   sun.shadow.mapSize.set(4096, 4096);
   sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.05;
+  sun.shadow.normalBias = 0.02;
   sun.shadow.autoUpdate = false;
+  // (Over a square as broad as a valley's place, for the near map's depth and how it is offset: see `SunShadow`.)
+  const R = 450;
+  Object.assign(sun.shadow.camera, { left: -R, right: R, top: R, bottom: -R, near: 1, far: 2 * R + 10 });
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.position.copy(sunDir).multiplyScalar(R + 5);
   scene.add(sun, sun.target);
-  const makeSky = (disc: boolean) => {
-    const sky = new SkyMesh();
-    sky.scale.setScalar(20000);
-    sky.turbidity.value = 3.2; sky.rayleigh.value = 1.4; sky.mieCoefficient.value = 0.004; sky.mieDirectionalG.value = 0.82;
-    sky.cloudCoverage.value = 0.25; sky.cloudDensity.value = 0.5;
-    sky.showSunDisc.value = disc ? 1 : 0;
-    for (const k of [sky]) if (S.disc) k.sunPosition.value.set(S.disc[0], S.disc[1], S.disc[2]).normalize(); else k.sunPosition.value.copy(sunDir);
-    return sky;
-  };
-  const sky = makeSky(true), envSky = makeSky(false), envScene = new Scene();
+  const sky = skyMesh(sunDir, daylight, { clouds: o.clouds > 0, disc: true, size: 20000 }), envScene = new Scene();
   scene.add(sky);
-  envScene.add(envSky);
+  envScene.add(skyMesh(sunDir, daylight, { clouds: o.clouds > 0, disc: false, size: 20000 }));
   const pmrem = new PMREMGenerator(renderer), env: RenderTarget = pmrem.fromScene(envScene, 0, 1, 20000);
   scene.environment = env.texture;
   scene.environmentIntensity = 0.5;
-  const skyPicture = new CubeRenderTarget(64, { type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter });
-  new CubeCamera(1, 20000, skyPicture).update(renderer, envScene);
-  const pipeline = new RenderPipeline(renderer);
-  const atmosphere = new Atmosphere(scene, camera, renderer, 1);
-  const aired = rtt(atmosphere.node);
-  pipeline.outputNode = aired.add(bloom(aired, 0.14, 0.5, 1.8));
-  const mean = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
+  const { atmosphere, pipeline } = airPipeline(renderer, scene, camera, { clouds: o.clouds, occlusion: o.occlusion, temporal: o.temporal, mirrors: o.temporal, bloom: o.bloom });
+  // (Smoothed over frames, everything drawn must be readied for it as it comes into the scene, as the game readies its scene once:
+  // squares, trees, places and the sea come in all the while here.)
+  if (o.temporal) {
+    const add = scene.add.bind(scene);
+    scene.add = ((...objects: Object3D[]) => { for (const x of objects) readyForSmoothing(x); return add(...objects); }) as typeof scene.add;
+    readyForSmoothing(scene);
+  }
+  const mean = skyMean(daylight);
   siteUniforms.uBake.value = 1;
   siteUniforms.uFallback.value.set(mean[0] * 0.9, mean[1] * 0.82, mean[2] * 0.71);
   const sharp = ROCK.greystone.sharp;
@@ -172,28 +179,37 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
   vegetationRange.value = 80;
   groundUniforms.uGrassRange.value = vegetationRange.value;
   vegetationUniforms.uWind.value = 1;
-  const u = atmosphere.uniforms, low = hour === 'sunset' || hour === 'dusk', night = S.night ?? 0;
-  u.uSunColor.value.set(S.colour[0], S.colour[1], S.colour[2]).multiplyScalar(S.intensity * 1.7);
-  u.uSkyColor.value.set(mean[0], mean[1], mean[2]).multiplyScalar(1.75);
-  u.tSky.value = skyPicture.texture;
-  u.uAirOn.value = 1;
-  // (Thinner than a valley's: here the eye sees ten kilometres, there one.)
-  u.uHaze.value.set((0.00006 + 0.0003 * haze * haze) * (low ? 1.35 : 1), 320, 0);
-  if (!S.disc || S.disc[1] > 0) u.uGlare.value.set(S.colour[0], S.colour[1], S.colour[2]).multiplyScalar(S.intensity * 0.018 * (0.4 + haze)); else u.uGlare.value.set(0, 0, 0);
-  u.uSkyZenith.value.set(S.zenith[0], S.zenith[1], S.zenith[2]);
-  u.uSkyHorizon.value.set(S.horizon[0], S.horizon[1], S.horizon[2]);
-  if (S.disc) { u.uGlowDir.value.set(S.disc[0], S.disc[1], S.disc[2]); u.uGlow.value.set(0.55, 0.22, 0.14).multiplyScalar(night > 0.9 ? 0.05 : 1); } else u.uGlow.value.set(0, 0, 0);
-  u.uNight.value = night;
+  const u = atmosphere.uniforms, low = hour === 'sunset' || hour === 'dusk';
+  lightAir(atmosphere, renderer, envScene, daylight, { clouds: o.clouds, cloud: o.weather.cloud });
+  weatherOf(atmosphere, sun, daylight, o.weather, { floor: 0, low, thin: 0.4 });
+  weatherUniforms.uWet.value = o.weather.rain ?? 0;
   u.uDensity.value = 0.0018;
   u.uIndoorDensity.value = 14;
   u.uEnabled.value = 1;
+  u.uAirCentre.value.copy(o.box.min).add(o.box.max).multiplyScalar(0.5);
+  // The game's sun shadow, near and far.
+  const gpu = (renderer.backend as unknown as { isWebGPUBackend?: boolean }).isWebGPUBackend === true;
+  const box = o.box.max.clone().sub(o.box.min).length() / 2;
+  const sunShadow = o.nearShadow && gpu
+    ? new SunShadow(sun, camera, { reach: 64, size: 2048, radius: R, far: { ...atmosphere.sunMap, deep: 2 * box + 0.5, point: (2 * box) / (atmosphere.sunMap.depth.image.width ?? 2048), gpu } })
+    : null;
+  if (sunShadow) (sun.shadow as unknown as { shadowNode: unknown }).shadowNode = sunShadow;
+  // (The air's pictures drawn empty at once, over the world, until its land is in to be drawn into them (`land`): never drawn, the
+  // picture from the sun said everything beyond the near square was in shadow.)
+  atmosphere.updateStatic([], sunDir, o.box.min, o.box.max);
+  // Rain, where there is any: falling about the eye, as in the game.
+  const rain = o.weather.rain ? new Rain(o.seed) : null;
+  if (rain) scene.add(rain.mesh);
   let shadowAt = new Vector3(1e9, 0, 0), shadowsDue = 3;
   return {
-    sunDir, sun, atmosphere, pipeline,
+    sunDir, sun, atmosphere, pipeline, sunShadow,
     /** Asks for the shadows to be drawn again, a few times, as what casts them comes in. */
-    redraw() { shadowsDue = 3; },
-    /** The sun's shadows over the ground about the walker: moved with them, and drawn again when they have gone far or something has come in. */
-    follow(at: Vector3, ground: number) {
+    redraw() { if (sunShadow) sun.shadow.needsUpdate = true; else shadowsDue = 3; },
+    /** Each frame: the clouds drifted, the rain moved with the eye; and, without the game's near shadow, the sun's own map over the ground about the walker, moved with them, drawn again when they have gone far or something has come in. */
+    follow(at: Vector3, ground: number, time: number, dt: number) {
+      driftClouds(atmosphere, time);
+      rain?.update(time, camera.position, o.weather.rain ?? 0, true, daylight.intensity * 0.22, dt);
+      if (sunShadow) return;
       if (at.distanceTo(shadowAt) > 30) { shadowAt = at.clone(); shadowsDue = 3; }
       if (shadowsDue <= 0) return;
       shadowsDue--;
@@ -204,8 +220,8 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
       sun.shadow.camera.updateProjectionMatrix();
       sun.shadow.needsUpdate = true;
     },
-    /** The air's maps of what stands under the sun and the sky, for the light in the haze: drawn once the land far off is in. */
-    land(statics: Mesh[], min: Vector3, max: Vector3) { u.uAirCentre.value.copy(min).add(max).multiplyScalar(0.5); atmosphere.updateStatic(statics, sunDir, min, max); },
+    /** The air's maps of what stands under the sun and the sky, for the light in the haze and the sun's shadow far off: drawn once the land far off is in. */
+    land(statics: Mesh[], min: Vector3, max: Vector3) { atmosphere.updateStatic(statics, sunDir, min, max); },
     eyes: S.eyes ?? 1.7,
   };
 }

@@ -1,26 +1,23 @@
 import {
-  ACESFilmicToneMapping, AgXToneMapping, NeutralToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, CubeCamera, FrontSide, HalfFloatType, LinearMipmapLinearFilter, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
+  ACESFilmicToneMapping, AgXToneMapping, NeutralToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, FrontSide, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
   Material, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, PlaneGeometry, Ray, Scene, SRGBColorSpace,
   Vector2, Vector3, Matrix4, Quaternion,
 } from 'three';
-import { CubeRenderTarget, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { rtt } from 'three/tsl';
-import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
+import { PMREMGenerator, WebGPURenderer } from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 import { bake, BakeLights, BakeResult } from '../render/bake/bake';
-import { Atmosphere, readyForSmoothing, smoothOverFrames } from '../render/post';
+import { readyForSmoothing } from '../render/post';
+import { airPipeline, Daylight, driftClouds, lightAir, QUALITY, qualityChosen, skyMesh, textureRoom as roomForTextures, Weather, weatherOf } from '../render/air';
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
-import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, renderUniforms, lampUniforms, setLamps, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { exportInk, exportJson, exportModel, exportPlan, inkCanvas, modelGlb, planCanvas, siteJson } from '../export/exporter';
 import { generateSite, generateWorldPlace, MakeOptions } from '../core/generate';
 import { Hour, SKIES, stairEnds, WHEN } from '../core/site';
-import { cloudNoise } from '../render/clouds';
 import { solve } from '../core/mission';
 import { SceneDescription } from '../render/scene';
 import { renderMap } from '../maps/rendered';
@@ -74,24 +71,9 @@ function keep(next: URLSearchParams): void {
 }
 const num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
 
-/**
- * How much detail to draw. Chosen on the opening card and remembered; a parameter in the address
- * overrides any one setting. Touch devices start a step lower, since their screens are dense and
- * their graphics modest.
- */
-const QUALITY = {
-  // (`ao`: whether the hollows of what is seen darken it, see `occlusion` in `post.ts`. `mirror`: how many points high still water's
-  // picture is at most, see `Water.update`; it was as high as the view, and is now at most half a common screen's at high.)
-  low: { dpr: 1, tex: 512, rays: 12, grass: 40, bloom: 0, leaves: 0.5, clouds: 0, mirror: 0, ao: 0 },
-  medium: { dpr: 1.25, tex: 1024, rays: 16, grass: 55, bloom: 1, leaves: 0.75, clouds: 16, mirror: 384, ao: 1 },
-  high: { dpr: 1.5, tex: 1024, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 512, ao: 1 },
-  // As high, with surfaces painted at 2048: four times the painting time and about a gigabyte of video memory, for desktops with room to spare.
-  ultra: { dpr: 1.5, tex: 2048, rays: 32, grass: 80, bloom: 1, leaves: 1, clouds: 28, mirror: 1080, ao: 1 },
-};
+/** How much detail to draw (`QUALITY` in `render/air.ts`, which the world's pages read too). */
 const coarse = window.matchMedia('(pointer: coarse)').matches;
-const remembered = (() => { try { return localStorage.getItem('dungeons.quality'); } catch { return null; } })();
-const wanted = params.get('quality') ?? remembered ?? (coarse ? 'medium' : 'high');
-const qualityName = (wanted in QUALITY ? wanted : 'high') as keyof typeof QUALITY;
+const qualityName = qualityChosen(params);
 const quality = QUALITY[qualityName];
 
 /** A fresh, readable seed such as "amber-vault-41". */
@@ -213,10 +195,7 @@ async function start(): Promise<void> {
   // (A program may read sixteen textures at once unless more are asked for. The ground's material reads sixteen already, with the
   // sun's shadow, the torches' and the sky's picture; the sun's shadow in a large place needs one more (`SunShadow`). Most graphics
   // cards allow far more, if asked when the device is made.)
-  const textureRoom = await (async () => {
-    if (params.has('webgl')) return 16;
-    try { return (await navigator.gpu?.requestAdapter({ powerPreference: 'high-performance' }))?.limits.maxSampledTexturesPerShaderStage ?? 16; } catch { return 16; }
-  })();
+  const textureRoom = await roomForTextures(params.has('webgl'));
   const renderer = new WebGPURenderer({
     canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl'),
     ...(textureRoom > 16 ? { requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(textureRoom, 32) } } : {}),
@@ -825,22 +804,9 @@ async function start(): Promise<void> {
 
 
   const cloudSteps = Math.round(num('clouds', quality.clouds));
-  const makeSky = (disc: boolean) => {
-    const sky = new SkyMesh();
-    sky.scale.setScalar(10000);
-    sky.turbidity.value = 3.2;
-    sky.rayleigh.value = 1.4;
-    sky.mieCoefficient.value = 0.004;
-    sky.mieDirectionalG.value = 0.82;
-    // The sky is drawn for where the sun itself is, which after sunset is not where the light comes from.
-    if (desc.sun?.disc) sky.sunPosition.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]).normalize();
-    else sky.sunPosition.value.copy(sunDir);
-    // Its own painted clouds are used only when the real ones are turned off.
-    sky.cloudCoverage.value = cloudSteps > 0 ? 0 : 0.32;
-    sky.cloudDensity.value = 0.5;
-    sky.showSunDisc.value = disc ? 1 : 0;
-    return sky;
-  };
+  // (The light of the hour, as the sky, the air and the weather are drawn from it: `render/air.ts`, shared with the world's pages.)
+  const daylight: Daylight = { colour: SUN_COLOR, intensity: SUN_INTENSITY, sky: SKY, disc: desc.sun?.disc, night: desc.sun?.night ?? 0 };
+  const makeSky = (disc: boolean) => skyMesh(sunDir, daylight, { clouds: cloudSteps > 0, disc });
   const sky = makeSky(true);
   scene.add(sky);
   await stage('Painting the sky', 0.95);
@@ -871,23 +837,12 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ post
   const size = renderer.getDrawingBufferSize(new Vector2());
-  // The picture is made in steps: the scene; the air put into it; the glow of what is very bright
-  // added; and last the eye's adjustment to light and the screen's colours, which the pipeline does itself.
-  const pipeline = new RenderPipeline(renderer);
   // (Smoothed over the frames unless asked not to, `?taa=0`, when each point is drawn four times instead: see `smoothOverFrames`.)
   const temporal = num('taa', 1) > 0;
   // (Wet ground mirrors what stands about it, with the smoothing alone: `?mirrors=0` leaves it out.)
-  const atmosphere = new Atmosphere(scene, camera, renderer, Math.max(1, cloudSteps), { occlusion: num('ao', quality.ao) > 0, temporal, mirrors: num('mirrors', 1) > 0 });
-  {
-    // (The air is drawn once into a picture of its own, which the smoothing and the glow then read; otherwise it would be worked out
-    // again for each. It is smoothed before the glow is added, so that the glow is of the smooth picture.)
-    const aired = rtt(atmosphere.node);
-    const smooth: typeof aired = temporal ? smoothOverFrames(aired, atmosphere, camera) : aired;
-    pipeline.outputNode = num('bloom', quality.bloom) ? smooth.add(bloom(smooth, 0.14, 0.5, 1.8)) : smooth;
-  }
+  const { atmosphere, pipeline } = airPipeline(renderer, scene, camera, { clouds: cloudSteps, occlusion: num('ao', quality.ao) > 0, temporal, mirrors: num('mirrors', 1) > 0, bloom: num('bloom', quality.bloom) > 0 });
   const skyMean = [0, 1, 2].map((c) => 0.55 * SKY.zenith[c] + 0.45 * SKY.horizon[c]);
-  atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7);
-  atmosphere.uniforms.uSkyColor.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(1.75);
+  lightAir(atmosphere, renderer, envScene, daylight, { clouds: cloudSteps, cloud: desc.sun?.cloud ?? 0.4 });
   // Until the bake arrives, surfaces are lit by a stand-in for the sky of this hour.
   siteUniforms.uFallback.value.set(skyMean[0] * 0.9, skyMean[1] * 0.82, skyMean[2] * 0.71);
   water.mirrorSky(atmosphere);
@@ -903,82 +858,14 @@ async function start(): Promise<void> {
   // Rain, 0 to 1: from the address (`?rain=`), or the weather menu.
   let raining = Math.min(1, Math.max(0, Number(params.get('rain') ?? 0) || 0));
   weatherUniforms.uWet.value = snowUniforms.uSnow.value > 0.5 ? 0 : raining;
-  const applyWeather = (w0: { cloud: number; layered: boolean; mist: number; haze: number; rain?: number }) => {
-    // (Rain comes out of heavy cloud, low and in banks; the air is thick with it; and the sun is behind it.)
-    const r = w0.rain ?? raining;
-    const w = { ...w0, cloud: r > 0 ? Math.max(w0.cloud, 0.7 + 0.3 * r) : w0.cloud, layered: w0.layered || r > 0.3, haze: Math.min(1, w0.haze + 0.4 * r), mist: Math.max(w0.mist, 0.3 * r) };
-    sun.intensity = SUN_INTENSITY * (1 - 0.72 * r);
-    atmosphere.uniforms.uSunColor.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 1.7 * (1 - 0.72 * r));
-    const u = atmosphere.uniforms, floor = desc.sun?.floor ?? 0, low = site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk', { haze, mist, layered } = w;
-    u.uCloudCover.value = w.cloud;
-    // Haze: thin enough that the valley is clear across, thick enough that each range of hills
-    // is paler than the one in front of it. A low sun has more air to shine through.
-    // (Above a sea of cloud the air is thin and clear: the haze of the low country is under the cloud.)
-    // (And it lies thickest in the valleys far below, which is what makes them blue.)
-    u.uHaze.value.set((0.00014 + 0.001 * haze * haze) * (low ? 1.35 : 1) * (desc.deck ? 0.75 : 1), 320, desc.deck ? floor - 420 : floor);
-    // Mist: a few metres deep on the valley floor, from a veil to a fog.
-    u.uMist.value.set(mist < 0.08 ? 0 : 0.045 * mist * mist, 2.2 + 3.2 * mist, floor - 0.4);
-    u.uMistLow.value = desc.groundLow !== undefined ? desc.groundLow - 0.5 : -1e6;
-    // And in the country beyond the valley, on its own higher ground, from some way out.
-    u.uMistFar.value.set(mist < 0.08 ? 0 : 0.006 * mist, 14 + 8 * mist, floor + 26, 175);
-    // (On a mountain top the cloud below is the mist, and there is no other: a veil over the cloud made a grey sea of it.)
-    if (desc.deck) { u.uMist.value.x = 0; u.uMistFar.value.x = 0; }
-    // The haze is alight towards the sun only while the sun is up.
-    if (!desc.sun?.disc || desc.sun.disc[1] > 0) u.uGlare.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.018 * (0.4 + haze) * (1 - 0.8 * r));
-    // In flat banks cloud is a thin layer, low, and the more of it there is the lower it hangs. Heaped, it stands high and tall:
-    // fair-weather cloud has its flat base some eight hundred metres up and heaps a kilometre or two over it, the most when the sky
-    // is half covered and more, when the heaps have the warmth and the room to tower; as the sky closes over they hang lower. (It
-    // was a layer three hundred and sixty metres deep two or three hundred metres up, whatever the day: small soft heaps, hanging
-    // low over the roofs like smoke, never the towers of a summer's afternoon.)
-    const c = w.cloud, sm = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-    // (Banks are some two hundred and thirty metres deep, in a layer of four hundred and twenty, each riding at its own height in it:
-    // see `layerAt` in `post.ts`. They were one layer a hundred and fifty metres deep, everywhere at one height: flat slabs.)
-    if (layered) {
-      u.uCloudBase.value = floor + 300 - 150 * c;
-      u.uCloudTop.value = u.uCloudBase.value + 420;
-    } else {
-      u.uCloudBase.value = floor + 600 + 350 * (1 - c) - 250 * r;
-      u.uCloudTop.value = u.uCloudBase.value + 700 + 1400 * sm(0.2, 0.55, c) * (1 - 0.5 * sm(0.75, 1, c));
-    }
-    u.uCloudFlat.value = layered ? 1 : 0;
-    // And far over it, when the weather is fair or changing, thin streaks of ice cloud.
-    u.uCirrus.value = r > 0 ? 0 : (layered ? 0.25 : 0.6) * sm(0.08, 0.35, c) * (1 - sm(0.7, 0.92, c));
-  };
+  const applyWeather = (w0: Weather) => weatherOf(atmosphere, sun, daylight, { ...w0, rain: w0.rain ?? raining }, {
+    floor: desc.sun?.floor ?? 0, low: site?.setting.hour === 'sunset' || site?.setting.hour === 'dusk', deck: !!desc.deck, groundLow: desc.groundLow,
+  });
   const night = desc.sun?.night ?? 0;
   // (The sanctum's coloured glass glows with the day through it: dim at dusk, nearly dark at night.)
   glassUniforms.uGlow.value = SUN_INTENSITY * 0.022 * (1 - 0.85 * night);
-  {
-    const u = atmosphere.uniforms;
-    if (cloudSteps > 0) {
-      u.tCloud.value = cloudNoise(64);
-      u.uCloudOn.value = 1;
-      u.uCloudCover.value = desc.sun?.cloud ?? 0.4;
-      // Lit cloud is as bright as a white wall in the same light; its shaded parts take the sky's colour.
-      u.uCloudSun.value.set(SUN_COLOR.r, SUN_COLOR.g, SUN_COLOR.b).multiplyScalar(SUN_INTENSITY * 0.19);
-      u.uCloudAir.value.set(skyMean[0], skyMean[1], skyMean[2]).multiplyScalar(0.95);
-      u.uShade.value = night > 0.2 ? 0.35 : 0.55;
-    }
-    if (desc.sun?.disc) {
-      // After sunset the daytime sky gives next to nothing, and the night's own is added.
-      u.uSkyZenith.value.set(SKY.zenith[0], SKY.zenith[1], SKY.zenith[2]);
-      u.uSkyHorizon.value.set(SKY.horizon[0], SKY.horizon[1], SKY.horizon[2]);
-      u.uGlowDir.value.set(desc.sun.disc[0], desc.sun.disc[1], desc.sun.disc[2]);
-      u.uGlow.value.set(0.55, 0.22, 0.14).multiplyScalar(night > 0.9 ? 0.05 : 1);
-      u.uNight.value = night;
-    }
-  }
-  {
-    // The air at a distance. What the land fades into is the sky itself, low down in whatever
-    // direction is looked in: so the sky, without the sun's disc, is drawn once into a small
-    // picture that the haze reads.
-    const u = atmosphere.uniforms;
-    const skyPicture = new CubeRenderTarget(64, { type: HalfFloatType, generateMipmaps: true, minFilter: LinearMipmapLinearFilter });
-    new CubeCamera(1, 20000, skyPicture).update(renderer, envScene);
-    u.tSky.value = skyPicture.texture;
-    u.uAirOn.value = 1;
-    u.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
-    applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
-  }
+  atmosphere.uniforms.uAirCentre.value.copy(desc.bounds.min).add(desc.bounds.max).multiplyScalar(0.5);
+  applyWeather({ cloud: desc.sun?.cloud ?? 0.4, layered: !!desc.sun?.layered, mist: desc.sun?.mist ?? 0, haze: desc.sun?.haze ?? 0.5 });
   if (desc.deck) {
     // The sea of cloud below a mountain top: white in the sun, the sky's colour in its troughs.
     const u = atmosphere.uniforms;
@@ -1312,8 +1199,7 @@ async function start(): Promise<void> {
       position: s.position, color: glow.set(1.0, 0.5, 0.2).multiplyScalar(TORCH_INTENSITY * 0.16 * s.strength).clone(),
     })));
     vegetationUniforms.uTime.value = time;
-    // The wind carries the clouds across, slowly, and turns them over as they go.
-    atmosphere.uniforms.uCloudDrift.value.set(time * 0.0042, time * 0.0006, time * 0.0017);
+    driftClouds(atmosphere, time);
     {
       // What is underfoot and overhead, for sound: a roof or the sky, and grass, earth, stone or planks.
       const at = site ? placeAt(site, player.position.x, player.position.z, player.position.y) : undefined;

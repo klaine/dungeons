@@ -419,6 +419,18 @@ The machine this is developed on now has a graphics card, and tablets were repor
     graphics card. What stands about the house comes cut into tiles of 64 metres, cut in the worker (`tilePacked`), as the game cuts it,
     so that what is out of view is not drawn; the page puts in some six milliseconds' worth of them a frame.
 
+53. **Every kind of place in the world, drawn as the game draws** (the rest of step 2, and step 3 of item 51; asked: "ok continue with
+    the remaining scope", "and include all game side improvements done in parallel the previous work"). *Done:* harbour towns, islands
+    and mountain tops are built into the world as valley heads are, each with its sea where it has one; the world's sea is the game's,
+    about the walker; a place whose land does not fill its square (a mountain top's stops at its cloud) has a hole that follows its land,
+    a lattice of two metres (`HoleGrid`); the town's brick and the mountain's talus are among the places' materials, and their water
+    mirrors the sky. The game's sky, air and weather are one code (`src/render/air.ts`) that the game and the world's pages both call, so
+    the world has the game's clouds and their shadows, ice cloud, mist lit by a low sun, smoothing over frames, the hollows darkened,
+    rain, the game's levels of detail and its sun's shadow near and far. See [document 6](06-world.md), *The world as the game*.
+    *Checked:* `npm run typecheck`, `npm run build`; `tools/places.ts` for a valley head, a town, an island and a mountain top (figures in
+    document 6); the route page in headless Chromium at 480 by 270, starting on Halhaven's quay (see below). *Not yet:* lamps and lights
+    of the places, smoke, birds and sheep; and no frame of the world drawn the game's way has been timed on a graphics card.
+
 ## Risks
 
 | Risk | Mitigation |

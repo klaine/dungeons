@@ -1,10 +1,10 @@
 import { BufferAttribute, BufferGeometry, Ray, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { Site } from '../core/site';
-import { Hole } from '../core/stream';
+import { Hole, HoleGrid } from '../core/stream';
 import { siteFrame, SiteFrame } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
-import { CardSet, SceneDescription } from './scene';
+import { CardSet, SceneDescription, SeaDesc } from './scene';
 import { meshSite } from './siteMesher';
 
 /**
@@ -49,11 +49,15 @@ export interface PlacePack {
   /** The solid part, in one mesh, and its tree of bounds as `MeshBVH.serialize` gives it. */
   solid: { position: Float32Array; index: Uint32Array; bvh: ReturnType<typeof MeshBVH.serialize> };
   water: SceneDescription['water'];
+  /** Its sea, if it has one (an island, a harbour town), in the world's coordinates. */
+  sea?: SeaDesc;
   streams: SceneDescription['streams'];
   falls: SceneDescription['falls'];
   /** For the bake: the house's masses (boxes, six numbers each, in the world), and its lights (each at a point, `keep`: baked in). */
   masses: Float32Array;
   lights: { pos: number[]; intensity: number[]; range: number; size: number; keep?: boolean }[];
+  /** How many of the heights round its square's edge found no land under them, and took the one before. */
+  misses: number;
   /** How long it took, milliseconds: laying out was before; meshing, and making ready. */
   ms: { mesh: number; pack: number };
   triangles: number;
@@ -77,10 +81,22 @@ export function frameMover(f: SiteFrame) {
   };
 }
 
-/** The numbers of a mesh builder's mesh, turned into the world's coordinates. */
-function packBuilder(key: string, b: MeshBuilder, mv: ReturnType<typeof frameMover>, baked: boolean): PackedMesh {
+/**
+ * The numbers of a mesh builder's mesh, turned into the world's coordinates; with `keep`, only the triangles whose middle (in the site's
+ * own coordinates) it keeps: what a place has beyond the land it was laid over would stand on land the world has otherwise.
+ */
+function packBuilder(key: string, b: MeshBuilder, mv: ReturnType<typeof frameMover>, baked: boolean, keep?: (x: number, z: number) => boolean): PackedMesh {
   const g = b.build(), n = b.vertexCount;
   const pos = (g.getAttribute('position').array as Float32Array).slice(0, n * 3), nrm = (g.getAttribute('normal').array as Float32Array).slice(0, n * 3);
+  let index = Uint32Array.from(g.getIndex()!.array as ArrayLike<number>);
+  if (keep) {
+    const kept: number[] = [];
+    for (let t = 0; t < index.length; t += 3) {
+      const a = index[t], c = index[t + 1], d = index[t + 2];
+      if (keep((pos[a * 3] + pos[c * 3] + pos[d * 3]) / 3, (pos[a * 3 + 2] + pos[c * 3 + 2] + pos[d * 3 + 2]) / 3)) kept.push(a, c, d);
+    }
+    if (kept.length < index.length) index = Uint32Array.from(kept);
+  }
   for (let i = 0; i < n; i++) {
     const p = mv.point(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]), d = mv.dir(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]);
     pos.set(p, i * 3); nrm.set(d, i * 3);
@@ -93,7 +109,7 @@ function packBuilder(key: string, b: MeshBuilder, mv: ReturnType<typeof frameMov
     position: pos, normal: nrm,
     uv: (g.getAttribute('uv').array as Float32Array).slice(0, n * 2), color: (g.getAttribute('color').array as Float32Array).slice(0, n * 3),
     field: (g.getAttribute('aField').array as Float32Array).slice(0, n * 4), edge: (g.getAttribute('aEdge').array as Uint8Array).slice(0, n * 4),
-    index: Uint32Array.from(g.getIndex()!.array as ArrayLike<number>),
+    index,
     open, own: b.own ? b.own.slice() : null, source: plan?.source ?? null, scale: plan?.scale ?? null,
   };
 }
@@ -139,17 +155,9 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
   const t0 = performance.now();
   const d = meshSite(site);
   const t1 = performance.now(), mv = frameMover(f);
-  const meshes: PackedMesh[] = [];
-  for (const [k, b] of d.meshes) if (b.vertexCount) meshes.push(packBuilder(k, b, mv, true));
-  // (What stands about the house, but its far land: kept in its own site's coordinates a moment longer, for the square's measure below.)
-  const land: MeshBuilder[] = [];
-  for (const [k, b] of d.scenery?.meshes ?? []) {
-    if (!b.vertexCount || k === 'soft|far') continue;
-    if (k === 'wild|turf' || k === 'wild|rockSheet') land.push(b);
-    // (Cut into tiles of 64 metres, as the game cuts what stands about a place; not the house, whose light is baked as one.)
-    meshes.push(...tilePacked(packBuilder(k, b, mv, false), 64));
-  }
   // The square of land it was laid over: as far as its own sheet of turf reaches, in its site.
+  const land: MeshBuilder[] = [];
+  for (const [k, b] of d.scenery?.meshes ?? []) if (b.vertexCount && (k === 'wild|turf' || k === 'wild|rockSheet')) land.push(b);
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   const landGeo: BufferGeometry[] = [];
   for (const b of land) {
@@ -157,11 +165,22 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
     for (let i = 0; i < b.vertexCount; i++) { x0 = Math.min(x0, p[i * 3]); x1 = Math.max(x1, p[i * 3]); z0 = Math.min(z0, p[i * 3 + 2]); z1 = Math.max(z1, p[i * 3 + 2]); }
     landGeo.push(g);
   }
+  /** Whether a point of the site lies within that square (a little over it at the edge, where the world's land meets it). */
+  const within = (x: number, z: number) => x > x0 - 2 && x < x1 + 2 && z > z0 - 2 && z < z1 + 2;
+  const meshes: PackedMesh[] = [];
+  for (const [k, b] of d.meshes) if (b.vertexCount) meshes.push(packBuilder(k, b, mv, true));
+  // What stands about the house, but its far land, and what of it lies beyond its square (a mountain top's shelters and cairns
+  // kilometres off, on peaks the world has otherwise): cut into tiles of 64 metres, as the game cuts it.
+  for (const [k, b] of d.scenery?.meshes ?? []) {
+    if (!b.vertexCount || k === 'soft|far') continue;
+    const m = packBuilder(k, b, mv, false, within);
+    if (m.index.length) meshes.push(...tilePacked(m, 64));
+  }
   // Its land's height all round the edge of that square, a little inside it, where the sheet surely is: found by looking down on the
   // land alone (not its trees, rock or buildings).
   const STEP = 2, inset = 1.5;
   const profile: number[] = [];
-  let hole: PlaceHole;
+  let hole: PlaceHole, misses = 0;
   {
     const merged = new BufferGeometry(), pos: number[] = [], idx: number[] = [];
     for (const g of landGeo) {
@@ -177,6 +196,7 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
       const [x, z] = s < w ? [ax + s, az] : s < w + h ? [bx, az + (s - w)] : s < 2 * w + h ? [bx - (s - w - h), bz] : [ax, bz - (s - 2 * w - h)];
       ray.origin.set(x, 5000, z);
       const hit = bvh.raycastFirst(ray, 2);
+      if (!hit) misses++;
       last = hit ? hit.point.y + mv.dy : last;
       profile.push(last);
     }
@@ -194,14 +214,21 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
     })) : undefined;
     hole = { cx, cz, turn: f.turn, hx: w / 2, hz: h / 2, step: STEP, profile: Float32Array.from(profile), gap };
   }
-  // Its cards, but the painted trees of its far land, in the world's coordinates.
+  // A place whose land does not fill its square (a mountain top's stops where the cloud would hide it, and goes on below as the
+  // world's): its hole following its land instead, a lattice read by looking down on its land and rock (`HoleGrid`).
+  if (misses > profile.length * 0.02) hole = { ...hole, ...gridHole(meshes, worldLand) };
+  // Its cards, but the painted trees of its far land and whatever grows beyond its square, in the world's coordinates.
   const cards: CardSet[] = [];
   for (const set of d.scenery?.cards ?? []) {
     if (set.kind === 'tree' || set.kind === 'fir') continue;
-    const matrices: number[] = [], centres: number[] = [];
-    for (let i = 0; i < set.matrices.length / 16; i++) mv.matrix(set.matrices, i * 16, matrices);
-    for (let i = 0; i < set.centres.length / 3; i++) centres.push(...mv.point(set.centres[i * 3], set.centres[i * 3 + 1], set.centres[i * 3 + 2]));
-    cards.push({ ...set, matrices, centres, colours: set.colours.slice() });
+    const matrices: number[] = [], centres: number[] = [], colours: number[] = [];
+    for (let i = 0; i < set.matrices.length / 16; i++) {
+      if (!within(set.matrices[i * 16 + 12], set.matrices[i * 16 + 14])) continue;
+      mv.matrix(set.matrices, i * 16, matrices);
+      centres.push(...mv.point(set.centres[i * 3], set.centres[i * 3 + 1], set.centres[i * 3 + 2]));
+      colours.push(set.colours[i * 3], set.colours[i * 3 + 1], set.colours[i * 3 + 2]);
+    }
+    if (matrices.length) cards.push({ ...set, matrices, centres, colours });
   }
   // The solid part in one mesh: the house, and what stands about it but what stops nobody.
   let vertices = 0, indices = 0;
@@ -217,12 +244,36 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
   solidGeo.setAttribute('position', new BufferAttribute(sPos, 3)); solidGeo.setIndex(new BufferAttribute(sIdx, 1));
   const solidBvh = new MeshBVH(solidGeo);
   // Water, in the world: ponds' outlines and streams' courses are points.
-  const water = (d.water ?? []).map((w) => {
+  const water = (d.water ?? []).filter((w) => within(w.x, w.z)).map((w) => {
     const [x, , z] = mv.point(w.x, 0, w.z), outline = w.outline ? (() => { const o: number[] = []; for (let k = 0; k < w.outline.length; k += 2) { const [px, , pz] = mv.point(w.outline[k], 0, w.outline[k + 1]); o.push(px, pz); } return o; })() : undefined;
     return { ...w, x, z, level: w.level + mv.dy, outline };
   });
-  const streams = (d.streams ?? []).map((s) => { const line: number[] = []; for (let k = 0; k < s.line.length; k += 3) line.push(...mv.point(s.line[k], s.line[k + 1], s.line[k + 2])); return { ...s, line }; });
-  const falls = (d.falls ?? []).map((q) => { const [x, y, z] = mv.point(q.x, q.y, q.z); return { ...q, x, y, z }; });
+  const streams = (d.streams ?? []).filter((s) => within(s.line[0], s.line[2])).map((s) => { const line: number[] = []; for (let k = 0; k < s.line.length; k += 3) line.push(...mv.point(s.line[k], s.line[k + 1], s.line[k + 2])); return { ...s, line }; });
+  const falls = (d.falls ?? []).filter((q) => within(q.x, q.z)).map((q) => { const [x, y, z] = mv.point(q.x, q.y, q.z); return { ...q, x, y, z }; });
+  // Its sea (an island's, a harbour town's), in the world: its middle and level moved, its bed laid again on a lattice along the world's
+  // own two ways (the sea reads its bed along them), each point read from the place's bed where it falls, by the frame turned back;
+  // the spray at the cliffs' feet moved and turned. (Its winter ice is the place's own, and is left.)
+  let sea: SeaDesc | undefined;
+  if (d.sea) {
+    const b = d.sea.bed, c = Math.cos(f.turn), sn = Math.sin(f.turn);
+    const corners = [[b.x0, b.z0], [b.x0 + (b.nx - 1) * b.cell, b.z0], [b.x0, b.z0 + (b.nz - 1) * b.cell], [b.x0 + (b.nx - 1) * b.cell, b.z0 + (b.nz - 1) * b.cell]].map(([x, z]) => mv.point(x, 0, z));
+    const wx0 = Math.min(...corners.map((q) => q[0])), wx1 = Math.max(...corners.map((q) => q[0])), wz0 = Math.min(...corners.map((q) => q[2])), wz1 = Math.max(...corners.map((q) => q[2]));
+    const nx = Math.ceil((wx1 - wx0) / b.cell) + 1, nz = Math.ceil((wz1 - wz0) / b.cell) + 1, data = new Float32Array(nx * nz);
+    const bedAt = (x: number, z: number) => {
+      const fx = Math.min(b.nx - 1.001, Math.max(0, (x - b.x0) / b.cell)), fz = Math.min(b.nz - 1.001, Math.max(0, (z - b.z0) / b.cell)), i = Math.floor(fx), j = Math.floor(fz), tx = fx - i, tz = fz - j, k = j * b.nx + i;
+      return (b.data[k] * (1 - tx) + b.data[k + 1] * tx) * (1 - tz) + (b.data[k + b.nx] * (1 - tx) + b.data[k + b.nx + 1] * tx) * tz;
+    };
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      // (The world's point back into the site: the frame's turn undone about its point.)
+      const dx = wx0 + i * b.cell - f.u, dz = wz0 + j * b.cell - f.v, sx = f.hx + c * dx + sn * dz, sz = f.hz - sn * dx + c * dz;
+      data[j * nx + i] = bedAt(sx, sz) + mv.dy;
+    }
+    const [cx, , cz] = mv.point(d.sea.x, 0, d.sea.z);
+    sea = {
+      level: d.sea.level + mv.dy, x: cx, z: cz, bed: { x0: wx0, z0: wz0, cell: b.cell, nx, nz, data },
+      spray: d.sea.spray?.map((q) => { const [x, , z] = mv.point(q.x, 0, q.z), [nx2, , nz2] = mv.dir(q.nx, 0, q.nz); return { x, z, nx: nx2, nz: nz2 }; }),
+    };
+  }
   // For the bake: the house's masses as boxes in the world (each box's corners turned, and the box about them), and its lamps.
   const masses: number[] = [];
   for (const m of d.masses) {
@@ -240,10 +291,141 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
   });
   const triangles = meshes.reduce((s, m) => s + m.index.length / 3, 0);
   return {
-    ...info, title: d.title ?? '', meshes, cards, hole, water, streams, falls, masses: Float32Array.from(masses), lights,
+    ...info, title: d.title ?? '', meshes, cards, hole, water, sea, streams, falls, masses: Float32Array.from(masses), lights,
     solid: { position: sPos, index: sIdx, bvh: MeshBVH.serialize(solidBvh) },
-    ms: { mesh: t1 - t0, pack: performance.now() - t1 }, triangles,
+    ms: { mesh: t1 - t0, pack: performance.now() - t1 }, triangles, misses,
   };
+}
+
+/** What of a place is its land, for where it stands: its sheet of turf and of rock, its scree; and its carved rock (`gridHole`). */
+const LAND = new Set(['wild|turf', 'wild|rockSheet', 'wild|scree']), ROCK = 'wild|rock';
+
+/**
+ * A place's hole as a lattice following its land (`HoleGrid` in `core/stream.ts`), from its packed meshes in the world: every metre,
+ * whether its land is there and how high, found by looking down on it. Its carved rock counts as land where it stands near the
+ * world's land, not where it stands far over it (twelve metres): the needles of rock that a mountain top raises out of its cloud stand on
+ * nothing the world has, and the world's land drawn up to their tops would make cones of them. Below it, the place's rock may lie well
+ * down (its land is worn on a lattice of its own, deeper in places by ten metres and more), and it counts down to forty: cut off at
+ * twelve both ways, the rock was counted in patches and its edge was ragged. The land found is then taken
+ * in by one point all round, so that the world's land, drawn up to its edge and a little in under it, runs in under the place's own;
+ * hollows in it (where its house stands, the sheet left out) are filled; and every point is given how far it lies from the edge, and the
+ * place's height and its standing off the world's land at the nearest point of the edge. The lattice reaches out beyond the land
+ * as far as the band the world's land is brought in over (`withHole`), so that at its edge the world's land is its own.
+ */
+function gridHole(meshes: PackedMesh[], worldLand?: (x: number, z: number) => number): Pick<Hole, 'cx' | 'cz' | 'hx' | 'hz' | 'turn' | 'grid'> {
+  // (A metre, as the world's squares are: at two, the edge could not follow a carved cliff, and the world's land met it a metre and a
+  // half off its face.)
+  const C = 1;
+  const land = meshes.filter((m) => LAND.has(m.key)), rock = meshes.filter((m) => m.key === ROCK);
+  let verts = 0, tris = 0;
+  for (const m of [...land, ...rock]) { verts += m.position.length / 3; tris += m.index.length / 3; }
+  const pos = new Float32Array(verts * 3), idx = new Uint32Array(tris * 3);
+  let vo = 0, io = 0, landTris = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const m of [...land, ...rock]) {
+    pos.set(m.position, vo * 3);
+    for (let i = 0; i < m.index.length; i++) idx[io++] = m.index[i] + vo;
+    if (land.includes(m)) { landTris += m.index.length / 3; for (let i = 0; i < m.position.length; i += 3) { x0 = Math.min(x0, m.position[i]); x1 = Math.max(x1, m.position[i]); z0 = Math.min(z0, m.position[i + 2]); z1 = Math.max(z1, m.position[i + 2]); } }
+    vo += m.position.length / 3;
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new BufferAttribute(pos, 3)); geo.setIndex(new BufferAttribute(idx, 1));
+  const bvh = new MeshBVH(geo), ray = new Ray(new Vector3(), new Vector3(0, -1, 0));
+  // Looked down on over its land's extent, a point beyond it all round.
+  const ix0 = Math.floor(x0 / C) - 1, iz0 = Math.floor(z0 / C) - 1, inx = Math.ceil(x1 / C) + 2 - ix0, inz = Math.ceil(z1 / C) + 2 - iz0;
+  const found = new Float32Array(inx * inz).fill(NaN);
+  for (let j = 0; j < inz; j++) for (let i = 0; i < inx; i++) {
+    const x = (ix0 + i) * C, z = (iz0 + j) * C;
+    ray.origin.set(x, 1e4, z);
+    const hit = bvh.raycastFirst(ray, 2);
+    if (!hit) continue;
+    if ((hit.faceIndex ?? 0) >= landTris && worldLand) { const off = hit.point.y - worldLand(x, z); if (off > 12 || off < -40) continue; }
+    found[j * inx + i] = hit.point.y;
+  }
+  // How far it stands off the world's land at its edge, which sets how far out the lattice must reach: the broadest band, and a little.
+  // (Not past three hundred metres: past that, the band is drawn in to fit.)
+  const edgeGap = (k: number, nxx: number, ox: number, oz: number) => (worldLand ? found[k] - worldLand((ox + (k % nxx)) * C, (oz + Math.floor(k / nxx)) * C) : 0);
+  let most = 0;
+  for (let j = 1; j < inz - 1; j++) for (let i = 1; i < inx - 1; i++) {
+    const k = j * inx + i;
+    if (!Number.isNaN(found[k]) && (Number.isNaN(found[k - 1]) || Number.isNaN(found[k + 1]) || Number.isNaN(found[k - inx]) || Number.isNaN(found[k + inx]))) most = Math.max(most, Math.abs(edgeGap(k, inx, ix0, iz0)));
+  }
+  const reach = Math.min(300, 30 + 3 * most + 8), M = Math.ceil(reach / C), gapMost = (reach - 38) / 3;
+  const ox = ix0 - M, oz = iz0 - M, nx = inx + 2 * M, nz = inz + 2 * M, n = nx * nz;
+  const y = new Float32Array(n).fill(NaN);
+  for (let j = 0; j < inz; j++) y.set(found.subarray(j * inx, (j + 1) * inx), (j + M) * nx + M);
+  // Taken in by a point all round; then what is enclosed filled.
+  const cover = new Uint8Array(n);
+  for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    let all = true;
+    for (let b = -1; b <= 1 && all; b++) for (let a = -1; a <= 1 && all; a++) all = !Number.isNaN(y[(j + b) * nx + i + a]);
+    if (all) cover[j * nx + i] = 1;
+  }
+  {
+    const seen = new Uint8Array(n), stack: number[] = [];
+    for (let i = 0; i < nx; i++) stack.push(i, (nz - 1) * nx + i);
+    for (let j = 0; j < nz; j++) stack.push(j * nx, j * nx + nx - 1);
+    while (stack.length) {
+      const k = stack.pop()!;
+      if (seen[k] || cover[k]) continue;
+      seen[k] = 1;
+      const i = k % nx, j = (k - i) / nx;
+      if (i > 0) stack.push(k - 1); if (i < nx - 1) stack.push(k + 1); if (j > 0) stack.push(k - nx); if (j < nz - 1) stack.push(k + nx);
+    }
+    for (let k = 0; k < n; k++) if (!cover[k] && !seen[k]) cover[k] = 1;
+  }
+  // (A height for every point inside, where filled from the nearest found.)
+  const known = nearestOf(nx, nz, (k) => !Number.isNaN(y[k]));
+  const yAt = (k: number) => (Number.isNaN(y[k]) ? y[known[k]] : y[k]);
+  const inner = nearestOf(nx, nz, (k) => cover[k] === 1), outer = nearestOf(nx, nz, (k) => cover[k] === 0);
+  const dist = (a: number, b: number) => C * Math.hypot((a % nx) - (b % nx), Math.floor(a / nx) - Math.floor(b / nx));
+  const gaps = new Map<number, number>();
+  const gapOf = (k: number) => { let g = gaps.get(k); if (g === undefined) gaps.set(k, (g = Math.max(-gapMost, Math.min(gapMost, worldLand ? yAt(k) - worldLand((ox + (k % nx)) * C, (oz + Math.floor(k / nx)) * C) : 0)))); return g; };
+  const out = new Float32Array(n), edge = new Float32Array(n), gap = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    if (cover[k]) {
+      const d = outer[k] >= 0 ? dist(k, outer[k]) : Infinity;
+      out[k] = -(d - C / 2); edge[k] = yAt(k); gap[k] = d < 4 * C ? gapOf(k) : 0;
+    } else {
+      const s = inner[k];
+      if (s < 0) { out[k] = 1e6; continue; }
+      out[k] = dist(k, s) - C / 2; gap[k] = gapOf(s);
+      // (The place's land just outside its edge: where it was found there (the edge was taken in by a point), as found; beyond, the
+      // world's own land as far off it as at the nearest point of the edge, so that it goes on down a slope as the world's does. Held
+      // level from the edge instead, on a mountainside the world's land was brought up to a shelf over the six metres it is met in.)
+      edge[k] = !Number.isNaN(y[k]) ? y[k] : worldLand && out[k] < 10 ? worldLand((ox + (k % nx)) * C, (oz + Math.floor(k / nx)) * C) + gap[k] : yAt(s);
+    }
+  }
+  const grid: HoleGrid = { x0: ox * C, z0: oz * C, cell: C, nx, nz, out, edge, gap };
+  return { cx: (ox + nx / 2) * C, cz: (oz + nz / 2) * C, hx: (nx * C) / 2, hz: (nz * C) / 2, turn: 0, grid };
+}
+
+/**
+ * For every point of a lattice, the nearest point of it for which `seed` holds (its index; less than nothing if there is none): passed
+ * over forwards and back twice, each point taking its neighbours' nearest where that is nearer to it, which finds the nearest but for
+ * rare cases a fraction of a point out.
+ */
+function nearestOf(nx: number, nz: number, seed: (k: number) => boolean): Int32Array {
+  const n = nx * nz, near = new Int32Array(n).fill(-1), d2 = new Float64Array(n).fill(Infinity);
+  for (let k = 0; k < n; k++) if (seed(k)) { near[k] = k; d2[k] = 0; }
+  const ahead = [[-1, 0], [-1, -1], [0, -1], [1, -1]], back = [[1, 0], [1, 1], [0, 1], [-1, 1]];
+  for (let round = 0; round < 4; round++) {
+    const fwd = round % 2 === 0, offs = fwd ? ahead : back;
+    for (let jj = 0; jj < nz; jj++) {
+      const j = fwd ? jj : nz - 1 - jj;
+      for (let ii = 0; ii < nx; ii++) {
+        const i = fwd ? ii : nx - 1 - ii, k = j * nx + i;
+        for (const [di, dj] of offs) {
+          const a = i + di, b = j + dj;
+          if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+          const s = near[b * nx + a];
+          if (s < 0) continue;
+          const si = s % nx, sj = (s - si) / nx, dd = (i - si) * (i - si) + (j - sj) * (j - sj);
+          if (dd < d2[k]) { d2[k] = dd; near[k] = s; }
+        }
+      }
+    }
+  }
+  return near;
 }
 
 /** Every typed array's buffer in a pack, for handing it over from a worker rather than copying it. */
@@ -251,7 +433,7 @@ export function packTransfer(p: PlacePack): ArrayBuffer[] {
   const out = new Set<ArrayBuffer>();
   const add = (a: { buffer: ArrayBufferLike } | null | undefined) => { if (a && a.buffer instanceof ArrayBuffer) out.add(a.buffer); };
   for (const m of p.meshes) for (const a of [m.position, m.normal, m.uv, m.color, m.field, m.edge, m.index, m.open, m.own, m.source, m.scale]) add(a);
-  add(p.solid.position); add(p.solid.index); add(p.hole.profile); add(p.hole.gap); add(p.masses);
+  add(p.solid.position); add(p.solid.index); add(p.hole.profile); add(p.hole.gap); add(p.hole.grid?.out); add(p.hole.grid?.edge); add(p.hole.grid?.gap); add(p.masses); add(p.sea?.bed.data);
   for (const r of p.solid.bvh.roots) if (r instanceof ArrayBuffer) out.add(r);
   add(p.solid.bvh.index as { buffer: ArrayBufferLike });
   return [...out];

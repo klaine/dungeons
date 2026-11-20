@@ -8,13 +8,33 @@ import { gradeHeights, Way, WAY, WayIndex, withWay } from './way';
  * turn and half-breadths, and the height of the place's land all round the square's edge, every `step` metres. Here only as numbers,
  * so that the workers making squares need nothing of the place's but this.
  */
-export interface Hole { cx: number; cz: number; turn: number; hx: number; hz: number; step: number; profile: Float32Array; gap?: Float32Array }
+export interface Hole { cx: number; cz: number; turn: number; hx: number; hz: number; step: number; profile: Float32Array; gap?: Float32Array; grid?: HoleGrid }
+
+/**
+ * A place whose land does not fill the square it was laid over (a mountain top, whose ground stops where the cloud would hide it and
+ * goes on as the world's below): the hole as a lattice in the world's own axes instead of a square, each point holding what `holeAt`
+ * would give there. `out` is how far the point lies outside the place's land (less than nothing inside it), `edge` the place's land
+ * there inside and at the nearest point of its edge outside, `gap` how far that stands off the world's own land. Beyond the lattice,
+ * which reaches out past the broadest band, the world's land is its own. (`cx`, `cz`, `hx`, `hz` of the hole are then the lattice's
+ * middle and half-breadths, `turn` nothing, for whoever only wants to know roughly where it is.)
+ */
+export interface HoleGrid { x0: number; z0: number; cell: number; nx: number; nz: number; out: Float32Array; edge: Float32Array; gap: Float32Array }
+
+/** `holeAt` for a hole given as a lattice: read between its four nearest points. */
+function holeGridAt(g: HoleGrid, x: number, z: number): { out: number; edge: number; gap: number } {
+  const fx = (x - g.x0) / g.cell, fz = (z - g.z0) / g.cell;
+  if (!(fx >= 0 && fz >= 0 && fx <= g.nx - 1 && fz <= g.nz - 1)) return { out: Infinity, edge: 0, gap: 0 };
+  const i = Math.min(g.nx - 2, Math.floor(fx)), j = Math.min(g.nz - 2, Math.floor(fz)), tx = fx - i, tz = fz - j, k = j * g.nx + i;
+  const at = (a: Float32Array) => (a[k] * (1 - tx) + a[k + 1] * tx) * (1 - tz) + (a[k + g.nx] * (1 - tx) + a[k + g.nx + 1] * tx) * tz;
+  return { out: at(g.out), edge: at(g.edge), gap: at(g.gap) };
+}
 
 /**
  * How far outside a hole's square a point lies (less than nothing inside), the place's land at the nearest point of its edge, and how far
  * that stands from the world's own land there (`gap`, as the place's worker measured it; nothing if not given).
  */
 export function holeAt(h: Hole, x: number, z: number): { out: number; edge: number; gap: number } {
+  if (h.grid) return holeGridAt(h.grid, x, z);
   const c = Math.cos(h.turn), s = Math.sin(h.turn), dx = x - h.cx, dz = z - h.cz;
   // (Into the square's own two ways: the inverse of the place's turn.)
   const lx = c * dx + s * dz, lz = -s * dx + c * dz;
@@ -30,19 +50,22 @@ export function holeAt(h: Hole, x: number, z: number): { out: number; edge: numb
 }
 
 /**
- * The land at a point with a place's land met (`holeAt`): outside its square, brought to the place's height at the edge over a band
- * the broader the more the place's land stands off the world's there (thirty metres, and three times that more: behind a valley's head
- * the place's land stands some tens of metres over the world's, and brought down over thirty metres it was a cliff); inside, a little
- * under the place's own land, which is drawn there instead (the squares are cut away inside: `squareBuilders`'s `skip`), so that where
- * the two overlap at the edge the place's is seen. The band's breadth goes by where along the edge a point is, not by the point's own
- * height: by that, a way's bed and the grass beside it, a metre apart, were brought in by different shares, and the way stood up out of
- * the land as a causeway. A function of where the point lies and of the land there alone, so squares still meet.
+ * The land at a point with a place's land met (`holeAt`). Outside its square, the land keeps its own shape and is lifted or lowered by
+ * how far the place's land stands off the world's at the nearest point of the square's edge (`gap`, measured in the place's worker),
+ * the less the further out, over a band the broader the greater that is (thirty metres, and three times the gap more: behind a valley's
+ * head the place's land stands some tens of metres over the world's); and over the last six metres it is brought to the place's own
+ * land exactly (the world's land at a metre has knolls the place's has not). Inside, a little under the place's own land, which is drawn
+ * there instead (the squares are cut away inside: `squareBuilders`'s `skip`), so that where the two overlap at the edge the place's is
+ * seen. (The land was brought to the edge's height over the band instead: on a mountainside, which rises metres for every metre out,
+ * that made it half as steep again over a fifth of the band, and on a way through it, by points a metre apart, a causeway.) A function
+ * of where the point lies and of the land there alone, so squares still meet.
  */
 export function withHole(h: Hole, x: number, z: number, natural: number): number {
   const { out, edge, gap } = holeAt(h, x, z);
   if (out <= 0) return edge - 0.25 * smooth(-out / 1.5);
   const band = 30 + 3 * Math.abs(gap);
-  return out >= band ? natural : edge + (natural - edge) * smooth(out / band);
+  const shifted = out >= band ? natural : natural + gap * (1 - smooth(out / band));
+  return out >= 6 ? shifted : edge + (shifted - edge) * smooth(out / 6);
 }
 
 /**

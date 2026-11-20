@@ -1,5 +1,6 @@
 import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, PlaneGeometry, Scene, Vector2, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
+import { QUALITY, qualityChosen, textureRoom } from '../render/air';
 import { Hour, SKIES } from '../core/site';
 import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor, wayThroughHoles } from '../core/stream';
 import { HeightField } from '../core/terrain';
@@ -13,6 +14,7 @@ import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { Player } from '../app/player';
 import { WorldColliders } from './body';
 import { WorldPlaces } from './places';
+import { WorldSea } from './worldSea';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
 
@@ -80,9 +82,15 @@ const readFine = (): boolean => {
 };
 
 async function start(): Promise<void> {
-  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl') });
+  // (Drawn as the game is drawn, at the level of detail chosen in the game, `QUALITY`; any one setting overridden in the address.)
+  const quality = QUALITY[qualityChosen(params)], num = (key: string, fallback: number) => (params.has(key) ? Number(params.get(key)) : fallback);
+  const room = await textureRoom(params.has('webgl'));
+  const renderer = new WebGPURenderer({
+    canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: params.has('webgl'),
+    ...(room > 16 ? { requiredLimits: { maxSampledTexturesPerShaderStage: Math.min(room, 32) } } : {}),
+  });
   await renderer.init();
-  renderer.setPixelRatio(Math.min(devicePixelRatio, Number(params.get('dpr')) || 1.5));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, num('dpr', quality.dpr)));
   renderer.setSize(innerWidth, innerHeight);
   const scene = new Scene(), camera = new PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 14000);
   camera.layers.enable(1);
@@ -106,10 +114,16 @@ async function start(): Promise<void> {
   });
   // Which blocks of trees are grown, whole and simply, for the shader (`treeGrownMap`): made before any material that draws trees.
   const grownMap = treeGrownMap((size ?? WORLD_SIZE).x / 2, (size ?? WORLD_SIZE).z / 2, LOW);
-  const materials: Record<string, Material> = makeMaterials(Number(params.get('tex')) || 1024);
+  const materials: Record<string, Material> = makeMaterials(num('tex', quality.tex));
   const W = await coming;
   const worldMs = performance.now() - t0, { field, grid } = W, [SX, SZ] = squareCount(grid);
-  const light = makeLight(renderer, scene, camera, hour, Math.min(1, Math.max(0, Number(params.get('haze') ?? 0.4))));
+  // (The world's weather, as a place's is given: fair, the sky some four tenths cloud, heaped, unless the address says otherwise.)
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v || 0));
+  const weather = { cloud: clamp01(num('cloud', 0.4)), layered: params.get('layered') === '1', mist: clamp01(num('mist', 0)), haze: clamp01(num('haze', 0.4)), rain: clamp01(num('rain', 0)) };
+  const light = makeLight(renderer, scene, camera, hour, {
+    weather, clouds: Math.round(num('clouds', quality.clouds)), occlusion: num('ao', quality.ao) > 0, temporal: num('taa', 1) > 0, bloom: num('bloom', quality.bloom) > 0,
+    nearShadow: room > 17 && num('nearshadow', 1) > 0, box: { min: new Vector3(-grid.hx, -150, -grid.hz), max: new Vector3(grid.hx, 900, grid.hz) }, seed,
+  });
   // (The houses' grounds, fitted to the land: made on it in every square they reach.)
   const grounds = W.places.flatMap((q) => (q.ground ? [q.ground] : []));
   const coverAt = (x: number, z: number) => W.cover[Math.min(field.nz - 1, Math.max(0, Math.round((z - field.z0) / field.cell))) * field.nx + Math.min(field.nx - 1, Math.max(0, Math.round((x - field.x0) / field.cell)))];
@@ -122,10 +136,11 @@ async function start(): Promise<void> {
   // (And nothing of the world's grows inside a place standing in it, which has its own: `placesBuilt`, below.)
   const growHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : growCover(x, z));
   const treesHere = (x: number, z: number) => (placesBuilt.inside(x, z) ? COVER.shore : treeCover(x, z));
-  // The sea: one sheet at its level, out beyond the world's edge, smooth enough to show the sky.
+  // The sea far off: one sheet at its level, out beyond the world's edge, smooth enough to show the sky; a little under the game's own
+  // sea, which is drawn about the walker (`WorldSea`, below) and covers it within three and a half kilometres.
   const water = new MeshStandardNodeMaterial({ color: 0x0b2430, roughness: 0.07, metalness: 0 });
   const sea = new Mesh(new PlaneGeometry(grid.hx * 2 + 24000, grid.hz * 2 + 24000), water);
-  sea.rotation.x = -Math.PI / 2; sea.position.y = -0.05; sea.receiveShadow = true;
+  sea.rotation.x = -Math.PI / 2; sea.position.y = -0.6; sea.receiveShadow = true;
   scene.add(sea);
   const drop = (meshes: (Mesh | InstancedMesh)[]) => { for (const m of meshes) { scene.remove(m); m.geometry.dispose(); } };
 
@@ -186,7 +201,10 @@ async function start(): Promise<void> {
     const need = tilesFor(grid, i, j), data = await Promise.all(need.map(([a, b]) => tile(a, b)));
     const send = data.filter((t) => !worker.has.has(`${t.i},${t.j}`));
     for (const t of send) worker.has.add(`${t.i},${t.j}`);
-    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways, holes: placesBuilt.holes() });
+    // (Only the places near enough to reach into it, as `makeSquare` reckons: a mountain top's hole is a lattice of some megabytes.)
+    const [x0, z0] = squareOrigin(grid, i, j), mx = x0 + SQUARE.size / 2, mz = z0 + SQUARE.size / 2;
+    const holes = placesBuilt.holes().filter((h) => { const r = Math.hypot(h.hx, h.hz) + 600 + SQUARE.size; return Math.abs(mx - h.cx) < r && Math.abs(mz - h.cz) < r; });
+    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways, holes });
   };
   /** Asks a worker to split a square into four at half a metre, from its own heights. */
   const requestFine = (sq: Sq) => {
@@ -299,14 +317,17 @@ async function start(): Promise<void> {
   // the game (`docs/06-world.md`, *The world as the game*); the walk had been a camera slid over the ground.
   let landVersion = 0;
   const colliders = new WorldColliders(heightAt, (x0, z0, x1) => treesIn(x0, z0, x1 - x0, treesHere, heightAt, W.plan.n, depthAt).map((t) => ({ x: t.x, z: t.z, r: Math.max(0.2, t.girth * 1.1) })), (x, z) => placesBuilt.inside(x, z, 0.5));
-  // Places built into the world as one comes to them (`WorldPlaces`, step 2): valley heads, so far. `?places=0` builds none.
-  const placesBuilt = new WorldPlaces({ seed, size, scene, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: Number(params.get('tex')) || 1024, turf: materials.turf, sunDir: light.sunDir });
+  // Places built into the world as one comes to them (`WorldPlaces`, step 2): every kind. `?places=0` builds none.
+  const placesBuilt = new WorldPlaces({ seed, size, scene, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
   /** Where a square's triangles are left out, under a place standing in the world: only for a square that reaches into one. */
   const underPlace = (x0: number, z0: number, size: number) => {
     const near = placesBuilt.holes().some((h) => Math.hypot(Math.max(0, x0 - h.cx, h.cx - x0 - size), Math.max(0, z0 - h.cz, h.cz - z0 - size)) < Math.hypot(h.hx, h.hz));
     return near ? (x: number, z: number) => placesBuilt.inside(x, z, 2.5) : undefined;
   };
   const drawn = new Vector2();
+  // The game's own sea, about the walker, or a standing place's own (`WorldSea`).
+  const worldSea = new WorldSea({ scene, atmosphere: light.atmosphere, field, hour });
+  placesBuilt.onSea = (d) => worldSea.override(d);
   // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
   // let be), the far land, what grows (none inside a place), and the body's ground.
   placesBuilt.onHoles = (h) => {
@@ -325,6 +346,11 @@ async function start(): Promise<void> {
     // (The way graded again on the land as the places now leave it, so that it comes through the band about one as a way.)
     if (route) ways[0] = wayThroughHoles(route.way, placesBuilt.holes());
     landVersion++;
+    // (A place come to stand where the walker is: stood on its ground, if that is over their feet, as on a town's quay.)
+    if (!player.flying && placesBuilt.inside(me.x, me.z)) {
+      const g = placesBuilt.groundAt(me.x, me.z, me.y + 3);
+      if (g !== null && g > me.y - 0.3) me.y = g + 0.02;
+    }
   };
   const player = new Player(camera, canvas, colliders);
   player.flySpeed = [40, 160];
@@ -333,7 +359,10 @@ async function start(): Promise<void> {
   /** Puts the walker at a point, on the ground there (or, flying, so high over it). */
   const teleport = (x: number, z: number, yawTo = player.yaw, pitchTo = player.pitch, lift = player.flying ? 20 : EYE) => {
     colliders.follow(x, z, landVersion);
-    player.place(new Vector3(x, Math.max(heightAt(x, z), player.flying ? 0 : -1e9) + lift, z), yawTo, pitchTo);
+    // (Inside a place standing in the world, on its own ground, or whatever of it is highest there: the world's land there is only a
+    // stand-in under it, and at a town's quay that was the harbour's floor.)
+    const ground = (placesBuilt.inside(x, z) ? placesBuilt.groundAt(x, z, 5000) : null) ?? heightAt(x, z);
+    player.place(new Vector3(x, Math.max(ground, player.flying ? 0 : -1e9) + lift, z), yawTo, pitchTo);
   };
   // Where the walker may be: within the world; within the way's corridor on the route page; not out in the sea, which stops one at the
   // depth of a knee (flying, over it, but not under the water); and never under the ground, where land that has come in finer than it
@@ -342,7 +371,14 @@ async function start(): Promise<void> {
   player.constrain = (p) => {
     p.x = Math.max(-grid.hx, Math.min(grid.hx, p.x)); p.z = Math.max(-grid.hz, Math.min(grid.hz, p.z));
     // (Inside a place standing in the world its own ground and walls hold the body, and the way's corridor gives way to the place.)
-    if (placesBuilt.inside(p.x, p.z)) { dryX = p.x; dryZ = p.z; return; }
+    // (Its sea stops one as the world's does, at the depth of a knee, where it is open to the sky: off a quay, the body walked out along
+    // the harbour's floor. Not in a cave under the sea's level, which has rock over it.)
+    if (placesBuilt.inside(p.x, p.z)) {
+      const sea = player.flying ? null : placesBuilt.seaAt(p.x, p.z), own = sea === null ? null : placesBuilt.groundAt(p.x, p.z, p.y + 1);
+      const open = own !== null && Math.abs((placesBuilt.groundAt(p.x, p.z, 5000) ?? own) - own) < 0.05;
+      if (sea !== null && own !== null && open && own < sea - 0.5) { p.x = dryX; p.z = dryZ; } else { dryX = p.x; dryZ = p.z; }
+      return;
+    }
     if (route) route.keepIn(p);
     const ground = heightAt(p.x, p.z);
     if (player.flying) { p.y = Math.max(p.y, Math.max(ground, 0) + 0.3); return; }
@@ -503,6 +539,7 @@ async function start(): Promise<void> {
     // that the worker that does it, making the world again, does not slow the first squares.)
     if (route && !layingAhead && (now - begun > 20000 || (squares.size >= 6 && pending.size === 0))) { layingAhead = true; route.layOutAhead(placesBuilt); }
     placesBuilt.update(me, now, camera, renderer.getDrawingBufferSize(drawn).y);
+    worldSea.update(me, now / 1000);
     const groundY = heightAt(me.x, me.z);
     // Streaming: ask for what is near and missing, nearest first; let go of what is far.
     const wanted = [...squaresWanted()].map((k) => { const [i, j] = k.split(',').map(Number); return { k, i, j, d: distTo(i, j) }; }).sort((a, b) => a.d - b.d);
@@ -597,7 +634,7 @@ async function start(): Promise<void> {
     vegetationUniforms.uTime.value = now / 1000;
     const cards = [...[...lows.values()].flat(), ...[...nears.values(), ...mids.values()].flat().filter((m): m is InstancedMesh => (m as InstancedMesh).isInstancedMesh)];
     cullCards([...cards, ...placesBuilt.cards()], camera.position);
-    light.follow(me, groundY);
+    light.follow(me, groundY, now / 1000, dt);
     light.atmosphere.update();
     light.pipeline.render();
     // The eye adjusts to the picture, as in the game.

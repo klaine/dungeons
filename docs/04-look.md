@@ -564,3 +564,13 @@ where they stand as the next way's grow from nothing in the same place, so no ri
 `vegetation.ts`; see document 6, *The land at a metre*). Its woods are built as the game's are now: close in their hearts, thinning tree
 by tree to their edges, with single trees out in the pasture past them and bramble, bushes and young trees along the edge; its meadows
 have flowers by kind in drifts, grass in seed and bracken on the dry banks.
+
+**The world's pages drawn as the game draws** (20 November 2026, asked: "include all game side improvements done in parallel"). The sky,
+the clouds, the air and the weather the game was given while the world was being made (clouds of many sizes with soft-edged shadows,
+heaped high or lying in banks, ice cloud, mist lit forward by a low sun, the frames smoothed into one another, the hollows of what is
+seen darkened, rain and its rings, the sun's shadow drawn finely about the eye and read far off from the air's picture) are set up by
+one code, `src/render/air.ts`, which the game (`src/app/main.ts`) and the walk and route pages (`dress.ts`'s `makeLight`) both call,
+at the levels of detail the game offers (`QUALITY`). What is the world's own is said where it is called: its haze is four tenths as
+thick (the eye sees ten kilometres, not one), its cloud and mist reckoned from the sea, its sky twice as large. The sea about the walker
+is the game's (`Sea`), laid over the world's land, or a place's own where a town or an island stands. See document 6, *The world as the
+game*, step 3.

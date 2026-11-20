@@ -1,11 +1,13 @@
-import { BufferAttribute, BufferGeometry, Color, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Material, Mesh, Scene, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Color, DoubleSide, InstancedMesh, InterleavedBuffer, InterleavedBufferAttribute, Material, Mesh, Ray, Scene, Vector3 } from 'three';
 import { MeshBVH } from 'three-mesh-bvh';
 import { worldShelf, WorldShelf } from '../app/worldStore';
 import { Hour, SKIES } from '../core/site';
 import { Hole, holeAt } from '../core/stream';
 import { WorldPlace } from '../core/world';
 import { bake } from '../render/bake/bake';
+import type { Atmosphere } from '../render/post';
 import type { PackedMesh, PlacePack } from '../render/placePack';
+import type { SeaDesc } from '../render/scene';
 import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
 import { Water } from '../render/water';
@@ -24,13 +26,21 @@ import { cardsOf } from './dress';
  * `FAR`. Layouts are kept in the browser as the world page keeps them (`worldStore.ts`), so that the game, entering the place, does
  * not lay it out again.
  *
- * Valley heads only, so far: an island, a town and a mountain top each bring sea, coast or cloud the walk does not yet draw.
+ * Every kind: a valley head, a harbour town, an island and a mountain top. What a place has beyond the square of land it was laid over
+ * is left out (a mountain top's far cairns stood on peaks the world has otherwise); an island's or a town's own sea is drawn in place of
+ * the world's while it stands (`onSea`).
  */
 
 /** How near a place must be to be built, and how far off it is let go of, metres from where it was found. */
 const NEAR = 1500, FAR = 2300;
-/** The kinds of place built into the world yet. */
-const KINDS: WorldPlace['kind'][] = ['valley'];
+/**
+ * How many places stand in the world at once, at most. (Three came within reach together on the route page's first world, two towns and a
+ * valley head, sixteen million triangles: more than a modest machine holds. A nearer one wanted takes the place of the furthest, once
+ * that one is in and is well further off than it, `YIELD` metres, so that walking between two the two are not built by turns.)
+ */
+const MOST = 2, YIELD = 300;
+/** The kinds of place built into the world. (A mountain top's sea of cloud under it is not drawn: in a world it would lie over all of it.) */
+const KINDS: WorldPlace['kind'][] = ['valley', 'coast', 'island', 'mountain'];
 /** How light each kind of surface is on the whole, for the bake (as the game has it). */
 const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
@@ -57,9 +67,11 @@ export class WorldPlaces {
   onSite: ((kind: string, n: number, site: unknown) => void) | null = null;
   /** Called when the holes change: the page makes again the squares and what grows about them. */
   onHoles: ((changed: Hole) => void) | null = null;
+  /** Called with a place's own sea when one with a sea stands, and with nothing when it goes. */
+  onSea: ((sea: SeaDesc | null) => void) | null = null;
   private t0 = performance.now();
 
-  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3 }) {
+  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
     this.shelf = worldShelf(o.seed);
   }
 
@@ -67,6 +79,17 @@ export class WorldPlaces {
   holes(): Hole[] { return [...this.built.values()].filter((b) => b.todo.length === 0).map((b) => b.pack.hole); }
   /** Whether a point lies inside a place standing in the world (so that its own land, not the world's, is under it). */
   inside(x: number, z: number, by = 0): boolean { for (const b of this.built.values()) if (b.todo.length === 0 && holeAt(b.pack.hole, x, z).out < -by) return true; return false; }
+  /** The height of a place's ground under a point, looking down from `from`: for a walker a place has come to stand under. */
+  groundAt(x: number, z: number, from: number): number | null {
+    const ray = new Ray(new Vector3(x, from, z), new Vector3(0, -1, 0));
+    for (const b of this.built.values()) if (b.todo.length === 0 && holeAt(b.pack.hole, x, z).out < 0) { const hit = b.bvh.raycastFirst(ray, DoubleSide); if (hit) return hit.point.y; }
+    return null;
+  }
+  /** The level of the sea of a place standing at a point (a town's, an island's), or none. */
+  seaAt(x: number, z: number): number | null {
+    for (const b of this.built.values()) if (b.todo.length === 0 && b.pack.sea && holeAt(b.pack.hole, x, z).out < 0) return b.pack.sea.level;
+    return null;
+  }
   /** The cards of the places standing, for the page's culling (grass and leaves drawn two ways near the eye). */
   cards(): InstancedMesh[] { return [...this.built.values()].flatMap((b) => b.cards); }
 
@@ -117,6 +140,12 @@ export class WorldPlaces {
       if (!KINDS.includes(q.kind) || this.asked.has(spec)) continue;
       if (d < best) { best = d; want = q; }
     }
+    if (want && this.asked.size >= MOST) {
+      let far: [string, Built] | null = null, farOff = -1;
+      for (const [spec, b] of this.built) { const d = Math.hypot(b.place.x - me.x, b.place.z - me.z); if (d > farOff) { farOff = d; far = [spec, b]; } }
+      if (far && this.built.size >= this.asked.size && far[1].todo.length === 0 && farOff > best + YIELD) this.letGo(far[0], far[1]);
+      else want = null;
+    }
     if (want && ![...this.built.values()].some((b) => b.todo.length)) {
       const spec = `${want.kind}${want.n}`;
       this.asked.add(spec);
@@ -144,7 +173,7 @@ export class WorldPlaces {
     const frame = () => new Promise<void>((r) => setTimeout(r, 16)), size = this.o.texSize;
     this.painting = (async () => {
       const set: Record<string, ReturnType<typeof generateTextureSet>> = {};
-      for (const [name, seed, half] of [['moss', 9, true], ['stone', 3], ['wood', 5], ['rock', 13], ['scree', 23], ['plaster', 41], ['thatch', 47], ['tile', 43], ['redBrick', 73], ['buffBrick', 79], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number, boolean?][]) {
+      for (const [name, seed, half] of [['moss', 9, true], ['stone', 3], ['wood', 5], ['rock', 13], ['scree', 23], ['plaster', 41], ['thatch', 47], ['tile', 43], ['redBrick', 73], ['buffBrick', 79], ['brick', 83], ['talus', 71], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number, boolean?][]) {
         set[name] = generateTextureSet(name, half ? size / 2 : size, seed);
         await frame();
       }
@@ -160,6 +189,8 @@ export class WorldPlaces {
         rock: makeRockMaterial(set.rock, moss),
         rockSheet: makeRockMaterial(set.rock, moss, { relief: true }),
         scree: makeSiteMaterial(set.scree, moss, { normalScale: 1.6, matt: true, fades: 'near' }),
+        // (On a mountain top what lies loose is rock split by frost, cornered and flat-faced: `make` draws a mountain's scree with it.)
+        talus: makeSiteMaterial(set.talus, moss, { normalScale: 1.6, matt: true, fades: 'near' }),
         bark: makeSiteMaterial(set.bark, moss, { normalScale: 2.2, mossScale: 2.5, matt: true, deep: 0.06 }),
         barkAsh: makeSiteMaterial(set.barkAsh, moss, { normalScale: 1.6, mossScale: 2.5, matt: true, deep: 0.02, hollow: 0.5 }),
         barkPine: makeSiteMaterial(set.barkPine, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.04, hollow: 0.35 }),
@@ -170,6 +201,8 @@ export class WorldPlaces {
         tile: makeSiteMaterial(set.tile, moss, { normalScale: 1.3, mossScale: 3, roof: true }),
         redBrick: makeSiteMaterial(set.redBrick, moss, { normalScale: 1.1, mossScale: 2.2, bond: 'wendish', weather: true }),
         buffBrick: makeSiteMaterial(set.buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, bond: 'wendish', weather: true }),
+        // (The brown brick of a town's classical buildings, in running bond.)
+        brick: makeSiteMaterial(set.brick, moss, { normalScale: 1.1, mossScale: 3, bond: 'running', weather: true }),
         metal: makeSiteMaterial(set.plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
         copper: makeSiteMaterial(set.plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
         glass: makeSiteMaterial(set.plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
@@ -223,7 +256,7 @@ export class WorldPlaces {
       for (let c = 0; c < 3; c++) { a[o + c * 4] = (Math.PI / 2) * (L[c] + G[c]) * open; a[o + c * 4 + 2] = (Math.PI / 2) * (L[c] * 0.8 - G[c]) * open; }
       a[o + 12] = open; a[o + 13] = 0.6;
     }
-    const mesh = new Mesh(g, this.materials![p.material] ?? this.materials!.stone);
+    const mesh = new Mesh(g, this.materials![b.place.kind === 'mountain' && p.material === 'scree' ? 'talus' : p.material] ?? this.materials!.stone);
     mesh.name = `place:${p.key}`;
     mesh.castShadow = !['pane', 'paneLit', 'glass', 'window'].includes(p.material);
     mesh.receiveShadow = true;
@@ -244,10 +277,13 @@ export class WorldPlaces {
         foam: [0, 1, 2].map((c) => 0.6 * S.horizon[c] + 0.12 * S.colour[c] * S.intensity),
         deep: [(0.55 * S.zenith[0] + 0.45 * S.horizon[0]) * 0.06 + 0.002, (0.55 * S.zenith[1] + 0.45 * S.horizon[1]) * 0.17 + 0.003, (0.55 * S.zenith[2] + 0.45 * S.horizon[2]) * 0.11 + 0.003],
       });
+      // (Mirroring the sky and the cloud as the game's water does: given its program before it comes into the scene.)
+      b.water.mirrorSky(this.o.atmosphere);
       for (const m of b.water.meshes) { this.o.scene.add(m); b.meshes.push(m); }
     }
     this.o.colliders.others.push(b.bvh);
     this.onHoles?.(b.pack.hole);
+    if (b.pack.sea) this.onSea?.(b.pack.sea);
     this.status = `${b.place.name} stands in the world (${(b.pack.triangles / 1e6).toFixed(1)} million triangles); its light being baked…`;
     this.bakeHouse(b);
   }
@@ -300,6 +336,8 @@ export class WorldPlaces {
     this.built.delete(spec);
     this.asked.delete(spec);
     this.onHoles?.(b.pack.hole);
+    // (Its sea goes with it; another standing place's, if there is one, is drawn instead.)
+    if (b.pack.sea) this.onSea?.([...this.built.values()].find((o) => o.pack.sea && o.todo.length === 0)?.pack.sea ?? null);
   }
 
   /** For scripts: what stands, and how. */
