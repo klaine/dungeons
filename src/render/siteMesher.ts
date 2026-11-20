@@ -24,6 +24,7 @@ import { lakeLevelAt, siteFrame, toSite, worldLand } from '../core/worldLand';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
+import { landAt as islandLandAt } from '../core/island';
 import { buildMountain } from './mountain';
 import { buildTown } from './town';
 import { layWall } from './walls';
@@ -4146,6 +4147,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildIsland({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    // The island's castle about the house, as a valley's: its curtain wall on the island's own ground, its towers and gate, and its keep.
+    if (site.castle && site.island) {
+      const isle = site.island, wasGroup = wild.group;
+      wild.group = 'castle';
+      buildCastle({ c: site.castle, mesh: (material) => wild.mesh(material), ground: (x, z) => islandLandAt(isle, p.floor, x, z), floor: p.floor, stone: stoneTint });
+      wild.group = wasGroup;
+      for (const t of (site.towers ?? []).filter((q) => q.castle)) buildTower(t, p.floor);
+    }
     arrival.spawn = made.spawn;
     arrival.track = made.track;
     farCover = made.far;

@@ -203,8 +203,9 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     // Mostly a sky of broken cloud; now and then nearly clear, or heavy.
     cloud: Math.round(base.fork('cloud').pick([0.12, 0.3, 0.38, 0.45, 0.5, 0.58, 0.72]) * 100) / 100,
   };
-  // In a valley the house is a castle's: its hall and keep within a curtain wall, a village below it. (Asked for.)
-  if (kind === 'valley') setting.kind = 'castle';
+  // In a valley the house is a castle's: its hall and keep within a curtain wall, a village below it. (Asked for.) And on an island,
+  // its castle over the cove and the hamlet. (Asked for: the island's house in the castle's form.)
+  if (kind === 'valley' || kind === 'island') setting.kind = 'castle';
   // A mountain top has two seasons, not four: bare rock and thin turf in summer, snow in winter.
   // (From a stream of its own, so valleys and islands keep the seasons they had.)
   // And what stands on a pass or a peak, keeping travellers alive, is a hospice.
@@ -2153,7 +2154,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   // ---- what each room was for. The big ones get the communal uses, one of each at most.
   const communal = shuffle(['refectory', 'dormitory', 'chapter house'], rng);
   // (A castle's first great room is its chapel.)
-  if (kind === 'valley') communal.push('chapel');
+  if (kind === 'valley' || kind === 'island') communal.push('chapel');
   const working = shuffle(['kitchen', 'store', 'workshop', 'scriptorium', 'dormitory'], rng);
   for (const p of places) {
     if (p.name !== 'gallery') continue;
@@ -2255,7 +2256,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     const up = rng.fork('storeys');
     const TREAD = 0.25, STEPS = 18, RISE = STEPS * STEP, RUN = STEPS * TREAD;
     // (A castle has a dungeon under it, always: the first room made below is that.)
-    const want = Math.max(kind === 'valley' ? 1 : 0, up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0);
+    const want = Math.max(kind === 'valley' || kind === 'island' ? 1 : 0, up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0);
     const hosts = shuffle(places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && !p.fallen && p.id !== secretId && p.role !== 'goal' && p.role !== 'entrance' && p.id !== forecourt.id
       && Math.max(p.x1 - p.x0, p.z1 - p.z0) >= RUN + 1.55 && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 3.7), up);
     let made = 0;
@@ -2277,7 +2278,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         }
       }
       if (!options.length) continue;
-      const stair = up.pick(options), down = up.chance(0.5) || (kind === 'valley' && made === 0);
+      const stair = up.pick(options), down = up.chance(0.5) || ((kind === 'valley' || kind === 'island') && made === 0);
       const other: Place = {
         ...host, id: places.length, role: 'reward', roof: 'timber', fallen: undefined, shaft: undefined,
         wall: down ? RISE - 0.3 : up.range(2.9, 3.5),
@@ -2285,7 +2286,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         level: down ? -1 : 1,
         // Never two dark rooms in a row: a cellar is dark unless the room over it is.
         light: down ? (host.light === 'dark' ? 'torch' : 'dark') : up.chance(0.5) && host.light !== 'dark' ? 'dark' : 'torch',
-        name: down ? (kind === 'valley' && !places.some((q) => q.name === 'dungeon') ? 'dungeon' : up.pick(['cellar', 'undercroft', 'crypt', 'cold store'])) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
+        name: down ? ((kind === 'valley' || kind === 'island') && !places.some((q) => q.name === 'dungeon') ? 'dungeon' : up.pick(['cellar', 'undercroft', 'crypt', 'cold store'])) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
       };
       // The lower of the two has a flat ceiling at the height the stair climbs to.
       if (!down) { host.roof = 'timber'; host.wall = RISE - 0.3; }

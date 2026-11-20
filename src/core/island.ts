@@ -1,4 +1,5 @@
 import { fbm2, Rng } from './rng';
+import { layOutCastle } from './castle';
 import { archipelago, findIslands, frameHeight, islandDetail, islandFrame, IslandSpot } from './archipelago';
 import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
 import { HeightField, leastPath, smoothLine, wornLattice } from './terrain';
@@ -585,6 +586,18 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   if (!island.cove.r) throw new Error(`no cove would fit the island (seed ${site.seed})`);
   const cove = island.cove;
   const headAngle = Math.atan2(island.z - cove.z, island.x - cove.x);
+  // The castle about the house, as a valley's is (asked for: the island's house in the castle's form, in place of the castle that
+  // stood on another headland): its curtain wall round the house and its forecourt, some way in from the cliffs, its gate where the way
+  // goes out, its towers and its keep. Then the house's level ground is grown to take it all in, so that the bailey is level and all
+  // that is placed after it (the summits, the hamlet, the lighthouse, the trees) keeps clear of it as it keeps clear of the house.
+  {
+    const c = layOutCastle(site, meadow, house, doorX, rng.fork('castle'), (x, z) => inland(island, x, z) - 6);
+    c.rise = 0;
+    site.castle = c;
+    const xs = c.wall.map((q) => q[0]), zs = c.wall.map((q) => q[1]);
+    level.x0 = round(Math.min(level.x0, Math.min(...xs) - 3)); level.x1 = round(Math.max(level.x1, Math.max(...xs) + 3));
+    level.z0 = round(Math.min(level.z0, Math.min(...zs) - 3)); level.z1 = round(Math.max(level.z1, Math.max(...zs) + 3));
+  }
   // The high ground: towards the back of the island, away from the cove.
   {
     const q = rng.fork('crown'), a = cove.out + Math.PI + q.range(-0.9, 0.9), at = coastAt(island, a) * q.range(0.35, 0.6);
@@ -706,6 +719,11 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
   const stairway = island.stair;
   const root: [number, number] = stairway ? [stairway[stairway.length - 1][0], stairway[stairway.length - 1][1]] : island.jetty.from;
   const track: [number, number][] = [[doorX, meadow.z0], [doorX, meadow.z1 - 4]];
+  // (Out through the castle's gate: across the bailey to it, through it, and a few strides on out of it, before the way finds its own line.)
+  if (site.castle) {
+    const g = site.castle.gate, ox = Math.cos(g.out), oz = Math.sin(g.out);
+    track.splice(1, 1, [round(g.x - ox * 3.5), round(g.z - oz * 3.5)], [g.x, g.z], [round(g.x + ox * 5), round(g.z + oz * 5)]);
+  }
   // On land that was found, the track goes where a track would have been worn: by the way of least effort over the land, round a
   // hill and not over it, along a slope and not up it, clear of the cliffs and round the cove, wandering a little where nothing
   // decides it.
@@ -783,12 +801,12 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
     return out;
   };
   if (island.terrain) {
-    const routedLine = routeOver(track[1][0], track[1][1], root[0], root[1], 'track');
+    const routedLine = routeOver(track[track.length - 1][0], track[track.length - 1][1], root[0], root[1], 'track');
     if (routedLine) { track.push(...routedLine); routed = true; }
   }
   if (!routed) {
     const q = rng.fork('track');
-    const [sx, sz] = track[1], length = Math.hypot(root[0] - sx, root[1] - sz), steps = Math.max(3, Math.round(length / 9));
+    const [sx, sz] = track[track.length - 1], length = Math.hypot(root[0] - sx, root[1] - sz), steps = Math.max(3, Math.round(length / 9));
     const bend = q.range(-1, 1) * Math.min(18, length * 0.2), phase = q.range(0, Math.PI);
     // Where it has further to climb than its length allows at a path's slope, it winds, in bends a long stride or two apart.
     const climb = Math.abs(F - (stairway ? stairway[stairway.length - 1][2] : plain(root[0], root[1]))), wanted = climb / 0.24;
@@ -974,21 +992,10 @@ export function layOutIsland(site: Site, meadow: Place, doorX: number, rng: Rng,
     }
   }
 
-  // A castle, in about half the islands, on another headland: it wants twenty metres of level ground every way.
+  // (No castle on another headland any more: the house is the island's castle now, and one in about half the islands stood on a
+  // headland as well, the two seen from each other. Asked: remove the far landmark castle from islands.)
   {
-    const q = rng.fork('castle');
-    if (q.chance(0.55)) for (let tries = 0; tries < 80; tries++) {
-      const a = q.range(0, TAU);
-      if (Math.abs(turnBetween(a, cove.out)) < 0.9 || Math.abs(turnBetween(a, toHouse)) < 0.7) continue;
-      if (island.lighthouse && Math.abs(turnBetween(a, Math.atan2(island.lighthouse.z - island.z, island.lighthouse.x - island.x))) < 1.0) continue;
-      const back = coastAt(island, a) - q.range(26, 32), x = island.x + Math.cos(a) * back, z = island.z + Math.sin(a) * back;
-      if (inland(island, x, z) < 22 || !clear(x, z, 24) || fromTrack(x, z) < 26) continue;
-      if (!reached(x - Math.cos(a) * 14, z - Math.sin(a) * 14)) continue;
-      island.castle = { x: round(x), z: round(z), y: round(made(x, z)), facing: Math.round(a * 1000) / 1000 };
-      taken.push({ x, z, r: 24 });
-      break;
-    }
-    // Where there is no castle, now and then a mansion: a stuccoed classical house standing back from a headland, its front to the sea.
+    // Now and then a mansion: a stuccoed classical house standing back from a headland, its front to the sea.
     const m = rng.fork('mansion');
     if (!island.castle && m.chance(0.45)) for (let tries = 0; tries < 120 && !island.mansion; tries++) {
       const a = m.range(0, TAU);
