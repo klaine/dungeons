@@ -119,6 +119,7 @@ docs/
 - **Example viewer.** `examples/viewer/` reads an exported model and document without using any of the tool's code: it cuts the building open at a chosen height, names the rooms, and draws the solver's route through them.
 - **Gallery.** `gallery.html` generates places a dozen at a time and shows each as a plan with its description, loop count and route length. It can be asked for places with a court, a cave, a portcullis, a hidden chamber or a fallen roof, or for small or large ones. A dozen take about a fifth of a second, because only the document is generated; choosing one opens it in the explorer.
 - **Building lab.** `lab/buildings.html` is a square apart from the game where any kind of building the game builds can be added, moved, turned, scaled and reshaped by its measures or by dragging arrows on its faces, built by the game's own builders and drawn with its materials; what is set out can be undone, is kept in the browser and can be saved as site documents. See item 25 below and the README.
+- **Figure lab.** `lab/figures.html` is a stage apart from the game where figures are steered from behind or sent about by pointing: they walk, run, sprint, creep, jump, climb ledges, sit, lie down and get up, and play any of 85 clips. They are not yet in the game or the world. See item 53 below and the README.
 - **Range.** `npm run range` generates 2,000 sites and charts what came out: loops against route length, how often each feature appears, plan shapes, and rooms and unlit rooms per site. Each seed has a size to aim for, so houses run from five rooms to eleven.
 - **Map.** A plan of the site is drawn from the same document and shown as a minimap. Out of doors it takes in the whole valley, with the track, the pond and the stones; indoors it shows the house alone. It fills in as the player explores: places entered are drawn in full, places seen through an open doorway are sketched, the rest is left off. Shut doors and keys seen but not taken are marked.
 - **Light and dark.** Each place is lit by day, by torches, or deliberately left dark; the player carries a small light for the dark ones. The plan map shades unlit rooms.
@@ -418,6 +419,35 @@ The machine this is developed on now has a graphics card, and tablets were repor
     mission (the game's rules); its torches and lamps as lights, smoke, birds and sheep; and the build's own frames are not yet timed on a
     graphics card. What stands about the house comes cut into tiles of 64 metres, cut in the worker (`tilePacked`), as the game cuts it,
     so that what is out of view is not drawn; the page puts in some six milliseconds' worth of them a frame.
+
+53. **Figures to steer and to send about.** Asked first whether a rigged humanoid under CC0 could be found "with common animations for
+    humanlike activities (walking, running, sitting, crawling, falling, climbing, sleeping, etc.) or would it be easier for you to
+    generate such?"; then that it would be "for a character or characters that the player can control / command and to experiment on
+    different things in our world", seen "third person / non-first person", and "first ... in the lab context instead of building always
+    full world based environments". *Found, not made:* Quaternius's Universal Animation Library (version 3, 2026) and his Universal
+    Animation Library 2, with his Universal Base Characters, all CC0 and on one skeleton of 65 bones. Their free versions have 85 clips
+    (the paid ones some 250, with eight-way walking, crawling and more), two mannequins and two of the six base characters. A body and
+    its rig could be made in code, as everything else here is, and walking could be; but sitting down, lying down and getting up, made by
+    hand, would be stiff where these are animated. `tools/figures.ts` makes `public/figures/` from the downloaded packs, which are not
+    kept: every clip on one skeleton, tracks that stay at rest dropped and keys that add nothing thinned (16 MB to 3, no bone moved by
+    more than 0.6 millimetres), the characters' textures brought to 1024 pixels; some 7 MB in all. *Done:* `src/figures/`. A figure is
+    carried by the game's own body (`Player`, which now takes `steer`, a speed and a heading, in place of keys, and needs no camera or
+    page); its model plays idle, walk, run and sprint (or crouched idle and walk) blended by how fast the body really goes, each gait kept
+    at the same point of its stride and played at the rate that makes its feet keep pace with the ground, at 1.3, 4.6 and 7 metres a
+    second (0.9 crouched); jumps, falls and lands (hard from over a metre and a third); sits down on a seat, lies down on a bedroll to
+    sleep, and gets up; climbs a ledge of 0.75 to 1.3 metres, by itself when sent somewhere one is in the way; and plays any clip, those
+    that carry their root along (rolls, dashes, sword strokes) moving the body so that walls stop them. Other bodies take the mannequin's
+    clips with the height of their hips scaled. `lab/figures.html` (`npm run figures`, published with the tool) has a stage of a stair,
+    ramps of fifteen and thirty-five degrees, ledges of 0.6, 1.0, 1.25 and 1.6 metres, a platform to drop from, a bench and bedrolls; the
+    chosen figure is steered from behind with the view following it, or figures are sent about by pointing; every clip can be played.
+    *Checked* (`tools/browser/figures.cjs`, headless Chromium drawing WebGL 2 in software, the figures stepped at sixty a second): the
+    three paces and creeping at their speeds; seated in 4.2 seconds, asleep in 4.6, both up again; the ledges of 1.0 and 1.25 climbed and
+    stood on at their height, the one of 1.6 not; sent onto a ledge, it climbed it; up the stair and the ramp; a hard landing off the
+    platform; the roll went 5.07 metres (its clip 4.99) and the sword combination 2.38 (2.35). Pictures of each were looked at.
+    `tools/body.ts w0` and `tools/houses.ts 10` as before the change to `Player`. *Not yet:* swimming (its clips are here, water is not);
+    ladders and crawling (not in the free clips); feet set on sloping ground (they stand level on a slope); a way found round things
+    when sent (a figure goes straight, and gives up when stopped); figures in one another's way; hair on the base characters; the figures
+    in the game and in the world; and no frame was timed on a graphics card.
 
 ## Risks
 
