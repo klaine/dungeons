@@ -995,7 +995,22 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (One turned to a road is given the larger of its two half breadths both ways, as anything that asks only how far it reaches across and along may.)
     // (`reach`: how far from its middle anything of it reaches, its wings and steps with it: past that and four and a half metres more,
     // a point's ground is not its.)
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => { const hx = b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz = b.w / 2 + 0.5, big = Math.max(hx, hz), rects = footprintOf(b); return { ...b, base: b.style === 'brick' ? frontOf(b) : swells(b.x, b.z), hx: b.turn !== undefined ? big : hx, hz: b.turn !== undefined ? big : hz, rects, reach: Math.max(...rects.map((r) => Math.max(Math.hypot(r.u0, r.v0 - b.d / 2), Math.hypot(r.u1, r.v0 - b.d / 2), Math.hypot(r.u0, r.v1 - b.d / 2), Math.hypot(r.u1, r.v1 - b.d / 2)))) + 4 }; });
+    // (A village's house, turned to face its road wherever it bends, is set into the slope it stands on, as houses on a hillside are: its
+    // floor at the height of the ground before its door, so that one steps in from the road, and the land coming to its walls as it
+    // lies, rising against its back wall where the slope goes up behind it and falling from it, onto its footing, where it goes down;
+    // only the ground before its door, and along its sides near the front, is levelled with its floor. Its floor is raised only as much
+    // as keeps the land behind it from rising more than a metre up its back wall, under its windows. Levelled all round at its middle's
+    // height, as before, the ground before the house stood in a bank over the road, a stride high, and behind it fell away from it.)
+    const setIn = (b: Building) => b.turn !== undefined && b.style === 'timber';
+    const sitOf = (b: Building) => {
+      const at = (u: number, v: number) => { const [x, z] = fromFront(b, u, v); return swells(x, z); };
+      let high = -Infinity;
+      for (const [u, v] of [[-b.w / 2, b.d + 0.3], [0, b.d + 0.3], [b.w / 2, b.d + 0.3], [-b.w / 2 - 0.3, b.d / 2], [b.w / 2 + 0.3, b.d / 2]]) high = Math.max(high, at(u, v));
+      return Math.max(at(0, -1.5), high - 1.0);
+    };
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => { const hx = b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz = b.w / 2 + 0.5, big = Math.max(hx, hz), rects = footprintOf(b); return { ...b, set: setIn(b), base: b.style === 'brick' ? frontOf(b) : setIn(b) ? sitOf(b) : swells(b.x, b.z), hx: b.turn !== undefined ? big : hx, hz: b.turn !== undefined ? big : hz, rects, reach: Math.max(...rects.map((r) => Math.max(Math.hypot(r.u0, r.v0 - b.d / 2), Math.hypot(r.u1, r.v0 - b.d / 2), Math.hypot(r.u0, r.v1 - b.d / 2), Math.hypot(r.u1, r.v1 - b.d / 2)))) + 4 }; });
+    /** How near a point is to the village's houses and the castle's wall, for what grows: whether it is within `m` metres of either. */
+    const nearBuilt = (x: number, z: number, m: number) => (!!site.castle && castleOff(site.castle, x, z) < m + 6) || houses.some((b) => Math.abs(x - b.x) + Math.abs(z - b.z) < (b.reach + m) * 1.415 && outside(b, x, z) < m);
     // Whether a point is under a building, within its outer walls.
     // Whether a point is under a building, within its outer walls (wings and all).
     const footprint = (b: (typeof houses)[number], x: number, z: number) => {
@@ -1413,7 +1428,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         if (!b.sunk && Math.abs(x - b.x) + Math.abs(z - b.z) > (b.reach + 4.6) * 1.415) continue;
         const d = outside(b, x, z), sunk = b.sunk ?? 0, { u, v } = frontOf2(b, x, z);
         let k: number;
-        if (!sunk) {
+        if (b.set) {
+          const before = Math.max(0, -v), aside = Math.max(0, Math.abs(u) - b.w / 2), back = Math.max(0, v - 0.6);
+          if (before > 4.5 || aside > 3) continue;
+          k = (1 - smooth((before - 1.4) / 2.6)) * (1 - smooth((aside - 0.4) / 2.2)) * (1 - smooth(back / 2.2));
+        } else if (!sunk) {
           if (d > 4.5) continue;
           k = 1 - smooth((d - 0.9) / 3.2);
         } else {
@@ -2739,13 +2758,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // (In winter: near, bare, an oak keeping a few of its dead leaves; far, where twigs are too fine to draw, their haze.)
         // (Painted sprays a metre and a half across stood for the far twigs at first, and from any height the bare woods were full
         // brown crowns, an autumn's: a trace of them is left.)
-        const wintry = !winter ? 1 : detail > 0.5 ? (oak ? 0.04 : 0) : 0.05;
+        const wintry = !winter ? 1 : detail > 0.5 ? (oak ? 0.04 : 0) : 0.05, builtNear = nearBuilt(x, z, 14);
         const reach = growTree(planting, woodOf(oak ? 'oak' : 'ash'), x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
           bare: winter, kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy * wintry), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: winter ? leafOf(detail <= 0.5 ? [0.2, 0.18, 0.18] : [0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
           // (Its boughs kept out of the house: a great oak by a house standing free reached over its roofs and drooped into its court,
           // and through the arch from the court, where it stopped whoever walked through.)
           // (Nor low over the track and the paths, where a bough at head height stopped whoever walked up from the gap.)
-          keepOut: (q) => (q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4)) || (q.y < y + 2.6 && Math.min(offTrack(q.x, q.z), offFoot(q.x, q.z)) < 1.2),
+          // (Nor into a house of the village, nor over the castle's wall.)
+          keepOut: (q) => (q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4)) || (q.y < y + 2.6 && Math.min(offTrack(q.x, q.z), offFoot(q.x, q.z)) < 1.2) || (builtNear && q.y < y + 16 && nearBuilt(q.x, q.z, 0.9)),
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
@@ -2756,19 +2776,29 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (In a castle's valley the woods are where the valley has them: a forest at its foot where the player comes in, thinning to a
     // few trees about the fields and the village, and the castle's ground open. Leaned on the patches, so their edges stay ragged.)
     const zones = site.zones;
-    const woodLean = (z: number): number => !zones ? 0
+    // (And about a castle, asked for: more forest and trees round it. Its hill is wooded from some fourteen metres off its wall, where
+    // the ground kept open for the walls' sake ends, out for a furlong and more, thinning towards the road and the village along it.)
+    const castleWoods = (x: number, z: number) => {
+      const c = site.castle;
+      if (!c) return 0;
+      const off = castleOff(c, x, z);
+      return smooth((off - 14) / 14) * (1 - smooth((off - 120) / 70)) * smooth((offTrack(x, z) - 9) / 14);
+    };
+    const woodLean = (x: number, z: number): number => !zones ? 0
       : z > zones.forest[0] ? 0.2 * smooth((z - zones.forest[0]) / 25) - 0.3 * (1 - smooth((z - zones.forest[0] + 6) / 18))
-      : z > zones.fields[0] ? -0.3 : z > zones.village[0] ? -0.32 : -0.45;
+      : Math.max(z > zones.fields[0] ? -0.3 : z > zones.village[0] ? -0.32 : -0.45, -0.45 + 0.62 * castleWoods(x, z));
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x0 = gx + plant.range(0.1, 0.9) * step, z0 = gz + plant.range(0.1, 0.9) * step;
-        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3) + woodLean(z0);
+        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3) + woodLean(x0, z0);
         const pair = step > 8 && thick > 0.6 && own01(x0, z0, 51) < 0.5 ? 2 : 1;
         for (let k = 0; k < pair; k++) {
           const x = k ? gx + own01(x0, z0, 52) * step : x0, z = k ? gz + own01(x0, z0, 53) * step : z0;
-          if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
+          // (Nor in or against a house of the village, or within the castle's wall or by it: the woods' trees knew nothing of either while
+          // the castle's ground and the village were kept clear of woods, and stood in them once woods came round them.)
+          if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5) || nearBuilt(x, z, 3)) continue;
           if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
-          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) + woodLean(z) : thick;
+          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) + woodLean(x, z) : thick;
           if (here < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
           if (step > 8 && own01(x, z, 54) < 0.85 * (1 - smooth((here - 0.46) / 0.12))) continue;
           // Full detail anywhere the player can stand, and for a stone's throw beyond, so that the wood the valley lies in goes on as
@@ -2797,6 +2827,30 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const row = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('treerow') : null; // (no woods when a row is asked for, so the row stands alone)
     if (!row) woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
     if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, (x, z) => inFine(x, z) || ringOut(x, z) > -4);
+    // Trees among the village's houses (asked for: some near the buildings): a fruit tree in a garden or yard behind a house more often
+    // than not, a broad old tree at a corner of the square, and now and then one beside a house, off its gable. Young and spreading,
+    // and from a stream of their own, so that nothing else moves.
+    if (!row && site.village) {
+      const vt = rng.fork('village trees'), tq = rng.fork('village tree ages');
+      const ok = (x: number, z: number, m: number) => !nearBuilt(x, z, m) && offTrack(x, z) > 3 && offFoot(x, z) > 1.6 && clearOfFeatures(x, z) > 3 && clearOfStones(x, z, 0.8) && (!fieldList.length || fieldAt(x, z, 3) < 0);
+      for (const pl of site.village.plots) {
+        if (!vt.chance(0.65)) continue;
+        const cx = pl.reduce((a, q) => a + q[0], 0) / pl.length, cz = pl.reduce((a, q) => a + q[1], 0) / pl.length;
+        const x = cx + vt.range(-1.2, 1.2), z = cz + vt.range(-1.2, 1.2);
+        if (ok(x, z, 2.2)) tree(x, z, ground(x, z), 1, { oak: true, roll: tq.range(0.72, 0.95) });
+      }
+      const sq = site.village.square;
+      if (sq && vt.chance(0.8)) {
+        const k = vt.int(0, sq.length - 1), [qx, qz] = sq[k], mx = sq.reduce((a, q) => a + q[0], 0) / sq.length, mz = sq.reduce((a, q) => a + q[1], 0) / sq.length;
+        const x = qx + (mx - qx) * 0.22, z = qz + (mz - qz) * 0.22;
+        if (ok(x, z, 2.5)) tree(x, z, ground(x, z), 1, { oak: true, roll: tq.range(0.3, 0.6), old: true });
+      }
+      for (const b of houses) {
+        if (!b.set || !vt.chance(0.35)) continue;
+        const side = vt.chance(0.5) ? 1 : -1, [x, z] = fromFront(b, side * (b.w / 2 + vt.range(3.2, 4.5)), b.d * vt.range(0.3, 0.9));
+        if (ok(x, z, 2.6)) tree(x, z, ground(x, z), 1, { oak: vt.chance(0.6), roll: tq.range(0.55, 0.9) });
+      }
+    }
     // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
     if (row) {
       const [rx, rz] = row.split(',').map(Number);
