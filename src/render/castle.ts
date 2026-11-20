@@ -132,14 +132,24 @@ export function buildCastle(b: CastleBuild): void {
         prism('castle', [[p0x + ox * T / 2, p0z + oz * T / 2], [p1x + ox * T / 2, p1z + oz * T / 2], [p1x + ox * (T / 2 + 0.7), p1z + oz * (T / 2 + 0.7)], [p0x + ox * (T / 2 + 0.7), p0z + oz * (T / 2 + 0.7)]], foot, floor + 0.6, tone(0.95));
         battlement(p0x + ox * T / 2, p0z + oz * T / 2, p1x + ox * T / 2, p1z + oz * T / 2, -ox, -oz, top);
         // Put-log holes in both faces, where the builders' scaffold was carried: rows of small square sockets a metre and a third apart,
-        // a stride and a half along, not every one of them there, nor all quite in line.
+        // two strides or so along, not every one of them there, nor all quite in line. Most were stopped with a stone when the scaffold
+        // came down: a row here and there shows, and few of its holes; and a length rebuilt or refaced shows none.
+        // (Every row, a hole in two of every three, was a grid of black squares over every wall, and the eye read the grid as a pattern.)
         const lenP = Math.hypot(p1x - p0x, p1z - p0z);
-        for (const side of [1, -1]) for (let y = floor + 1.7; y < top - 1.2; y += 1.33) for (let u = 0.8; u < lenP - 0.6; u += 1.55) {
-          const h = Math.sin(u * 12.9898 + y * 78.233 + i * 37.7 + k * 11.1 + side * 3.3) * 43758.5453, r1 = h - Math.floor(h);
-          if (r1 < 0.35) continue;
-          const f = u / lenP, bx2 = p0x + (p1x - p0x) * f, bz2 = p0z + (p1z - p0z) * f, yy = y + (r1 - 0.5) * 0.12, s2 = 0.1;
-          const fx = ox * side, fz = oz * side, wx = bx2 + fx * (T / 2 + 0.012), wz = bz2 + fz * (T / 2 + 0.012), ax2 = -fz, az2 = fx;
-          face('metal', [[wx - ax2 * s2, yy - s2, wz - az2 * s2], [wx + ax2 * s2, yy - s2, wz + az2 * s2], [wx + ax2 * s2, yy + s2, wz + az2 * s2], [wx - ax2 * s2, yy + s2, wz - az2 * s2]], dark, [bx2, yy, bz2]);
+        const rnd = (s: number) => { const h = Math.sin(s * 12.9898 + i * 37.7 + k * 11.1) * 43758.5453; return h - Math.floor(h); };
+        for (const side of [1, -1]) {
+          if (rnd(side * 5.1) < 0.3) continue;
+          const lift = rnd(side * 7.3) * 1.33, step = 1.7 + rnd(side * 9.9) * 0.7;
+          for (let y = floor + 1.5 + lift; y < top - 1.2; y += 1.33) {
+            if (rnd(y * 3.7 + side) < 0.45) continue;
+            for (let u = 0.6 + rnd(y + side * 2.2) * step; u < lenP - 0.6; u += step) {
+              const h = Math.sin(u * 12.9898 + y * 78.233 + i * 37.7 + k * 11.1 + side * 3.3) * 43758.5453, r1 = h - Math.floor(h);
+              if (r1 < 0.55) continue;
+              const f = u / lenP, bx2 = p0x + (p1x - p0x) * f, bz2 = p0z + (p1z - p0z) * f, yy = y + (r1 - 0.5) * 0.14, s2 = 0.07 + (r1 - 0.55) * 0.07;
+              const fx = ox * side, fz = oz * side, wx = bx2 + fx * (T / 2 + 0.012), wz = bz2 + fz * (T / 2 + 0.012), ax2 = -fz, az2 = fx;
+              face('metal', [[wx - ax2 * s2, yy - s2, wz - az2 * s2], [wx + ax2 * s2, yy - s2, wz + az2 * s2], [wx + ax2 * s2, yy + s2, wz + az2 * s2], [wx - ax2 * s2, yy + s2, wz - az2 * s2]], dark, [bx2, yy, bz2]);
+            }
+          }
         }
       }
     }

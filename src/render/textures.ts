@@ -682,18 +682,19 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   // four stones in each, every stone the same grey, clean-edged and flat: a grid, which made the castle look drawn rather than built;
   // and then courses of their own heights with stones of their own lengths, which still read as brick.)
   castle: {
-    normalStrength: 3.8,
+    normalStrength: 1.9,
     height: /* glsl */ `
 vec4 blockAt(vec2 uv) {
-  // Coursed rubble: each stone the cell of a lattice of points, four along and six up to the two metres, each point moved about in its
-  // cell (more along the course than across it, so the courses hold), and some stones grown larger than their neighbours (a cell's
-  // distance is less its own weight), so that stones are of many sizes and their joints are anything but straight. (A grid of
-  // rectangles, however uneven, read as brick.)
-  vec2 cells = vec2(4., 6.), g = uv * cells, ip = floor(g), fp = fract(g);
+  // Coursed rubble: each stone the cell of a lattice of points, eight along and twelve up to the picture's four metres, each point
+  // moved about in its cell (more along the course than across it, so the courses hold), and some stones grown larger than their
+  // neighbours (a cell's distance is less its own weight), so that stones are of many sizes and their joints are anything but
+  // straight. (A grid of rectangles, however uneven, read as brick.) (The picture is four metres, not two, and is laid in patches
+  // from different places in it, so that a wall does not repeat: see laidUnrepeated in siteMaterial.ts.)
+  vec2 cells = vec2(8., 12.), g = uv * cells, ip = floor(g), fp = fract(g);
   float d1 = 9., d2 = 9.; vec2 best = vec2(0.);
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     vec2 o = vec2(float(i), float(j)), cell = mod(ip + o, cells), h = hash22(cell + 3.1);
-    vec2 pt = (o + vec2(.5 + (h.x - .5) * .75, .5 + (h.y - .5) * .3) - fp) * (vec2(2.) / cells);
+    vec2 pt = (o + vec2(.5 + (h.x - .5) * .75, .5 + (h.y - .5) * .3) - fp) * (vec2(4.) / cells);
     float d = length(pt) - hash21(cell + 6.7) * .09;
     if (d < d1) { d2 = d1; d1 = d; best = cell; } else if (d < d2) d2 = d;
   }
@@ -703,14 +704,14 @@ vec4 blockAt(vec2 uv) {
 float heightFn(vec2 uv) {
   vec4 b = blockAt(uv);
   // (The joint wavers: hammer-dressed stone has no straight edge.)
-  float wear = (fbm(uv + b.w * 9.1, vec2(14., 34.), 3, .5) - .5) * .05 + fbm(uv * 3. + b.w, vec2(60.), 2, .5) * .012;
+  float wear = (fbm(uv + b.w * 9.1, vec2(28., 68.), 3, .5) - .5) * .05 + fbm(uv * 3. + b.w, vec2(120.), 2, .5) * .012;
   float face = smoothstep(.006, .034, b.z + wear);
   // (Faces split and dressed flat, with only a little rounding to their edges: domed more, each stone was a cushion.)
   float dome = smoothstep(0., .1, b.z + wear * .5) * .07;
-  float rough = fbm(uv + b.w * 3.7, vec2(22.), 4, .55) * .2 + gnoise(vec2(uv.x * 46., uv.y * 96.), vec2(46., 96.)) * .05;
+  float rough = fbm(uv + b.w * 3.7, vec2(44.), 4, .55) * .2 + gnoise(vec2(uv.x * 92., uv.y * 192.), vec2(92., 192.)) * .05;
   // (A stone in a few stands proud of the course, and one in a few sits back.)
   float own = (b.w - .5) * .12 + (step(.86, hash21(vec2(b.x, b.y) + 21.3)) - step(.9, hash21(vec2(b.x, b.y) + 33.1))) * .1;
-  float mortar = .16 + fbm(uv + 7.7, vec2(64.), 3, .5) * .1;
+  float mortar = .16 + fbm(uv + 7.7, vec2(128.), 3, .5) * .1;
   return clamp(mix(mortar, .52 + dome + rough + own, face), 0., 1.);
 }`,
     surface: /* glsl */ `
@@ -723,18 +724,19 @@ void surfaceFn(vec2 uv, float h, float cavity, out vec3 albedo, out float rough)
   stone = mix(stone, vec3(.46, .44, .42), step(.84, r2) * .75);
   stone = mix(stone, vec3(.72, .58, .4), step(.9, r4) * .55);
   // (Within a stone: mottled.) (The noise is asked at whole multiples of the texture's breadth only, so that it tiles.)
-  stone *= .86 + .22 * smoothstep(-.3, .3, fbm(uv + b.w * 5.3, vec2(29., 68.), 4, .55));
-  float stain = smoothstep(.1, .5, fbm(uv + 13.7, vec2(4.), 4, .55));
+  stone *= .86 + .22 * smoothstep(-.3, .3, fbm(uv + b.w * 5.3, vec2(58., 136.), 4, .55));
+  float stain = smoothstep(.1, .5, fbm(uv + 13.7, vec2(8.), 4, .55));
   stone = mix(stone, vec3(.55, .48, .38), stain * .3);
   // Specks of lichen, pale grey-green and yellow, on some stones.
-  float lichen = smoothstep(.72, .8, fbm(uv + b.w * 2.1, vec2(48., 96.), 3, .55)) * step(.55, r4);
+  float lichen = smoothstep(.72, .8, fbm(uv + b.w * 2.1, vec2(96., 192.), 3, .55)) * step(.55, r4);
   stone = mix(stone, mix(vec3(.75, .76, .62), vec3(.72, .64, .32), step(.5, r2)), lichen * .55);
-  vec3 mortar = vec3(.62, .59, .54) * (.8 + .2 * smoothstep(-.3, .3, fbm(uv + 2.2, vec2(30.), 3, .5)));
+  vec3 mortar = vec3(.62, .59, .54) * (.8 + .2 * smoothstep(-.3, .3, fbm(uv + 2.2, vec2(60.), 3, .5)));
   float isStone = smoothstep(.006, .03, b.z);
   vec3 c = mix(mortar, stone, isStone);
-  // (Rain runs down a wall in long streaks, darkening it.)
-  c *= .8 + .2 * smoothstep(-.35, .25, fbm(vec2(uv.x, uv.y * .15) + 4.4, vec2(10., 1.), 3, .5));
-  albedo = c * (1. - cavity * .4) * (.94 + .12 * hash21(floor(uv * 512.)));
+  // (Rain runs down a wall in long streaks, darkening it.) (One cell of the noise from the picture's foot to its head, so that the
+  // streaks are long and the picture still meets itself above and below: squeezed upright by a fraction, it did not.)
+  c *= .8 + .2 * smoothstep(-.35, .25, fbm(uv + 4.4, vec2(20., 1.), 3, .5));
+  albedo = c * (1. - cavity * .4) * (.94 + .12 * hash21(floor(uv * 1024.)));
   rough = mix(.96, .88, isStone);
 }`,
   },

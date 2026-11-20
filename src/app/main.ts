@@ -269,7 +269,8 @@ async function start(): Promise<void> {
   const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
   // (The coursed stone of a castle's walls and towers, in a valley.)
   // (A valley's castle and its village's church, and an island's castle, are of it.)
-  const castleStone = place === 'valley' || place === 'island' ? await paint('castle', texSize, 89) : null;
+  // (Painted at twice the breadth of the others, up to 2048, since it covers four metres to their two: see `laidUnrepeated`.)
+  const castleStone = place === 'valley' || place === 'island' ? await paint('castle', Math.min(texSize * 2, 2048), 89) : null;
   // (And the ashlar of a cathedral's walls, laid as a picture and not stone by stone, is only in towns, where the cathedral is.)
   const ashlar = place === 'town' ? await paint('ashlar', texSize, 89) : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
@@ -306,7 +307,7 @@ async function start(): Promise<void> {
     // (Weathered as old roofs are: see `roof` there.)
     tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
     ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }) } : {}),
-    ...(castleStone ? { castle: makeSiteMaterial(castleStone, moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered }) } : {}),
+    ...(castleStone ? { castle: makeSiteMaterial(castleStone, moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered, unrepeat: { span: 2, courses: 12 } }) } : {}),
     // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
     redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
     buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),

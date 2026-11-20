@@ -193,6 +193,9 @@ export function buildExportScene(source: ModelSource): Group {
     let maps = converted.get(set);
     if (!maps) {
       maps = [0, 1, 2].map((k) => toCanvasTexture(set, k as 0 | 1 | 2));
+      // (The castle's stone is a picture of four metres where the others' are of two, and is read at half the scale: see
+      // `laidUnrepeated` in `siteMaterial.ts`, which also lays it in patches; an exported model has it repeating as it is.)
+      if (name === 'castle') for (const t of maps) t.repeat.set(0.5, 0.5);
       converted.set(set, maps);
     }
     m = new MeshStandardMaterial({ name, map: maps[0], normalMap: maps[1], aoMap: maps[2], roughnessMap: maps[2], metalnessMap: maps[2], roughness: 1, metalness: 1, vertexColors: true });

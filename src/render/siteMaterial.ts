@@ -257,19 +257,34 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * `paint`, where given, is the colour of the whole surface in place of the colour each point carries: for glass in a lit
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
-export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean; chips?: boolean; weather?: boolean; bond?: 'wendish' | 'running'; timber?: boolean; roof?: boolean } = {}): MeshStandardNodeMaterial {
+/**
+ * `unrepeat`, for a wall of rubble (the castle's): its picture covers `span` units of the surface's texture coordinates, and it is laid
+ * over the wall in patches a few metres across, each patch from another place in it (see `laidUnrepeated`), so that no stretch of the
+ * wall is a copy of another. `courses` is how many courses the picture has from foot to head, so that a patch is moved up or down by
+ * whole courses and its courses run on into its neighbour's.
+ */
+export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?: number; roughness?: number; mossScale?: number; matt?: boolean; deep?: number; hollow?: number; paint?: [number, number, number]; fades?: 'near'; bevel?: number; render?: boolean; chips?: boolean; weather?: boolean; bond?: 'wendish' | 'running'; timber?: boolean; roof?: boolean; unrepeat?: { span: number; courses: number } } = {}): MeshStandardNodeMaterial {
   if (o.deep) return makeDeepMaterial(base, moss, { ...o, deep: o.deep });
+  const un = o.unrepeat;
   const m = new MeshStandardNodeMaterial({
-    normalMap: base.normalMap,
+    normalMap: un ? null : base.normalMap,
     normalScale: new Vector2(o.normalScale ?? 1, o.normalScale ?? 1),
-    aoMap: base.ormMap,
-    roughnessMap: base.ormMap,
+    aoMap: un ? null : base.ormMap,
+    roughnessMap: un ? null : base.ormMap,
     roughness: o.roughness ?? 1,
     metalness: 0,
     color: new Color(1, 1, 1),
   });
   const f = fieldOf(), bk = bakeOf();
-  const stone: N = texture(base.map, uv()), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
+  const laid = un ? laidUnrepeated(base, un.span, un.courses) : null;
+  const stone: N = laid ? laid.map : texture(base.map, uv()), mossTex: N = texture(moss.map, uv().mul(o.mossScale ?? 1.7));
+  // (The picture's bumps, as the standard material would read them, or as they are laid in patches.)
+  const bumps = (): N => (laid ? laid.normal : texture(base.normalMap, uv()));
+  if (laid) {
+    m.normalNode = normalMap(laid.normal, vec2(o.normalScale ?? 1, o.normalScale ?? 1));
+    m.aoNode = laid.orm.r;
+  }
+  const roughness: N = laid ? float(o.roughness ?? 1).mul(laid.orm.g) : materialRoughness;
   // (Damp from the place, and the rain's wetting where the sky reaches.)
   const wet = max(f.y, rainWet(bk).mul(0.8));
   // Moss wants sky above it and little direct sun; before the bake arrives, use the raw field.
@@ -277,6 +292,15 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   const mossy = smoothstep(0, 0.22, f.x.mul(lightOk).mul(1.5).add(one(stone.a).mul(0.4)).add(mossTex.a.mul(0.45)).sub(1));
   // Damp stone is darker; soot is darker still and matt.
   let colour: N = stone.rgb.mul(o.paint ? vec3(...o.paint) : vertexColor().rgb).mul(mix(1, 0.5, wet));
+  if (laid) {
+    // A wall of rubble is not one grey from end to end: stone from another bed of the quarry or another year's work, a length
+    // refaced, the grime of centuries thicker in some places than others. Patches of a few metres, darker and lighter, a little
+    // warmer and cooler, with smaller ones in them. (Seen from across a field, the wall of one even tone was a picture laid on it.)
+    const t: N = uv();
+    const big: N = farNoise(t.div(2.4).add(vec2(4.4, 2.6))).mul(0.6).add(farNoise(t.div(0.9).add(vec2(9.1, 1.4))).mul(0.28)).add(farNoise(t.div(0.3).add(vec2(2.7, 6.3))).mul(0.12)).toVar();
+    colour = colour.mul(mix(0.66, 1.06, smoothstep(0.22, 0.78, big)));
+    colour = colour.mul(mix(vec3(0.93, 0.97, 1.03), vec3(1.06, 1.0, 0.9), smoothstep(0.3, 0.7, farNoise(t.div(3.3).add(vec2(1.7, 8.8))))));
+  }
   colour = mix(colour, mossTex.rgb, mossy);
   colour = mix(colour, vec3(0.012), f.z.mul(0.9));
   // Damp risen in the foot of an outer wall from the ground it stands in, where the wall says how high that ground is (the fourth
@@ -461,7 +485,8 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // Rain has run down the outer walls, in long streaks of grime from what stands out over them, darker in some places than others.
   if (o.weather) {
     const streak: N = smoothstep(0.52, 0.8, farNoise(vec2(q.x.mul(2.4), q.y.mul(0.16)).add(1.3)).mul(0.75).add(farNoise(vec2(q.x.mul(9.1), q.y.mul(0.5)).add(4.4)).mul(0.25)));
-    colour = colour.mul(one(streak.mul(worn.mul(0.14).add(0.12)).mul(hasFoot).mul(renderUniforms.uChips as N)));
+    // (On a castle's walls, high and long without eaves over them, more of it.)
+    colour = colour.mul(one(streak.mul(worn.mul(laid ? 0.2 : 0.14).add(laid ? 0.2 : 0.12)).mul(hasFoot).mul(renderUniforms.uChips as N)));
   }
   const mark: N = farNoise(vec2(along.mul(0.9), 3.1)).mul(0.6).add(farNoise(vec2(along.mul(4.3), positionWorld.y.mul(0.7))).mul(0.2)).add(0.42).toVar();
   // (Its edge is taken through the wall's own texture as well, so that it is blotched as damp is, and not a drawn wave.)
@@ -481,11 +506,11 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     colour = colour.mul(edge.wear.mul(0.12).add(1)).mul(edge.chip.mul(0.16).add(1));
     // (Paint wears through first where it is knocked and rubbed, at the arrises, and most where a piece has been knocked off.)
     if (woodEdge) colour = mix(colour, woodGrey, clamp(woodEdge(max(edge.wear.mul(0.75), edge.chip)), 0, 1));
-    m.normalNode = edge.bend(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
+    m.normalNode = edge.bend(normalMap(bumps(), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   }
-  if (chipNormal) m.normalNode = chipNormal(normalMap(texture(base.normalMap, uv()), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
+  if (chipNormal) m.normalNode = chipNormal(normalMap(bumps(), vec2(o.normalScale ?? 1, o.normalScale ?? 1)));
   m.colorNode = vec4(colour, 1);
-  m.roughnessNode = mix(mix(materialRoughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(max(mossy, f.z), roofMatt)), 0.66, snowy);
+  m.roughnessNode = mix(mix(roughness.mul(mix(1, 0.42, wet.mul(one(mossy)))), 0.97, max(max(mossy, f.z), roofMatt)), 0.66, snowy);
   // Stone that sees no sky, out where the sun's shadows are not kept, is indoors: the inside of
   // a tower in the valley, say. The sun does not reach it through its walls.
   // Reflections of the sky only where the sky can be seen.
@@ -1388,6 +1413,33 @@ const farNoise: N = Fn(([p]: [N]) => {
   const f: N = f0.mul(f0).mul(f0.mul(-2).add(3)).toVar();
   return mix(mix(farHash(i), farHash(i.add(vec2(1, 0))), f.x), mix(farHash(i.add(vec2(0, 1))), farHash(i.add(vec2(1, 1))), f.x), f.y);
 });
+/**
+ * A picture of rubble laid over a wall so that it does not repeat (`unrepeat` in `makeSiteMaterial`). The wall is cut into patches by
+ * a number that wanders over it, rising a little along it and up it, each whole step of the number a patch; each patch reads the
+ * picture from a place of its own, moved along by any amount and up by whole courses. Between two patches both are read, and at
+ * each point whichever stands higher there is shown, the one patch's stones over the other's mortar, so that where they meet the join
+ * runs round stones and not through them in a line. (Read from one place, a picture of two metres repeated sixty times over a length of
+ * curtain, and the eye found the same dark stone and the same lichen at every step.)
+ */
+function laidUnrepeated(base: TextureSet, span: number, courses: number): { map: N; normal: N; orm: N } {
+  // (The texture coordinates of what is built run a unit to two metres, along a wall and up it; see `face` in `castle.ts`.)
+  const t: N = uv().toVar(), u0: N = t.div(span).toVar();
+  // (Read with the steepness of the coordinates themselves: where the patch changes, the place read jumps, and the picture's finest
+  // level would be read there for a point of the picture's width, a line of speckle round every patch.)
+  const gx: N = dFdx(u0), gy: N = dFdy(u0);
+  const n: N = farNoise(t.div(1.6).add(vec2(3.7, 1.1))).mul(2.4).add(farNoise(t.div(0.55).add(vec2(8.2, 5.9))).mul(0.55)).add(t.x.mul(0.1)).add(t.y.mul(0.06)).toVar();
+  const k: N = floor(n).toVar(), fk: N = fract(n).toVar();
+  const shift = (i: N): N => vec2(farHash(vec2(i, 1.3)), floor(farHash(vec2(i.add(0.5), 7.9)).mul(courses)).div(courses));
+  const uA: N = u0.add(shift(k)).toVar(), uB: N = u0.add(shift(k.add(1))).toVar();
+  const read = (tex: N, at: N): N => (texture(tex, at) as N).grad(gx, gy);
+  const mA: N = read(base.map, uA).toVar(), mB: N = read(base.map, uB).toVar();
+  // (Each picture keeps its height in its fourth number. The weights rise from one patch to the next across the whole step, so
+  // that the join is as smooth from one step to the next as within one; the higher wins within a few hundredths.)
+  const a: N = mA.a.add(one(fk)), b: N = mB.a.add(fk), top: N = max(a, b).sub(0.05);
+  const wa: N = max(a.sub(top), 0), wb: N = max(b.sub(top), 0);
+  const w: N = wb.div(wa.add(wb).add(1e-5)).toVar();
+  return { map: mix(mA, mB, w), normal: mix(read(base.normalMap, uA).xyz, read(base.normalMap, uB).xyz, w), orm: mix(read(base.ormMap, uA), read(base.ormMap, uB), w) };
+}
 const farFbm: N = Fn(([p0]: [N]) => {
   const p: N = vec2(p0).toVar(), s: N = float(0).toVar(), a: N = float(0.5).toVar();
   Loop(4, () => {
