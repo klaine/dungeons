@@ -1175,7 +1175,10 @@ export function makeSnowMaterial(turf: TextureSet, scree: TextureSet): MeshStand
   // which seen across a slope from a little way off were blocks.)
   const turned: N = vec2(P.x.mul(0.8).sub(P.z.mul(0.6)), P.x.mul(0.6).add(P.z.mul(0.8)));
   const fringe: N = farNoise(turned.mul(0.85)).mul(0.6).add(farNoise(turned.yx.mul(2.3).add(5.3)).mul(0.4));
-  const snowy: N = smoothstep(0, 0.12, mix(-1.15, 0.75, snowUniforms.uSnow as N).add(up.sub(0.8).mul(2.4)).add(farFbm(at0.mul(0.045).add(3.7)).sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, snowUniforms.uSnow as N)).toVar();
+  // (Its drifts some tens of metres across from the turf read large, which this material reads already, in place of the four sizes of
+  // noise `snowOn` sums for them.)
+  const drift: N = macro.mul(0.65).add(mid.mul(0.35));
+  const snowy: N = smoothstep(0, 0.12, mix(-1.15, 0.75, snowUniforms.uSnow as N).add(up.sub(0.8).mul(2.4)).add(drift.sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, snowUniforms.uSnow as N)).toVar();
   // Where it does not lie, the mountain's rock, as the far land draws it (`makeFarMaterial`): in beds some metres thick, each its own
   // shade; its grain from the scree's picture read at two sizes, so that no repeat of it shows; tinted by the colour the sheet carries.
   // (The scree's picture alone, at a stride, showed the same pebbles over and over across a face.)
@@ -1197,16 +1200,14 @@ export function makeSnowMaterial(turf: TextureSet, scree: TextureSet): MeshStand
   {
     // Snow the wind has worked, as the ground's material draws it: low ripples across the way it blows, broader drifts, and near the
     // eye ripples a hand apart; none on what is groomed, where instead the corduroy's ridges tilt the light across the lane.
-    const rip = (k: number, e: number): N => {
-      const q: N = vec2(at0.x.mul(0.8).add(at0.y.mul(0.35)), at0.y.mul(2.6).sub(at0.x.mul(0.5))).mul(k);
-      return vec2(farNoise(q.add(vec2(e, 0))).sub(farNoise(q.sub(vec2(e, 0)))), farNoise(q.add(vec2(0, e))).sub(farNoise(q.sub(vec2(0, e))))).div(e * 2);
-    };
+    // (Each size's slope worked out exactly, not from the noise a step either way: three samples of noise for the twelve it took.)
+    const rip = (k: number): N => farNoiseSlope(vec2(at0.x.mul(0.8).add(at0.y.mul(0.35)), at0.y.mul(2.6).sub(at0.x.mul(0.5))).mul(k));
     // (Worked out only where they can be seen, within ninety metres: twelve samples of noise, the most of what this material does,
     // and nothing of them shows further off.)
     const drifted: N = Fn(() => {
       const d: N = vec2(0, 0).toVar();
       If(far.lessThan(90), () => {
-        d.assign(rip(0.9, 0.08).mul(0.16).add(rip(0.16, 0.05).mul(0.35)).add(rip(2.7, 0.03).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))));
+        d.assign(rip(0.9).mul(0.16).add(rip(0.16).mul(0.35)).add(rip(2.7).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))));
       });
       return d;
     })().toVar();
@@ -1508,6 +1509,17 @@ const farNoise: N = Fn(([p]: [N]) => {
   const i: N = floor(p).toVar(), f0: N = fract(p);
   const f: N = f0.mul(f0).mul(f0.mul(-2).add(3)).toVar();
   return mix(mix(farHash(i), farHash(i.add(vec2(1, 0))), f.x), mix(farHash(i.add(vec2(0, 1))), farHash(i.add(vec2(1, 1))), f.x), f.y);
+});
+/**
+ * How `farNoise` rises along each axis at a point, worked out exactly from the same four corners: what its value a step either way
+ * on each axis gives, for a quarter of the samples (four reads of the noise for one).
+ */
+const farNoiseSlope: N = Fn(([p]: [N]) => {
+  const i: N = floor(p).toVar(), f0: N = fract(p).toVar();
+  const f: N = f0.mul(f0).mul(f0.mul(-2).add(3)).toVar(), df: N = f0.mul(one(f0)).mul(6);
+  const a: N = farHash(i).toVar(), b: N = farHash(i.add(vec2(1, 0))).toVar(), c: N = farHash(i.add(vec2(0, 1))).toVar(), d: N = farHash(i.add(vec2(1, 1)));
+  const k: N = a.sub(b).sub(c).add(d).toVar();
+  return vec2(df.x.mul(b.sub(a).add(k.mul(f.y))), df.y.mul(c.sub(a).add(k.mul(f.x))));
 });
 /**
  * A picture of rubble laid over a wall so that it does not repeat (`unrepeat` in `makeSiteMaterial`). The wall is cut into patches by

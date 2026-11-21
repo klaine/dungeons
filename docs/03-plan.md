@@ -1042,6 +1042,29 @@ The machine this is developed on now has a graphics card, and tablets were repor
     (*Plain*). *Checked* (headless, drawing in software): the page ready in some eleven seconds (the textures painted at 512),
     0.69 million triangles drawn against 0.73; a frame about twice the plain look's (1.5 to 1.8 seconds against 0.7 to 0.8, in
     software; the far land's light form saved about a tenth); the switch between the looks and to the groomed slope and back.
+78. **Faster frames on the run.** Asked: "Ok find how to best optimize the performance still with reasonable visual tradeoffs".
+    *Measured* first (`__slope.bench` in `lab/slope.ts`: the present view drawn a few frames, each in a frame of the browser's own
+    and waited for, with parts of the land hidden or settings changed; headless, drawing in software at 1000 by 620, which weighs
+    every point of the picture heavily and four-times-over smoothing most of all, so the shares below are a guide, not a graphics
+    card's). As published, from behind the skier looking down the run, 2.12 seconds a frame, from beside 1.13. Hiding a part saved
+    more than it could cost alone: the land about the run lay whole under the run's snow, sunk out of sight, and the country under
+    both, and each point there was worked out two and three times over. The scene drawn four times over at each point (MSAA) was
+    more than half; half the fineness each way halved what was left; the blur pass a tenth; shadows, firs and the skier next to
+    nothing. *Done:* (1) a hole in each coarser grid where a finer lies over it, a square left out where all its corners are under
+    the finer (2.12 to 1.59 seconds, nothing seen changed); (2) the scene drawn once to a point and its edges smoothed after (FXAA),
+    with the blur and without it, the canvas's own four-times-over not asked for (`?msaa=1` for it) (to 0.84 and 0.66); (3) the run's
+    snow at a metre in tiles of 64 metres, each made at a metre and at four, those within 120 metres of the eye drawn at a metre
+    (`lod` on the land; 676,000 triangles to 497,000; from behind a frame cost the same in software, where the cost is the points
+    of the picture, but a graphics card shades a triangle smaller than a point several times over); (4) the winter snow lighter
+    still: its ripples' slopes worked out exactly (three samples of noise for twelve), its swells from a texture it reads already,
+    and the motion blur's eight samples only where something moves across the picture (to 0.78 and 0.62: about 2.7 and 1.8 times
+    faster than published); (5) *Resolution*: *Auto* draws at fewer points while frames keep coming slower than sixty a second (or
+    the screen's rate), three slow frames in a row and half a second of them, down a step of 15% at a time to half; back up 10% after
+    four seconds with room to spare; each step held a while; *Full*, *¾*, *½* fix it. In the headless browser *Auto* went 72%, 61%,
+    50% and stayed there. The plain look (*Snow*) costs some two thirds of the game's (0.55 seconds from behind). Not done, as
+    costing more than they save or seen: fewer shadows (a tenth), coarser far land (its material, not its triangles, is the cost).
+    Pictures from behind, beside, above the crest and near: nothing seen changed. Not yet timed on a graphics card, a laptop or a
+    tablet.
 ## Risks
 
 | Risk | Mitigation |

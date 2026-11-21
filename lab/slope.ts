@@ -41,8 +41,9 @@ import {
   PCFSoftShadowMap, PerspectiveCamera, Quaternion, RepeatWrapping, Scene, SkinnedMesh, SRGBColorSpace, Vector3,
 } from 'three';
 import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { abs, float, Fn, int, length, Loop, max, min, mix, mrt, output, pass, smoothstep, uniform, uv, vec2, vec4, velocity } from 'three/tsl';
+import { abs, float, Fn, If, int, length, Loop, max, min, mix, mrt, output, pass, renderOutput, screenSize, smoothstep, uniform, uv, vec2, vec4, velocity } from 'three/tsl';
 import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
+import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FigureLibrary } from '../src/figures/library';
 import { putOn } from '../src/figures/gear';
@@ -107,8 +108,10 @@ interface Now { down: number; left: number; speed: number; way: number; ski: num
 
 async function start() {
   const canvas = $<HTMLCanvasElement>('view');
-  const renderer = new WebGPURenderer({ canvas, antialias: true, powerPreference: 'high-performance', forceWebGL: query.has('webgl') });
+  // (Its picture is drawn through a pipeline of its own, smoothed there: the canvas's own four times over is not wanted.)
+  const renderer = new WebGPURenderer({ canvas, antialias: false, powerPreference: 'high-performance', forceWebGL: query.has('webgl') });
   await renderer.init();
+  // (How finely: see *Resolution*, below.)
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.toneMapping = ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.92;
@@ -1066,7 +1069,10 @@ async function start() {
   // skinned body's motion comes out wrong when the whole of it moves across the picture. A smear that would leave out what lies much
   // nearer than the point smeared, so that the skier is not streaked over the snow behind it, read nothing from the depths at other
   // points of the picture and drew the near snow black; it is not done.)
-  const scenePass = pass(scene, camera);
+  // (Drawn once to a point, its edges smoothed after (FXAA), not drawn four times over at each (`?msaa=1` for that): four times over cost
+  // more than half of a frame drawn in software, and what the blur smears and softens needs none of it.)
+  const msaa = query.get('msaa') === '1';
+  const scenePass = pass(scene, camera, { samples: msaa ? 4 : 0 });
   scenePass.setMRT(mrt({ output, velocity }));
   const picture = scenePass.getTextureNode('output'), moved = scenePass.getTextureNode('velocity').xy;
   const uShutter = uniform(1), uFocus = uniform(10), uBlur = uniform(1);
@@ -1074,17 +1080,27 @@ async function start() {
   const depthHere: N = scenePass.getViewZNode().negate();
   const streak: N = moved.mul(uShutter).mul(smoothstep(0.12, 0.4, abs(depthHere.sub(uFocus)).div(uFocus)));
   const smear: N = streak.mul(min(1, max(length(streak), 1e-5).reciprocal().mul(0.04)));
+  // (Not at all where nothing moves across the picture by as much as a tenth of a point: the skier, and everything while it stands.)
   const smeared: N = Fn(() => {
     const sum = vec4(0).toVar();
-    Loop({ start: int(0), end: int(8), type: 'int' }, ({ i }: { i: N }) => {
-      sum.addAssign(picture.sample(uv().add(smear.mul(float(i).div(7).sub(0.5)))));
-    });
-    return sum.div(8);
+    If(length(smear.mul(screenSize)).greaterThan(0.1), () => {
+      Loop({ start: int(0), end: int(8), type: 'int' }, ({ i }: { i: N }) => {
+        sum.addAssign(picture.sample(uv().add(smear.mul(float(i).div(7).sub(0.5)))));
+      });
+      sum.divAssign(8);
+    }).Else(() => { sum.assign(picture.sample(uv())); });
+    return sum;
   })();
   const soft = gaussianBlur(picture, vec2(1, 1), 3, { resolutionScale: 0.5 });
   const away = smoothstep(uFocus.mul(2.2), uFocus.mul(9), depthHere).mul(min(0.95, uBlur.mul(0.85)));
   const pipeline = new RenderPipeline(renderer);
-  pipeline.outputNode = mix(smeared, soft, away);
+  if (msaa) pipeline.outputNode = mix(smeared, soft, away);
+  else { pipeline.outputColorTransform = false; pipeline.outputNode = fxaa(renderOutput(mix(smeared, soft, away))); }
+  // (With no blur, the scene alone, smoothed the same way: drawn straight to the canvas, it had its four times over, and cost more
+  // than with the blur.)
+  const sharp = new RenderPipeline(renderer), sharpPass = pass(scene, camera, { samples: msaa ? 4 : 0 });
+  if (msaa) sharp.outputNode = sharpPass;
+  else { sharp.outputColorTransform = false; sharp.outputNode = fxaa(renderOutput(sharpPass)); }
   // (How much, by *Blur*: from none, the plain picture drawn, to twice as much; `?blur=` too.)
   let blurLevel = query.has('blur') ? clamp(Number(query.get('blur')) || 0, 0, 2) : 1;
   // Hiding the menus and the text, `H` too; the distance of the views from the skier. (Kept in this browser for next time, where it may.)
@@ -1102,17 +1118,52 @@ async function start() {
   setBlur(query.has('blur') || keptBlur === null ? blurLevel : Number(keptBlur));
   setDistance(Number(kept('distance') ?? 1) || 1);
   setBare(kept('bare') === '1');
+
+  // How finely the picture is drawn (asked: "find how to best optimize the performance still with reasonable visual tradeoffs"):
+  // what a frame costs goes nearly as the number of points drawn, so the surest saving there is. *Auto* (unless `?res=` says
+  // otherwise) watches how long frames take: kept slower than sixty a second (or than the screen's own rate, if that is lower) for
+  // half a second, it draws at fewer points, a step at a time, down to half as many each way; with room to spare for some seconds,
+  // a step back up. Each step is held a while before the next, so that it does not hunt. *Full*, *¾* and *½* fix it. (Full is the
+  // screen's own fineness, but never more than twice the page's.)
+  type Res = 'auto' | 1 | 0.75 | 0.5;
+  const fullRatio = Math.min(devicePixelRatio, 2), resChoices: [string, Res][] = [['Auto', 'auto'], ['Full', 1], ['¾', 0.75], ['½', 0.5]];
+  const asRes = (v: string | null): Res | undefined => (v === 'auto' ? 'auto' : resChoices.find(([, r]) => String(r) === v)?.[1]);
+  let res: Res = asRes(query.get('res')) ?? asRes(kept('res')) ?? 'auto', autoScale = 1;
+  const auto = { best: Infinity, slow: 0, slowFrames: 0, fast: 0, hold: 0 };
+  const resButtons = resChoices.map(([label, r]) => button('resolutions', label, () => setRes(r), r === 'auto' ? 'Fewer points drawn while frames come slowly' : `Draw at ${label === 'Full' ? 'the screen\'s own' : label} fineness`));
+  const applyRatio = () => {
+    const s = res === 'auto' ? autoScale : res;
+    renderer.setPixelRatio(fullRatio * s);
+    fit();
+    resButtons.forEach((b, i) => { b.classList.toggle('on', resChoices[i][1] === res); if (resChoices[i][1] === 'auto') b.textContent = res === 'auto' && autoScale < 0.995 ? `Auto ${Math.round(autoScale * 100)}%` : 'Auto'; });
+  };
+  const setRes = (r: Res) => { res = r; keep('res', String(r)); Object.assign(auto, { slow: 0, slowFrames: 0, fast: 0, hold: 1500 }); applyRatio(); };
+  /** Watches a frame's length, in milliseconds, and draws at fewer points or more as frames keep coming slowly or with room to spare. */
+  const adapt = (interval: number) => {
+    // (A gap of more than a second is the page put aside, not a slow frame. And a single long frame, as when shaders are made, is not
+    // slowness: it takes three in a row.)
+    if (res !== 'auto' || interval > 1000 || document.hidden) return;
+    auto.best = Math.min(auto.best * 1.0005, interval);
+    const target = Math.max(auto.best, 1000 / 62);
+    auto.hold -= interval;
+    if (interval > target * 1.3) { auto.slow += interval; auto.slowFrames++; auto.fast = 0; } else { auto.slow = Math.max(0, auto.slow - interval * 0.5); auto.slowFrames = 0; auto.fast = interval < target * 1.12 ? auto.fast + interval : 0; }
+    if (auto.slow > 500 && auto.slowFrames >= 3 && autoScale > 0.5 && auto.hold <= 0) { autoScale = Math.max(0.5, autoScale * 0.85); Object.assign(auto, { slow: 0, slowFrames: 0, fast: 0, hold: 1200 }); applyRatio(); }
+    else if (auto.fast > 4000 && autoScale < 1 && auto.hold <= 0) { autoScale = Math.min(1, autoScale * 1.1); Object.assign(auto, { slow: 0, fast: 0, hold: 3000 }); applyRatio(); }
+  };
+  applyRatio();
   addEventListener('resize', fit);
   fit();
   setView('behind');
   reflect();
   $('status').hidden = true;
 
-  let then = performance.now(), shownPart = '';
+  let then = performance.now(), shownPart = '', benching = false;
   const fixedDt = Number(query.get('dt')) || 0;
   const frame = async () => {
+    if (benching) { requestAnimationFrame(frame); return; }
     // (`?dt=` steps every frame by so many seconds whatever time has passed: for pictures, made by a browser too slow to keep pace.)
     const now = performance.now(), dt = fixedDt || Math.min(0.1, (now - then) / 1000);
+    adapt(now - then);
     then = now;
     let at: Now;
     if (mode === 'watch') {
@@ -1145,6 +1196,7 @@ async function start() {
       showPad();
     }
     land.keepAbout(rider.position.x, rider.position.z);
+    land.lod?.(camera.position.x, camera.position.z);
     if (kickersOn) placeKickers(at.down);
     placeView(at, dt);
     reinsNow();
@@ -1157,7 +1209,7 @@ async function start() {
       uBlur.value = blurLevel;
       uFocus.value = Math.max(3, camera.position.distanceTo(rider.position));
       pipeline.render();
-    } else await renderer.renderAsync(scene, camera);
+    } else sharp.render();
     requestAnimationFrame(frame);
   };
   // (For a script that drives the page: where it is, and to put it anywhere; riding, what the pointer would ask.)
@@ -1176,6 +1228,45 @@ async function start() {
     setSkier: (w: Who, skis?: HorseSkis) => setSkier(w, skis), who: () => who,
     // (The view from so far east, up and south of the skier, looking at it: for pictures.)
     lookFrom: (dx: number, dy: number, dz: number) => { view = 'free'; controls.enabled = true; const at = focus(); camera.position.copy(at).add(new Vector3(dx, dy, dz)); controls.target.copy(at).addScaledVector(UP, 0.9); controls.update(); lastRider.copy(at); placed = true; },
+    // (For a script measuring what each part of the picture costs: the present view drawn `frames` times, each waited for to be done,
+    // with some things changed for the while; how long a frame took, in milliseconds, and what was drawn. `hide` names parts of the
+    // land (`run`, `about`, `country`, `firs`, `far firs`, `poles`) or `skier`.)
+    bench: async (o: { frames?: number; ratio?: number; blur?: number; shadows?: boolean; shadowSize?: number; firShadows?: boolean; hide?: string[] }) => {
+      const was = { ratio: renderer.getPixelRatio(), blur: blurLevel, shadows: sun.castShadow, size: sun.shadow.mapSize.x };
+      const hidden: Object3D[] = [];
+      for (const name of o.hide ?? []) { const m = name === 'skier' ? rider : land.group.getObjectByName(name); if (m && m.visible) { m.visible = false; hidden.push(m); } }
+      const firs = land.group.getObjectByName('firs'), firsCast = firs?.castShadow;
+      if (firs && o.firShadows !== undefined) firs.castShadow = o.firShadows;
+      if (o.ratio) { renderer.setPixelRatio(o.ratio); fit(); }
+      const wasRes = res;
+      res = 1;
+      if (o.blur !== undefined) blurLevel = o.blur;
+      if (o.shadows !== undefined) sun.castShadow = o.shadows;
+      if (o.shadowSize) { sun.shadow.mapSize.set(o.shadowSize, o.shadowSize); sun.shadow.map?.dispose(); (sun.shadow as unknown as { map: unknown }).map = null; }
+      const backend = (renderer as unknown as { backend: { gl?: WebGL2RenderingContext; device?: { queue: { onSubmittedWorkDone(): Promise<void> } } } }).backend;
+      const done = async () => { if (backend.gl) backend.gl.readPixels(0, 0, 1, 1, backend.gl.RGBA, backend.gl.UNSIGNED_BYTE, new Uint8Array(4)); else await backend.device?.queue.onSubmittedWorkDone(); };
+      const draw = (p: RenderPipeline) => { if (blurLevel > 0) { uShutter.value = 0.3 * blurLevel; uBlur.value = blurLevel; uFocus.value = Math.max(3, camera.position.distanceTo(rider.position)); p.render(); } else sharp.render(); };
+      const p = pipeline;
+      // (Each drawn in a frame of the browser's own, as the page's frames are: the renderer counts frames by them, and the scene's
+      // picture is drawn once a frame, so that drawn twice within one only the blur was drawn again. The page's own frames wait. The
+      // first frame after a change makes its shaders, and is not counted.)
+      benching = true;
+      const tick = () => new Promise((r) => requestAnimationFrame(r));
+      await tick(); draw(p); await done();
+      const frames = o.frames ?? 4;
+      let ms = 0;
+      for (let i = 0; i < frames; i++) { await tick(); const t0 = performance.now(); draw(p); await done(); ms += performance.now() - t0; }
+      ms /= frames;
+      const info = { triangles: renderer.info.render.triangles, calls: renderer.info.render.drawCalls };
+      benching = false;
+      for (const m of hidden) m.visible = true;
+      if (firs) firs.castShadow = firsCast!;
+      if (o.ratio) { renderer.setPixelRatio(was.ratio); fit(); }
+      res = wasRes;
+      blurLevel = was.blur; sun.castShadow = was.shadows;
+      if (o.shadowSize) { sun.shadow.mapSize.set(was.size, was.size); sun.shadow.map?.dispose(); (sun.shadow as unknown as { map: unknown }).map = null; }
+      return { ms: +ms.toFixed(1), ...info };
+    },
     // (What was drawn in the last frame.)
     drawn: () => ({ triangles: renderer.info.render.triangles, calls: renderer.info.render.drawCalls }),
     setLand: (k: LandKind) => setLand(k),

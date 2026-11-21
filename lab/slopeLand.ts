@@ -44,6 +44,8 @@ export interface Land {
   /** What is seen of it, and keeping that about a point as it moves (the groomed slope's goes on with the skier). */
   group: Group;
   keepAbout(x: number, z: number): void;
+  /** Draws what is near the eye at (`x`, `z`) finely and the rest coarsely, where the land is made so. */
+  lod?(x: number, z: number): void;
   /** How far the air's haze begins and is whole; where the sun is (towards it); and how strong the sky's light is. */
   fog: [number, number]; sun: [number, number, number]; sky: number;
 }
@@ -204,7 +206,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
    * triangle pair for each square of four, its normals from the heights about each point, and its colour from how steep it is and
    * what lies there; with a skirt hanging from its outer edges, so that no crack shows where it meets the grid under it.
    */
-  const gridMesh = (g: Grid, lift: (x: number, z: number) => number, uv: (x: number, z: number) => [number, number], skirt: number, coloured: boolean, off?: (x: number, z: number) => number) => {
+  const gridMesh = (g: Grid, lift: (x: number, z: number) => number, uv: (x: number, z: number) => [number, number], skirt: number, coloured: boolean, off?: (x: number, z: number) => number, hole?: (x: number, z: number) => boolean) => {
     const idx = new Int32Array(g.nx * g.nz).fill(-1), pos: number[] = [], nor: number[] = [], col: number[] = [], uvs: number[] = [], index: number[] = [], other: number[] = [], kinds: boolean[] = [];
     const H = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? NaN : g.data[j * g.nx + i]);
     const c = new Color();
@@ -250,7 +252,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
       index.push(a, base, b, b, base, base + 1, a, b, base, b, base + 1, base);
     };
     for (let j = 0; j < g.nz - 1; j++) for (let i = 0; i < g.nx - 1; i++) {
-      if (!whole(i, j)) continue;
+      if (!whole(i, j) || covered(g, i, j, hole)) continue;
       const a = v(i, j), b = v(i + 1, j), c2 = v(i, j + 1), d = v(i + 1, j + 1);
       // (A square with any corner of the other kind is of it: the path's edge falls a little outside its edge.)
       (kinds[a] || kinds[b] || kinds[c2] || kinds[d] ? other : index).push(a, c2, b, b, c2, d);
@@ -290,23 +292,65 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
   const underSnow = (x: number, z: number) => (Number.isNaN(gridAt(snow, x, z)) ? 0 : -1.2);
   const nearBox = [near.x0, near.z0, near.x0 + (near.nx - 1) * near.cell, near.z0 + (near.nz - 1) * near.cell];
   const underNear = (x: number, z: number) => (x > nearBox[0] + 24 && x < nearBox[2] - 24 && z > nearBox[1] + 24 && z < nearBox[3] - 24 ? -8 : 0);
+  // Where a finer grid lies over a coarser one, the coarser has a hole: not drawn there at all, rather than drawn sunk out of sight.
+  // (Sunk, every point of the picture there was worked out twice or three times over, the land about the run under the run's snow and
+  // the country under both; it was a third and more of what a frame cost.) A square of the coarser is left out where all its corners
+  // lie under the finer; where it reaches out from under it, it is kept, sunk where it is under, as before.
+  const inSlice = (x: number, z: number) => !Number.isNaN(gridAt(snow, x, z));
+  const inNear = (x: number, z: number) => underNear(x, z) < 0;
+  function covered(g: Grid, i: number, j: number, hole?: (x: number, z: number) => boolean) {
+    if (!hole) return false;
+    const x = g.x0 + i * g.cell, z = g.z0 + j * g.cell;
+    return hole(x, z) && hole(x + g.cell, z) && hole(x, z + g.cell) && hole(x + g.cell, z + g.cell);
+  }
+  let runOf: (g: Grid) => Mesh;
   if (game) {
-    const meshes = gameMeshes(game);
-    for (const m of meshes) group.add(m);
+    const made = gameMeshes(game);
+    group.add(...made.parts);
+    runOf = made.runOf;
   } else {
     const pisteMap = snowMap.clone();
     pisteMap.needsUpdate = true;
-    const run = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, true, offPiste), [
+    const pisteMats = [
       new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: pisteMap, roughness: 0.92 }),
       new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95 }),
-    ]);
-    run.receiveShadow = true;
+    ];
+    runOf = (g) => { const m = new Mesh(gridMesh(g, () => 0, pisteUv, 1.5, true, offPiste), pisteMats); m.receiveShadow = true; return m; };
     const powder = (offset: number) => new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
-    const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true), powder(1));
+    const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true, undefined, inSlice), powder(1));
     about.receiveShadow = true;
-    const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 61, z / 61], 0, true), powder(2));
-    group.add(run, about, country);
+    const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 61, z / 61], 0, true, undefined, inNear), powder(2));
+    about.name = 'about'; country.name = 'country';
+    group.add(about, country);
   }
+
+  // The run's snow at a metre, in tiles of 64 metres, each made twice: at a metre, and at four (every fourth point). Only the tiles
+  // within some 120 metres of the eye are drawn at a metre (`lod`); further off, a metre's triangle is smaller than a point of the
+  // picture, and the material was worked out for each again and again. (Drawn whole at a metre, from behind the skier looking down
+  // the run, it was a third of a frame.) Each tile's edges have skirts, so that a tile at a metre beside one at four leaves no crack.
+  const TILE = 64, FINE_WITHIN = 120, runTiles: { x0: number; z0: number; x1: number; z1: number; fine: Mesh; coarse: Mesh }[] = [];
+  const subGrid = (i0: number, j0: number, every: number): Grid => {
+    const nx = Math.floor(Math.min(TILE, snow.nx - 1 - i0) / every) + 1, nz = Math.floor(Math.min(TILE, snow.nz - 1 - j0) / every) + 1, data = new Float32Array(nx * nz);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) data[j * nx + i] = snow.data[(j0 + j * every) * snow.nx + i0 + i * every];
+    return { x0: snow.x0 + i0 * snow.cell, z0: snow.z0 + j0 * snow.cell, cell: snow.cell * every, nx, nz, data };
+  };
+  const runGroup = new Group();
+  runGroup.name = 'run';
+  for (let j0 = 0; j0 < snow.nz - 1; j0 += TILE) for (let i0 = 0; i0 < snow.nx - 1; i0 += TILE) {
+    const fineGrid = subGrid(i0, j0, 1);
+    if (fineGrid.data.every((v) => Number.isNaN(v))) continue;
+    const fine = runOf(fineGrid), coarse = runOf(subGrid(i0, j0, 4));
+    coarse.visible = false;
+    runGroup.add(fine, coarse);
+    runTiles.push({ x0: fineGrid.x0, z0: fineGrid.z0, x1: fineGrid.x0 + (fineGrid.nx - 1) * fineGrid.cell, z1: fineGrid.z0 + (fineGrid.nz - 1) * fineGrid.cell, fine, coarse });
+  }
+  group.add(runGroup);
+  const lod = (x: number, z: number) => {
+    for (const t of runTiles) {
+      const near = Math.hypot(Math.max(t.x0 - x, 0, x - t.x1), Math.max(t.z0 - z, 0, z - t.z1)) < FINE_WITHIN;
+      t.fine.visible = near; t.coarse.visible = !near;
+    }
+  };
 
   /**
    * The land drawn with the game's materials: each grid's points as the game's meshes carry them (the colour and the four fields its
@@ -315,10 +359,10 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
    * how much of a hollow it is. And each point lit by the sky as the game lights what it does not bake. (Laid as snow or rock a square
    * at a time, as the game's rock material wants, the rock near the run came out in squares four metres across.)
    */
-  function gameMeshes(look: GameLook): Mesh[] {
+  function gameMeshes(look: GameLook): { parts: Mesh[]; runOf: (g: Grid) => Mesh } {
     // (Under the snow, where it does not lie, the mountain's stones, grey.)
     const tint = new Color(0.72, 0.71, 0.7);
-    const gridBuilder = (g: Grid, lift: (x: number, z: number) => number, skirt: number, groomedHere: boolean) => {
+    const gridBuilder = (g: Grid, lift: (x: number, z: number) => number, skirt: number, groomedHere: boolean, hole?: (x: number, z: number) => boolean) => {
       const B = new MeshBuilder(), ids = new Int32Array(g.nx * g.nz).fill(-1);
       const H = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? NaN : g.data[j * g.nx + i]);
       // (Off the skiable path, each point faces as the world's own land does there: where the slice's land was brought lower, as steep
@@ -352,7 +396,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
       };
       const whole = (i: number, j: number) => [H(i, j), H(i + 1, j), H(i, j + 1), H(i + 1, j + 1)].every((v) => !Number.isNaN(v));
       for (let j = 0; j < g.nz - 1; j++) for (let i = 0; i < g.nx - 1; i++) {
-        if (!whole(i, j)) continue;
+        if (!whole(i, j) || covered(g, i, j, hole)) continue;
         const a = vertex(i, j), b = vertex(i + 1, j), c = vertex(i, j + 1), d = vertex(i + 1, j + 1);
         B.addTriangle(a, c, b); B.addTriangle(b, c, d);
         if (skirt > 0) for (const [p, q, open] of [[[i, j], [i + 1, j], !whole(i, j - 1)], [[i, j + 1], [i + 1, j + 1], !whole(i, j + 1)], [[i, j], [i, j + 1], !whole(i - 1, j)], [[i + 1, j], [i + 1, j + 1], !whole(i + 1, j)]] as const) {
@@ -375,10 +419,11 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
       fid[j * far.nx + i] = farB.addVertex(x, y + underNear(x, z), z, -gx / nl, 1 / nl, -gz / nl, x * 0.012, z * 0.012, 0.3, 0.3, 0.31, water, 0, hollow, high);
     }
     for (let j = 0; j < far.nz - 1; j++) for (let i = 0; i < far.nx - 1; i++) {
+      if (covered(far, i, j, inNear)) continue;
       const a = fid[j * far.nx + i], b = fid[j * far.nx + i + 1], c = fid[(j + 1) * far.nx + i], d = fid[(j + 1) * far.nx + i + 1];
       farB.addTriangle(a, c, b); farB.addTriangle(b, c, d);
     }
-    const snowRun = gridBuilder(snow, () => 0, 1.5, true), snowAbout = gridBuilder(near, underSnow, 3, false);
+    const snowAbout = gridBuilder(near, underSnow, 3, false, inSlice);
     const lit = (builder: MeshBuilder, material: Material) => {
       // (As the walk page lights the world's land, `meshOf`: the sky's light by the share of it each point sees, here all of it.)
       const geometry = builder.build(), L = look.sky;
@@ -391,7 +436,9 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
       mesh.receiveShadow = true; mesh.matrixAutoUpdate = false;
       return mesh;
     };
-    return [lit(snowRun, look.snow), lit(snowAbout, look.snow), lit(farB, look.far)];
+    const parts = [lit(snowAbout, look.snow), lit(farB, look.far)];
+    ['about', 'country'].forEach((name, k) => { parts[k].name = name; });
+    return { parts, runOf: (g) => lit(gridBuilder(g, () => 0, 1.5, true), look.snow) };
   }
 
   // The path's edges marked with poles every twenty metres.
@@ -402,6 +449,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
   }
   const poles = new InstancedMesh(POLE, POLE_PAINT, marks.length);
   marks.forEach((m, i) => poles.setMatrixAt(i, m));
+  poles.name = 'poles';
   group.add(poles);
 
   // Snowy firs where the world has woods: near the run, every four metres a chance of one, none on the run; further out, one to a
@@ -430,6 +478,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
   nearFirs.forEach((m, k) => near3.setMatrixAt(k, m));
   farFirs.forEach((m, k) => far1.setMatrixAt(k, m));
   near3.castShadow = true;
+  near3.name = 'firs'; far1.name = 'far firs';
   near3.computeBoundingSphere(); far1.computeBoundingSphere();
   group.add(near3, far1);
 
@@ -448,7 +497,7 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture,
     about: `${(length / 1000).toFixed(2)} km from ${worldHeight(slice.run.heights[0]).toFixed(0)} m to ${worldHeight(slice.run.heights[slice.run.heights.length - 1]).toFixed(0)} m`,
     drop: (y: number) => worldHeight(slice.run.heights[0]) - worldHeight(y),
     fall: worldHeight(slice.run.heights[0]) - worldHeight(slice.run.heights[slice.run.heights.length - 1]),
-    length, half: slice.half, edges, height, frame, at, kickable, group, keepAbout: () => {}, fog: [380, 5200], sun: [-0.6, 0.42, -0.5], sky: 0.8,
+    length, half: slice.half, edges, height, frame, at, kickable, group, keepAbout: () => {}, lod, fog: [380, 5200], sun: [-0.6, 0.42, -0.5], sky: 0.8,
   };
 }
 
