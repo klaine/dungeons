@@ -9,7 +9,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  * left +x: the space its bind matrices are in), and put into each bone's own by the inverse of where that bone stood: so they fit any
  * body on the skeleton, whatever the length of its feet and arms.
  */
-export type GearKind = 'classic' | 'alpine' | 'jump';
+export type GearKind = 'classic' | 'alpine' | 'jump' | 'mounted';
 
 /** Which clips want which gear: the downhill turns' jumps the turns' skis and poles. */
 export const GEAR_OF: Record<string, GearKind> = {
@@ -26,6 +26,8 @@ const SPECS: Record<GearKind, SkiSpec> = {
   classic: { length: 2.0, width: 0.047, ahead: 0.95, on: 'toes', colour: 0xe8edf2, pole: 1.48 },
   alpine: { length: 1.68, width: 0.075, ahead: 0.88, on: 'foot', colour: 0xc0322b, pole: 1.18 },
   jump: { length: 2.45, width: 0.11, ahead: 1.38, on: 'toes', colour: 0xf2c230, pole: 0 },
+  // A rider on a skiing horse: no skis of its own, and poles long enough to reach the snow from the saddle.
+  mounted: { length: 0, width: 0, ahead: 0, on: 'foot', colour: 0, pole: 2.3 },
 };
 /** How thick a ski is; the clips stand the feet this much over the ground, on it. */
 export const SKI_THICK = 0.02;
@@ -76,12 +78,12 @@ export function putOn(model: Object3D, kind: GearKind): Object3D[] {
     b.bone.add(m);
     out.push(m);
   };
-  const ski = skiGeometry(s), pole = s.pole ? poleGeometry(s.pole) : null;
+  const ski = s.length ? skiGeometry(s) : null, pole = s.pole ? poleGeometry(s.pole) : null;
   for (const k of ['l', 'r'] as const) {
     const ball = rest(`ball_${k}`);
     if (!ball) continue;
     // (Its sole on the ground under the ball of the foot as it stands at rest, the ball a little above it.)
-    hang(s.on === 'toes' ? `ball_${k}` : `foot_${k}`, ski, material(s.colour), new Matrix4().makeTranslation(ball.x, ball.y - 0.015 - SKI_THICK, ball.z));
+    if (ski) hang(s.on === 'toes' ? `ball_${k}` : `foot_${k}`, ski, material(s.colour), new Matrix4().makeTranslation(ball.x, ball.y - 0.015 - SKI_THICK, ball.z));
     const hand = rest(`hand_${k}`);
     if (pole && hand) {
       // Through the fist, which is a little beyond the wrist along the hand and under it, the palm being down as the arm rests level.

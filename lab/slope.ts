@@ -29,15 +29,16 @@
  */
 import {
   ACESFilmicToneMapping, AnimationMixer, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DirectionalLight, DoubleSide,
-  Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial,
+  Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
   PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, RepeatWrapping, Scene, SkinnedMesh, SRGBColorSpace, Vector3,
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FigureLibrary } from '../src/figures/library';
 import { putOn } from '../src/figures/gear';
-import { makeDownhillRun, Rider, RUN_LENGTH, RUN_PARTS, type RunSample } from '../src/figures/alpine';
-import { type Ground, type Joint, JOINTS, Ragdoll } from '../src/figures/ragdoll';
+import { type AirControls, makeDownhillRun, type RideControls, Rider, RUN_LENGTH, RUN_PARTS, type RunSample } from '../src/figures/alpine';
+import { type BodySpec, type Ground, HUMAN, humanSpec, JOINTS, Ragdoll } from '../src/figures/ragdoll';
+import { Horse, horseAirPose, horseRidePose, type HorseSkis, saddlePose } from '../src/figures/horse';
 import { Rng } from '../src/core/rng';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -256,10 +257,18 @@ async function start() {
   const source = await library.mannequin();
   const run = makeDownhillRun(source, idle, STEP);
   const live = new Rider(source, idle), model = live.model;
-  model.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
+  const shade = (m: Object3D) => m.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
+  shade(model);
   const gear = putOn(model, 'alpine');
+  // The horse (asked: "a rigged horse model; fantasy/imaginary way for the horse have skis, two bindings per ski - left and right ski
+  // (or as an option for horse skiing: four short skis!); same skiing actions, tricks and animations adapted for this skiing horse;
+  // with a rider on back or just the horse skiing option"), on a long pair of skis or four short ones (`src/figures/horse.ts`); and the
+  // rider for its back, another mannequin, with poles long enough to reach the snow from the saddle.
+  const horse = new Horse(query.get('skis') === 'four' ? 'four' : 'pair');
+  const jockey = new Rider(source, idle);
+  shade(jockey.model);
+  putOn(jockey.model, 'mounted');
   const rider = new Group();
-  rider.add(model);
   scene.add(rider);
   const tilt = new Quaternion().setFromAxisAngle(LEFT, ANGLE);
   /**
@@ -272,19 +281,18 @@ async function start() {
     if (pitch) rider.quaternion.multiply(new Quaternion().setFromAxisAngle(LEFT, -pitch));
     rider.updateMatrixWorld(true);
   };
-  // The skier's joints where they are in the world, as a body gone limp takes them: its bones', and its skis' tips and tails.
-  const jointBones = JOINTS.filter((j) => !j.startsWith('tip') && !j.startsWith('tail')).map((j) => [j, model.getObjectByName(j)!] as const);
-  const skiOf = (k: 'l' | 'r') => gear.find((m) => m.parent?.name === `foot_${k}`)!;
-  const jointsNow = (): Record<Joint, Vector3> => {
+  // A person's joints where they are in the world, as a body gone limp takes them: its bones', and its skis' tips and tails.
+  const humanJoints = (m: Object3D, skis: Object3D[] | null): Record<string, Vector3> => {
     rider.updateMatrixWorld(true);
-    const out = {} as Record<Joint, Vector3>;
-    for (const [j, b] of jointBones) out[j] = b.getWorldPosition(new Vector3());
-    for (const k of ['l', 'r'] as const) {
-      out[`tip_${k}`] = skiOf(k).localToWorld(new Vector3(0, 0.01, 0.8));
-      out[`tail_${k}`] = skiOf(k).localToWorld(new Vector3(0, 0.01, -0.78));
-    }
+    const out: Record<string, Vector3> = {};
+    for (const j of JOINTS) if (!j.startsWith('tip') && !j.startsWith('tail')) out[j] = m.getObjectByName(j)!.getWorldPosition(new Vector3());
+    if (skis) (['l', 'r'] as const).forEach((k, i) => {
+      out[`tip_${k}`] = skis[i].localToWorld(new Vector3(0, 0.01, 0.8));
+      out[`tail_${k}`] = skis[i].localToWorld(new Vector3(0, 0.01, -0.78));
+    });
     return out;
   };
+  const personSkis = (['l', 'r'] as const).map((k) => gear.find((m) => m.parent?.name === `foot_${k}`)!);
   const mixer = new AnimationMixer(model), action = mixer.clipAction(run.clip);
   action.play();
   const samples = run.samples, last = samples.length - 1;
@@ -295,20 +303,58 @@ async function start() {
     for (const key of Object.keys(a) as (keyof RunSample)[]) out[key] = a[key] + (b[key] - a[key]) * k;
     return out;
   };
+  /** Puts a spot on the snow (or on a kicker's), a finger's breadth over it. */
+  const onSnow = (p: Vector3) => p.addScaledVector(UP, -p.dot(UP) + groundAt(p.dot(FALL), p.dot(LEFT)).h + 0.012);
+  const feet = ['foot_l', 'foot_r'].map((n) => model.getObjectByName(n)!), toes = ['ball_l', 'ball_r'].map((n) => model.getObjectByName(n)!);
+
+  /**
+   * What is skiing, and what it is asked to do: posed for the ride, for the air and for the watched run; how far its body faces round
+   * with its way (a person's chest stays down the slope, a horse goes where its skis go); where each of its skis is (the middles, to lay
+   * their tracks from); and the bodies it is made of, for a fall (a horse and its rider are two, and part).
+   */
+  interface Body { spec: BodySpec; joints(): Record<string, Vector3>; poseJoints(p: Record<string, Vector3>): void }
+  interface Skier { object: Object3D; facing: number; ride(c: RideControls): void; air(c: AirControls): void; watch(t: number, s: RunSample): void; skis(): Vector3[]; bodies(): Body[] }
+  type Who = 'person' | 'horse' | 'mounted';
+  const fromSample = (s: RunSample): RideControls => ({ s: s.lean, ski: s.ski, tuck: s.tuck, brake: s.brake, tall: 0, flickL: s.flickL, flickR: s.flickR });
+  const personBody: Body = { spec: HUMAN, joints: () => humanJoints(model, personSkis), poseJoints: (p) => live.poseJoints(p) };
+  const horseBody: Body = { get spec() { return horse.spec(); }, joints: () => horse.joints(), poseJoints: (p) => horse.poseJoints(p) };
+  const jockeyBody: Body = { spec: humanSpec(false), joints: () => humanJoints(jockey.model, null), poseJoints: (p) => jockey.poseJoints(p) };
+  const airSaddle = (c: AirControls) => saddlePose({ s: 0, brake: 0, tall: 0, flickL: 0, flickR: 0, ...c });
+  const skiers: Record<Who, Skier> = {
+    person: {
+      object: model, facing: 0.5,
+      ride: (c) => live.pose(c), air: (c) => live.poseAir(c),
+      watch: (t) => { action.time = Math.min(t, RUN_LENGTH - 1e-4); mixer.update(0); },
+      skis: () => [0, 1].map((k) => feet[k].getWorldPosition(new Vector3()).add(toes[k].getWorldPosition(new Vector3())).multiplyScalar(0.5)),
+      bodies: () => [personBody],
+    },
+    horse: {
+      object: horse.model, facing: 0.85,
+      ride: (c) => horse.pose(horseRidePose(c)), air: (c) => horse.pose(horseAirPose(c, horse.skis === 'four')),
+      watch: (_t, s) => horse.pose(horseRidePose(fromSample(s))),
+      skis: () => horse.skiMiddles(), bodies: () => [horseBody],
+    },
+    mounted: {
+      object: horse.model, facing: 0.85,
+      ride: (c) => { horse.pose(horseRidePose(c)); jockey.posePose(saddlePose(c)); },
+      air: (c) => { horse.pose(horseAirPose(c, horse.skis === 'four')); jockey.posePose(airSaddle(c)); },
+      watch: (_t, s) => { const c = fromSample(s); horse.pose(horseRidePose(c)); jockey.posePose(saddlePose(c)); },
+      skis: () => horse.skiMiddles(), bodies: () => [horseBody, jockeyBody],
+    },
+  };
+  let who: Who = (['horse', 'mounted'] as Who[]).find((w) => w === query.get('skier')) ?? 'person', skier = skiers[who];
+  /** The rider back in its saddle, if there is one. */
+  const seat = () => { if (who === 'mounted') horse.saddle.add(jockey.model); else jockey.model.removeFromParent(); };
+  rider.add(skier.object);
+  seat();
+
   /** Puts the skier where the watched run has it at time `t`, in its pose then. */
   const watchPose = (t: number): Now => {
     const s = sampleAt(t);
     standAt(s.down, s.left, 0);
-    action.time = Math.min(t, RUN_LENGTH - 1e-4);
-    mixer.update(0);
+    skier.watch(t, s);
     rider.updateMatrixWorld(true);
     return s;
-  };
-  const feet = ['foot_l', 'foot_r'].map((n) => model.getObjectByName(n)!), toes = ['ball_l', 'ball_r'].map((n) => model.getObjectByName(n)!);
-  /** Where a ski's middle is on the snow, now: between the ankle and the ball of its foot, a finger's breadth over the snow. */
-  const skiOnSnow = (k: number) => {
-    const a = feet[k].getWorldPosition(new Vector3()), b = toes[k].getWorldPosition(new Vector3()), mid = a.add(b).multiplyScalar(0.5);
-    return mid.addScaledVector(UP, -mid.dot(UP) + groundAt(mid.dot(FALL), mid.dot(LEFT)).h + 0.012);
   };
 
   // The tracks. A carved line is a narrow, sharp groove, shadowed; a skid scrapes a broad band, only a little paler than the snow
@@ -336,29 +382,36 @@ async function start() {
     (mesh.geometry.getAttribute('color') as BufferAttribute).set([c.r, c.g, c.b, c.r, c.g, c.b], j * 6);
   };
   const halfOf = (skid: number) => 0.035 + 0.75 * skid;
-  // The watched run's: worked out once for the whole run, then shown as far as the skier has got.
-  const watchTracks = [strip(Math.ceil((last + 1) / 2)), strip(Math.ceil((last + 1) / 2))];
-  for (let i = 0, j = 0; i <= last; i += 2, j++) {
-    const s = watchPose(i * STEP);
-    for (const k of [0, 1]) lay(watchTracks[k], j, skiOnSnow(k), s.way, halfOf(s.skid));
-  }
-  for (const m of watchTracks) { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; }
-  const showWatchTracks = (t: number | null) => { for (const m of watchTracks) m.geometry.setDrawRange(0, t === null ? 0 : Math.max(0, Math.floor(t / (2 * STEP))) * 6); };
+  // The watched run's: worked out for the whole run (again for each skier), then shown as far as the skier has got. As many strips as
+  // the skier has skis: two, or a horse's four short ones.
+  const watchTracks = [0, 1, 2, 3].map(() => strip(Math.ceil((last + 1) / 2)));
+  let watchSkis = 2;
+  const layWatchTracks = () => {
+    for (let i = 0, j = 0; i <= last; i += 2, j++) {
+      const s = watchPose(i * STEP), spots = skier.skis();
+      watchSkis = spots.length;
+      spots.forEach((p, k) => lay(watchTracks[k], j, onSnow(p), s.way, halfOf(s.skid)));
+    }
+    for (const m of watchTracks) { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; }
+  };
+  layWatchTracks();
+  const showWatchTracks = (t: number | null) => watchTracks.forEach((m, k) => m.geometry.setDrawRange(0, t === null || k >= watchSkis ? 0 : Math.max(0, Math.floor(t / (2 * STEP))) * 6));
   // The ridden run's: laid as the skier goes, a step every thirty centimetres; the oldest let go of when the strip is full.
-  const RIDE_STEPS = 2400, rideTracks = [strip(RIDE_STEPS), strip(RIDE_STEPS)];
-  let rideLaid = 0;
+  const RIDE_STEPS = 2400, rideTracks = [0, 1, 2, 3].map(() => strip(RIDE_STEPS));
+  let rideLaid = 0, rideSkis = 2;
   const lastLaid = new Vector3();
   const layRide = (now: Now) => {
-    const at = [skiOnSnow(0), skiOnSnow(1)];
+    const at = skier.skis().map(onSnow);
     if (rideLaid && at[0].distanceTo(lastLaid) < 0.3) return;
     lastLaid.copy(at[0]);
+    rideSkis = at.length;
     if (rideLaid === RIDE_STEPS) {
       for (const m of rideTracks) for (const name of ['position', 'color']) { const arr = (m.geometry.getAttribute(name) as BufferAttribute).array as Float32Array; arr.copyWithin(0, (RIDE_STEPS / 2) * 6); }
       rideLaid = RIDE_STEPS / 2;
     }
-    for (const k of [0, 1]) lay(rideTracks[k], rideLaid, at[k], now.way, halfOf(now.skid));
+    at.forEach((p, k) => lay(rideTracks[k], rideLaid, p, now.way, halfOf(now.skid)));
     rideLaid++;
-    for (const m of rideTracks) { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; m.geometry.setDrawRange(0, Math.max(0, rideLaid - 1) * 6); }
+    rideTracks.forEach((m, k) => { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; m.geometry.setDrawRange(0, k < rideSkis ? Math.max(0, rideLaid - 1) * 6 : 0); });
   };
   const clearRideTracks = () => { rideLaid = 0; for (const m of rideTracks) m.geometry.setDrawRange(0, 0); };
 
@@ -373,9 +426,9 @@ async function start() {
   const stepSpray = (dt: number, now: Now | null) => {
     if (now && now.skid > 0.45 && now.speed > 3.5) {
       // (Thrown on along the way it goes, and out the way the skis slide sideways: to the outside of a skidded turn.)
-      const go = along(now.way), skiAlong = along(now.ski), slide = go.clone().addScaledVector(skiAlong, -go.dot(skiAlong));
+      const go = along(now.way), skiAlong = along(now.ski), slide = go.clone().addScaledVector(skiAlong, -go.dot(skiAlong)), spots = skier.skis();
       for (let i = 0; i < Math.round(now.speed * 0.9); i++) {
-        const f = flakes[nextFlake++ % SPRAY], from = skiOnSnow(i % 2);
+        const f = flakes[nextFlake++ % SPRAY], from = onSnow(spots[i % spots.length].clone());
         f.p.copy(from).addScaledVector(go, 0.35).addScaledVector(LEFT, sprayRng.range(-0.8, 0.8)).addScaledVector(UP, 0.04);
         f.v.copy(go).multiplyScalar(now.speed * sprayRng.range(0.5, 1)).addScaledVector(UP, sprayRng.range(1.2, 3.2)).addScaledVector(LEFT, sprayRng.range(-1.5, 1.5)).addScaledVector(slide, now.speed * sprayRng.range(0.2, 0.6));
         f.life = sprayRng.range(0.5, 0.9);
@@ -409,10 +462,10 @@ async function start() {
    */
   interface Air { kind: 'air' | 'flip' | 'flight' | 'hop'; spinTo: number; flipTo: number; spin: number; flip: number; t: number; T: number; vDown: number; vLeft: number; from: Vector3; nose: number; name: string }
   let air: Air | null = null;
-  /** Gone limp, and why. */
-  let crash: { body: Ragdoll; why: string } | null = null;
-  /** The skier's joints as the last two steps left them, and how long the last step was: what a body gone limp goes on from. */
-  let joints: Record<Joint, Vector3> | null = null, jointsBefore: Record<Joint, Vector3> | null = null, jointsDt = 1 / 120;
+  /** Gone limp, every body of it (a horse and its rider each their own), and why. */
+  let crash: { dolls: { body: Body; doll: Ragdoll }[]; why: string } | null = null;
+  /** The skier's bodies' joints as the last two steps left them, and how long the last step was: what a body gone limp goes on from. */
+  let joints: Record<string, Vector3>[] | null = null, jointsBefore: Record<string, Vector3>[] | null = null, jointsDt = 1 / 120;
   /** What the rider asks: across (-1 to 1, to the right positive) and up (1 the deepest tuck, -1 standing tallest); and braking. */
   const ask = { x: 0, y: 0 }, want = { x: 0, y: 0, keys: { up: false, down: false, left: false, right: false }, brake: false, brakeKey: false };
   const FLICK = 0.3;
@@ -422,7 +475,7 @@ async function start() {
   const INTO = G * Math.cos(ANGLE), ALONG = G * Math.sin(ANGLE);
   /** How long from now until something `out` over the slope and rising at `rising` comes down onto it. */
   const timeToSnow = (out: number, rising: number) => (rising + Math.sqrt(Math.max(0, rising * rising + 2 * INTO * Math.max(0, out)))) / INTO;
-  const keepJoints = (dt: number) => { if (dt <= 0) return; jointsBefore = joints; joints = jointsNow(); jointsDt = dt; };
+  const keepJoints = (dt: number) => { if (dt <= 0) return; jointsBefore = joints; joints = skier.bodies().map((b) => b.joints()); jointsDt = dt; };
 
   /** What a trick is called. */
   const trickName = (a: Air) => {
@@ -430,7 +483,8 @@ async function start() {
     if (a.kind === 'hop') return 'Hop';
     if (a.kind === 'flip') return spin ? `Backflip ${spin}` : 'Backflip';
     if (a.kind === 'flight') return spin ? `Flight ${spin}` : 'Ski-jump flight';
-    return spin || 'Straight air';
+    // (A horse's straight air is a show jumper's.)
+    return spin || (who === 'person' ? 'Straight air' : 'Show jump');
   };
   // What has just happened, said over the picture for a while: a landing, or a fall.
   let told = { text: '', small: '', bad: false, until: 0 };
@@ -489,12 +543,22 @@ async function start() {
 
   /** Goes limp: the body goes on as it was going, turning as it was turning, from where its joints were. */
   const fall = (why: string) => {
-    const now = jointsNow();
-    crash = { body: new Ragdoll(now, jointsBefore ?? now, jointsDt, groundUnder), why };
+    const bodies = skier.bodies(), now = bodies.map((b) => b.joints()), going = along(ride.way);
+    crash = {
+      dolls: bodies.map((body, i) => {
+        let before = jointsBefore?.[i] ?? now[i];
+        // (A rider is thrown on over the horse's head as the horse stops: given that much more of a start, forward and up.)
+        if (i > 0) { const thrown = going.clone().multiplyScalar(1.5).addScaledVector(UP, 2.2).multiplyScalar(jointsDt); before = Object.fromEntries(Object.entries(before).map(([k, v]) => [k, v.clone().sub(thrown)])); }
+        return { body, doll: new Ragdoll(body.spec, now[i], before, jointsDt, groundUnder) };
+      }),
+      why,
+    };
     rider.position.set(0, 0, 0);
     rider.quaternion.identity();
     rider.updateMatrixWorld(true);
-    live.poseJoints(crash.body.joints());
+    // (Out of the saddle: its own body now, in the world.)
+    if (who === 'mounted') rider.add(jockey.model);
+    for (const { body, doll } of crash.dolls) body.poseJoints(doll.joints());
     tell(`Crashed: ${why}`, 'Restart run with the button, or Enter', true, 1e9);
     reflect();
   };
@@ -505,6 +569,7 @@ async function start() {
     ride.settle = { spin: 0, flip: 0, left: 0 };
     Object.assign(ask, { x: 0, y: 0 });
     air = null; crash = null; joints = jointsBefore = null;
+    seat();
     told = { text: '', small: '', bad: false, until: 0 };
     clearRideTracks();
     clearSpray();
@@ -537,7 +602,7 @@ async function start() {
     a.spin = turned(a.spin, a.spinTo, 1.35);
     ride.facing += (ride.way - ride.facing) * ease(dt, 6);
     ride.flickL = ride.flickR = 0;
-    live.poseAir({
+    skier.air({
       tuck: Math.max(0, ask.y), flight: a.kind === 'flight' ? smooth(a.t / 0.3) : 0, open,
       throw: a.kind === 'flip' ? 1 - smooth(a.t / 0.35) : 0, wrap: a.spinTo ? smooth(a.t / 0.2) : 0, ski: ride.way - ride.facing, spin: a.spin, flip: a.flip,
     });
@@ -549,13 +614,16 @@ async function start() {
 
   /** Gone limp, a step on. */
   const stepFallen = (dt: number): Now => {
-    const body = crash!.body, was = body.middle().clone();
-    body.step(dt);
-    live.poseJoints(body.joints());
+    const was = fallenAt();
+    for (const { body, doll } of crash!.dolls) { doll.step(dt); body.poseJoints(doll.joints()); }
     ride.time += dt;
-    const at = body.middle(), went = at.clone().sub(was);
+    const at = fallenAt(), went = at.clone().sub(was);
     return { down: at.dot(FALL), left: at.dot(LEFT), speed: went.length() / dt, way: ride.way, ski: ride.way, skid: 0, tuck: 0, brake: 0 };
   };
+  /** Where what has fallen is, for the view to follow: the first of its bodies (a horse, not the rider thrown from it). */
+  const fallenAt = () => crash!.dolls[0].doll.middle().clone();
+  /** How long all of it has lain still. */
+  const stillFor = () => Math.min(...crash!.dolls.map((d) => d.doll.still));
 
   const stepRide = (dt: number): Now => {
     easeAsk(dt);
@@ -605,14 +673,14 @@ async function start() {
     ride.flickL = Math.max(0, ride.flickL - dt);
     ride.flickR = Math.max(0, ride.flickR - dt);
     const bump = (left: number) => (left > 0 ? Math.sin((Math.PI * (FLICK - left)) / FLICK) : 0) * (1 - ride.tuck);
-    ride.facing += (0.5 * ride.way - ride.facing) * ease(dt, 2);
+    ride.facing += (skier.facing * ride.way - ride.facing) * ease(dt, 2);
     const ski = ride.way + pivot + ((ride.brakeSide * 78 * Math.PI) / 180) * ride.brake;
     // Sunk into a landing, coming up out of it; crouched going up a kicker's ramp, the more the steeper; and out of what is left of
     // a turn of the whole body.
     ride.absorb = Math.max(ride.out > 0.05 ? 0.5 * clamp(Math.sin(nose) / 0.34, 0, 1) : 0, ride.absorb - dt * 1.6);
     const settling = smooth(ride.settle.left / 0.25);
     ride.settle.left = Math.max(0, ride.settle.left - dt);
-    live.pose({
+    skier.ride({
       s: ride.lean, ski: ski - ride.facing, tuck: ride.tuck, brake: ride.brake, tall: ride.tall, flickL: bump(ride.flickL), flickR: bump(ride.flickR),
       absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid,
     });
@@ -622,9 +690,9 @@ async function start() {
   };
   /** What the ridden skier is doing, in words. */
   const doingNow = () => {
-    if (crash) return crash.body.still > 0.5 ? 'Down in the snow' : 'Tumbling';
+    if (crash) return stillFor() > 0.5 ? 'Down in the snow' : 'Tumbling';
     if (air) return air.kind === 'hop' ? 'In the air' : `${air.name}…`;
-    if (ride.brake > 0.5) return 'Braking';
+    if (ride.brake > 0.5) return who === 'person' ? 'Braking' : 'Sliding stop';
     if (ride.speed < 0.5) return 'Standing';
     if (ride.out > 0.05) return 'Up the kicker';
     const turn = Math.abs(ask.x) > 0.15 ? (ask.x < 0 ? 'turning left' : 'turning right') : '';
@@ -636,13 +704,19 @@ async function start() {
   };
 
   // ---------------------------------------------------------------- what is shown, and how it is moved about in
-  let mode: 'watch' | 'ride' = 'watch';
-  let t = 0, playing = true, rate = 1, view: 'behind' | 'beside' | 'above' | 'free' = 'behind', scrubbing = false;
+  type Mode = 'watch' | 'ride';
+  type View = 'behind' | 'beside' | 'above' | 'free';
+  let mode = 'watch' as Mode;
+  let t = 0, playing = true, rate = 1, view = 'behind' as View, scrubbing = false;
   const rates: [string, number][] = [['¼×', 0.25], ['½×', 0.5], ['1×', 1]];
-  const views: [string, typeof view, string][] = [['Behind', 'behind', 'B'], ['Beside', 'beside', 'S'], ['Above', 'above', 'A'], ['Free', 'free', 'F']];
-  const modes: [string, typeof mode, string][] = [['Watch', 'watch', 'Watch the run as it was made'], ['Ride', 'ride', 'Ride it yourself: point to steer']];
+  const views: [string, View, string][] = [['Behind', 'behind', 'B'], ['Beside', 'beside', 'S'], ['Above', 'above', 'A'], ['Free', 'free', 'F']];
+  const modes: [string, Mode, string][] = [['Watch', 'watch', 'Watch the run as it was made'], ['Ride', 'ride', 'Ride it yourself: point to steer']];
   const button = (parent: string, label: string, onclick: () => void, title?: string) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; if (title) b.title = title; b.onclick = onclick; $(parent).appendChild(b); return b; };
   const modeButtons = modes.map(([label, m, title]) => button('modes', label, () => setMode(m), title));
+  const whos: [string, Who][] = [['Person', 'person'], ['Horse', 'horse'], ['Horse & rider', 'mounted']];
+  const skiSets: [string, HorseSkis, string][] = [['Two long', 'pair', 'A long ski under each side, the fore and hind hooves bound to it'], ['Four short', 'four', 'A short ski under each hoof']];
+  const whoButtons = whos.map(([label, w]) => button('skiers', label, () => setSkier(w)));
+  const skiButtons = skiSets.map(([label, k, title]) => button('skisets', label, () => setSkier(who, k), title));
   const rateButtons = rates.map(([label, r]) => button('rates', label, () => { rate = r; reflect(); }));
   const viewButtons = views.map(([label, v, key]) => button('views', label, () => setView(v), `${label} (${key})`));
   const brakeButton = $('brake'), restartButton = $('restart');
@@ -663,13 +737,16 @@ async function start() {
     $('rates').hidden = line.hidden = mode === 'ride';
     $('brakes').hidden = $('pad').hidden = $('restarts').hidden = mode === 'watch';
     restartButton.classList.toggle('on', !!crash);
-    $('name').textContent = mode === 'ride' ? 'Downhill run · riding' : 'Downhill run';
+    whoButtons.forEach((b, i) => b.classList.toggle('on', whos[i][1] === who));
+    skiButtons.forEach((b, i) => b.classList.toggle('on', skiSets[i][1] === horse.skis));
+    $('skisets').hidden = who === 'person';
+    $('name').textContent = ['Downhill run', { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
     document.body.classList.toggle('riding', mode === 'ride');
   };
   $('play').onclick = () => { playing = !playing; reflect(); };
   // (Free: the view turned about the skier by hand, and carried along with it; only watching, as riding the pointer steers.)
-  const setView = (v: typeof view) => { view = mode === 'ride' && v === 'free' ? 'behind' : v; controls.enabled = view === 'free'; camera.up.set(0, 1, 0); placed = false; reflect(); };
-  const setMode = (m: typeof mode) => {
+  const setView = (v: View) => { view = mode === 'ride' && v === 'free' ? 'behind' : v; controls.enabled = view === 'free'; camera.up.set(0, 1, 0); placed = false; reflect(); };
+  const setMode = (m: Mode) => {
     if (m === mode) return;
     if (m === 'ride') {
       // Ridden from where the watched run had got to, going as it went.
@@ -692,6 +769,27 @@ async function start() {
     clearSpray();
     setView(view);
     placed = false;
+  };
+  /**
+   * Another skier, or the horse on other skis: the watched run's tracks made again for it; riding, it goes on from where the last was
+   * (or from the top, if that one lay fallen).
+   */
+  const setSkier = (w: Who, skis: HorseSkis = horse.skis) => {
+    if (w === who && skis === horse.skis) return;
+    skier.object.removeFromParent();
+    if (skis !== horse.skis) horse.setSkis(skis);
+    who = w;
+    skier = skiers[w];
+    rider.add(skier.object);
+    seat();
+    joints = jointsBefore = null;
+    if (mode === 'ride' && crash) restart();
+    if (air) { air = null; ride.out = groundAt(ride.down, ride.left).h; ride.rising = 0; }
+    layWatchTracks();
+    clearRideTracks();
+    clearSpray();
+    placed = false;
+    reflect();
   };
   const seek = (x: number) => { const r = line.getBoundingClientRect(); t = clamp(((x - r.left) / r.width) * RUN_LENGTH, 0, RUN_LENGTH - 0.01); clearSpray(); };
   line.addEventListener('pointerdown', (e) => { scrubbing = true; line.setPointerCapture(e.pointerId); seek(e.clientX); });
@@ -748,7 +846,7 @@ async function start() {
   const eyeOff = new Vector3(), lookOff = new Vector3(), lastRider = new Vector3(), ahead = FALL.clone();
   let across = 0;
   /** Where the view is about: the skier's feet, or, gone limp, the snow under its hips. */
-  const focus = () => { if (!crash) return rider.position.clone(); const p = crash.body.middle(); return onSlope(p.dot(FALL), p.dot(LEFT)); };
+  const focus = () => { if (!crash) return rider.position.clone(); const p = fallenAt(); return onSlope(p.dot(FALL), p.dot(LEFT)); };
   const placeView = (now: Now, dt: number) => {
     const at = focus();
     across += ((mode === 'ride' ? 1 : 0.35) * now.left - across) * (placed ? ease(dt, 3) : 1);
@@ -826,6 +924,7 @@ async function start() {
       const doing = doingNow();
       if (doing !== shownPart) { shownPart = doing; $('part').textContent = doing; }
       $('clock').textContent = `${ride.time.toFixed(0)} s riding`;
+      document.body.classList.toggle('hinted', ride.time > 12);
       showPad();
     }
     keepSlopeAbout(at.down, at.left);
@@ -844,9 +943,10 @@ async function start() {
     onScreen: () => { const p = focus().addScaledVector(UP, 0.9).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; },
     step: (seconds: number) => { let at: Now | null = null; for (let i = 0; i < Math.round(seconds * 120); i++) at = stepRide(1 / 120); if (at && !air && !crash) layRide(at); placed = false; return { ...ride }; },
     // (Riding: what is happening in the air or on the ground, the kickers, and to put the skier anywhere going anyhow.)
-    state: () => ({ air: air && { ...air }, crash: crash && { why: crash.why, still: crash.body.still, at: crash.body.middle().toArray() }, told: { ...told } }),
+    state: () => ({ air: air && { ...air }, crash: crash && { why: crash.why, still: stillFor(), at: fallenAt().toArray(), bodies: crash.dolls.map((d) => d.doll.middle().toArray()) }, told: { ...told } }),
     kicker: (i: number) => ({ down: KICK.first + i * KICK.every, left: kickerLeft(i), length: KICK.length }),
     put: (o: Partial<typeof ride>) => { Object.assign(ride, o); placed = false; },
+    setSkier: (w: Who, skis?: HorseSkis) => setSkier(w, skis), who: () => who,
     restart, time: () => t, ready: true, run,
   };
   requestAnimationFrame(frame);

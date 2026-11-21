@@ -387,8 +387,12 @@ export const RUN_PARTS = [
 ];
 export const RUN_LENGTH = 44;
 
-/** Where the skier is at a moment of the run: how far down the slope and to its left (metres), how fast, which way its skis and it go (radians from straight down, to the left), and how much its skis slide sideways (0 to 1). */
-export interface RunSample { t: number; down: number; left: number; speed: number; ski: number; way: number; skid: number; tuck: number; brake: number }
+/**
+ * Where the skier is at a moment of the run: how far down the slope and to its left (metres), how fast, which way its skis and it go
+ * (radians from straight down, to the left), and how much its skis slide sideways (0 to 1); how far into a tuck and braking; and how far
+ * it leans into its turn and flicks each pole, as `riderPose` takes them (so that another skier can be posed from the run, live).
+ */
+export interface RunSample { t: number; down: number; left: number; speed: number; ski: number; way: number; skid: number; tuck: number; brake: number; lean: number; flickL: number; flickR: number }
 
 export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 / 30): { clip: AnimationClip; samples: RunSample[]; stretch: number; sunk: number } {
   const P = new Poser(source, base), h0 = turnsHeight(P), K = RUN_KEYS, n = Math.round(RUN_LENGTH / step);
@@ -405,11 +409,12 @@ export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 
     const s = Math.max(-1.3, Math.min(1.3, Math.atan((speed * turning) / G) / rad(48))) * (1 - brake);
     const ski = carve + (rad(78) - carve) * brake, way = carve * (1 - brake);
     const turnsBig = Math.min(1, at(t, K.across) / 25) * (1 - tuck) * (1 - brake);
-    const a = riderPose(h0, { s, ski, tuck, brake, tall: 0, flickL: flick('l', p) * turnsBig, flickR: flick('r', p) * turnsBig });
+    const flickL = flick('l', p) * turnsBig, flickR = flick('r', p) * turnsBig;
+    const a = riderPose(h0, { s, ski, tuck, brake, tall: 0, flickL, flickR });
     stretch = Math.max(stretch, poseAlpine(P, a));
     for (const k of ['l', 'r'] as const) sunk = Math.max(sunk, -skiOver(P, k, false));
     P.keep(t);
-    samples.push({ t, down, left, speed, ski, way, skid: Math.abs(Math.sin(ski - way)), tuck, brake });
+    samples.push({ t, down, left, speed, ski, way, skid: Math.abs(Math.sin(ski - way)), tuck, brake, lean: s, flickL, flickR });
     down += speed * Math.cos(way) * step;
     left += speed * Math.sin(way) * step;
   }
@@ -547,6 +552,8 @@ export class Rider {
    * in the figure's own frame, which is the world's only while it stands in nothing, so it is taken out of what holds it meanwhile.)
    */
   pose(c: RideControls): number { return this.alone(() => poseAlpine(this.P, riderPose(this.h0, c))); }
+  /** In any pose (a rider on a horse's back, `saddlePose`). */
+  posePose(a: AlpinePose): number { return this.alone(() => poseAlpine(this.P, a)); }
   /** In the air, as `airPose` has it. */
   poseAir(c: AirControls): number { return this.alone(() => poseAlpine(this.P, airPose(this.h0, c))); }
   /**

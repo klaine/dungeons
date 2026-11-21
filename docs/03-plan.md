@@ -804,6 +804,43 @@ The machine this is developed on now has a graphics card, and tablets were repor
     the end, skidded, 0.8 seconds and 11 metres, at 48. Six full skids of 1.1 seconds each, each coming round past a hundred degrees,
     brought it to a stop, as skidding is meant to. An arrow held: no skid for the first 0.8 seconds by the page's clock, wholly
     skidded by 1.8. The watched run is the same to the last bit. Pictures from above and behind of carved and skidded turns.
+68. **A skiing horse, with a rider or without, on two long skis or four short.** Asked: "a rigged horse model; fantasy/imaginary way
+    for the horse have skis, two bindings per ski - left and right ski (or as an option for horse skiing: four short skis!); same
+    skiing actions, tricks and animations adapted for this skiing horse; with a rider on back or just the horse skiing option", and,
+    for later: "all this is heading towards making this possible in the world game winter mountains and hills. no need to do that
+    now". *Done:* Quaternius's free animal pack (CC0) has a rigged horse, but its files are kept on Google Drive, which this machine
+    cannot reach, and itch.io turned the requests away; so the horse is made in code (`src/figures/horse.ts`), as the figures'
+    mannequin is, a wooden horse in its gold with violet joints and a violet crest and tail tuft: a skeleton of hips, spine, chest,
+    two bones of neck, head, ears, three of tail and each leg's upper and middle bones, cannon, pastern and hoof, every bone resting
+    unturned, and a mesh of rounded solids skinned to it, the barrel and the neck bending smoothly between their bones; 1.55 metres at
+    the withers. Its skis: a long ski under each side, 2.75 metres, the fore and hind hooves bound 1.1 metres apart on it; or a short
+    ski of a metre under each hoof. It is posed by a handful of numbers (`HorsePose`): the body over its skis, turned, leant and
+    pitched about its middle, the back arched, the neck raised or lowered and turned, the head flexed, the ears laid back, the tail
+    raised; each ski placed, turned, pitched and edged; the whole spun, flipped and lifted. Its legs are found from the skis up: the
+    hoof bound, the pastern and the cannon standing on it as the binding holds them (the knee coming forward and the hock back as the
+    leg is gathered), the upper bones reaching from shoulder or hip to the top of the cannon with the elbow bending back and the
+    stifle forward. `horseRidePose` takes what a skier's pose takes: carving leant in over skis swung out, lower in the turn, its head
+    turned into it, a nod where a skier flicks a pole; the tuck low, the neck stretched out level ahead as a racehorse's, the ears
+    back, the tail streaming; standing tall, the head up and drawn in; braking, a reining horse's sliding stop, sat down on its hocks;
+    a skid some of that; sunk into a landing. `horseAirPose`: straight air a show jumper's (named so), the skis drawn up under it, the
+    neck arched down; a flight stretched out along its skis, not laid forward over them as a ski jumper is (a horse is level already,
+    and laid forward it dived), its skis spread at their tips and, on four, the fore pushed forward and the hind back; the backflip's
+    throw, the head flung up; gathered in for a spin. Every pose was measured for how far each leg had to stretch to its ski, and the
+    carve, the stop and the flight eased until none goes past 0.95 of its length (the fore legs stand at 0.84 at rest). A rider sits
+    astride in the saddle, a frame that moves with the spine (`saddlePose`, another mannequin with poles of 2.3 metres to reach the
+    snow): leant into the turn and flicking its poles, a jockey's crouch in the tuck, laid along the neck in a flight, arms flung up
+    for a backflip. A body gone limp is now any body's points and links (`BodySpec` in `ragdoll.ts`): the horse's barrel braced stiff,
+    its neck, tail and legs in their bones, each ski stiff with the hooves bound to it; with a rider, two bodies, the rider thrown on
+    from the horse a little faster and higher. On `lab/slope.html`, *Skier* chooses a person, a horse or a horse and rider, and *Skis*
+    two long or four short; the page holds a skier as a thing to be posed for the ride, the air and the watched run (a horse posed
+    live from the run, whose samples now keep the lean and the pole flicks), with as many tracks as it has skis; trick names and
+    *Sliding stop* fit the horse. `lab/slope.ts` was not in the typecheck's list, and now is. *Checked:* without a browser, every
+    pose's leg reach on both kinds of skis; in headless Chromium, the horse alone and with its rider in the watched run's turns, tuck
+    and stop, from beside and behind; off the first kicker, a show jump, a flight, a backflip and a 360, with and without the rider;
+    the run of kicker trials as the person's, with a horse and rider on four skis, every landing and fall the same as the person's
+    (the physics is the same), the two bodies settling apart within eleven seconds; the person's trials and skids after the change,
+    the same to the number; the page's own buttons at desktop and phone size with no fault. Not done: the horse in the world's winter
+    mountains, as said, for later; a horse that walks, trots or gallops off its skis.
 
 ## Risks
 

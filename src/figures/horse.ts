@@ -1,0 +1,594 @@
+import {
+  Bone, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Group, Matrix4, Mesh, MeshStandardMaterial, Object3D,
+  Quaternion, Skeleton, SkinnedMesh, SphereGeometry, Vector3,
+} from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import type { AirControls, AlpineArm, AlpineFoot, AlpinePose, RideControls } from './alpine';
+import type { BodySpec } from './ragdoll';
+
+/**
+ * A horse that skis (asked: "a rigged horse model; fantasy/imaginary way for the horse have skis, two bindings per ski - left and right
+ * ski (or as an option for horse skiing: four short skis!); same skiing actions, tricks and animations adapted for this skiing horse;
+ * with a rider on back or just the horse skiing option").
+ *
+ * The horse is made here, in code, as the figures' mannequin is made: an artist's wooden horse, its parts the mannequin's gold and its
+ * joints its violet, on a skeleton of its own (hips, spine, chest, two bones of neck, head and ears, three of tail, and each leg's
+ * upper bone, middle bone, cannon, pastern and hoof), skinned so that the barrel and the neck bend smoothly between their bones. (A
+ * horse from Quaternius's free animal pack was looked for first; its files are kept where this machine could not reach them.)
+ *
+ * It is posed as the skiers are, by a handful of numbers (`HorsePose`), not by its bones' own axes: the body placed over its skis and
+ * turned, leant and pitched about its middle, the back arched, the neck raised or lowered and turned, the head flexed, the ears laid
+ * back, the tail raised; each ski placed, turned, pitched and edged under it; and the whole turned about the upright and over (a spin, a
+ * flip) and lifted. Its legs are found from the skis up: each hoof is held in a binding on its ski (two to a ski, fore and hind, on a
+ * pair of long skis; or each on a short ski of its own), the pastern and the cannon stand on it as the binding holds them, and the upper
+ * two bones reach from the shoulder or the hip to the top of the cannon, the elbow bending back and the stifle forward, as a horse's do.
+ *
+ * Every bone rests unturned, so that a bone's turn in the horse's frame is its turn from rest; the poser keeps those turns and the
+ * joints' places itself, bone by bone down the skeleton, and gives each bone its turn from its parent's at the end.
+ */
+
+type V3 = [number, number, number];
+export type HorseLeg = 'f_l' | 'f_r' | 'h_l' | 'h_r';
+export const HORSE_LEGS: HorseLeg[] = ['f_l', 'f_r', 'h_l', 'h_r'];
+export type HorseSkis = 'pair' | 'four';
+type Side = 'l' | 'r';
+
+/** How thick a horse's ski is: its hooves stand this much over the snow. */
+const SKI_T = 0.03;
+/** How far apart the fore and hind hooves of a side stand, along the horse, and where between them its middle is. */
+const BINDINGS = 1.1;
+
+// The skeleton, as the horse stands square on the snow (forward +z, up +y, its left +x): each bone's joint, and its parent.
+const BONES: [string, string | null, V3][] = (() => {
+  const b: [string, string | null, V3][] = [
+    ['root', null, [0, 0, 0]],
+    ['hips', 'root', [0, 1.3, -0.45]],
+    ['spine', 'hips', [0, 1.32, 0]],
+    ['chest', 'spine', [0, 1.3, 0.45]],
+    ['neck1', 'chest', [0, 1.42, 0.78]],
+    ['neck2', 'neck1', [0, 1.74, 0.98]],
+    ['head', 'neck2', [0, 2.02, 1.14]],
+    ['ear_l', 'head', [0.07, 2.08, 1.11]], ['ear_r', 'head', [-0.07, 2.08, 1.11]],
+    ['tail1', 'hips', [0, 1.46, -0.84]], ['tail2', 'tail1', [0, 1.24, -0.98]], ['tail3', 'tail2', [0, 0.96, -1.04]],
+  ];
+  for (const [k, s] of [['l', 1], ['r', -1]] as const) {
+    b.push([`f_up_${k}`, 'chest', [0.2 * s, 1.18, 0.62]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.4]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.44]],
+      [`f_pas_${k}`, `f_low_${k}`, [0.15 * s, 0.17, 0.48]], [`f_hoof_${k}`, `f_pas_${k}`, [0.15 * s, 0.07, BINDINGS / 2 - 0.02]]);
+    b.push([`h_up_${k}`, 'hips', [0.22 * s, 1.22, -0.58]], [`h_mid_${k}`, `h_up_${k}`, [0.24 * s, 0.92, -0.36]], [`h_low_${k}`, `h_mid_${k}`, [0.17 * s, 0.56, -0.7]],
+      [`h_pas_${k}`, `h_low_${k}`, [0.15 * s, 0.17, -0.64]], [`h_hoof_${k}`, `h_pas_${k}`, [0.15 * s, 0.07, -BINDINGS / 2 - 0.02]]);
+  }
+  return b;
+})();
+/** Points that are not joints: the end of the muzzle and of the tail, the tips of the ears. */
+const ENDS: Record<string, V3> = { muzzle: [0, 1.58, 1.62], tail_end: [0, 0.62, -1.03], ear_tip_l: [0.1, 2.27, 1.07], ear_tip_r: [-0.1, 2.27, 1.07] };
+
+const REST = new Map<string, Vector3>([...BONES.map(([n, , p]) => [n, new Vector3(...p)] as const), ...Object.entries(ENDS).map(([n, p]) => [n, new Vector3(...p)] as const)]);
+const PARENT = new Map(BONES.map(([n, p]) => [n, p]));
+const rest = (n: string) => REST.get(n)!.clone();
+
+const GOLD = new Color(0xe7aa3a), VIOLET = new Color(0xaa66db), HORN = new Color(0x3a2f2a);
+
+// ------------------------------------------------------------------ making it
+
+/** A piece of the horse's mesh: its shape where the horse rests, its colour, and which bones move each of its points, how much. */
+interface Piece { geometry: BufferGeometry; colour: Color; weights: (p: Vector3) => [string, number][] }
+const rigid = (bone: string) => () => [[bone, 1]] as [string, number][];
+const smooth01 = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+
+/** A round solid, `r` its half-breadths, at `c`. */
+function ellipsoid(c: V3 | Vector3, r: V3, detail = 18): BufferGeometry {
+  const at = Array.isArray(c) ? new Vector3(...c) : c;
+  return new SphereGeometry(1, detail, Math.round(detail * 0.7)).scale(...r).translate(at.x, at.y, at.z);
+}
+/** A tapering round solid from `a` (half-breadth `ra`) to `b` (`rb`), narrowed across the horse by `squash`. */
+function tube(a: Vector3, b: Vector3, ra: number, rb: number, squash = 1, segments = 12): BufferGeometry {
+  const d = b.clone().sub(a), g = new CylinderGeometry(rb, ra, d.length(), segments, 4, false).scale(squash, 1, 1);
+  g.applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), d.clone().normalize()));
+  const mid = a.clone().add(b).multiplyScalar(0.5);
+  return g.translate(mid.x, mid.y, mid.z);
+}
+
+function pieces(): Piece[] {
+  const out: Piece[] = [];
+  const add = (geometry: BufferGeometry, colour: Color, weights: Piece['weights']) => out.push({ geometry, colour, weights });
+  // The barrel, bending with the hips, the spine and the chest along it; the rump over the hind legs, and the breast before the fore.
+  const along = (p: Vector3): [string, number][] => {
+    const z = p.z;
+    if (z <= -0.45) return [['hips', 1]];
+    if (z >= 0.45) return [['chest', 1]];
+    if (z < 0) { const w = smooth01((z + 0.45) / 0.45); return [['hips', 1 - w], ['spine', w]]; }
+    const w = smooth01(z / 0.45);
+    return [['spine', 1 - w], ['chest', w]];
+  };
+  add(ellipsoid([0, 1.22, 0], [0.3, 0.34, 0.8], 28), GOLD, along);
+  add(ellipsoid([0, 1.26, -0.52], [0.3, 0.3, 0.38]), GOLD, rigid('hips'));
+  add(ellipsoid([0, 1.2, 0.5], [0.27, 0.34, 0.34]), GOLD, rigid('chest'));
+  // The neck, tapering from the withers to the poll, narrow across; a violet crest of mane along its top.
+  const n1 = rest('neck1'), n2 = rest('neck2'), hd = rest('head');
+  const neckW = (p: Vector3): [string, number][] => { const t = (p.y - n1.y) / (hd.y - n1.y), w = smooth01((t - 0.3) / 0.4); return [['neck1', 1 - w], ['neck2', w]]; };
+  add(tube(n1.clone().add(new Vector3(0, -0.12, -0.08)), hd.clone().add(new Vector3(0, -0.04, -0.02)), 0.24, 0.12, 0.62, 16), GOLD, neckW);
+  for (let i = 0; i < 6; i++) {
+    const t = (i + 0.5) / 6, p = n1.clone().lerp(hd, t).add(new Vector3(0, 0.14 - 0.05 * t, -0.13 + 0.06 * t));
+    add(ellipsoid(p, [0.035, 0.1, 0.07], 10), VIOLET, t < 0.5 ? rigid('neck1') : rigid('neck2'));
+  }
+  void n2;
+  // The head: long, from the poll down to the muzzle, a cheek round under the poll.
+  const mz = rest('muzzle');
+  add(tube(hd.clone().add(new Vector3(0, 0.02, 0.02)), mz, 0.12, 0.085, 0.72, 14), GOLD, rigid('head'));
+  add(ellipsoid([0, 1.86, 1.22], [0.09, 0.13, 0.13]), GOLD, rigid('head'));
+  add(ellipsoid(mz, [0.075, 0.075, 0.08]), GOLD, rigid('head'));
+  for (const k of ['l', 'r'] as const) add(tube(rest(`ear_${k}`), rest(`ear_tip_${k}`), 0.04, 0.008, 0.6, 8), GOLD, rigid(`ear_${k}`));
+  // The tail, in three bones, a violet tuft at its end.
+  const t1 = rest('tail1'), t2 = rest('tail2'), t3 = rest('tail3'), te = rest('tail_end');
+  add(tube(t1, t2, 0.055, 0.045, 1, 8), GOLD, rigid('tail1'));
+  add(tube(t2, t3, 0.045, 0.04, 1, 8), GOLD, rigid('tail2'));
+  add(tube(t3, te, 0.04, 0.03, 1, 8), GOLD, rigid('tail3'));
+  add(ellipsoid(te.clone().add(new Vector3(0, 0.02, 0)), [0.07, 0.16, 0.07], 12), VIOLET, rigid('tail3'));
+  // The legs: each bone a tapering solid, the elbow and the knee, the stifle and the hock and each fetlock a violet ball, the hoof horn.
+  for (const k of ['l', 'r'] as const) {
+    for (const f of ['f', 'h'] as const) {
+      const up = rest(`${f}_up_${k}`), mid = rest(`${f}_mid_${k}`), low = rest(`${f}_low_${k}`), pas = rest(`${f}_pas_${k}`), hoof = rest(`${f}_hoof_${k}`);
+      if (f === 'f') {
+        add(tube(up, mid, 0.12, 0.09, 0.8), GOLD, rigid(`f_up_${k}`));
+        add(tube(mid, low, 0.085, 0.055, 0.85), GOLD, rigid(`f_mid_${k}`));
+      } else {
+        add(ellipsoid(up.clone().lerp(mid, 0.45).add(new Vector3(0, 0.02, 0)), [0.13, 0.22, 0.17]), GOLD, rigid(`h_up_${k}`));
+        add(tube(mid, low, 0.09, 0.055, 0.8), GOLD, rigid(`h_mid_${k}`));
+      }
+      add(tube(low, pas, 0.045, 0.04, 0.85, 10), GOLD, rigid(`${f}_low_${k}`));
+      add(tube(pas, hoof, 0.04, 0.045, 0.85, 10), GOLD, rigid(`${f}_pas_${k}`));
+      const sole = hoof.clone().add(new Vector3(0, -0.07, 0.02));
+      add(tube(hoof, sole, 0.055, 0.068, 1, 12), HORN, rigid(`${f}_hoof_${k}`));
+      add(ellipsoid(mid, [0.075, 0.075, 0.075], 12), VIOLET, rigid(`${f}_mid_${k}`));
+      add(ellipsoid(low, [0.062, 0.062, 0.062], 12), VIOLET, rigid(`${f}_low_${k}`));
+      add(ellipsoid(pas, [0.05, 0.05, 0.05], 10), VIOLET, rigid(`${f}_pas_${k}`));
+    }
+  }
+  return out;
+}
+
+/** The horse's skis: a long one under each side, a binding for each hoof; or a short one under each hoof. Its sole on y = 0, along +z. */
+const SKIS: Record<HorseSkis, { length: number; ahead: number; width: number }> = {
+  // (Ahead of the middle between the bindings, the rest behind it.)
+  pair: { length: 2.75, ahead: 1.42, width: 0.11 },
+  four: { length: 1.0, ahead: 0.55, width: 0.1 },
+};
+function skiMesh(kind: HorseSkis): Mesh {
+  const s = SKIS[kind], tip = 0.16, flat = s.length - tip, back = s.length - s.ahead;
+  const body = new BoxGeometry(s.width, SKI_T, flat).translate(0, SKI_T / 2, (s.ahead - tip - back) / 2);
+  const turned = new BoxGeometry(s.width * 0.9, SKI_T, tip).translate(0, SKI_T / 2, tip / 2).rotateX(-0.45).translate(0, 0, s.ahead - tip);
+  // The bindings: a toe piece and a heel piece round each hoof.
+  const at = kind === 'pair' ? [BINDINGS / 2, -BINDINGS / 2] : [0];
+  const parts = [body, turned];
+  for (const z of at) parts.push(new BoxGeometry(s.width * 1.05, 0.05, 0.06).translate(0, SKI_T + 0.025, z + 0.1), new BoxGeometry(s.width * 1.05, 0.07, 0.05).translate(0, SKI_T + 0.035, z - 0.09));
+  const g = mergeGeometries(parts.map((p) => { p.deleteAttribute('uv'); return p; }));
+  const m = new Mesh(g, new MeshStandardMaterial({ color: 0xc0322b, roughness: 0.5 }));
+  m.castShadow = true;
+  return m;
+}
+
+// ------------------------------------------------------------------ posing it
+
+/** A ski's place under the horse, from where it rests: to the left `x`, ahead `z`, `up` off the snow; turned, pitched nose down, edged. */
+export interface HorseSki { x: number; z: number; up: number; yaw: number; pitch: number; edge: number }
+/**
+ * A skiing horse's pose. Its body from where it stands square on its skis: lower (negative `height`), to the left and ahead; turned to
+ * the left (`yaw`), leant to its right (`roll`; to its left, negative) and pitched nose down, about its middle; its back arched
+ * (positive, the chest and the hips down from the spine) and twisted; its neck lowered (positive) and turned to the left; its head
+ * flexed, the nose in towards the chest; its ears laid back (0 pricked, 1 flat back); its tail raised (0 hanging, 1 streaming straight
+ * back) and swung. Each side's ski (on four short skis, the side's two together), and on four short skis the fore and the hind skis
+ * lifted more (`front`, `hind`) and pushed apart along the horse (`spread`). The whole turned about the upright and over, and lifted.
+ */
+export interface HorsePose {
+  height: number; bodyX: number; bodyZ: number; yaw: number; roll: number; pitch: number; arch: number; twist: number;
+  neck: number; neckYaw: number; head: number; ears: number; tail: number; tailYaw: number;
+  skis: Record<Side, HorseSki>; front: number; hind: number; spread: number;
+  spin: number; flip: number; lift: number;
+}
+
+const X = new Vector3(1, 0, 0), Y = new Vector3(0, 1, 0), Z = new Vector3(0, 0, 1);
+const qx = (a: number) => new Quaternion().setFromAxisAngle(X, a), qy = (a: number) => new Quaternion().setFromAxisAngle(Y, a), qz = (a: number) => new Quaternion().setFromAxisAngle(Z, a);
+const rad = (d: number) => (d * Math.PI) / 180;
+const mul = (...q: Quaternion[]) => q.reduce((a, b) => a.multiply(b), new Quaternion());
+
+export function restHorsePose(): HorsePose {
+  const ski = (): HorseSki => ({ x: 0, z: 0, up: 0, yaw: 0, pitch: 0, edge: 0 });
+  return { height: 0, bodyX: 0, bodyZ: 0, yaw: 0, roll: 0, pitch: 0, arch: 0, twist: 0, neck: 0, neckYaw: 0, head: 0, ears: 0, tail: 0, tailYaw: 0, skis: { l: ski(), r: ski() }, front: 0, hind: 0, spread: 0, spin: 0, flip: 0, lift: 0 };
+}
+/** A pose `w` of the way from `a` to `b`, every number of it. */
+export function mixHorse(a: HorsePose, b: HorsePose, w: number): HorsePose {
+  const m = (x: number, y: number) => x + (y - x) * w, ski = (s: Side): HorseSki => {
+    const p = a.skis[s], q = b.skis[s];
+    return { x: m(p.x, q.x), z: m(p.z, q.z), up: m(p.up, q.up), yaw: m(p.yaw, q.yaw), pitch: m(p.pitch, q.pitch), edge: m(p.edge, q.edge) };
+  };
+  const out = { ...a } as HorsePose;
+  for (const k of Object.keys(a) as (keyof HorsePose)[]) if (typeof a[k] === 'number') (out as unknown as Record<string, number>)[k] = m(a[k] as number, b[k] as number);
+  out.skis = { l: ski('l'), r: ski('r') };
+  return out;
+}
+
+export class Horse {
+  readonly model = new Group();
+  /** Where a rider sits: on its back over its middle, a frame that moves with the spine (its origin 0.6 under the seat, where a rider's stirrups hang). */
+  readonly saddle = new Object3D();
+  readonly mesh: SkinnedMesh;
+  private readonly bones = new Map<string, Bone>();
+  private readonly wq = new Map<string, Quaternion>();
+  private readonly wp = new Map<string, Vector3>();
+  private skiKind: HorseSkis;
+  private skiMeshes: Mesh[] = [];
+  /** The skis' turns and places as last posed (in the horse's frame), by `l`, `r` or by leg. */
+  private readonly skiAt = new Map<string, { at: Vector3; q: Quaternion }>();
+  /** How far each leg was stretched to reach its ski as last posed, as a share of its length. */
+  readonly reach: Record<HorseLeg, number> = { f_l: 0, f_r: 0, h_l: 0, h_r: 0 };
+
+  constructor(skis: HorseSkis = 'pair') {
+    this.skiKind = skis;
+    for (const [n, , p] of BONES) {
+      const b = new Bone();
+      b.name = n;
+      const at = new Vector3(...p);
+      const parent = PARENT.get(n);
+      b.position.copy(parent ? at.clone().sub(rest(parent)) : at);
+      this.bones.set(n, b);
+      if (parent) this.bones.get(parent)!.add(b);
+    }
+    const root = this.bones.get('root')!;
+    this.model.add(root);
+    this.model.updateMatrixWorld(true);
+    const all = [...this.bones.values()], index = new Map(all.map((b, i) => [b.name, i]));
+    // The mesh: every piece given its colour and its bones, made one.
+    const made = pieces().map(({ geometry, colour, weights }) => {
+      geometry.deleteAttribute('uv');
+      const g = geometry;
+      const n = g.getAttribute('position').count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), col = new Float32Array(n * 3), p = new Vector3();
+      for (let i = 0; i < n; i++) {
+        p.fromBufferAttribute(g.getAttribute('position') as BufferAttribute, i);
+        const w = weights(p).filter(([, x]) => x > 1e-4);
+        w.forEach(([b, x], j) => { si[i * 4 + j] = index.get(b)!; sw[i * 4 + j] = x; });
+        col.set([colour.r, colour.g, colour.b], i * 3);
+      }
+      g.setAttribute('skinIndex', new BufferAttribute(si, 4));
+      g.setAttribute('skinWeight', new BufferAttribute(sw, 4));
+      g.setAttribute('color', new BufferAttribute(col, 3));
+      return g;
+    });
+    const geometry = mergeGeometries(made);
+    this.mesh = new SkinnedMesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }));
+    this.mesh.castShadow = this.mesh.receiveShadow = true;
+    this.mesh.frustumCulled = false;
+    this.model.add(this.mesh);
+    this.mesh.updateMatrixWorld(true);
+    this.mesh.bind(new Skeleton(all));
+    // (The seat is on the top of the barrel over the spine; a rider's frame stands 0.6 under it.)
+    this.saddle.position.set(0, 1.22 + 0.34 - 0.6 - 1.32, -0.02);
+    this.bones.get('spine')!.add(this.saddle);
+    this.setSkis(skis);
+    this.pose(restHorsePose());
+  }
+
+  get skis(): HorseSkis { return this.skiKind; }
+  /** Its skis changed: a long pair, or four short. */
+  setSkis(kind: HorseSkis): void {
+    for (const m of this.skiMeshes) { m.removeFromParent(); m.geometry.dispose(); }
+    this.skiKind = kind;
+    this.skiMeshes = (kind === 'pair' ? ['l', 'r'] : HORSE_LEGS).map(() => { const m = skiMesh(kind); this.model.add(m); return m; });
+  }
+  /** Each ski's mesh, by side (a pair) or by leg (four). */
+  skiObjects(): Mesh[] { return this.skiMeshes; }
+  /** How far ahead of its middle (between bindings) and behind it each ski reaches. */
+  skiReach(): { ahead: number; behind: number } { const s = SKIS[this.skiKind]; return { ahead: s.ahead, behind: s.length - s.ahead }; }
+
+  /** Puts the horse in a pose. Gives back how far its legs had to stretch to reach their skis, as a share of their length (over 1: not reached). */
+  pose(a: HorsePose): number {
+    const wq = this.wq, wp = this.wp;
+    wq.clear(); wp.clear();
+    wq.set('root', new Quaternion()); wp.set('root', new Vector3());
+    // The whole, turned about the middle of the barrel and lifted.
+    const R = mul(qy(a.spin), qx(a.flip)), pivot = new Vector3(a.bodyX, 1.22 + SKI_T + a.height, a.bodyZ);
+    const place = (v: Vector3) => v.sub(pivot).applyQuaternion(R).add(pivot).setY(v.y + a.lift);
+    const Rb = mul(R, qy(a.yaw), qz(a.roll), qx(a.pitch));
+    // The body, turned about its spine.
+    const spineAt = place(rest('spine').add(new Vector3(a.bodyX, SKI_T + a.height, a.bodyZ)));
+    wq.set('hips', Rb.clone().multiply(qx(-a.arch * 0.5)).multiply(qy(-a.twist * 0.5)));
+    wp.set('hips', spineAt.clone().sub(rest('spine').sub(rest('hips')).applyQuaternion(wq.get('hips')!)));
+    const fk = (n: string, q: Quaternion) => {
+      const p = PARENT.get(n)!;
+      wp.set(n, wp.get(p)!.clone().add(rest(n).sub(rest(p)).applyQuaternion(wq.get(p)!)));
+      wq.set(n, q);
+    };
+    fk('spine', Rb.clone());
+    fk('chest', Rb.clone().multiply(qx(a.arch * 0.5)).multiply(qy(a.twist * 0.5)));
+    fk('neck1', wq.get('chest')!.clone().multiply(qy(a.neckYaw * 0.5)).multiply(qx(a.neck * 0.5)));
+    fk('neck2', wq.get('neck1')!.clone().multiply(qy(a.neckYaw * 0.5)).multiply(qx(a.neck * 0.5)));
+    fk('head', wq.get('neck2')!.clone().multiply(qx(a.head)));
+    for (const k of ['l', 'r'] as const) fk(`ear_${k}`, wq.get('head')!.clone().multiply(qx(-a.ears * 1.15)).multiply(qz(a.ears * 0.4 * (k === 'l' ? -1 : 1))));
+    fk('tail1', wq.get('hips')!.clone().multiply(qy(a.tailYaw)).multiply(qx(a.tail * 0.95)));
+    fk('tail2', wq.get('tail1')!.clone().multiply(qy(a.tailYaw * 0.5)).multiply(qx(a.tail * 0.45)));
+    fk('tail3', wq.get('tail2')!.clone().multiply(qx(a.tail * 0.3)));
+    // The skis, and where each hoof stands on them.
+    this.skiAt.clear();
+    const soles: Record<HorseLeg, { at: Vector3; q: Quaternion }> = {} as Record<HorseLeg, { at: Vector3; q: Quaternion }>;
+    for (const k of ['l', 'r'] as const) {
+      const s = a.skis[k], sign = k === 'l' ? 1 : -1, Rs = mul(qy(s.yaw), qx(s.pitch), qz(s.edge)), q = R.clone().multiply(Rs);
+      if (this.skiKind === 'pair') {
+        const centre = new Vector3(0.15 * sign + s.x, s.up, s.z);
+        this.skiAt.set(k, { at: place(centre.clone()), q });
+        for (const [f, dz] of [['f', BINDINGS / 2], ['h', -BINDINGS / 2]] as const) soles[`${f}_${k}`] = { at: place(centre.clone().add(new Vector3(0, SKI_T, dz).applyQuaternion(Rs))), q };
+      } else {
+        // (Each side's two along a line as a long ski's bindings are, turned with it.)
+        for (const [f, dz, lift, apart] of [['f', BINDINGS / 2, a.front, a.spread], ['h', -BINDINGS / 2, a.hind, -a.spread]] as const) {
+          const centre = new Vector3(0.15 * sign + s.x, s.up, s.z).add(new Vector3(0, lift, dz + apart).applyQuaternion(Rs));
+          this.skiAt.set(`${f}_${k}`, { at: place(centre.clone()), q });
+          soles[`${f}_${k}`] = { at: place(centre.clone().add(new Vector3(0, SKI_T, 0).applyQuaternion(Rs))), q };
+        }
+      }
+    }
+    // The legs, from the skis up.
+    let stretch = 0;
+    const aim = (n: string, next: Vector3, up: Quaternion) => {
+      const from = rest(this.childOf(n)).sub(rest(n)).applyQuaternion(up).normalize(), to = next.clone().sub(wp.get(n)!).normalize();
+      return new Quaternion().setFromUnitVectors(from, to).multiply(up);
+    };
+    for (const leg of HORSE_LEGS) {
+      const [f, k] = leg.split('_') as ['f' | 'h', Side], fore = f === 'f', { at: sole, q } = soles[leg];
+      const up = Y.clone().applyQuaternion(q), fwd = Z.clone().applyQuaternion(q);
+      const coronet = sole.clone().addScaledVector(up, 0.07).addScaledVector(fwd, -0.02), fetlock = coronet.clone().addScaledVector(up, 0.1).addScaledVector(fwd, -0.07);
+      fk(`${f}_up_${k}`, new Quaternion()); // (its place, from the chest or the hips; its turn is found below)
+      const top = wp.get(`${f}_up_${k}`)!, n = (s: string) => `${f}_${s}_${k}`;
+      const L1 = rest(n('mid')).distanceTo(rest(n('up'))), L2 = rest(n('low')).distanceTo(rest(n('mid'))), Lc = rest(n('pas')).distanceTo(rest(n('low')));
+      const restReach = rest(n('low')).distanceTo(rest(n('up')));
+      // The cannon stands on the pastern as it rests, tipped as the leg is gathered: the knee forward under a fore leg, the hock back.
+      const cannon0 = rest(n('low')).sub(rest(n('pas'))).normalize().applyQuaternion(q);
+      const gathered = Math.max(0, Math.min(1, (restReach - top.distanceTo(fetlock.clone().addScaledVector(cannon0, Lc))) / restReach));
+      const bodyFwd = Z.clone().applyQuaternion(wq.get(fore ? 'chest' : 'hips')!), side = X.clone().applyQuaternion(q);
+      const cannon = cannon0.clone().applyAxisAngle(side, (fore ? -0.9 : 0.6) * gathered).normalize();
+      const knee = fetlock.clone().addScaledVector(cannon, Lc);
+      const d = knee.clone().sub(top), len = d.length(), reach = Math.min(len, (L1 + L2) * 0.999), u = d.clone().normalize();
+      stretch = Math.max(stretch, len / (L1 + L2));
+      this.reach[leg] = len / (L1 + L2);
+      const bend = bodyFwd.clone().multiplyScalar(fore ? -1 : 1), w = bend.clone().addScaledVector(u, -bend.dot(u)).normalize();
+      const cosA = (L1 * L1 + reach * reach - L2 * L2) / (2 * L1 * reach), A = Math.acos(Math.max(-1, Math.min(1, cosA)));
+      const midAt = top.clone().addScaledVector(u, Math.cos(A) * L1).addScaledVector(w, Math.sin(A) * L1);
+      // (Each bone placed at the end of the one above it, then aimed at where the next joint is to be.)
+      const step = (bone: string, target: Vector3) => { fk(bone, new Quaternion()); wq.set(bone, aim(bone, target, wq.get(PARENT.get(bone)!)!)); };
+      wq.set(n('up'), aim(n('up'), midAt, wq.get(fore ? 'chest' : 'hips')!));
+      step(n('mid'), top.clone().addScaledVector(u, reach));
+      step(n('low'), fetlock);
+      step(n('pas'), coronet);
+      fk(n('hoof'), q.clone());
+    }
+    this.apply();
+    return stretch;
+  }
+
+  private childOf(n: string): string {
+    if (n === 'head') return 'muzzle';
+    if (n === 'tail3') return 'tail_end';
+    if (n.startsWith('ear_')) return `ear_tip_${n.slice(-1)}`;
+    const leg = n.match(/^([fh])_(up|mid|low|pas)_([lr])$/);
+    if (leg) return `${leg[1]}_${{ up: 'mid', mid: 'low', low: 'pas', pas: 'hoof' }[leg[2]]}_${leg[3]}`;
+    return { hips: 'spine', spine: 'chest', chest: 'neck1', neck1: 'neck2', neck2: 'head', tail1: 'tail2', tail2: 'tail3' }[n] ?? n;
+  }
+
+  /** Gives every bone its turn from its parent's, the hips their place, and the skis theirs. */
+  private apply(): void {
+    for (const [n, b] of this.bones) {
+      const p = PARENT.get(n), q = this.wq.get(n) ?? new Quaternion();
+      b.quaternion.copy(p ? (this.wq.get(p) ?? new Quaternion()).clone().invert().multiply(q) : q);
+    }
+    this.bones.get('hips')!.position.copy(this.wp.get('hips')!);
+    const keys = this.skiKind === 'pair' ? ['l', 'r'] : HORSE_LEGS;
+    keys.forEach((k, i) => { const s = this.skiAt.get(k); if (s) { this.skiMeshes[i].position.copy(s.at); this.skiMeshes[i].quaternion.copy(s.q); } });
+    this.model.updateMatrixWorld(true);
+  }
+
+  /** Where each ski's middle is on the snow, in the world: under each side (a pair) or each hoof (four). */
+  skiMiddles(): Vector3[] {
+    return this.skiMeshes.map((m) => m.localToWorld(new Vector3(0, 0, (SKIS[this.skiKind].ahead - (SKIS[this.skiKind].length - SKIS[this.skiKind].ahead)) / 2)));
+  }
+
+  // ---------------------------------------------------------------- gone limp
+
+  /** The points a body gone limp is made of: the joints, the muzzle and the tail's end, and each ski's tip and tail, by name. */
+  spec(): BodySpec { return horseSpec(this.skiKind); }
+  /** Where those points are now, in the world. */
+  joints(): Record<string, Vector3> {
+    this.model.updateMatrixWorld(true);
+    const out: Record<string, Vector3> = {};
+    for (const j of this.spec().joints) {
+      if (j === 'muzzle') out[j] = this.bones.get('head')!.localToWorld(rest('muzzle').sub(rest('head')));
+      else if (j === 'tail_end') out[j] = this.bones.get('tail3')!.localToWorld(rest('tail_end').sub(rest('tail3')));
+      else if (j.startsWith('ski_')) {
+        const [, key, end] = j.match(/^ski_(.+)_(tip|tail)$/)!, i = (this.skiKind === 'pair' ? ['l', 'r'] : HORSE_LEGS).indexOf(key as HorseLeg), s = SKIS[this.skiKind];
+        out[j] = this.skiMeshes[i].localToWorld(new Vector3(0, 0.01, end === 'tip' ? s.ahead - 0.1 : -(s.length - s.ahead) + 0.05));
+      } else out[j] = this.bones.get(j)!.getWorldPosition(new Vector3());
+    }
+    return out;
+  }
+  /**
+   * The skeleton put through points placed anywhere, in the frame of what holds the horse: the hips and the chest turned as the frames
+   * of their points are (the spine between), the neck, the head, the tail and each leg aimed bone by bone at the next point, each hoof
+   * and its ski turned as the ski's tip and tail and the pastern above it lie.
+   */
+  poseJoints(p: Record<string, Vector3>): void {
+    const wq = this.wq, wp = this.wp;
+    wq.clear(); wp.clear();
+    wq.set('root', new Quaternion()); wp.set('root', new Vector3());
+    const frame = (a: Vector3, b: Vector3) => { const z = a.clone().normalize(), x = b.clone().addScaledVector(z, -b.dot(z)).normalize(), y = z.clone().cross(x); return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, z)); };
+    const turnOf = (a0: Vector3, b0: Vector3, a1: Vector3, b1: Vector3) => frame(a1, b1).multiply(frame(a0, b0).invert());
+    const q = (n: string) => p[n].clone();
+    const hipsQ = turnOf(rest('spine').sub(rest('hips')), rest('h_up_l').sub(rest('h_up_r')), q('spine').sub(q('hips')), q('h_up_l').sub(q('h_up_r')));
+    const chestQ = turnOf(rest('neck1').sub(rest('chest')), rest('f_up_l').sub(rest('f_up_r')), q('neck1').sub(q('chest')), q('f_up_l').sub(q('f_up_r')));
+    wq.set('hips', hipsQ); wp.set('hips', q('hips'));
+    const fk = (n: string, qq: Quaternion) => { const par = PARENT.get(n)!; wp.set(n, wp.get(par)!.clone().add(rest(n).sub(rest(par)).applyQuaternion(wq.get(par)!))); wq.set(n, qq); };
+    const aimAt = (n: string, target: Vector3) => {
+      const up = wq.get(PARENT.get(n)!)!, from = rest(this.childOf(n)).sub(rest(n)).applyQuaternion(up).normalize(), to = target.clone().sub(wp.get(n)!);
+      return to.lengthSq() > 1e-10 ? new Quaternion().setFromUnitVectors(from, to.normalize()).multiply(up) : up.clone();
+    };
+    const chain = (n: string, target: Vector3) => { fk(n, new Quaternion()); wq.set(n, aimAt(n, target)); };
+    fk('spine', hipsQ.clone().slerp(chestQ, 0.5));
+    fk('chest', chestQ);
+    chain('neck1', q('neck2'));
+    chain('neck2', q('head'));
+    chain('head', q('muzzle'));
+    for (const k of ['l', 'r'] as const) fk(`ear_${k}`, wq.get('head')!.clone());
+    chain('tail1', q('tail_end'));
+    fk('tail2', wq.get('tail1')!.clone()); fk('tail3', wq.get('tail1')!.clone());
+    this.skiAt.clear();
+    for (const leg of HORSE_LEGS) {
+      const [f, k] = leg.split('_'), n = (s: string) => `${f}_${s}_${k}`;
+      chain(n('up'), q(n('mid'))); chain(n('mid'), q(n('low'))); chain(n('low'), q(n('pas'))); chain(n('pas'), q(n('hoof')));
+      const key = this.skiKind === 'pair' ? k : leg, tip = q(`ski_${key}_tip`), tail = q(`ski_${key}_tail`), s = SKIS[this.skiKind];
+      // (The ski's frame: along it from tail to tip, and its left, across it from the pastern standing over it.)
+      const along = tip.clone().sub(tail), skiQ = frame(along, q(n('pas')).sub(q(n('hoof'))).cross(along));
+      fk(n('hoof'), skiQ);
+      const behind = s.length - s.ahead;
+      this.skiAt.set(key, { at: tail.clone().addScaledVector(tip.clone().sub(tail).normalize(), behind - 0.05).addScaledVector(Y.clone().applyQuaternion(skiQ), -0.01), q: skiQ });
+    }
+    this.apply();
+  }
+}
+
+// ------------------------------------------------------------------ a horse gone limp
+
+/** The points of a horse gone limp, and how they hold together. */
+export function horseSpec(skis: HorseSkis): BodySpec {
+  const legs = HORSE_LEGS.flatMap((l) => { const [f, k] = l.split('_'); return ['up', 'mid', 'low', 'pas', 'hoof'].map((s) => `${f}_${s}_${k}`); });
+  const skiKeys = skis === 'pair' ? ['l', 'r'] : HORSE_LEGS;
+  const joints = ['hips', 'spine', 'chest', 'neck1', 'neck2', 'head', 'muzzle', 'tail1', 'tail_end', ...legs, ...skiKeys.flatMap((k) => [`ski_${k}_tip`, `ski_${k}_tail`])];
+  return {
+    joints,
+    radius: (j) => (({ hips: 0.3, spine: 0.32, chest: 0.3, neck1: 0.18, neck2: 0.13, head: 0.12, muzzle: 0.09, tail1: 0.06 }) as Record<string, number>)[j] ?? (j.startsWith('ski_') ? 0.02 : 0.06),
+    links(link) {
+      // The barrel nearly stiff, braced between the shoulders and the hips; the neck, the head and the tail in their bones.
+      const soft = (stiff: number) => ({ stiff });
+      link('hips', 'spine'); link('spine', 'chest'); link('hips', 'chest', soft(0.8));
+      link('chest', 'neck1'); link('spine', 'neck1', soft(0.6)); link('neck1', 'neck2'); link('neck2', 'head'); link('head', 'muzzle'); link('neck1', 'head', soft(0.25));
+      link('hips', 'tail1'); link('spine', 'tail1', soft(0.6)); link('tail1', 'tail_end');
+      link('f_up_l', 'f_up_r'); link('h_up_l', 'h_up_r');
+      for (const k of ['l', 'r'] as const) {
+        link(`f_up_${k}`, 'chest'); link(`f_up_${k}`, 'spine', soft(0.8)); link(`f_up_${k}`, 'neck1', soft(0.8));
+        link(`h_up_${k}`, 'hips'); link(`h_up_${k}`, 'spine', soft(0.8)); link(`h_up_${k}`, 'tail1', soft(0.8));
+      }
+      for (const l of HORSE_LEGS) {
+        const [f, k] = l.split('_'), n = (s: string) => `${f}_${s}_${k}`, len = (a: string, b: string) => rest(n(a)).distanceTo(rest(n(b)));
+        link(n('up'), n('mid')); link(n('mid'), n('low')); link(n('low'), n('pas')); link(n('pas'), n('hoof'));
+        // (Never folded quite flat.)
+        link(n('up'), n('low'), { least: (len('up', 'mid') + len('mid', 'low')) * 0.4 }); link(n('mid'), n('pas'), { least: (len('mid', 'low') + len('low', 'pas')) * 0.4 });
+      }
+      // Each ski stiff with the hooves bound to it and their pasterns.
+      for (const key of skiKeys) {
+        const bound = skis === 'pair' ? [`f_hoof_${key}`, `f_pas_${key}`, `h_hoof_${key}`, `h_pas_${key}`] : [`${key.split('_')[0]}_hoof_${key.split('_')[1]}`, `${key.split('_')[0]}_pas_${key.split('_')[1]}`];
+        const piece = [`ski_${key}_tip`, `ski_${key}_tail`, ...bound];
+        for (let a = 0; a < piece.length; a++) for (let b = a + 1; b < piece.length; b++) link(piece[a], piece[b]);
+      }
+    },
+  };
+}
+
+// ------------------------------------------------------------------ skiing
+
+/**
+ * A skiing horse's pose from what it is doing, as a skier's is (`riderPose`): carving into a turn, its body leant in over skis swung
+ * out under it and on their edges, lower in the turn, its head turned into it; nodding as each turn begins, where a skier flicks its
+ * pole; tucked, low with the neck stretched out level ahead as a racehorse's, its ears laid back and its tail streaming; standing tall,
+ * the head up and drawn in, the ears pricked; braking, a reining horse's sliding stop, sat down on its hocks over the skis thrown
+ * across, its fore legs braced ahead; skidding, some of that; sunk into a landing.
+ */
+export function horseRidePose(c: RideControls): HorsePose {
+  const a = restHorsePose(), { s, ski, tuck, brake, tall } = c, skid = c.skid ?? 0, absorb = c.absorb ?? 0, nod = Math.max(c.flickL, c.flickR);
+  a.height = -0.08 - 0.16 * Math.abs(s);
+  a.bodyX = 0.12 * s;
+  a.roll = -rad(18) * s;
+  a.yaw = 0.95 * ski;
+  a.neckYaw = 0.25 * s - 0.4 * ski;
+  a.neck = rad(8);
+  a.head = rad(6);
+  a.tail = 0.15 + 0.1 * Math.abs(s);
+  const edge = -rad(28) * s * (1 - 0.4 * skid) - rad(22) * brake;
+  for (const k of ['l', 'r'] as const) a.skis[k] = { x: -0.08 * s, z: 0, up: 0, yaw: ski, pitch: 0, edge };
+  a.head += rad(14) * nod; a.neck += rad(6) * nod;
+  // The tuck.
+  a.height -= 0.26 * tuck; a.pitch += rad(4) * tuck; a.neck += rad(46) * tuck; a.head -= rad(30) * tuck; a.ears += tuck; a.tail += 0.7 * tuck;
+  // Standing tall.
+  a.height += 0.04 * tall; a.neck -= rad(18) * tall; a.head += rad(22) * tall; a.tail += 0.25 * tall;
+  // The sliding stop, and some of it in a skid.
+  const sit = Math.max(brake, 0.35 * skid);
+  a.pitch -= rad(6) * sit; a.height -= 0.24 * sit; a.bodyZ -= 0.06 * sit; a.arch += rad(6) * sit; a.neck -= rad(12) * sit; a.head += rad(10) * sit; a.tail += 0.3 * sit;
+  a.ears += 0.3 * sit;
+  // Sunk into a landing.
+  a.height -= 0.2 * absorb; a.neck += rad(10) * absorb;
+  a.spin = c.spin ?? 0;
+  a.flip = c.flip ?? 0;
+  return a;
+}
+
+/**
+ * A skiing horse in the air (the controls a skier's are, `AirControls`): straight air, a show jumper's, its skis drawn up under it with
+ * the legs folded, the neck arched down and the back rounded over them (the fore skis drawn higher still on four); a ski jumper's
+ * flight as a horse can fly one, stretched out along its skis, which are spread at their tips, the neck reaching out ahead and the ears
+ * back (on four skis, the fore pushed forward and the hind back, as a horse stretches over a ditch); the backflip's throw, its head flung up and back;
+ * gathered in for a spin; opened up to land into its stance.
+ */
+export function horseAirPose(c: AirControls, four: boolean): HorsePose {
+  const stance = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
+  const tucked = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 }), draw = 0.44 + 0.12 * c.tuck + 0.08 * c.wrap;
+  tucked.height -= 0.02;
+  for (const k of ['l', 'r'] as const) { tucked.skis[k].up += draw; tucked.skis[k].pitch -= rad(6); }
+  if (four) { tucked.front += 0.14; tucked.hind -= 0.04; }
+  tucked.arch += rad(8); tucked.neck += rad(22) + rad(10) * c.wrap; tucked.head += rad(14); tucked.tail = 0.55; tucked.ears = 0.2;
+  // The backflip's throw.
+  if (c.throw) { tucked.neck -= rad(40) * c.throw; tucked.head -= rad(30) * c.throw; tucked.tail += 0.3 * c.throw; tucked.arch -= rad(6) * c.throw; }
+  const flight = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
+  // (Not laid forward over its skis as a ski jumper is: a horse is level already, and laid forward it dives. It stretches out along
+  // them instead, the neck reaching out ahead, the nose along it, the legs long.)
+  Object.assign(flight, { height: 0.02, neck: rad(24), head: rad(-30), ears: 1, tail: 1, arch: rad(-5) });
+  for (const k of ['l', 'r'] as const) {
+    const sign = k === 'l' ? 1 : -1;
+    Object.assign(flight.skis[k], { yaw: rad(four ? 10 : 5) * sign, x: (four ? 0.06 : 0.03) * sign, up: 0, pitch: 0 });
+  }
+  if (four) flight.spread = 0.16;
+  const a = mixHorse(mixHorse(tucked, flight, c.flight), stance, c.open);
+  for (const k of ['l', 'r'] as const) a.skis[k].yaw += c.ski;
+  a.yaw += 0.95 * c.ski;
+  a.spin = c.spin;
+  a.flip += c.flip;
+  return a;
+}
+
+// ------------------------------------------------------------------ a rider on it
+
+/**
+ * The pose of a rider astride a skiing horse, in the frame of its saddle (`Horse.saddle`; the rider's hips 0.7 over that frame's
+ * floor, which is 0.6 under the seat): sat down in the saddle, the legs long round the barrel and the feet at its sides, a long pole in
+ * each hand to reach the snow from up there; leant into the turn with the horse and a little more, the inside pole flicked to the snow
+ * as each turn begins; crouched as a jockey in the tuck, up out of the saddle and laid along the neck, the poles under the arms; sat
+ * up straight standing tall; sat back and braced braking. In the air: the arms flung up for a backflip, in close for a spin, laid
+ * flat along the neck in a flight; sat deep into a landing.
+ */
+export function saddlePose(c: RideControls & Partial<AirControls>): AlpinePose {
+  const { s, tuck, tall, brake } = c, absorb = c.absorb ?? 0, fl = c.flight ?? 0, th = c.throw ?? 0, wr = c.wrap ?? 0;
+  const arm = (k: Side): AlpineArm => {
+    const f = k === 'l' ? c.flickL : c.flickR;
+    return { swing: rad(26) + rad(18) * f, bend: rad(40), wrist: rad(30) - rad(45) * f, hang: 50, inward: rad(4) * (k === 'l' ? -1 : 1) };
+  };
+  const foot = (k: Side): AlpineFoot => { const sign = k === 'l' ? 1 : -1; return { x: 0.36 * sign, z: 0.06, up: 0, yaw: rad(14) * sign, pitch: rad(-10), edge: rad(-10) * sign }; };
+  const a: AlpinePose = {
+    hips: 0.7, hipsX: 0, hipsZ: 0, pelvisYaw: 0, pelvisRoll: 0, pelvisPitch: rad(4), chestYaw: 0, chestRoll: rad(8) * s, lean: rad(10), neck: rad(4), head: 0,
+    arms: { l: arm('l'), r: arm('r') }, feet: { l: foot('l'), r: foot('r') }, spin: 0, flip: 0, lift: 0,
+  };
+  const both = (f: (k: Side, arm: AlpineArm, foot: AlpineFoot) => void) => { for (const k of ['l', 'r'] as const) f(k, a.arms[k], a.feet[k]); };
+  // The jockey's crouch.
+  const crouch = Math.max(tuck, fl);
+  a.hips += 0.1 * crouch; a.hipsZ -= 0.06 * crouch; a.pelvisPitch += rad(34) * crouch; a.lean += rad(48) * crouch; a.neck -= rad(18) * crouch; a.head -= rad(38) * crouch;
+  both((k, arm, f) => { arm.swing += rad(40) * crouch; arm.bend += (rad(95) - arm.bend) * crouch; arm.hang += (86 - arm.hang) * crouch; arm.wrist += (rad(85) - arm.wrist) * crouch; arm.inward += (rad(20) * (k === 'l' ? -1 : 1) - arm.inward) * crouch; f.z -= 0.1 * crouch; });
+  // Sat up tall; sat back braced.
+  a.lean -= rad(14) * tall; a.pelvisPitch -= rad(6) * tall; both((_k, arm) => { arm.swing -= rad(10) * tall; });
+  a.lean -= rad(18) * brake; a.pelvisPitch -= rad(10) * brake; both((_k, arm, f) => { f.z += 0.16 * brake; arm.hang -= 14 * brake; });
+  // In the air.
+  if (th) { a.lean -= rad(20) * th; a.head -= rad(26) * th; both((_k, arm) => { arm.swing += rad(120) * th; arm.hang -= 30 * th; arm.bend -= rad(20) * th; }); }
+  if (wr) both((_k, arm) => { arm.bend += rad(40) * wr; arm.hang += 14 * wr; });
+  a.hips -= 0.06 * absorb; a.lean += rad(8) * absorb;
+  return a;
+}

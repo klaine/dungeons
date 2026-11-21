@@ -66,7 +66,9 @@
     #line .head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--brass); pointer-events: none; }
     #line .ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; pointer-events: none;
       background-image: repeating-linear-gradient(to right, var(--band-strong) 0 1px, transparent 1px calc(100% / 44)); }
-    @media (max-width: 640px) { #line .band span { display: none; } #where .part { font-size: 17px; } }
+    @media (max-width: 640px) { #line .band span { display: none; } #where .part { font-size: 17px; } .group .label { display: none; }
+      /* (On a phone, the hint goes once it has been ridden a while: it covers too much of the picture.) */
+      body.riding.hinted #where .hint { display: none; } }
 
     /* Riding: a ring in the middle of the picture, as far as the pointer steers, with what each way asks and where it is now. */
     #pad { position: fixed; width: calc(var(--r, 200px) * 2); height: calc(var(--r, 200px) * 2); transform: translate(-50%, -50%); pointer-events: none; opacity: .5; transition: opacity .3s; }
@@ -120,6 +122,8 @@
   <div id="foot">
     <div id="controls">
       <div class="group" id="modes"><span class="label">Mode</span></div>
+      <div class="group" id="skiers"><span class="label">Skier</span></div>
+      <div class="group" id="skisets" hidden><span class="label">Skis</span></div>
       <div class="group"><button id="play" type="button">Pause</button></div>
       <div class="group" id="brakes" hidden><button id="brake" type="button" title="Hold to brake (Shift)">Brake</button></div>
       <div class="group" id="restarts" hidden><button id="restart" type="button" title="Start the run again from the top (Enter)">Restart run</button></div>
