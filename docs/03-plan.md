@@ -1010,6 +1010,22 @@ The machine this is developed on now has a graphics card, and tablets were repor
     straight and holding turns and tucks either way, to the foot in 60 to 79 seconds at up to 97 km/h, never thrown; at its kickers
     (130, 602, 720 and 850 metres down), straight air of 11 to 19 metres, flights of 22 to 24, backflips coming round when tucked in
     the air and falling short held tall; the groomed slope as before; about 0.73 million triangles drawn.
+76. **A clear picture, a further view, and blur.** Asked: "add a hide menus and the text window button; and make the from side view to
+    be from like a bit further back (there could be a control slider for this?) can we cheaply make background a bit blurry and add
+    some motion blur?" *Done* (`lab/slope.ts`, `lab/slope.html`): *Hide menus* (and `H`) hides the corner's text, the menus and the
+    steering ring, leaving only itself, faint, to bring them back. *Beside* is now from 14 metres to the side and 4 behind, 2.2 up
+    (it was 11 to the side and level); *Distance* takes every view from half as far to three times. *Blur*: the scene drawn once
+    with each point's motion across the picture since the last frame (`velocity`, as the game's own smoothing has it); each point
+    smeared along it over eight samples, scaled to a sixtieth of a second's shutter whatever the frame's length and never more than a
+    twenty-fifth of the picture; and the far background mixed with a picture blurred at half the size, from 2.2 times the skier's
+    distance and wholly by nine times; *Blur*, asked for next ("add control slider for the blur intensity"), a slider from none (the
+    plain picture drawn, no pass of its own) to twice as much, of both. Nothing about as far as the skier is smeared: its skinned
+    body's motion came out wrong as the whole figure moved across the picture (its last pose laid where it now stands), and it
+    dissolved in the side view. A smear leaving out what lies much nearer than the point smeared, so that the skier would not streak
+    over the snow behind it, read nothing from the depths at other points and drew the near snow black, and is not done. The three
+    choices are kept in the browser. *Checked* (headless, drawing in software, each frame stepped by a sixtieth of a second with
+    `?dt=`): behind and beside at 77 km/h, the blur on and off, the menus hidden, the view at 2.2 times; the far slopes softened, the
+    skier sharp. Not yet seen at a real frame rate: published for trying on a laptop and a tablet.
 ## Risks
 
 | Risk | Mitigation |

@@ -40,7 +40,9 @@ import {
   Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
   PCFSoftShadowMap, PerspectiveCamera, Quaternion, RepeatWrapping, Scene, SkinnedMesh, SRGBColorSpace, Vector3,
 } from 'three';
-import { WebGPURenderer } from 'three/webgpu';
+import { RenderPipeline, WebGPURenderer } from 'three/webgpu';
+import { abs, float, Fn, int, length, Loop, max, min, mix, mrt, output, pass, smoothstep, uniform, uv, vec2, vec4, velocity } from 'three/tsl';
+import { gaussianBlur } from 'three/addons/tsl/display/GaussianBlurNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { FigureLibrary } from '../src/figures/library';
 import { putOn } from '../src/figures/gear';
@@ -955,7 +957,8 @@ async function start() {
     if (mode === 'ride' && e.key === 'Shift') { want.brakeKey = true; return; }
     if (mode === 'ride' && e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) { restart(); e.preventDefault(); return; }
     const k = e.key.toLowerCase(), v = views.find((x) => x[2].toLowerCase() === k);
-    if (k === ' ') { playing = !playing; reflect(); e.preventDefault(); } else if (k === 'r') setMode(mode === 'ride' ? 'watch' : 'ride'); else if (v) setView(v[1]);
+    if (e.target instanceof HTMLInputElement) return;
+    if (k === ' ') { playing = !playing; reflect(); e.preventDefault(); } else if (k === 'r') setMode(mode === 'ride' ? 'watch' : 'ride'); else if (k === 'h') setBare(!document.body.classList.contains('bare')); else if (v) setView(v[1]);
   });
   window.addEventListener('keyup', (e) => { if (ARROWS[e.key]) want.keys[ARROWS[e.key]] = false; if (e.key === 'Shift') want.brakeKey = false; });
   window.addEventListener('blur', () => { for (const k of Object.keys(want.keys) as (keyof typeof want.keys)[]) want.keys[k] = false; want.brakeKey = false; letGo(); });
@@ -971,7 +974,7 @@ async function start() {
   // looks along, and the change from one view to another. (Eased whole, the view had trailed the skier by its speed over the easing's
   // rate, twice over: some twelve metres at speed, so that from beside and above the skier ran ahead of the picture.) Riding, behind
   // and above look most of the way along the way it goes.
-  let placed = false;
+  let placed = false, distance = 1;
   const eyeOff = new Vector3(), lookOff = new Vector3(), lastRider = new Vector3(), ahead = new Vector3(0, 0, 1);
   let across = 0;
   /** Where the view is about: the skier's feet, or, gone limp, the snow under its hips. */
@@ -984,7 +987,7 @@ async function start() {
     const p = land.at(now.down, across), follow = new Vector3(p.x, at.y, p.z), down = runDir(f), aside = runLeft(f);
     ahead.lerp(mode === 'ride' ? down.clone().lerp(along(now.way, f), 0.65).normalize() : down, placed ? ease(dt, 2) : 1).setY(0).normalize();
     if (view === 'free') {
-      if (!placed) { camera.position.copy(at).addScaledVector(UP, 3).addScaledVector(aside, 6).addScaledVector(down, -6); controls.target.copy(at); }
+      if (!placed) { camera.position.copy(at).addScaledVector(UP, 3 * distance).addScaledVector(aside, 6 * distance).addScaledVector(down, -6 * distance); controls.target.copy(at); }
       else camera.position.add(at.clone().sub(lastRider));
       controls.target.copy(at).addScaledVector(UP, 0.9);
       controls.update();
@@ -993,10 +996,13 @@ async function start() {
     } else {
       // (Each kept over the snow where it is: on a world's land the snow behind and beside the skier can lie well above it.)
       const wantAt = new Vector3(), aim = new Vector3();
-      if (view === 'behind') { over(wantAt.copy(follow).addScaledVector(ahead, -9), 3.4); over(aim.copy(follow).addScaledVector(ahead, 6), 0.6); wantAt.y = Math.max(wantAt.y, at.y + 1.6); }
-      else if (view === 'beside') { over(wantAt.copy(follow).addScaledVector(aside, 11).addScaledVector(down, 1.5), 1.8); wantAt.y = Math.max(wantAt.y, at.y + 0.8); aim.copy(at).addScaledVector(UP, 0.9); }
+      // (Each as far off as the *Distance* slider says, from half as far to three times.)
+      const d = distance;
+      if (view === 'behind') { over(wantAt.copy(follow).addScaledVector(ahead, -9 * d), 3.4 * d); over(aim.copy(follow).addScaledVector(ahead, 6), 0.6); wantAt.y = Math.max(wantAt.y, at.y + 1.6 * d); }
+      // (From the side and a little behind, back far enough to see the slope it is on as well as the skier.)
+      else if (view === 'beside') { over(wantAt.copy(follow).addScaledVector(aside, 14 * d).addScaledVector(down, -4 * d), 2.2 * d); wantAt.y = Math.max(wantAt.y, at.y + 0.8 * d); aim.copy(at).addScaledVector(UP, 0.9); }
       // (From above, looking a little behind the skier, so that it is in the upper part of the picture with its tracks below it.)
-      else { wantAt.copy(follow).addScaledVector(ahead, -5).setY(at.y + 32); aim.copy(follow).addScaledVector(ahead, -5).setY(at.y); camera.up.copy(ahead); }
+      else { wantAt.copy(follow).addScaledVector(ahead, -5).setY(at.y + 32 * d); aim.copy(follow).addScaledVector(ahead, -5).setY(at.y); camera.up.copy(ahead); }
       eyeOff.lerp(wantAt.sub(at), placed ? ease(dt, 5) : 1);
       lookOff.lerp(aim.sub(at), placed ? ease(dt, 6) : 1);
       camera.position.copy(at).add(eyeOff);
@@ -1024,6 +1030,52 @@ async function start() {
   };
 
   const fit = () => { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); };
+
+  // The picture (asked: "can we cheaply make background a bit blurry and add some motion blur?"): the scene drawn once with how far
+  // each point of it moved across the picture since the last frame; each point smeared along that way, over eight samples, as a
+  // camera's shutter open a sixtieth of a second would smear it (the frames' own length taken out, so that it smears alike at any
+  // rate, and never more than a twenty-fifth of the picture); and what lies well beyond the skier mixed with a blurred picture drawn
+  // at half the size, the more the further, so that the background is a little out of focus. *Blur* turns both off, and the plain
+  // picture is drawn. (Nothing about as far off as the skier is smeared: the view keeps the skier still in the picture, and its
+  // skinned body's motion comes out wrong when the whole of it moves across the picture. A smear that would leave out what lies much
+  // nearer than the point smeared, so that the skier is not streaked over the snow behind it, read nothing from the depths at other
+  // points of the picture and drew the near snow black; it is not done.)
+  const scenePass = pass(scene, camera);
+  scenePass.setMRT(mrt({ output, velocity }));
+  const picture = scenePass.getTextureNode('output'), moved = scenePass.getTextureNode('velocity').xy;
+  const uShutter = uniform(1), uFocus = uniform(10), uBlur = uniform(1);
+  type N = any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const depthHere: N = scenePass.getViewZNode().negate();
+  const streak: N = moved.mul(uShutter).mul(smoothstep(0.12, 0.4, abs(depthHere.sub(uFocus)).div(uFocus)));
+  const smear: N = streak.mul(min(1, max(length(streak), 1e-5).reciprocal().mul(0.04)));
+  const smeared: N = Fn(() => {
+    const sum = vec4(0).toVar();
+    Loop({ start: int(0), end: int(8), type: 'int' }, ({ i }: { i: N }) => {
+      sum.addAssign(picture.sample(uv().add(smear.mul(float(i).div(7).sub(0.5)))));
+    });
+    return sum.div(8);
+  })();
+  const soft = gaussianBlur(picture, vec2(1, 1), 3, { resolutionScale: 0.5 });
+  const away = smoothstep(uFocus.mul(2.2), uFocus.mul(9), depthHere).mul(min(0.95, uBlur.mul(0.85)));
+  const pipeline = new RenderPipeline(renderer);
+  pipeline.outputNode = mix(smeared, soft, away);
+  // (How much, by *Blur*: from none, the plain picture drawn, to twice as much; `?blur=` too.)
+  let blurLevel = query.has('blur') ? clamp(Number(query.get('blur')) || 0, 0, 2) : 1;
+  // Hiding the menus and the text, `H` too; the distance of the views from the skier. (Kept in this browser for next time, where it may.)
+  const keep = (k: string, v: string) => { try { localStorage.setItem(`slope.${k}`, v); } catch { /* (not kept) */ } };
+  const kept = (k: string) => { try { return localStorage.getItem(`slope.${k}`); } catch { return null; } };
+  const bareButton = $('bare'), distanceInput = $<HTMLInputElement>('distance');
+  const setBare = (on: boolean) => { document.body.classList.toggle('bare', on); bareButton.textContent = on ? 'Show menus' : 'Hide menus'; bareButton.title = on ? 'Show the menus and the text (H)' : 'Hide the menus and the text (H)'; keep('bare', on ? '1' : '0'); };
+  bareButton.onclick = () => setBare(!document.body.classList.contains('bare'));
+  const setDistance = (d: number) => { distance = clamp(d, 0.5, 3); distanceInput.value = String(distance); $('distanceOut').textContent = `${distance.toFixed(1)}×`; keep('distance', String(distance)); };
+  distanceInput.addEventListener('input', () => setDistance(Number(distanceInput.value)));
+  const blurInput = $<HTMLInputElement>('blur');
+  const setBlur = (b: number) => { blurLevel = clamp(b, 0, 2); blurInput.value = String(blurLevel); $('blurOut').textContent = blurLevel ? `${blurLevel.toFixed(1)}×` : 'off'; keep('blur', String(blurLevel)); };
+  blurInput.addEventListener('input', () => setBlur(Number(blurInput.value)));
+  const keptBlur = kept('blur');
+  setBlur(query.has('blur') || keptBlur === null ? blurLevel : Number(keptBlur));
+  setDistance(Number(kept('distance') ?? 1) || 1);
+  setBare(kept('bare') === '1');
   addEventListener('resize', fit);
   fit();
   setView('behind');
@@ -1031,8 +1083,10 @@ async function start() {
   $('status').hidden = true;
 
   let then = performance.now(), shownPart = '';
+  const fixedDt = Number(query.get('dt')) || 0;
   const frame = async () => {
-    const now = performance.now(), dt = Math.min(0.1, (now - then) / 1000);
+    // (`?dt=` steps every frame by so many seconds whatever time has passed: for pictures, made by a browser too slow to keep pace.)
+    const now = performance.now(), dt = fixedDt || Math.min(0.1, (now - then) / 1000);
     then = now;
     let at: Now;
     if (mode === 'watch') {
@@ -1071,7 +1125,12 @@ async function start() {
     showTold();
     $('speed').textContent = (at.speed * 3.6).toFixed(0);
     $('down').textContent = Math.max(0, at.down).toFixed(0);
-    await renderer.renderAsync(scene, camera);
+    if (blurLevel > 0) {
+      uShutter.value = clamp(1 / 60 / Math.max(dt, 1e-3), 0.005, 3) * blurLevel;
+      uBlur.value = blurLevel;
+      uFocus.value = Math.max(3, camera.position.distanceTo(rider.position));
+      pipeline.render();
+    } else await renderer.renderAsync(scene, camera);
     requestAnimationFrame(frame);
   };
   // (For a script that drives the page: where it is, and to put it anywhere; riding, what the pointer would ask.)
