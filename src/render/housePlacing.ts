@@ -44,7 +44,8 @@ export function placeHouse(
   };
   const wallTop = y + bd.heights.reduce((a, h) => a + h, 0) + (bd.basement ?? 0) + 1.2;
   for (const [m, src] of local) {
-    const weathers = m === 'plaster' || m === 'stone' || /brick/i.test(m), roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
+    // (`castle` is the coursed stone of a village church's walls, weathered as the castle's own walls are.)
+    const weathers = m === 'plaster' || m === 'stone' || m === 'castle' || /brick/i.test(m), roofOrGlass = /^(tile|thatch|glass|window|pane|paneLit|leaf)$/.test(m);
     const indoors = new Uint8Array(roofOrGlass ? 0 : src.vertexCount);
     if (!roofOrGlass) src.eachTriangle((a, b, cc, mx, my, mz, nx0, ny0, nz0) => {
       if (my > wallTop) return;

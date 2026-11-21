@@ -38,6 +38,7 @@ import type { ClassicalDress } from '../src/core/site';
 import { BODIES } from '../src/figures/library';
 import { Solids } from '../src/figures/solids';
 import { Crew } from './figureCrew';
+import { BUILT_SURFACES, builtSurfaceSize, makeBuiltMaterials, makeWindowFor, type BuiltSurface } from '../src/render/builtMaterials';
 
 type Tool = 'move' | 'extrude' | 'scale' | 'paint';
 type Colour = [number, number, number];
@@ -94,7 +95,7 @@ function readItem(o: Partial<Item> & { building?: Building }, id: number): Item 
   const shape = o.shape ?? (o.building ? (({ x, z, faces, plan, ...rest }) => rest)(o.building) : deal(kind, String(o.seed ?? id)));
   const scale = Array.isArray(o.scale) && o.scale.length === 3 ? (o.scale.map((v) => Math.min(5, Math.max(0.2, num(v, 1)))) as [number, number, number]) : [1, 1, 1] as [number, number, number];
   try {
-    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, ...(typeof o.wear === 'number' && Number.isFinite(o.wear) ? { wear: Math.min(2, Math.max(0, o.wear)) } : {}), shape: normalise(kind, shape as Shape) };
+    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, ...(typeof o.wear === 'number' && Number.isFinite(o.wear) ? { wear: Math.min(4, Math.max(0, o.wear)) } : {}), shape: normalise(kind, shape as Shape) };
   } catch { return null; }
 }
 // While the page opens, a note says so; it is taken away once the first pictures are drawn. Found on opening, the page did not get
@@ -382,52 +383,38 @@ async function start(): Promise<void> {
   // (Each surface is kept twice, as pixels and on the graphics card: some 210 MB at 1024 for the seven, a quarter of it at 512,
   // which on a phone's screen looks much the same.)
   const size = Number(query.get('tex')) || (phone ? 512 : 1024);
-  // (The same recipes with the same seeds as `main.ts`, so that every surface is the game's.)
+  // (The same recipes with the same seeds as `main.ts`, from one table, so that every surface is the game's: see `builtMaterials.ts`.)
+  const paintBuilt = (name: BuiltSurface) => generateTextureSet(name, builtSurfaceSize(name, size), BUILT_SURFACES[name].seed);
   const T = {
-    stone: generateTextureSet('stone', size, 3), wood: generateTextureSet('wood', size, 5), moss: generateTextureSet('moss', size / 2, 9),
-    plaster: generateTextureSet('plaster', size, 41), tile: generateTextureSet('tile', size, 43),
-    redBrick: generateTextureSet('redBrick', size, 73), buffBrick: generateTextureSet('buffBrick', size, 79),
+    stone: paintBuilt('stone'), wood: paintBuilt('wood'), moss: paintBuilt('moss'), plaster: paintBuilt('plaster'), tile: paintBuilt('tile'),
+    redBrick: paintBuilt('redBrick'), buffBrick: paintBuilt('buffBrick'),
     // (The brown brick of the towns' classical buildings, laid in running bond: what a classical front of brick is built of.)
-    brick: generateTextureSet('brick', size, 83),
+    brick: paintBuilt('brick'),
   };
   doneGenerating();
   /**
-   * What buildings are made of, made as `main.ts` makes them, with the same options: stone and timber with their edges rounded and
-   * chipped, render come away, roofs and brick weathered, rain streaks. Unless the lab shows them new (`weathered` under Scene, or
-   * `?chips=0` as in the game), when they are made plain. If what `main.ts` gives a maker changes, change it here too.
+   * What buildings are made of, made by the one maker the game uses (`makeBuiltMaterials`), with the same options: stone and timber
+   * with their edges rounded and chipped, render come away, roofs and brick weathered, rain streaks. Unless the lab shows them new
+   * (`weathered` under Scene, or `?chips=0` as in the game), when they are made plain.
    */
   /** The coursed rubble of a castle's walls and a village church's, painted when a castle or a church is first set out, as `main.ts` paints it. */
   let castleStone: ReturnType<typeof generateTextureSet> | null = null;
   const castleSurface = () => {
     if (castleStone) return;
-    castleStone = generateTextureSet('castle', Math.min(size * 2, 2048), 89);
+    castleStone = paintBuilt('castle');
     doneGenerating();
-    Object.assign(materials, { castle: makeSiteMaterial(castleStone, T.moss, { normalScale: 1.2, mossScale: 2.4, weather: state.weathered, unrepeat: { span: 2, courses: 12 } }) });
+    materials.castle = makeBuiltMaterials({ ...T, castle: castleStone }, { weathered: state.weathered }).castle;
   };
   /**
    * What buildings are made of, as below; `wear`, a uniform of their own for how worn they are, for a building shown more or less worn
    * than the rest (see `materialFor`).
    */
-  const buildingMaterials = (weathered: boolean, wear?: { value: number }): Record<string, Material> => ({
-    ...(castleStone ? { castle: makeSiteMaterial(castleStone, T.moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered, unrepeat: { span: 2, courses: 12 }, wear }) } : {}),
-    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered, wear }),
-    slate: makeSiteMaterial(T.stone, T.moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered, wear }),
-    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8, render: weathered, weather: weathered, wear }),
-    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3, roof: weathered, wear }),
-    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, wear, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, wear, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3, wear, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }),
-  });
+  const buildingMaterials = (weathered: boolean, wear?: { value: number }): Record<string, Material> => makeBuiltMaterials({ ...T, castle: castleStone }, { weathered, wear });
   if (query.get('chips') === '0') state.weathered = false;
   renderUniforms.uChips.value = state.weathered ? 1 : 0;
   const materials: Record<string, Material> = {
     ...buildingMaterials(state.weathered),
-    floor: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.2 }),
     leaf: makeSiteMaterial(T.moss, T.moss, { normalScale: 2.4 }),
-    metal: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.25, roughness: 0.5 }),
-    copper: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
-    glass: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1 }),
     // (Clear glass, for the windows of a building that can be entered, as in the game.)
     pane: makePaneMaterial(),
   };
@@ -436,7 +423,7 @@ async function start(): Promise<void> {
   const windows = () => {
     materials.window?.dispose();
     const lamps = lampsAt(state.hour);
-    materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+    materials.window = makeWindowFor(lamps, T);
     if (materials.paneLit && materials.paneLit !== materials.pane) materials.paneLit.dispose();
     materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
     windowUniforms.uLit.value = lamps;
@@ -1574,13 +1561,14 @@ async function start(): Promise<void> {
     // How worn it is, where its kind weathers: its own materials' uniform moved as the slider goes, nothing built again.
     if (weathers(it.kind)) {
       el('h3', selBox, 'Wear');
-      slider(selBox, list, 'Worn', 0, 2, 0.05, () => it.wear ?? 1, (v) => {
+      slider(selBox, list, 'Worn', 0, 4, 0.05, () => it.wear ?? 1, (v) => {
         const first = it.wear === undefined;
         it.wear = v;
         if (first) dress();
         const own = worn.get(it.id);
         if (own) own.u.value = wearShown(it);
-      }, { done: commit, title: 'How worn it is: render come away, brick flaked and its mortar raked, stone chipped, timber faded and paint peeling, roofs mossed, rain streaks. 1 as the game builds it, 0 new, 2 twice as worn' });
+      }, { done: commit, title: 'How worn it is: render come away, brick flaked and its mortar raked, stone chipped, timber faded and paint peeling, roofs mossed, rain streaks. 0 new from the builder, 1 as the game builds it, 4 derelict: render mostly gone, the joints raked deep, the timber grey and rotten, paint all but gone, the roof dark and broken, the walls grimed and grown over' });
+      el('p', selBox, '0 new, 1 as the game builds it, 4 derelict.').className = 'note';
       buttons(selBox, [['As the rest', () => { delete it.wear; unwear(it.id); dress(); reflect(); commit(); }, 'Worn as everything else is: as the game builds it, or new where weathered is off under Scene']]);
       if (!state.weathered) el('p', selBox, 'Weathered is off under Scene: everything is shown new.').className = 'note';
     }

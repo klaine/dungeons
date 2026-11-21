@@ -14,6 +14,7 @@ import { Atmosphere, readyForSmoothing, smoothOverFrames } from '../render/post'
 import { edgeAt, insideOf, joinLine } from '../core/valley';
 import { buildingPlans } from '../maps/buildingPlan';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { BUILT_SURFACES, builtSurfaceSize, makeBuiltMaterials, makeWindowFor, type BuiltSurface } from '../render/builtMaterials';
 import { edgeUniforms, farUniforms, groundUniforms, nearFarUniforms, makeFarMaterial, makeGroundMaterial, makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, windowUniforms, glassUniforms, rockUniforms, paveUniforms, renderUniforms, lampUniforms, setLamps, setPaving, siteUniforms, snowUniforms, weatherUniforms } from '../render/siteMaterial';
 import { ROCK } from '../render/geom/rockForms';
 import { doneGenerating, generateTextureSet } from '../render/textures';
@@ -251,9 +252,11 @@ async function start(): Promise<void> {
     await stage(`Painting surfaces: ${TEXTURE_NAMES[name] ?? name}`, 0.04 + 0.2 * (textureDone++ / textureCount), `${textureDone} of ${textureCount} textures, ${size} pixels square`);
     return generateTextureSet(name, size, tseed);
   };
-  const stone = await paint('stone', texSize, 3);
-  const wood = await paint('wood', texSize, 5);
-  const moss = await paint('moss', texSize / 2, 9);
+  // (What is built is painted from the seeds the building lab paints it from: see `builtMaterials.ts`.)
+  const built = (name: BuiltSurface) => paint(name, builtSurfaceSize(name, texSize), BUILT_SURFACES[name].seed);
+  const stone = await built('stone');
+  const wood = await built('wood');
+  const moss = await built('moss');
   const rock = await paint('rock', texSize, 13);
   const ground = await paint('ground', texSize, 17);
   const scree = await paint('scree', texSize, 23);
@@ -261,18 +264,18 @@ async function start(): Promise<void> {
   const barkAsh = await paint('barkAsh', texSize, 59), barkPine = await paint('barkPine', texSize, 61), barkFir = await paint('barkFir', texSize, 67);
   const soil = await paint('soil', texSize, 31);
   const litter = await paint('litter', texSize, 37);
-  const plaster = await paint('plaster', texSize, 41);
-  const thatch = await paint('thatch', texSize, 47);
-  const tile = await paint('tile', texSize, 43);
-  const redBrick = await paint('redBrick', texSize, 73), buffBrick = await paint('buffBrick', texSize, 79);
+  const plaster = await built('plaster');
+  const thatch = await built('thatch');
+  const tile = await built('tile');
+  const redBrick = await built('redBrick'), buffBrick = await built('buffBrick');
   // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
-  const brick = place === 'town' ? await paint('brick', texSize, 83) : null;
+  const brick = place === 'town' ? await built('brick') : null;
   // (The coursed stone of a castle's walls and towers, in a valley.)
   // (A valley's castle and its village's church, and an island's castle, are of it.)
   // (Painted at twice the breadth of the others, up to 2048, since it covers four metres to their two: see `laidUnrepeated`.)
-  const castleStone = place === 'valley' || place === 'island' ? await paint('castle', Math.min(texSize * 2, 2048), 89) : null;
+  const castleStone = place === 'valley' || place === 'island' ? await built('castle') : null;
   // (And the ashlar of a cathedral's walls, laid as a picture and not stone by stone, is only in towns, where the cathedral is.)
-  const ashlar = place === 'town' ? await paint('ashlar', texSize, 89) : null;
+  const ashlar = place === 'town' ? await built('ashlar') : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
   const sand = place === 'island' ? await paint('sand', texSize, 53) : null;
   // And on a mountain top what lies loose is rock split by frost, cornered and flat-faced, not the rounded scree of a valley's foot.
@@ -281,12 +284,9 @@ async function start(): Promise<void> {
   // (Whether what is built shows its age: render come away, brick flaked, stone chipped, rain streaked. `?chips=0` builds it all new.)
   const weathered = num('chips', 1) > 0;
   const materials: Record<string, Material> = {
-    // (Stone and timber cut square have their edges rounded in the shading: see `edgeOf`.)
-    // (`?edges=0` draws them sharp, as they were.)
-    stone: makeSiteMaterial(stone, moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered }),
-    floor: makeSiteMaterial(stone, moss, { normalScale: 1.2 }),
-    slate: makeSiteMaterial(stone, moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(wood, moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered }),
+    // What is built, made as the building lab makes it (`builtMaterials.ts`), so that a change here is seen there. (Stone and timber
+    // cut square have their edges rounded in the shading; `?edges=0` draws them sharp, as they were.)
+    ...makeBuiltMaterials({ stone, wood, moss, plaster, tile, thatch, redBrick, buffBrick, brick, castle: castleStone, ashlar }, { weathered }),
     rock: makeRockMaterial(rock, moss),
     // (Rock laid as a plain sheet, not carved: the same, with its buttresses, gullies and ledges drawn on it.)
     rockSheet: makeRockMaterial(rock, moss, { relief: true }),
@@ -301,28 +301,12 @@ async function start(): Promise<void> {
     // Grass and leaves use the moss recipe as their own surface, tinted per vertex.
     turf: makeGroundMaterial(ground, sand ?? soil, talus ?? scree, litter, thatch, moss),
     leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
-    // What buildings are made of besides stone and timber: plaster, with a wash of colour on it; clay tiles; sheet metal, for low roofs;
-    // and glass, which is the same smooth surface made dark and bright, so that it mirrors the sky.
-    plaster: makeSiteMaterial(plaster, moss, { normalScale: 0.8, render: weathered, weather: weathered }),
-    // (Weathered as old roofs are: see `roof` there.)
-    tile: makeSiteMaterial(tile, moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
-    ...(brick ? { brick: makeSiteMaterial(brick, moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }) } : {}),
-    ...(castleStone ? { castle: makeSiteMaterial(castleStone, moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered, unrepeat: { span: 2, courses: 12 } }) } : {}),
-    // Brick, for the towns of the northern coasts: of red clay or of buff, and tinted per building from brown to orange.
-    redBrick: makeSiteMaterial(redBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    buffBrick: makeSiteMaterial(buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    metal: makeSiteMaterial(plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
-    // Copper gone green, on the roofs and spires of the brick towns: the patina is matt, and does not mirror the sky as sheet metal does.
-    copper: makeSiteMaterial(plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
-    glass: makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
     // Clear glass, for the windows of buildings that can be entered, which are seen through both ways.
     pane: makePaneMaterial(),
-    // Thatch on the fishermen's cottages; and the lamp of the lighthouse, which shines by night.
-    thatch: makeSiteMaterial(thatch, moss, { normalScale: 1.6, mossScale: 2 }),
+    // The lamp of the lighthouse, which shines by night.
     lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
     // Coloured glass in the sanctum's windows, glowing with the day through it (dim at dusk, nearly dark at night).
     stained: makeStainedMaterial(),
-    ...(ashlar ? { ashlar: makeSiteMaterial(ashlar, moss, { normalScale: 1.0, chips: weathered, weather: weathered }) } : {}),
   };
 
   // ------------------------------------------------------------------ geometry
@@ -385,7 +369,7 @@ async function start(): Promise<void> {
   // (In winter the light goes early: by the evening, lamps are lit.)
   const lamps = site?.setting.hour === 'night' ? 0.5 : site?.setting.hour === 'dusk' ? 0.55 : site?.setting.hour === 'sunset' ? 0.4 : site?.setting.season === 'winter' && site.setting.hour === 'evening' ? 0.3 : 0;
   // (By day a window that would be lit is glass like any other: its points carry the lamp's colour, which the glass must not take.)
-  materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+  materials.window = makeWindowFor(lamps, { plaster, moss });
   // (And in a building that can be entered, a lit room shows through its glass as a glow, without hiding the room.)
   materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
   windowUniforms.uLit.value = lamps;

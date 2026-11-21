@@ -609,6 +609,32 @@ The machine this is developed on now has a graphics card, and tablets were repor
     `tools/buildingLab.ts 60` builds the three sixty times each with their measures pushed past their ends (the canal house's one
     failure as before); pictures of the church, the castle, and a timber house at *Worn* 0 and 2.
 
+59. **From new to derelict; the lab bound to the game.** Asked: "to be able to go from \"cgi pristine new\" to derelict", and "are these
+    linked now so that if while developing the game, i decide to adjust how the buildings are, it will reflect in the lab editor as
+    well?" *Derelict:* *Worn* now runs from 0 to 4. At 0 nothing is weathered; 1 is the game's own; past it, in `makeSiteMaterial`, a
+    second measure (`past`, 0 at 1 and 1 at 4) carries each kind of wear on where it had stopped: the render comes away over most of a
+    wall, the joints of brick are raked deep and salt comes out of them, stone chips further in from its arrises, timber goes grey and
+    rots from the foot up, paint is all but gone, roofs darken and lose tiles, cracks and rain streaks deepen, and a grime and a creep of
+    moss rise from the ground at the walls' feet. Nothing at 1 or below draws differently for it, and the game, which never goes past 1,
+    is drawn as it was. Holes in roofs, broken panes, ivy and fallen walls are not done: they are shapes, not pictures, and would be the
+    builders' to make. *Linked:* the lab had made its own materials, with the game's options copied in, and its own seeds for the
+    surfaces; a change in one would not have reached the other. Now both make them in one place, `src/render/builtMaterials.ts`
+    (`BUILT_SURFACES`, `makeBuiltMaterials`, `makeWindowFor`); the village church's measures are dealt by one function (`dealChapel` in
+    `building.ts`) for the village and the lab, drawn in the order the village always drew them (checked: five thousand seeds dealt the
+    same before and after); and the lab's buildings were already built by the game's builders (`buildBuilding`, the brick and canal
+    builders, `buildCastle`, `layOutCastle`, `placeHouse`). What is still the lab's own: its light within (a simpler copy of the game's),
+    the shed's dealing, and the ranges of each kind's measures on its panel (`lab/buildingKinds.ts`), so that a new style of building, or
+    a new measure, has to be added to the lab as well. *Mended on the way:* a canal house with a narrow front of two bays, a stepped gable
+    and no loft window had its oval window laid at minus infinity, for want of an opening in the middle to lay it over (the failure
+    `tools/buildingLab.ts` had reported since before item 57): it has no oval now. And a village church's walls, of the castle's
+    coursed stone, had never weathered, in the game or the lab: `placeHouse` marked only plaster, stone and brick with the height of
+    the ground at their foot. It marks the coursed stone too now, so that the church takes rain streaks and damp as the castle above it
+    does. *Checked:* `tools/buildingLab.ts 60`, all built;
+    `tools/houses.ts 30`; `tools/browser/houses.cjs` in a harbour town (the game, with its materials made the shared way, built it and
+    its canal houses were walked to the top); `tools/browser/crew.cjs`; pictures of the brick street, a timber house and the village
+    church at 0, 1, 2 and 4 (the first try at 4 grew moss over whole walls in patches like a soldier's coat, for its threshold stood
+    under the noise's middle; it rises from the foot now, and only here and there higher).
+
 ## Risks
 
 | Risk | Mitigation |

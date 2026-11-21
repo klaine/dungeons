@@ -8,7 +8,7 @@ import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { castleOff, layOutCastle } from './castle';
 import { armRise, armsOf, edgeAt, findSeat, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
-import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
+import { classicalFront, classicalVariations, dealChapel, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -1387,9 +1387,8 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   // from the square. (Its own stream, so nothing else moves.)
   let churchyard: { ring: [number, number][]; gate: [number, number] } | undefined;
   {
-    const cq = rng.fork('church'), W = round(cq.range(11, 14.5)), D = round(cq.range(6.6, 7.8)), H = round(cq.range(6.2, 7.4)), T = round(cq.range(4.2, 5));
-    const spire = cq.pick(['pyramid', 'pyramid', 'needle', 'saddle'] as const), before = cq.range(5, 7);
-    const chapel = { tower: T, height: round(H + cq.range(7, 10.5)), spire, spireHeight: round(spire === 'needle' ? cq.range(9, 13) : spire === 'pyramid' ? cq.range(5, 7.5) : cq.range(2.6, 3.4)), choir: round(cq.range(3.6, 5)), apse: cq.chance(0.6) };
+    // (Its measures dealt as the building lab deals a village church's: see `dealChapel`.)
+    const { W, D, H, before, chapel } = dealChapel(rng.fork('church'));
     for (let s = s0 + (square ? 4 : 2); s < s1 - 10 && !churchyard; s += 3) for (const side of [-1, 1] as const) {
       if (churchyard) break;
       const [px, pz, dx, dz] = along(s + W / 2 + chapel.tower), nx = -dz * side, nz = dx * side, th = Math.atan2(-nz, -nx), off = 4 + before + D / 2;

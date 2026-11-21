@@ -7,7 +7,7 @@
 // from a site document, as a valley builds it; only where it stands, which way it is turned and how
 // it is scaled are the lab's. The document is always made at the origin facing `w`, and the lab
 // places what is built.
-import { classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
+import { classicalVariations, CLOSE, dealChapel, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
 import { brickCountry, brickEaves, dealBrickHouse, dealChurch, planBrick } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
 import { Vector3 } from 'three';
@@ -55,7 +55,7 @@ export interface Item {
   inn?: boolean;
   /**
    * How worn it is, where its kind weathers: 0 new, 1 as the game builds it (render come away, brick flaked, stone chipped, timber
-   * faded, paint peeling, roofs mossed), more for more. Not given, as the rest.
+   * faded, paint peeling, roofs mossed), up to 4, derelict (`makeSiteMaterial`'s `wear`). Not given, as the rest.
    */
   wear?: number;
   shape: Shape;
@@ -483,10 +483,9 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
     return normalise(kind, s);
   }
   if (kind === 'chapel') {
-    // As the village deals its church (`generate.ts`): its own measures from the same ranges.
-    const W = round(rng.range(11, 14.5)), D = round(rng.range(6.6, 7.8)), H = round(rng.range(6.2, 7.4)), T = round(rng.range(4.2, 5));
-    const spire = rng.pick(['pyramid', 'pyramid', 'needle', 'saddle'] as const);
-    return normalise(kind, { style: 'chapel', w: W, d: D, storeys: 1, heights: [H], bays: 1, colour: [0.9, 0.88, 0.82], chapel: { end: rng.chance(0.5) ? 1 : -1, tower: T, height: round(H + rng.range(7, 10.5)), spire, spireHeight: round(spire === 'needle' ? rng.range(9, 13) : spire === 'pyramid' ? rng.range(5, 7.5) : rng.range(2.6, 3.4)), choir: round(rng.range(3.6, 5)), apse: rng.chance(0.6) } });
+    // As the village deals its church: by the village's own dealer (`dealChapel`), so that a change there is seen here.
+    const { W, D, H, chapel } = dealChapel(rng.fork('church'));
+    return normalise(kind, { style: 'chapel', w: W, d: D, storeys: 1, heights: [H], bays: 1, colour: [0.9, 0.88, 0.82], chapel: { end: rng.chance(0.5) ? 1 : -1, ...chapel } });
   }
   if (kind === 'shed') {
     return normalise(kind, { style: 'shed', w: round(rng.range(2.4, 3.4)), d: round(rng.range(2, 2.8)), storeys: 1, heights: [round(rng.range(2.2, 2.6))], bays: 1, colour: rng.pick([[0.42, 0.33, 0.24], [0.36, 0.28, 0.2], [0.5, 0.4, 0.3], [0.32, 0.3, 0.28]] as Colour[]) });

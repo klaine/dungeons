@@ -171,7 +171,9 @@ const edgeOf = (radius: number, chips = false, wearU: N = renderUniforms.uChips 
   const quad: N = step(0.25, e.z).mul(step(e.z, 0.75)), tri: N = step(0.75, e.z);
   // (Not narrower than a point of the picture; and gone where it would be much narrower.)
   const W: N = positionWorld;
-  const chip: N = chips ? smoothstep(0.6, 0.78, farNoise(vec2(W.x.mul(6.1).add(W.z.mul(4.7)), W.y.mul(6.3).add(W.x.mul(1.9)))).mul(0.6).add(farNoise(vec2(W.z.mul(5.3).sub(W.y.mul(2.9)), W.x.mul(5.9).add(W.y.mul(4.1)))).mul(0.4))).mul(wearU).toVar() : float(0);
+  // (Past the game's wear, more of them, each no stronger: see `wearU` in `makeSiteMaterial`.)
+  const pastE: N = clamp(wearU.sub(1).div(3), 0, 1);
+  const chip: N = chips ? smoothstep(float(0.6).sub(pastE.mul(0.14)), float(0.78).sub(pastE.mul(0.1)), farNoise(vec2(W.x.mul(6.1).add(W.z.mul(4.7)), W.y.mul(6.3).add(W.x.mul(1.9)))).mul(0.6).add(farNoise(vec2(W.z.mul(5.3).sub(W.y.mul(2.9)), W.x.mul(5.9).add(W.y.mul(4.1)))).mul(0.4))).mul(min(wearU, 1)).toVar() : float(0);
   const rad: N = float(radius).mul(chip.mul(2).add(1)).toVar();
   const point: N = max(length(fwidth(P)), 1e-5), r: N = max(rad, point), shown: N = smoothstep(0.15, 0.6, rad.div(point)).mul(edgeUniforms.uEdges as N);
   // (Rounded where worn, as a quarter of a curve; where a piece is knocked off, a flat facet that ends at a line.)
@@ -258,7 +260,10 @@ const lit = (m: MeshStandardNodeMaterial, o: { irradiance: N; sun?: N; sky?: N; 
  * window's frame by day, whose points carry the colour of the lamp behind it, which by day is not seen.
  */
 /**
- * `wear`, a uniform of the material's own for how worn it is, in place of the one for everything (`renderUniforms.uChips`).
+ * `wear`, a uniform of the material's own for how worn it is, in place of the one for everything (`renderUniforms.uChips`): 0 new,
+ * 1 as the game builds it, and on past that to 4, derelict, where the render is mostly gone, the joints raked deep, timber grey and
+ * rotten and its paint all but gone, the roof dark and broken, and the walls grimed and grown over from the foot. (Nothing changes
+ * at 1 or below for anything past it: the game, which never goes past 1, is drawn as it was.)
  *
  * `unrepeat`, for a wall of rubble (the castle's): its picture covers `span` units of the surface's texture coordinates, and it is laid
  * over the wall in patches a few metres across, each patch from another place in it (see `laidUnrepeated`), so that no stretch of the
@@ -271,6 +276,11 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // (How worn what is built is: the one for everything, which `?chips=0` turns off, or one of this material's own, `wear`, as the building
   // lab gives a building it has been asked to show more or less worn than the rest. 1 is as the game builds it.)
   const wearU: N = (o.wear ?? renderUniforms.uChips) as N;
+  // Up to 1, as the game builds: each mark grows as it always has. Past it, a building worn more than the game's, to a ruin at 4: the
+  // same marks spread further (more render come away, more bricks flaked, more paint peeled, more tiles lost), each held at its full
+  // strength, which overdrawn went past black; and what only a long-abandoned building has, grime over everything and moss and lichen
+  // climbing its walls. (`wearI`, how strong a mark is; `past`, how far past the game's it is, 0 up to 1 and 1 at 4.)
+  const wearI: N = min(wearU, 1).toVar(), past: N = clamp(wearU.sub(1).div(3), 0, 1).toVar();
   const m = new MeshStandardNodeMaterial({
     normalMap: un ? null : base.normalMap,
     normalScale: new Vector2(o.normalScale ?? 1, o.normalScale ?? 1),
@@ -331,7 +341,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   const q: N = (laid ? uv().mul(2) : vec2(dot(P.xz, tH), P.y)).toVar();
   const worn: N = smoothstep(0.35, 0.8, farNoise(P.xz.div(17).add(5.3))).toVar();
   if (o.render) {
-    const share: N = worn.mul(0.09).add(0.012).add(one(smoothstep(0.25, 1.4, above)).mul(0.12)).mul(wearU).mul(hasFoot).toVar();
+    const share: N = min(worn.mul(0.09).add(0.012).add(one(smoothstep(0.25, 1.4, above)).mul(0.12)).mul(wearU), 0.9).mul(hasFoot).toVar();
     // (Blots a few hand-breadths across, ragged with smaller ones, their edges torn finer still.)
     // (The finest tearing only where a point of the picture is small enough to show it: further off it speckled the edges.)
     const nearW: N = one(smoothstep(0.004, 0.012, length(fwidth(q)))).toVar();
@@ -361,7 +371,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     const cw: N = max(fwidth(cv).mul(0.9), 1e-4);
     // (Faint, and only where the wall is old: drawn darker, and everywhere, they were the lines of a map drawn on the wall.)
     const crack: N = one(smoothstep(cw.mul(0.6), cw.mul(1.6), abs(cv.sub(0.5)))).mul(smoothstep(0.6, 0.72, farNoise(rot(q.mul(3.3)).add(9.9)).mul(0.6).add(farNoise(rot(q.mul(0.7)).add(2.3)).mul(0.4)).add(worn.mul(0.1))))
-      .mul(one(smoothstep(4, 11, length(positionView)))).mul(one(hole)).mul(hasFoot).mul(wearU);
+      .mul(one(smoothstep(4, 11, length(positionView)))).mul(one(hole)).mul(hasFoot).mul(wearI.add(past.mul(1.5)));
     colour = colour.mul(one(crack.mul(0.2)));
     // The hole's depth, for its light: a centimetre and a half below the face, the brick a little deeper still; turned into the way
     // the surface faces from how it changes across the picture (as `edgeOf` does for its rounding).
@@ -393,18 +403,18 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
       xb = floor(x); fx = fract(x);
     }
     idx = vec2(xb, row);
-    const out: N = hasFoot.mul(wearU).toVar();
+    const out: N = hasFoot.mul(wearU).toVar(), outI: N = hasFoot.mul(wearI).toVar();
     const faceB: N = smoothstep(0.38, 0.5, stone.a).toVar(), joint: N = one(faceB);
     const flaky: N = step(farHash(idx.add(vec2(3.3, 7.1))), worn.mul(0.07).add(0.03).add(one(smoothstep(0.3, 1.6, above)).mul(0.1))).mul(out);
     const fv: N = farNoise(vec2(fx.mul(3.1), fy.mul(1.3)).add(farHash(idx).mul(17))).toVar();
     const flake: N = smoothstep(0.4, 0.46, fv).mul(flaky).mul(faceB).toVar();
     const flakeRim: N = smoothstep(0.38, 0.4, fv).mul(one(smoothstep(0.4, 0.43, fv))).mul(flaky).mul(faceB);
     colour = mix(colour, colour.mul(vec3(1.5, 1.2, 0.92)).mul(mix(0.8, 1.1, farNoise(t.mul(220)))), flake.mul(0.9)).mul(one(flakeRim.mul(0.5)));
-    const raked: N = smoothstep(0.58, 0.74, farNoise(rot(q.mul(2.3)).add(6.1)).add(worn.mul(0.12)).add(one(smoothstep(0.2, 1.2, above)).mul(0.2))).mul(out).toVar();
+    const raked: N = smoothstep(float(0.58).sub(past.mul(0.3)), float(0.74).sub(past.mul(0.25)), farNoise(rot(q.mul(2.3)).add(6.1)).add(worn.mul(0.12)).add(one(smoothstep(0.2, 1.2, above)).mul(0.2))).mul(outI).toVar();
     colour = colour.mul(one(joint.mul(raked).mul(0.62)));
     // (In a crust that is thick in the joints and thin over the brick, broken up finely: laid as an even veil it was white paint.)
     const salt: N = one(smoothstep(0.2, 0.85, above.add(farNoise(rot(q.mul(4.1))).sub(0.5).mul(0.35)))).mul(smoothstep(0.55, 0.75, farNoise(rot(q.mul(3.3)).add(2.2))))
-      .mul(smoothstep(0.3, 0.7, farNoise(rot(q.mul(27)).add(5.5)))).mul(out);
+      .mul(smoothstep(0.3, 0.7, farNoise(rot(q.mul(27)).add(5.5)))).mul(outI);
     colour = mix(colour, vec3(0.74, 0.72, 0.68).mul(mix(0.85, 1, stone.a)), salt.mul(mix(0.12, 0.5, joint)));
   }
   // Timber out of doors on a house (`timber`; where the timber says how high the ground at its foot is, see `placeHouse`), weathered
@@ -415,7 +425,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
   // flakes drawn out along the grain, most low down and on older houses, showing the grey wood under it, the paint's edge lifting.
   let woodEdge: N = null;
   if (o.timber) {
-    const t: N = uv(), isOut: N = hasFoot.mul(wearU).toVar(), painted: N = step(f.w, -500).toVar(), bare: N = one(painted);
+    const t: N = uv(), isOut: N = hasFoot.mul(wearI).toVar(), isOutX: N = hasFoot.mul(wearU).toVar(), painted: N = step(f.w, -500).toVar(), bare: N = one(painted);
     const lum = (c: N): N => dot(c, vec3(0.3, 0.55, 0.15));
     // (Wood long bare goes silver grey; the brown of the picture under it, only a little.)
     const grey: N = mix(stone.rgb, vec3(lum(stone.rgb)), 0.78).mul(vec3(0.92, 0.92, 0.9)).toVar();
@@ -428,12 +438,12 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     const lw: N = max(fwidth(lane).mul(0.8), 0.02);
     const check: N = one(smoothstep(lw, lw.mul(2), abs(fract(lane).sub(0.5)))).mul(step(0.66, farNoise(vec2(t.x.mul(1.7), floor(lane).mul(3.7))))).mul(one(smoothstep(4, 12, length(positionView))));
     colour = colour.mul(one(check.mul(isOut).mul(0.55)));
-    const rotten: N = one(smoothstep(0.1, 0.45, above.add(farNoise(vec2(t.x.mul(7), t.y.mul(3))).sub(0.5).mul(0.15)))).mul(isOut);
+    const rotten: N = one(smoothstep(0.1, float(0.45).add(past.mul(0.9)), above.add(farNoise(vec2(t.x.mul(7), t.y.mul(3))).sub(0.5).mul(0.15)))).mul(isOut);
     colour = mix(colour, vec3(0.045, 0.045, 0.03).mul(mix(0.8, 1.2, stone.a)), rotten.mul(0.6));
     // Painted: chalky, then worn and peeled.
     colour = mix(colour, colour.mul(1.12).add(vec3(lum(colour)).mul(0.25)).add(0.012), isOut.mul(painted).mul(mix(0.25, 0.6, facing)).mul(worn.mul(0.6).add(0.4)));
     // (In flakes a few centimetres to a hand long, not in broad sheets: large and many, they were a soldier's camouflage.)
-    const share: N = worn.mul(0.07).add(0.015).add(one(smoothstep(0.2, 1.1, above)).mul(0.14)).add(facing.mul(0.05)).mul(isOut).mul(painted).toVar();
+    const share: N = min(worn.mul(0.07).add(0.015).add(one(smoothstep(0.2, 1.1, above)).mul(0.14)).add(facing.mul(0.05)).mul(isOutX), 0.75).mul(painted).toVar();
     const pv: N = farNoise(vec2(t.x.mul(6.3), t.y.mul(29)).add(8.8)).mul(0.65).add(farNoise(vec2(t.x.mul(19), t.y.mul(83)).add(1.3)).mul(0.35)).toVar();
     const pt: N = float(0.8).sub(share).toVar(), pw: N = max(fwidth(pv).mul(0.8), 0.004);
     const peeled: N = smoothstep(pt.sub(pw), pt.add(pw), pv).mul(step(0.002, share)).toVar();
@@ -460,7 +470,7 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     const sharp: N = one(smoothstep(0.35, 0.9, length(fwidth(t.mul(vec2(6, 8)))))).toVar();
     // (North is less z. A roof's slope, not the upright sides of its ridge or of a chimney's pots.)
     const north: N = smoothstep(0.2, -0.6, nG.z).toVar(), slope: N = smoothstep(0.25, 0.5, nG.y).toVar();
-    const patch: N = farNoise(P.xz.div(4.3).add(7.7)).toVar(), age: N = worn.mul(0.6).add(farNoise(P.xz.div(9.1).add(1.9)).mul(0.4)).toVar();
+    const patch: N = farNoise(P.xz.div(4.3).add(7.7)).toVar(), age: N = worn.mul(0.6).add(farNoise(P.xz.div(9.1).add(1.9)).mul(0.4)).add(past.mul(0.7)).toVar();
     const mended: N = step(0.64, patch).mul(step(0.4, h2)).toVar(), old: N = one(mended);
     colour = colour.mul(mix(1, mix(0.78, 1.14, h1), sharp)).mul(mix(vec3(1), vec3(0.9, 0.84, 0.78), step(0.72, h3).mul(sharp)));
     colour = mix(colour, colour.mul(vec3(1.2, 1.07, 0.9)), mended.mul(sharp).mul(0.85));
@@ -484,17 +494,25 @@ export function makeSiteMaterial(base: TextureSet, moss: TextureSet, o: { normal
     const streak: N = smoothstep(0.55, 0.82, farNoise(vec2(dot(P.xz, vec2(nG.z, nG.x.negate())).mul(2.1), P.y.mul(0.35)).add(2.2))).mul(north.mul(0.7).add(0.3)).mul(age).mul(slope).mul(old);
     colour = colour.mul(one(streak.mul(0.38)));
     // (One tile in a few hundred, on the oldest roofs only.)
-    const gone: N = step(float(0.9985).add(one(age).mul(0.002)), h4).mul(smoothstep(0.15, 0.3, stone.a)).mul(slope).mul(sharp);
+    const gone: N = step(float(0.9985).add(one(age).mul(0.002)).sub(past.mul(0.04)), h4).mul(smoothstep(0.15, 0.3, stone.a)).mul(slope).mul(sharp);
     colour = mix(colour, vec3(0.03, 0.024, 0.02), gone);
     // (`uChips` turns it off, as it does the walls' weathering, to compare.)
     colour = mix(plain, colour, min(wearU, 1));
-    roofMatt = max(mossed, lichen.mul(0.7)).mul(wearU);
+    roofMatt = max(mossed, lichen.mul(0.7)).mul(wearI);
   }
   // Rain has run down the outer walls, in long streaks of grime from what stands out over them, darker in some places than others.
   if (o.weather) {
     const streak: N = smoothstep(0.52, 0.8, farNoise(vec2(q.x.mul(2.4), q.y.mul(0.16)).add(1.3)).mul(0.75).add(farNoise(vec2(q.x.mul(9.1), q.y.mul(0.5)).add(4.4)).mul(0.25)));
     // (On a castle's walls, high and long without eaves over them, more of it.)
-    colour = colour.mul(one(streak.mul(worn.mul(laid ? 0.2 : 0.14).add(laid ? 0.2 : 0.12)).mul(hasFoot).mul(wearU)));
+    colour = colour.mul(one(streak.mul(worn.mul(laid ? 0.2 : 0.14).add(laid ? 0.2 : 0.12)).mul(hasFoot).mul(wearI.add(past.mul(1.2)))));
+    // Long left: grime over the whole of it, dull and darker in some places than others, the colour gone out of it; and moss and lichen
+    // up its walls from the foot, higher the longer it has been left, and here and there a patch higher up, thickest in the joints, as
+    // on a ruin. (Nothing below the game's wear.)
+    const grime: N = smoothstep(0.25, 0.75, farNoise(vec2(q.x.mul(0.45), q.y.mul(0.3)).add(7.3))).mul(0.6).add(0.4).mul(past).mul(hasFoot).toVar();
+    colour = mix(colour, vec3(dot(colour, vec3(0.3, 0.55, 0.15))).mul(vec3(0.95, 0.93, 0.88)), grime.mul(0.45)).mul(one(grime.mul(0.32)));
+    const low: N = one(smoothstep(0.15, past.mul(1.6).add(0.5), above));
+    const creep: N = smoothstep(0.72, 0.84, farNoise(rot(q.mul(0.9)).add(3.3)).mul(0.65).add(farNoise(rot(q.mul(3.7)).add(8.8)).mul(0.35)).add(low.mul(0.42)).sub(stone.a.sub(0.5).mul(0.2))).mul(past).mul(hasFoot).toVar();
+    colour = mix(colour, mossTex.rgb.mul(vec3(0.62, 0.78, 0.45)).mul(mix(1, 0.6, wet)), creep.mul(mix(0.75, 0.45, stone.a)));
   }
   const mark: N = farNoise(vec2(along.mul(0.9), 3.1)).mul(0.6).add(farNoise(vec2(along.mul(4.3), positionWorld.y.mul(0.7))).mul(0.2)).add(0.42).toVar();
   // (Its edge is taken through the wall's own texture as well, so that it is blotched as damp is, and not a drawn wave.)

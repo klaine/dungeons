@@ -373,8 +373,11 @@ function canalHouse(b: Building, k: BrickKit, rng: Rng, tops?: Vector3[]): void 
 
   // An oval window under the crown, from the second degree, where there is room over the highest opening; and the hoist kept under the crown.
   const topMid = Math.max(...top.filter(([s]) => s > 0.01 && s < W - 0.01 && Math.abs(s - mid) < W / 2).map(([, y]) => y), Etop);
-  if (orn >= 2 && !cornice) {
-    const hi = Math.max(...openings.filter((o) => Math.abs((o.s0 + o.s1) / 2 - mid) < 0.05).map((o) => o.y1)), room = halfAt(top, W, hi + 1.1);
+  // (Over the highest opening in the middle of the front: a front of an even number of bays with no loft in its gable has none there,
+  // and has no oval either.)
+  const middles = openings.filter((o) => Math.abs((o.s0 + o.s1) / 2 - mid) < 0.05);
+  if (orn >= 2 && !cornice && middles.length) {
+    const hi = Math.max(...middles.map((o) => o.y1)), room = halfAt(top, W, hi + 1.1);
     if (room > 0.55 && topMid - hi > (hoistAt ? 1.65 : 1.0)) {
       const y = hi + (hoistAt ? 1.15 : 0.55), r = 0.25;
       openings.push({ s0: mid - r, s1: mid + r, y0: y - r, y1: y + r, head: 'round', fill: 'oculus', storey: N, ring: Array.from({ length: 16 }, (_, i): Pt => [mid + Math.cos((i / 16) * Math.PI * 2) * r, y + Math.sin((i / 16) * Math.PI * 2) * r]) });
