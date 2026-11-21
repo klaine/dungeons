@@ -561,7 +561,7 @@ async function start(): Promise<void> {
     frames++;
     if (now - fpsAt > 500) { fps = (frames * 1000) / (now - fpsAt); frames = 0; fpsAt = now; }
     if (chosen) doing.textContent = `${chosen.doing}${chosen.busy ? ' (sent)' : ''}`;
-    foot.innerHTML = `${help}\n<span class="dim">${figures.length} figure${figures.length === 1 ? '' : 's'} · ${fps.toFixed(0)} frames a second${slow ? ' · slow time' : ''}${paused ? ' · paused (P)' : ''}${forceWebGL ? ' · WebGL 2' : ''}</span>`;
+    foot.innerHTML = `${help}\n<span class="dim">${figures.length} figure${figures.length === 1 ? '' : 's'}${steeds.length ? ` · ${steeds.length} horse${steeds.length === 1 ? '' : 's'}` : ''} · ${fps.toFixed(0)} frames a second${slow ? ' · slow time' : ''}${paused ? ' · paused (P)' : ''}${forceWebGL ? ' · WebGL 2' : ''}</span>`;
   });
 }
 

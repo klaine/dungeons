@@ -871,7 +871,8 @@ The machine this is developed on now has a graphics card, and tablets were repor
     ahead was looked for from just over the horse's own level, and from inside the block of the ledge the look found the floor under
     it, so the horse walked half into the stone; it is now looked for from well over its head. The stair first stopped it too: looked
     at every 0.3, the treads' own depth, two steps could fall between two looks and read as one step of 0.34. Not done: a way found
-    round what is in its way (it walks straight); a horse in the world.
+    round what is in its way (it walks straight); the figures are not in its way at all (it walks through them, and they through
+    it); a horse in the world.
 
 ## Risks
 
