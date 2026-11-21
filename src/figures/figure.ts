@@ -1,6 +1,7 @@
 import { AnimationAction, AnimationClip, AnimationMixer, Group, LoopOnce, LoopRepeat, Vector2, Vector3 } from 'three';
 import { Player, type Colliders } from '../app/player';
 import { type Move, type Rigged, travelAt } from './library';
+import { RUN, SPRINT, strideOf } from './gait';
 import type { Route } from './nav';
 
 /**
@@ -16,19 +17,21 @@ import type { Route } from './nav';
  * Forward is +z in the model's frame: a figure facing `facing` looks along (sin facing, 0, cos facing).
  */
 
-/** How fast a figure goes at each pace, metres a second. */
-export const PACES = { walk: 1.3, run: 4.6, sprint: 7.0, crouch: 0.9 };
+/** How fast a figure goes at each pace, metres a second: a run and a sprint at the speeds their gaits are made for (`gait.ts`). */
+export const PACES = { walk: 1.3, run: RUN.speed, sprint: SPRINT.speed, crouch: 0.9 };
 export type Pace = 'walk' | 'run' | 'sprint';
 
 /**
- * The gaits: their clip, and the ground it covers in one cycle (two steps) at the mannequin's size, measured in the clips with their
- * root moving (`UAL1_Standard_RM.glb`): what the walk covers in 1.33 seconds, the run in 0.93, and so on.
+ * The gaits: their clip, and the ground it covers in one cycle (two steps) at the mannequin's size. The walk's and the crouched walk's
+ * measured in the packs' clips with their root moving (`UAL1_Standard_RM.glb`): what the walk covers in its 1.33 seconds. The run and
+ * the sprint are made, not the packs' (whose jog and sprint loped and crouched, and looked silly: see `gait.ts`), and cover what their
+ * feet do.
  */
 const GAITS = {
   idle: { clip: 'Idle_Loop', stride: 0 },
   walk: { clip: 'Walk_Loop', stride: 1.3 },
-  run: { clip: 'Jog_Fwd_Loop', stride: 5.0 },
-  sprint: { clip: 'Sprint_Loop', stride: 5.5 },
+  run: { clip: RUN.name, stride: strideOf(RUN) },
+  sprint: { clip: SPRINT.name, stride: strideOf(SPRINT) },
   crouchIdle: { clip: 'Crouch_Idle_Loop', stride: 0 },
   crouchWalk: { clip: 'Crouch_Fwd_Loop', stride: 1.5 },
 } as const;

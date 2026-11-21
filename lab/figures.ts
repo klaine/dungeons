@@ -407,7 +407,7 @@ async function start(): Promise<void> {
   panel.querySelector('#follow')!.addEventListener('change', (e) => { follow = (e.target as HTMLInputElement).checked; });
   // The clips, in groups by what they are for.
   const GROUPS: [string, RegExp][] = [
-    ['Going about', /^(Idle_Loop|Walk|Jog|Sprint|Crouch|Swim|Zombie|Slide|Roll|NinjaJump|Jump|ClimbUp)/],
+    ['Going about', /^(Idle_Loop|Walk|Run|Jog|Sprint|Crouch|Swim|Zombie|Slide|Roll|NinjaJump|Jump|ClimbUp)/],
     ['Resting', /^(Sitting|LayToIdle|Idle_(FoldArms|Rail|Lantern|Torch|Talking|TalkingPhone|No))/],
     ['Work', /^(Interact|PickUp|Chest|Consume|Farm|Fixing|TreeChopping|Push|Driving|Walk_Carry)/],
     ['Fighting', /^(Sword|Shield|Idle_Shield|Melee|Punch|Pistol|Spell|OverhandThrow|Hit|Death)/],

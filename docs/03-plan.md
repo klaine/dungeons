@@ -657,6 +657,28 @@ The machine this is developed on now has a graphics card, and tablets were repor
     with `Delete` (the castle stays), drags the gate, is refused a wall crossing itself, undoes, and bends the wall in on itself, with no
     error on the page.
 
+61. **A better run.** Asked: "the running animation looks super silly, make a better one". The run was the packs' jog (`Jog_Fwd_Loop`)
+    and the sprint theirs: the only running clips in either pack. Filmed from the side, a frame at every twelfth of its cycle, the jog
+    was keyed as a cartoon is: the hips sunk a fifth of a metre below standing and bobbing a quarter of a metre a step, the hands
+    swinging half a metre ahead, the knees deep, and a stride of five metres a cycle, so that at the run's pace (4.6 metres a second)
+    it went at some 110 steps a minute, a slow lope; a runner at that speed takes some 170. The sprint was the same, crouched. *Done:*
+    both are made in code on the figures' own skeleton as the clips are loaded (`src/figures/gait.ts`, `makeRun`), from how people run:
+    178 steps a minute for the run and 190 for the sprint; the foot that bears the body stays where it came down, the leg over it
+    solved for every instant so that it reaches from the hip without the foot sliding, the heel lifting as the body passes over it;
+    the hips lowest a little after the foot lands and thrown between steps as a body is, up and down (some nine centimetres in all),
+    as high as the legs allow; the free leg folding at once, the heel up under the seat, the thigh driving forward with the knee still
+    bent, and the shin reaching out only in the last fifth of the swing, through keyed curves that cannot overshoot; the pelvis turning
+    with the legs and the chest against it, the arms swinging against the legs with the elbows near a right angle, a slight lean, the
+    head level. It is built from the skeleton's rest pose, which is the same on either side, with the arms let down to hang and the
+    idle's loosely curled fingers (the idle itself stands on one leg with a foot turned out, and made the two legs unlike). Each foot
+    lands when the walk's does, so that walk, run and sprint blend in step; the stride the figure keeps its feet in step with is what
+    the made feet cover (3.10 and 4.42 metres a cycle). The packs' jog and sprint are still among the clips that can be played.
+    *Checked:* the clips as played, measured without a browser: no foot slides while it bears the body, the free foot stays 3.5 and
+    7.9 centimetres clear of the ground at least, the knee folds to 100 and 118 degrees; filmed from the side and from ahead at a walk,
+    at three metres a second (walk and run blended), at the run, between run and sprint, and at the sprint, and the base woman at the
+    run; `tools/browser/figures.cjs` (the paces, sitting, lying, climbing, dropping, the clips that carry a figure) and
+    `tools/browser/crew.cjs` pass.
+
 ## Risks
 
 | Risk | Mitigation |
