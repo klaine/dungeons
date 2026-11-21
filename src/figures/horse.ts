@@ -184,7 +184,16 @@ export interface HorsePose {
   neck: number; neckYaw: number; head: number; ears: number; tail: number; tailYaw: number;
   skis: Record<Side, HorseSki>; front: number; hind: number; spread: number;
   spin: number; flip: number; lift: number;
+  /** Off its skis: where each hoof's sole is (in the horse's frame) and how far its toe is tipped down; given, the skis are not worn. */
+  hooves?: Record<HorseLeg, Hoof>;
 }
+/** A hoof off skis: the middle of its sole, in the horse's frame, and its toe tipped down (radians; the hoof folded back in a stride). */
+export interface Hoof { x: number; y: number; z: number; pitch: number }
+/** Where each hoof's sole rests, the horse standing square. */
+export const HOOF_REST: Record<HorseLeg, Hoof> = {
+  f_l: { x: 0.15, y: 0, z: BINDINGS / 2, pitch: 0 }, f_r: { x: -0.15, y: 0, z: BINDINGS / 2, pitch: 0 },
+  h_l: { x: 0.15, y: 0, z: -BINDINGS / 2, pitch: 0 }, h_r: { x: -0.15, y: 0, z: -BINDINGS / 2, pitch: 0 },
+};
 
 const X = new Vector3(1, 0, 0), Y = new Vector3(0, 1, 0), Z = new Vector3(0, 0, 1);
 const qx = (a: number) => new Quaternion().setFromAxisAngle(X, a), qy = (a: number) => new Quaternion().setFromAxisAngle(Y, a), qz = (a: number) => new Quaternion().setFromAxisAngle(Z, a);
@@ -204,6 +213,10 @@ export function mixHorse(a: HorsePose, b: HorsePose, w: number): HorsePose {
   const out = { ...a } as HorsePose;
   for (const k of Object.keys(a) as (keyof HorsePose)[]) if (typeof a[k] === 'number') (out as unknown as Record<string, number>)[k] = m(a[k] as number, b[k] as number);
   out.skis = { l: ski('l'), r: ski('r') };
+  if (a.hooves && b.hooves) {
+    const hoof = (l: HorseLeg): Hoof => { const p = a.hooves![l], q = b.hooves![l]; return { x: m(p.x, q.x), y: m(p.y, q.y), z: m(p.z, q.z), pitch: m(p.pitch, q.pitch) }; };
+    out.hooves = { f_l: hoof('f_l'), f_r: hoof('f_r'), h_l: hoof('h_l'), h_r: hoof('h_r') };
+  } else out.hooves = w < 0.5 ? a.hooves : b.hooves;
   return out;
 }
 
@@ -284,12 +297,13 @@ export class Horse {
     const wq = this.wq, wp = this.wp;
     wq.clear(); wp.clear();
     wq.set('root', new Quaternion()); wp.set('root', new Vector3());
-    // The whole, turned about the middle of the barrel and lifted.
-    const R = mul(qy(a.spin), qx(a.flip)), pivot = new Vector3(a.bodyX, 1.22 + SKI_T + a.height, a.bodyZ);
+    // The whole, turned about the middle of the barrel and lifted (on skis, by their thickness more).
+    const shod = a.hooves, under = shod ? 0 : SKI_T;
+    const R = mul(qy(a.spin), qx(a.flip)), pivot = new Vector3(a.bodyX, 1.22 + under + a.height, a.bodyZ);
     const place = (v: Vector3) => v.sub(pivot).applyQuaternion(R).add(pivot).setY(v.y + a.lift);
     const Rb = mul(R, qy(a.yaw), qz(a.roll), qx(a.pitch));
     // The body, turned about its spine.
-    const spineAt = place(rest('spine').add(new Vector3(a.bodyX, SKI_T + a.height, a.bodyZ)));
+    const spineAt = place(rest('spine').add(new Vector3(a.bodyX, under + a.height, a.bodyZ)));
     wq.set('hips', Rb.clone().multiply(qx(-a.arch * 0.5)).multiply(qy(-a.twist * 0.5)));
     wp.set('hips', spineAt.clone().sub(rest('spine').sub(rest('hips')).applyQuaternion(wq.get('hips')!)));
     const fk = (n: string, q: Quaternion) => {
@@ -309,7 +323,9 @@ export class Horse {
     // The skis, and where each hoof stands on them.
     this.skiAt.clear();
     const soles: Record<HorseLeg, { at: Vector3; q: Quaternion }> = {} as Record<HorseLeg, { at: Vector3; q: Quaternion }>;
-    for (const k of ['l', 'r'] as const) {
+    for (const m of this.skiMeshes) m.visible = !shod;
+    if (shod) for (const leg of HORSE_LEGS) { const h = shod[leg]; soles[leg] = { at: place(new Vector3(h.x, h.y, h.z)), q: R.clone().multiply(qx(h.pitch)) }; }
+    else for (const k of ['l', 'r'] as const) {
       const s = a.skis[k], sign = k === 'l' ? 1 : -1, Rs = mul(qy(s.yaw), qx(s.pitch), qz(s.edge)), q = R.clone().multiply(Rs);
       if (this.skiKind === 'pair') {
         const centre = new Vector3(0.15 * sign + s.x, s.up, s.z);
@@ -343,6 +359,9 @@ export class Horse {
       const gathered = Math.max(0, Math.min(1, (restReach - top.distanceTo(fetlock.clone().addScaledVector(cannon0, Lc))) / restReach));
       const bodyFwd = Z.clone().applyQuaternion(wq.get(fore ? 'chest' : 'hips')!), side = X.clone().applyQuaternion(q);
       const cannon = cannon0.clone().applyAxisAngle(side, (fore ? -0.9 : 0.6) * gathered).normalize();
+      // (Off skis, a hoof flat on the ground lets its fetlock give, so that the cannon lies along the leg's line, from the hoof up
+      // towards the shoulder or the hip, as the leg sweeps under the body; folded in a stride, the hoof's tip sets it.)
+      if (shod) cannon.lerp(top.clone().sub(fetlock).normalize(), 0.65 * (1 - Math.min(1, Math.max(0, Math.abs(shod[leg].pitch) - 0.2) / 0.4))).normalize();
       const knee = fetlock.clone().addScaledVector(cannon, Lc);
       const d = knee.clone().sub(top), len = d.length(), reach = Math.min(len, (L1 + L2) * 0.999), u = d.clone().normalize();
       stretch = Math.max(stretch, len / (L1 + L2));
@@ -567,11 +586,15 @@ export function horseAirPose(c: AirControls, four: boolean): HorsePose {
  * up straight standing tall; sat back and braced braking. In the air: the arms flung up for a backflip, in close for a spin, laid
  * flat along the neck in a flight; sat deep into a landing.
  */
-export function saddlePose(c: RideControls & Partial<AirControls>): AlpinePose {
-  const { s, tuck, tall, brake } = c, absorb = c.absorb ?? 0, fl = c.flight ?? 0, th = c.throw ?? 0, wr = c.wrap ?? 0;
+export function saddlePose(c: RideControls & Partial<AirControls> & { reins?: number; post?: number }): AlpinePose {
+  const { s, tuck, tall, brake } = c, absorb = c.absorb ?? 0, fl = c.flight ?? 0, th = c.throw ?? 0, wr = c.wrap ?? 0, reins = c.reins ?? 0, post = c.post ?? 0;
   const arm = (k: Side): AlpineArm => {
-    const f = k === 'l' ? c.flickL : c.flickR;
-    return { swing: rad(26) + rad(18) * f, bend: rad(40), wrist: rad(30) - rad(45) * f, hang: 50, inward: rad(4) * (k === 'l' ? -1 : 1) };
+    const f = k === 'l' ? c.flickL : c.flickR, sign = k === 'l' ? -1 : 1;
+    // (Holding the reins rather than poles: the hands low and together over the withers, the elbows bent at the sides.)
+    const poles = { swing: rad(26) + rad(18) * f, bend: rad(40), wrist: rad(30) - rad(45) * f, hang: 50, inward: rad(4) * sign };
+    const held = { swing: rad(18), bend: rad(78), wrist: rad(-6), hang: 80, inward: rad(18) * sign };
+    return { swing: poles.swing + (held.swing - poles.swing) * reins, bend: poles.bend + (held.bend - poles.bend) * reins, wrist: poles.wrist + (held.wrist - poles.wrist) * reins,
+      hang: poles.hang + (held.hang - poles.hang) * reins, inward: poles.inward + (held.inward - poles.inward) * reins };
   };
   const foot = (k: Side): AlpineFoot => { const sign = k === 'l' ? 1 : -1; return { x: 0.36 * sign, z: 0.06, up: 0, yaw: rad(14) * sign, pitch: rad(-10), edge: rad(-10) * sign }; };
   const a: AlpinePose = {
@@ -590,5 +613,7 @@ export function saddlePose(c: RideControls & Partial<AirControls>): AlpinePose {
   if (th) { a.lean -= rad(20) * th; a.head -= rad(26) * th; both((_k, arm) => { arm.swing += rad(120) * th; arm.hang -= 30 * th; arm.bend -= rad(20) * th; }); }
   if (wr) both((_k, arm) => { arm.bend += rad(40) * wr; arm.hang += 14 * wr; });
   a.hips -= 0.06 * absorb; a.lean += rad(8) * absorb;
+  // Rising to the trot: up out of the saddle on one beat of the two, leant a little forward.
+  a.hips += 0.09 * post; a.lean += rad(8) * post; a.pelvisPitch += rad(6) * post;
   return a;
 }

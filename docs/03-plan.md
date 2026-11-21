@@ -841,6 +841,37 @@ The machine this is developed on now has a graphics card, and tablets were repor
     (the physics is the same), the two bodies settling apart within eleven seconds; the person's trials and skids after the change,
     the same to the number; the page's own buttons at desktop and phone size with no fault. Not done: the horse in the world's winter
     mountains, as said, for later; a horse that walks, trots or gallops off its skis.
+69. **The horse on its own hooves: standing, walking, trotting, cantering, galloping.** Asked: "ok continue with crucial missing
+    things like horse regular movement and then push to default". *Done:* `src/figures/steed.ts`, the skiing horse of `horse.ts`
+    off its skis, its pose now taking where each hoof stands (`HorsePose.hooves`: its sole's place and how far its toe is tipped), the
+    skis then not worn; on the ground the fetlock gives so that the cannon lies along the leg's line from the hoof to the shoulder or
+    the hip, and folded in a stride the hoof's tip sets it. Each gait by how a horse's legs go in it, the order the hooves come down in
+    and how much of a stride each is down: the walk's four beats, left hind, left fore, right hind, right fore, each down 62 per cent of
+    the stride; the trot's two, the diagonal pairs together, 40; the canter's three on the right lead, 27, then all in the air; the
+    gallop's four, 22. A hoof down stays where it came down while the body goes on over it (its stretch on the ground no longer than
+    0.95, which these legs can sweep); in the air it is lifted and brought forward, its toe tipped down as the leg folds, a fore hoof
+    carried high (folded nearly square, its cannon lies forward from the hoof, and carried any lower the shoulder could not reach the
+    knee). The stride quickens a little with speed within a gait; the gait follows the speed, changing up at 2.6, 5 and 9 m/s and down
+    at 2.2, 4.4 and 8.2, faded across in a third of a second. The body rises and falls with each beat, rocks fore and aft in the canter
+    and the gallop, leans into turns; the head nods; the neck stretches out lower, the ears go back and the tail streams the faster it
+    goes. Standing, it breathes, swishes its tail now and then, moves its head and ears and rests a hind leg on its toe. It gains speed
+    at 2.6 m/s² and loses it at 4.5, turns quickly at a walk and widely at a gallop, slows almost to a stop to come round, and coming in
+    to where it was sent slows through the gaits. Each hoof stands where the ground is under it and the body is carried at their middle,
+    pitched as the ground under its fore and hind hooves lies; the ground ahead is looked at every 0.2 metres as far as a stride or the
+    place it is going (closer than a stair's treads, so that no two steps read as one high one), and a rise of more than 0.4 from one
+    look to the next, a drop of more than 0.6 or a slope steeper than 32 degrees stops it; it turns where it stands, and gives up a
+    place it was sent to when the way straight there stays shut. A rider (`saddlePose`'s reins and rising) holds the reins, sits the
+    walk and the canter, rises to the trot on one beat of two, crouches out of the saddle at the gallop. In the figure lab it is
+    steered as a figure is, `Shift` gathering it from a trot into a canter and a gallop; sent by pointing at a walk, a canter or a
+    gallop; `E` puts up or takes down a rider; *Figures* adds a horse or a horse and rider. *Checked:* every gait's legs over a
+    stride, at first up to a third past their length (the stride swept too far, the cannon stood upright on a flat hoof, the folded
+    fore hoof was carried too low), now no more than 7 per cent for a moment, a hoof a few centimetres short; filmed from the side
+    through every gait, with its rider; `tools/browser/figures.cjs`, which now checks the horse too: each gait at its speed, its legs'
+    reach, up the ramp at a canter, down it, up the stair, and stopped before the ledge of 1.6. That last first failed: the ground
+    ahead was looked for from just over the horse's own level, and from inside the block of the ledge the look found the floor under
+    it, so the horse walked half into the stone; it is now looked for from well over its head. The stair first stopped it too: looked
+    at every 0.3, the treads' own depth, two steps could fall between two looks and read as one step of 0.34. Not done: a way found
+    round what is in its way (it walks straight); a horse in the world.
 
 ## Risks
 

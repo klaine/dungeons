@@ -1,6 +1,8 @@
 // Drives the figure lab (lab/figures.html): the figures' paces, sitting on the bench and lying on a bedroll and getting up, climbing the
 // ledges (and not the one too high), sent onto a ledge, up the stair and the ramp, a drop from the platform, creeping, and clips that
-// carry the figure along. Reports each with what it should have come to, and keeps a picture of the most of them.
+// carry the figure along; and the horse's gaits by its speed, its legs reaching its hooves through them, and the horse sent up the ramp
+// at a canter, down it, up the stair, and at the ledge of 1.6, which stops it. Reports each with what it should have come to, and keeps
+// a picture of the most of them.
 //   node tools/browser/figures.cjs <out folder>
 // Needs the development server on port 5180 (`npm run figures`, or `npx vite --port 5180 --strictPort`), or PORT. The figures are
 // stepped by the script at sixty steps a second while the page's own time stands still, so it does not matter how slowly software
@@ -88,6 +90,38 @@ const fs = require('node:fs');
   }
   const death = await ev(() => { const f = figureLab.figures[1]; f.play('Death01'); T.sim(3); const lies = f.state; f.drive(T.D(0, -1), 'walk'); T.sim(1); return [lies, f.state]; });
   check('falls and stays down until moved', death[0] === 'act' && death[1] === 'ground', death.join(' then '));
+
+  // The horse (`src/figures/steed.ts`): each gait at its speed, a second of it on level ground, its legs reaching where its hooves go.
+  const gaits = await ev(() => {
+    const s = figureLab.steeds[0], seen = [];
+    let reach = 0;
+    for (const v of [1.7, 3.8, 6.5, 12]) {
+      s.position.set(-10, 0, 12); s.heading = Math.PI / 2; s.speed = v; s.drive(T.D(1, 0), v);
+      for (let i = 0; i < 90; i++) { s.position.x = -10; s.update(1 / 60); if (i > 30) reach = Math.max(reach, ...Object.values(s.horse.reach)); }
+      seen.push(s.gait);
+    }
+    s.drive(T.D(0, 0), 0);
+    return { seen, reach: +reach.toFixed(3) };
+  });
+  check('horse: its gaits by its speed', gaits.seen.join() === 'walk,trot,canter,gallop', `at 1.7, 3.8, 6.5 and 12 m/s: ${gaits.seen.join(', ')}`);
+  check('horse: its legs reach its hooves', gaits.reach < 1.1, `stretched at most ${gaits.reach} of their length`);
+  const send = (from, to, v) => ev(([from, to, v]) => {
+    const s = figureLab.steeds[0];
+    s.position.set(...from); s.heading = Math.atan2(to[0] - from[0], to[2] - from[2]); s.speed = 0; s.update(0);
+    s.goTo(T.V(...to), v);
+    let t = 0;
+    for (; t < 20 && s.busy; t += 1 / 60) s.update(1 / 60);
+    return { at: s.position.toArray().map((x) => +x.toFixed(2)), t, doing: s.doing };
+  }, [from, to, v]);
+  const hr = await send([6.2, 0, 3], [6.2, 1.5, -7], 6.5);
+  check('horse: up the ramp at a canter', Math.abs(hr.at[1] - 1.5) < 0.05, `at ${hr.at.join(', ')} after ${hr.t.toFixed(1)} s`);
+  const hd = await send([6.2, 1.5, -7], [6.2, 0, 6], 1.7);
+  check('horse: down the ramp', Math.abs(hd.at[1]) < 0.05 && hd.at[2] > 4.5, `at ${hd.at.join(', ')} after ${hd.t.toFixed(1)} s`);
+  const hs = await send([-8, 0, 3], [-8, 1.02, -3.5], 1.7);
+  check('horse: up the stair', Math.abs(hs.at[1] - 1.02) < 0.05, `at ${hs.at.join(', ')} after ${hs.t.toFixed(1)} s`);
+  const hl = await send([2.2, 0, 2], [2.2, 1.6, -3.2], 3.8);
+  check('horse: stopped by the ledge of 1.6', hl.at[1] < 0.05 && hl.at[2] > -2.1, `at ${hl.at.join(', ')}: ${hl.doing}`);
+  await picture('horse-on-the-stair', () => { const s = figureLab.steeds[0]; s.position.set(-8, 0, 3); s.heading = Math.PI; s.speed = 0; s.update(0); s.goTo(T.V(-8, 1.02, -3.5), 1.7); for (let t = 0; t < 2.3; t += 1 / 60) s.update(1 / 60); T.look(-8, 1.2, -0.5, -3.5, 2.2, 1.5); });
 
   if (faults.length) { failed++; console.log(`FAIL errors in the page:\n  ${faults.join('\n  ')}`); }
   console.log(failed ? `${failed} failed` : 'all passed');

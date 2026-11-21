@@ -8,8 +8,14 @@
  * pause.
  * Pointing: on a figure chooses it; on the ground sends the chosen one there (Shift: running); on a seat or a bedroll, to sit or lie.
  * Dragging turns the view about the figure; the wheel brings it nearer.
+ *
+ * Horses (`src/figures/steed.ts`) go about the stage too, with a rider or without: steered by the same keys, walking, and with Shift
+ * held gathering from a trot into a canter and then a gallop; sent by pointing at a walk, a canter (*run*) or a gallop (*sprint*); E
+ * puts a rider up or takes it down. They go up the ramps and the stair and over uneven ground on their own hooves, and stop at ground
+ * too steep to step up onto.
  */
-import { SKI_RUN } from '../src/figures/alpine';
+import { Rider, SKI_RUN } from '../src/figures/alpine';
+import { Steed } from '../src/figures/steed';
 import {
   ACESFilmicToneMapping, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, DirectionalLight, DoubleSide,
   HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, Ray, Raycaster, RepeatWrapping, RingGeometry, Scene, SphereGeometry,
@@ -192,7 +198,7 @@ async function start(): Promise<void> {
   // ---------------------------------------------------------------- figures
   const figures: Figure[] = [];
   const kinds = new Map<Figure, string>();
-  let chosen: Figure | null = null;
+  let chosen: Figure | Steed | null = null;
   const ring = new Mesh(new RingGeometry(0.42, 0.5, 40), new MeshStandardMaterial({ color: 0xe0b070, emissive: 0x6a4a18, transparent: true, opacity: 0.85 }));
   ring.rotation.x = -Math.PI / 2;
   scene.add(ring);
@@ -218,11 +224,30 @@ async function start(): Promise<void> {
     return f;
   }
 
-  function choose(f: Figure | null): void {
-    if (chosen && chosen !== f) chosen.drive(new Vector2(), 'walk');
+  function choose(f: Figure | Steed | null): void {
+    if (chosen && chosen !== f) { if (chosen instanceof Figure) chosen.drive(new Vector2(), 'walk'); else chosen.drive(new Vector2(), 0); }
     chosen = f;
     renderWho();
   }
+
+  // ---------------------------------------------------------------- horses, and riders for them
+  const steeds: Steed[] = [];
+  const idle = library.clips.find((c) => c.name === 'Idle_Loop')!, mannequin = await library.mannequin();
+  const riderFor = () => {
+    const r = new Rider(mannequin, idle);
+    r.model.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
+    return r;
+  };
+  function addSteed(ridden: boolean, at?: Vector3, heading = Math.PI / 2): Steed {
+    const s = new Steed(world.heightAt, at ?? new Vector3(-4, 0, 10.5 + steeds.length * 2.2), heading);
+    if (ridden) s.mount(riderFor());
+    scene.add(s.root);
+    steeds.push(s);
+    renderWho();
+    return s;
+  }
+  /** How fast a horse is sent at each pace: a walk, a canter, a gallop. */
+  const STEED_PACE: Record<Pace, number> = { walk: 1.7, run: 6.5, sprint: 13 };
 
   // ---------------------------------------------------------------- the view, following the chosen figure
   const controls = new OrbitControls(camera, canvas);
@@ -243,15 +268,17 @@ async function start(): Promise<void> {
   window.addEventListener('keydown', (e) => {
     if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'SELECT') return;
     keys.add(e.code);
-    if (e.code === 'Tab') { e.preventDefault(); if (figures.length) choose(figures[(figures.indexOf(chosen!) + 1) % figures.length]); }
+    const everyone: (Figure | Steed)[] = [...figures, ...steeds];
+    if (e.code === 'Tab') { e.preventDefault(); if (everyone.length) choose(everyone[(everyone.indexOf(chosen!) + 1) % everyone.length]); }
+    if (e.code === 'KeyT') { slow = !slow; renderWho(); }
+    if (e.code === 'KeyP' && !e.repeat) paused = !paused;
+    if (e.code === 'KeyF' && !e.repeat) follow = !follow;
+    if (chosen instanceof Steed) { if (e.code === 'KeyE' && !e.repeat) chosen.mount(chosen.ridden ? null : riderFor()); return; }
     if (!chosen || e.repeat) return;
     if (e.code === 'Space') { e.preventDefault(); chosen.jump(); }
     if (e.code === 'KeyC') chosen.toggleCrouch();
     if (e.code === 'KeyE') useNearest(chosen);
     if (e.code === 'KeyX') chosen.standUp();
-    if (e.code === 'KeyT') { slow = !slow; renderWho(); }
-    if (e.code === 'KeyP') paused = !paused;
-    if (e.code === 'KeyF') follow = !follow;
     const n = Number(e.key);
     if (n >= 1 && n <= 9) chosen.play(QUICK[n - 1]);
   });
@@ -280,6 +307,14 @@ async function start(): Promise<void> {
     right.set(-fwd.z, 0, fwd.x);
     dir.set(fwd.x * f + right.x * r, fwd.z * f + right.z * r);
     if (dir.lengthSq() > 0) dir.normalize();
+    if (chosen instanceof Steed) {
+      // (A horse: walking; with Shift held, a trot, gathering into a canter and then a gallop.)
+      const shift = keys.has('ShiftLeft') || keys.has('ShiftRight');
+      if (!shift) shiftSince = 0; else if (!shiftSince) shiftSince = now;
+      const held = shift ? now - shiftSince : -1;
+      chosen.drive(dir, held < 0 ? 1.7 : held < 900 ? 3.8 : held < 2400 ? 6.5 : 13);
+      return;
+    }
     // (Moving by the keys, the pace is walking unless Shift is held; the pace chosen in the panel is for sending figures about.)
     const p = keys.has('ShiftLeft') || keys.has('ShiftRight') ? pace(now) : 'walk';
     chosen.drive(dir, p);
@@ -331,10 +366,24 @@ async function start(): Promise<void> {
       const along = onRay.distanceTo(ray.origin);
       if (d2 < 0.35 * 0.35 && along < nearest) { nearest = along; hitFigure = f; }
     }
+    // A horse: as a log along its body, from its tail to its withers.
+    let hitSteed: Steed | null = null;
+    for (const s of steeds) {
+      const along = new Vector3(Math.sin(s.heading), 0, Math.cos(s.heading)), a = s.root.position.clone().addScaledVector(along, -0.9).setY(s.root.position.y + 1.2);
+      const b = s.root.position.clone().addScaledVector(along, 1.1).setY(s.root.position.y + 1.5), onRay = new Vector3(), onLog = new Vector3();
+      const d2 = ray.distanceSqToSegment(a, b, onRay, onLog), far = onRay.distanceTo(ray.origin);
+      if (d2 < 0.5 * 0.5 && far < nearest) { nearest = far; hitSteed = s; hitFigure = null; }
+    }
     const hit = stage.bvh.raycastFirst(ray, DoubleSide);
-    if (hitFigure && (!hit || hit.distance > nearest)) { choose(hitFigure); return; }
+    if ((hitFigure || hitSteed) && (!hit || hit.distance > nearest)) { choose(hitFigure ?? hitSteed); return; }
     if (!hit || !chosen) return;
     const run: Pace = e.shiftKey ? 'run' : state.pace;
+    if (chosen instanceof Steed) {
+      chosen.goTo(hit.point, STEED_PACE[run]);
+      mark.position.copy(hit.point).add(new Vector3(0, 0.02, 0));
+      markFade = 1.5;
+      return;
+    }
     for (const s of stage.seats) {
       if (Math.abs(hit.point.x - s.centre.x) < s.half.x && Math.abs(hit.point.z - s.centre.z) < s.half.y && hit.point.y < s.centre.y + 0.6) {
         if (!s.taken || s.taken === chosen) { takeSpot(chosen, s, run); return; }
@@ -357,6 +406,7 @@ async function start(): Promise<void> {
     <div class="buttons" id="acts">
       <button data-a="sit">Sit</button><button data-a="lie">Lie down</button><button data-a="up">Get up</button>
       <button data-a="crouch">Crouch</button><button data-a="jump">Jump</button><button data-a="remove">Remove</button>
+      <button data-a="rider" title="A horse: a rider up, or taken down (E)">Rider on / off</button>
     </div>
     <div class="buttons" id="paces">Sent at <button data-p="walk">walk</button><button data-p="run">run</button><button data-p="sprint">sprint</button></div>
     <div class="checks"><label><input type="checkbox" id="slow"> slow time (T)</label><label><input type="checkbox" id="follow" checked> follow (F)</label></div>
@@ -370,6 +420,12 @@ async function start(): Promise<void> {
     btn.onclick = async () => { const f = await addFigure(b.id); choose(f); };
     add.appendChild(btn);
   }
+  for (const [label, ridden] of [['+ Horse', false], ['+ Horse & rider', true]] as const) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.onclick = () => choose(addSteed(ridden));
+    add.appendChild(btn);
+  }
   const who = panel.querySelector('#who')!, doing = panel.querySelector('#doing')!;
   function renderWho(): void {
     who.innerHTML = '';
@@ -380,6 +436,13 @@ async function start(): Promise<void> {
       b.onclick = () => choose(f);
       who.appendChild(b);
     });
+    steeds.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.textContent = `${figures.length + i + 1}. Horse${s.ridden ? ' & rider' : ''}`;
+      b.classList.toggle('on', s === chosen);
+      b.onclick = () => choose(s);
+      who.appendChild(b);
+    });
     for (const b of panel.querySelectorAll<HTMLButtonElement>('#paces button')) b.classList.toggle('on', b.dataset.p === state.pace);
     (panel.querySelector('#slow') as HTMLInputElement).checked = slow;
     (panel.querySelector('#follow') as HTMLInputElement).checked = follow;
@@ -387,6 +450,12 @@ async function start(): Promise<void> {
   panel.querySelector('#acts')!.addEventListener('click', (e) => {
     const a = (e.target as HTMLElement).dataset.a;
     if (!a || !chosen) return;
+    if (chosen instanceof Steed) {
+      const s = chosen;
+      if (a === 'rider') { s.mount(s.ridden ? null : riderFor()); renderWho(); }
+      if (a === 'remove') { scene.remove(s.root); steeds.splice(steeds.indexOf(s), 1); choose(figures[0] ?? steeds[0] ?? null); }
+      return;
+    }
     if (a === 'sit' || a === 'lie') { const s = nearestSpot(chosen, a === 'sit' ? 'seat' : 'bed', 60); if (s) takeSpot(chosen, s, state.pace); }
     if (a === 'up') chosen.standUp();
     if (a === 'crouch') chosen.toggleCrouch();
@@ -397,7 +466,7 @@ async function start(): Promise<void> {
       figures.splice(figures.indexOf(f), 1);
       for (const s of stage.seats) if (s.taken === f) s.taken = null;
       kinds.delete(f);
-      choose(figures[0] ?? null);
+      choose(figures[0] ?? steeds[0] ?? null);
     }
   });
   panel.querySelector('#paces')!.addEventListener('click', (e) => {
@@ -429,7 +498,7 @@ async function start(): Promise<void> {
       const b = document.createElement('button');
       b.textContent = n.replace(/_Loop$/, ' ↻').replace(/_/g, ' ');
       b.title = n;
-      b.onclick = () => { chosen?.play(n); canvas.focus(); };
+      b.onclick = () => { if (chosen instanceof Figure) chosen.play(n); canvas.focus(); };
       box.appendChild(b);
     }
     // (And the downhill turns with every jump between them, one after another, a turn or two apart.)
@@ -437,7 +506,7 @@ async function start(): Promise<void> {
       const b = document.createElement('button');
       b.textContent = 'Run with jumps ↻';
       b.title = 'The downhill turns, and each jump in turn between them: a pop, a kicker, a 360, a cliff drop, a backflip';
-      b.onclick = () => { chosen?.chain(SKI_RUN); canvas.focus(); };
+      b.onclick = () => { if (chosen instanceof Figure) chosen.chain(SKI_RUN); canvas.focus(); };
       box.appendChild(b);
     }
     clipsBox.append(h, box);
@@ -446,9 +515,10 @@ async function start(): Promise<void> {
   // ---------------------------------------------------------------- the first figures
   choose(await addFigure('mannequin', new Vector3(0, 0, 7)));
   await addFigure('base-woman', new Vector3(1.6, 0, 7.4));
+  addSteed(true, new Vector3(-4.5, 0, 9.5));
   followed.copy(chosen!.root.position);
-  // (For drivers in `tools/browser/`: the figures, the stage and the view.)
-  Object.assign(window, { figureLab: { figures, stage, camera, controls, choose, takeSpot, pause: (on: boolean) => { paused = on; }, ready: true } });
+  // (For drivers in `tools/browser/`: the figures, the horses, the stage and the view.)
+  Object.assign(window, { figureLab: { figures, steeds, addSteed, stage, camera, controls, choose, takeSpot, pause: (on: boolean) => { paused = on; }, ready: true } });
 
   // ---------------------------------------------------------------- size and the loop
   const resize = () => {
@@ -462,14 +532,14 @@ async function start(): Promise<void> {
   resize();
 
   let last = performance.now(), frames = 0, fpsAt = last, fps = 0;
-  const help = 'WASD move · Shift run · Space jump/climb · C crouch · E sit/lie · X get up · 1–9 clips · Tab next · T slow · P pause · drag to turn the view · point to send';
+  const help = 'WASD move · Shift run · Space jump/climb · C crouch · E sit/lie (a horse: rider up/down) · X get up · 1–9 clips · Tab next · T slow · P pause · drag to turn the view · point to send';
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     let dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (slow) dt *= 0.25;
     steerChosen(now);
-    if (!paused) for (const f of figures) f.update(dt);
+    if (!paused) { for (const f of figures) f.update(dt); for (const s of steeds) s.update(dt); }
     if (chosen) {
       // The view goes along with the chosen figure, keeping its own angle and distance; it can still be turned about it.
       const p = chosen.root.position;
@@ -480,6 +550,7 @@ async function start(): Promise<void> {
       followed.copy(p);
       ring.visible = true;
       ring.position.set(p.x, p.y + 0.02, p.z);
+      ring.scale.setScalar(chosen instanceof Steed ? 2.4 : 1);
       sun.position.copy(p).addScaledVector(sunDir, 30);
       sun.target.position.copy(p);
     } else ring.visible = false;
