@@ -952,7 +952,7 @@ The machine this is developed on now has a graphics card, and tablets were repor
     hooves' strides centred a little less far forward of their rest, and the flight off a kicker a little lower and its four skis less
     spread, so that no leg reaches further than it did. *Checked:* pictures from the side, close by the shoulder, three quarters
     before, at the walk and the gallop, before and after; the profile measured at every height; the legs' reach through every gait
-    and ski pose (at most 1.06 of a leg's length at the canter, against 1.04); `tools/browser/figures.cjs` and `crew.cjs`.
+    and ski pose (at most 1.06 of a leg's length at the canter, against 1.04); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
 
 ## Risks
 
