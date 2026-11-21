@@ -592,6 +592,23 @@ The machine this is developed on now has a graphics card, and tablets were repor
     building; `tools/buildingLab.ts 60` as before (its one failure, a canal house with a point that is not a number when its measures
     are pushed past their ends, is there without this change too); `tools/browser/crew.cjs` (below).
 
+58. **How worn each building is; every kind of building in the lab.** Asked: "check if it is possible to add a slider parameter for the
+    worn down level for building types that support it and that we have all \"non-house\" building types available in the lab editor".
+    *Wear:* how worn what is built is had been one number for everything (`renderUniforms.uChips`, which `?chips=0` turns off), and every
+    point of a mesh's fields already says something (moss, damp, soot, the ground at a wall's foot), so no building could say its own.
+    `makeSiteMaterial` now takes `wear`, a uniform of the material's own in its place (the game passes none, and is as it was); the lab
+    gives a building whose *Worn* has been moved its own materials, made once, and the slider moves their uniform, building nothing again:
+    0 new, 1 as the game, 2 twice as worn (the roofs' weathering held at its fullest past 1). For every kind but trees, boulders and
+    shacks, which do not weather. *Kinds:* the lab had every style `buildBuilding` makes but the two the castle's village brought, the
+    village church (`chapel`) and the shed, and not the castle; all three are added, dealt as `generate.ts` and `layOutCastle` deal them,
+    the church with its measures on the panel; the castle on open ground about a house and forecourt that are not built, its keep left
+    out (it is a valley's tower, built stone by stone with the place); their coursed stone painted when one is first set out. Not in the
+    lab, and how they would come: the cathedral, which is a town's house, rooms, crypt and all, built with its site (a town site would
+    have to be generated for it); the fishermen's cottages and the lighthouse (`coast.ts`), the town's storehouses (`town.ts`) and the
+    mountain's hospice, each built within its place's builder, which would have to give them out as builders of their own. *Checked:*
+    `tools/buildingLab.ts 60` builds the three sixty times each with their measures pushed past their ends (the canal house's one
+    failure as before); pictures of the church, the castle, and a timber house at *Worn* 0 and 2.
+
 ## Risks
 
 | Risk | Mitigation |

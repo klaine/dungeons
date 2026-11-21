@@ -14,7 +14,7 @@ import {
   InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Float32BufferAttribute, Material, Matrix4, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
 } from 'three';
 import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { rtt } from 'three/tsl';
+import { rtt, uniform } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -30,7 +30,7 @@ import { CardSet } from '../src/render/scene';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { GROUND_PAINTS, natureKit, Painted, PLANT_PAINTS, Season, SEASONS, TREES } from './nature';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
+import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour, weathers } from './buildingKinds';
 import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
@@ -94,7 +94,7 @@ function readItem(o: Partial<Item> & { building?: Building }, id: number): Item 
   const shape = o.shape ?? (o.building ? (({ x, z, faces, plan, ...rest }) => rest)(o.building) : deal(kind, String(o.seed ?? id)));
   const scale = Array.isArray(o.scale) && o.scale.length === 3 ? (o.scale.map((v) => Math.min(5, Math.max(0.2, num(v, 1)))) as [number, number, number]) : [1, 1, 1] as [number, number, number];
   try {
-    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, shape: normalise(kind, shape as Shape) };
+    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, ...(typeof o.wear === 'number' && Number.isFinite(o.wear) ? { wear: Math.min(2, Math.max(0, o.wear)) } : {}), shape: normalise(kind, shape as Shape) };
   } catch { return null; }
 }
 // While the page opens, a note says so; it is taken away once the first pictures are drawn. Found on opening, the page did not get
@@ -396,15 +396,28 @@ async function start(): Promise<void> {
    * chipped, render come away, roofs and brick weathered, rain streaks. Unless the lab shows them new (`weathered` under Scene, or
    * `?chips=0` as in the game), when they are made plain. If what `main.ts` gives a maker changes, change it here too.
    */
-  const buildingMaterials = (weathered: boolean): Record<string, Material> => ({
-    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered }),
+  /** The coursed rubble of a castle's walls and a village church's, painted when a castle or a church is first set out, as `main.ts` paints it. */
+  let castleStone: ReturnType<typeof generateTextureSet> | null = null;
+  const castleSurface = () => {
+    if (castleStone) return;
+    castleStone = generateTextureSet('castle', Math.min(size * 2, 2048), 89);
+    doneGenerating();
+    Object.assign(materials, { castle: makeSiteMaterial(castleStone, T.moss, { normalScale: 1.2, mossScale: 2.4, weather: state.weathered, unrepeat: { span: 2, courses: 12 } }) });
+  };
+  /**
+   * What buildings are made of, as below; `wear`, a uniform of their own for how worn they are, for a building shown more or less worn
+   * than the rest (see `materialFor`).
+   */
+  const buildingMaterials = (weathered: boolean, wear?: { value: number }): Record<string, Material> => ({
+    ...(castleStone ? { castle: makeSiteMaterial(castleStone, T.moss, { normalScale: 1.2, mossScale: 2.4, weather: weathered, unrepeat: { span: 2, courses: 12 }, wear }) } : {}),
+    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered, wear }),
     slate: makeSiteMaterial(T.stone, T.moss, { normalScale: 0.7, roughness: 0.8 }),
-    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered }),
-    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8, render: weathered, weather: weathered }),
-    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
-    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
-    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }),
+    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered, wear }),
+    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8, render: weathered, weather: weathered, wear }),
+    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3, roof: weathered, wear }),
+    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, wear, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
+    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, wear, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
+    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3, wear, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }),
   });
   if (query.get('chips') === '0') state.weathered = false;
   renderUniforms.uChips.value = state.weathered ? 1 : 0;
@@ -432,12 +445,28 @@ async function start(): Promise<void> {
   siteUniforms.uBake.value = 1;
   const clay = new MeshStandardNodeMaterial({ color: new Color(0.42, 0.41, 0.4), roughness: 0.92, metalness: 0 });
   const materialOf = (name: string) => (state.clay ? clay : materials[name] ?? materials.stone);
-  /** Shows what is built weathered, or new: its materials made again, and put on. */
+  /**
+   * A building shown more or less worn than the rest (`wear` on the item) has materials of its own, made once, with a uniform of their
+   * own for how worn they are, which its slider moves without building anything again. (One uniform for everything can't show two houses
+   * differently worn, and every point of a mesh's fields already says something else.)
+   */
+  const worn = new Map<number, { u: { value: number }; made: Record<string, Material> }>();
+  const wearShown = (it: Item) => (state.weathered ? it.wear ?? 1 : 0);
+  const materialFor = (it: Item | undefined, name: string): Material => {
+    if (state.clay || !it || it.wear === undefined || !weathers(it.kind)) return materialOf(name);
+    let own = worn.get(it.id);
+    if (!own) { const u = uniform(wearShown(it)); own = { u: u as unknown as { value: number }, made: buildingMaterials(state.weathered, u as unknown as { value: number }) }; worn.set(it.id, own); }
+    return own.made[name] ?? materialOf(name);
+  };
+  /** Lets go of a building's own materials, when it is taken away or shown as the rest again. */
+  const unwear = (id: number) => { const own = worn.get(id); if (!own) return; for (const m of Object.values(own.made)) m.dispose(); worn.delete(id); };
+  /** Shows what is built weathered, or new: its materials made again, and put on; and those of buildings worn as they are their own. */
   const weather = (on: boolean) => {
     const made = buildingMaterials(on);
     for (const k of Object.keys(made)) materials[k]?.dispose();
     Object.assign(materials, made);
     renderUniforms.uChips.value = on ? 1 : 0;
+    for (const id of [...worn.keys()]) unwear(id);
     dress();
   };
 
@@ -480,8 +509,8 @@ async function start(): Promise<void> {
     if (g.index) g.index.array = new Uint32Array(0);
     m.userData.open = EMPTY;
   };
-  const meshOf = (name: string, builder: MeshBuilder): Mesh => {
-    const mesh = new Mesh(builder.build(), materialOf(name));
+  const meshOf = (name: string, builder: MeshBuilder, it?: Item): Mesh => {
+    const mesh = new Mesh(builder.build(), materialFor(it, name));
     mesh.name = name;
     mesh.castShadow = name !== 'glass' && name !== 'window' && name !== 'pane' && name !== 'paneLit';
     mesh.receiveShadow = true;
@@ -624,6 +653,7 @@ async function start(): Promise<void> {
     try {
       const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
       if (isNature(it.kind)) natureSurfaces();
+      if (it.kind === 'castle' || it.kind === 'chapel') castleSurface();
       made = buildItem(it, state.stone, into, nearItem(it), state.season, roomItem(it));
       const c = stoneColour(state.stone);
       buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
@@ -640,7 +670,7 @@ async function start(): Promise<void> {
     b.meshes = []; b.box.makeEmpty(); b.triangles = 0;
     for (const [name, builder] of builders) {
       if (!builder.vertexCount) continue;
-      const m = meshOf(name, builder);
+      const m = meshOf(name, builder, it);
       b.holder.add(m); b.meshes.push(m);
       b.box.union(m.geometry.boundingBox!);
       b.triangles += (m.geometry.index?.count ?? 0) / 3;
@@ -655,12 +685,12 @@ async function start(): Promise<void> {
   const neighbours = () => { for (const it of state.items) { const b = built.get(it.id); if (b && b.sig !== sigOf(it)) dirty.add(it.id); } };
   /** Brings what is built into line with what is set out: new items built, changed ones built again (in the loop, a few at a time), gone ones taken away. */
   const sync = () => {
-    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); dropCards(b.cards); built.delete(id); dirty.delete(id); }
+    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); dropCards(b.cards); built.delete(id); dirty.delete(id); unwear(id); }
     for (const it of state.items) { const b = built.get(it.id); if (!b || b.sig !== sigOf(it)) dirty.add(it.id); else placeItem(it); }
     changed(true);
   };
   const dress = () => {
-    for (const b of built.values()) for (const m of b.meshes) m.material = materialOf(m.userData.material);
+    for (const [id, b] of built) for (const m of b.meshes) m.material = materialFor(itemOf(id), m.userData.material);
     for (const m of natureLayer.children as Mesh[]) m.material = materialOf(m.userData.material);
     if (ground) ground.material = materialOf('floor');
     shadowsDue = 3;
@@ -1177,6 +1207,8 @@ async function start(): Promise<void> {
       out.push({ id: 'size', label: `${s.boulder!.size.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.3, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.boulder!.size = st.shape.boulder!.size + by * 1.4; }) });
       return out;
     }
+    // (A castle's walls are laid out, not measured: it is dealt anew, moved, turned and scaled, but not extruded.)
+    if (it.kind === 'castle') return out;
     // Extruding: each face's arrow changes the measure it stands on, and the building is built again as it goes.
     const mid = Math.min(E / 2, 6);
     const church = it.kind === 'church';
@@ -1200,7 +1232,7 @@ async function start(): Promise<void> {
         drag: (q, st, by) => reshape(q, st, (t) => { t.brickwork!.church!.choirLength = st.shape.brickwork!.church!.choirLength + by; }) });
       return out;
     }
-    if (it.kind === 'shack') return out;
+    if (it.kind === 'shack' || it.kind === 'chapel' || it.kind === 'shed') return out;
     // Storeys: dragged up a storey's height, one more; down, one fewer.
     out.push({ id: 'storeys', label: `${s.storeys} storeys`, colour: GREEN, at: worldAt(it, 0, top + 0.6, D / 2), axis: 'y', sign: 1,
       drag: (q, st, by) => reshape(q, st, (t) => { const h = st.shape.heights[st.shape.heights.length - 1] ?? 3; t.storeys = st.shape.storeys + Math.round(by / h); }) });
@@ -1539,6 +1571,19 @@ async function start(): Promise<void> {
     slider(selBox, list, 'Depth', 0.2, 5, 0.01, () => it.scale[2], (v) => { it.scale[2] = v; moved(); }, { done: commit, title: 'Stretches it from front to back' });
     buttons(selBox, [['True size', () => { it.scale = [1, 1, 1]; moved(); reflect(); commit(); }, 'Takes the scale away']]);
     el('p', selBox, 'Scale stretches the building as it is built. The measures below build it again at its true size: a broader front gets more windows, a taller one more storeys.').className = 'note';
+    // How worn it is, where its kind weathers: its own materials' uniform moved as the slider goes, nothing built again.
+    if (weathers(it.kind)) {
+      el('h3', selBox, 'Wear');
+      slider(selBox, list, 'Worn', 0, 2, 0.05, () => it.wear ?? 1, (v) => {
+        const first = it.wear === undefined;
+        it.wear = v;
+        if (first) dress();
+        const own = worn.get(it.id);
+        if (own) own.u.value = wearShown(it);
+      }, { done: commit, title: 'How worn it is: render come away, brick flaked and its mortar raked, stone chipped, timber faded and paint peeling, roofs mossed, rain streaks. 1 as the game builds it, 0 new, 2 twice as worn' });
+      buttons(selBox, [['As the rest', () => { delete it.wear; unwear(it.id); dress(); reflect(); commit(); }, 'Worn as everything else is: as the game builds it, or new where weathered is off under Scene']]);
+      if (!state.weathered) el('p', selBox, 'Weathered is off under Scene: everything is shown new.').className = 'note';
+    }
 
     // Its measures, by kind. Each change is brought back within what the kind can be, and the building is built again.
     el('h3', selBox, 'Measures');
@@ -1577,7 +1622,27 @@ async function start(): Promise<void> {
       num('Roof pitch', roofRange, () => bw().pitch, (t, v) => { t.brickwork!.pitch = v; }, 'How steep the roof is, in degrees', 0.5);
       pick('Roof', [['Red tiles', 'red'], ['Dark tiles', 'dark'], ['Copper', 'copper']], () => bw().roof, (t, v) => { t.brickwork!.roof = v; });
     };
-    if (it.kind === 'timber') {
+    if (it.kind === 'chapel') {
+      const c = () => s().chapel!;
+      num('Length', R.chapel.w, () => s().w, (t, v) => { t.w = v; }, 'The nave, from the tower to the choir');
+      num('Breadth', R.chapel.d, () => s().d, (t, v) => { t.d = v; });
+      num('Walls', R.chapel.height, () => s().heights[0], (t, v) => { t.heights = [v]; }, 'How high the nave walls stand');
+      num('Tower', R.chapel.tower, () => c().tower, (t, v) => { t.chapel!.tower = v; }, 'How broad the tower is');
+      num('Tower height', [R.chapel.height[0] + R.chapel.over[0], R.chapel.height[1] + R.chapel.over[1]], () => c().height, (t, v) => { t.chapel!.height = v; }, 'From the ground to the top of its walls', 0.1);
+      pick('Spire', [['Pyramid', 'pyramid'], ['Needle', 'needle'], ['Saddle roof', 'saddle']], () => c().spire, (t, v) => { t.chapel!.spire = v; });
+      num('Spire height', R.chapel.spire, () => c().spireHeight, (t, v) => { t.chapel!.spireHeight = v; }, undefined, 0.1);
+      num('Choir', R.chapel.choir, () => c().choir, (t, v) => { t.chapel!.choir = v; }, 'How far the choir reaches beyond the nave');
+      tick([['Apse', () => c().apse, (t, v) => { t.chapel!.apse = v; }, 'The choir ends round, not square']]);
+      pick('Tower at', [['Left end', -1], ['Right end', 1]], () => c().end, (t, v) => { t.chapel!.end = v; }, 'Which end of the nave the tower stands at, as one stands before it');
+    } else if (it.kind === 'shed') {
+      num('Width', R.shed.w, () => s().w, (t, v) => { t.w = v; });
+      num('Depth', R.shed.d, () => s().d, (t, v) => { t.d = v; });
+      num('Height', R.shed.height, () => s().heights[0], (t, v) => { t.heights = [v]; }, 'At its front, under the eaves');
+      wash();
+    } else if (it.kind === 'castle') {
+      const c = s().castle!;
+      el('p', selBox, `${c.wall.length} corners, ${c.towers.length} towers, the wall ${c.height.toFixed(1)} m high and ${c.thick.toFixed(1)} m through, ${c.ranges?.length ?? 0} ranges of buildings in the bailey. Deal anew for another; scale it to make it larger or smaller. Its keep and the house it guards are built with a valley, stone by stone, and are not here.`).className = 'note';
+    } else if (it.kind === 'timber') {
       num('Width', R.timber.w, () => s().w, (t, v) => { t.w = v; });
       num('Depth', R.timber.d, () => s().d, (t, v) => { t.d = v; });
       ints('Storeys', () => s().storeys, (t, v) => { t.storeys = v; });
@@ -1901,7 +1966,7 @@ async function start(): Promise<void> {
     note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
     // (A shack is no building of the site document: it is saved as the town keeps one.)
     // (Trees and boulders are no buildings: their measures are all there is of them.)
-    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : isNature(it.kind) ? it : { ...it, building: documentOf(it) })),
+    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : isNature(it.kind) || it.kind === 'castle' ? it : { ...it, building: documentOf(it) })),
     // (What was painted, as the brushes laid it: see document 5.)
     paint: state.paint,
   }, null, 1);
