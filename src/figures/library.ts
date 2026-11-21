@@ -2,6 +2,7 @@ import { AnimationClip, KeyframeTrack, Mesh, Object3D, SkinnedMesh, Vector3, Vec
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
 import { makeRun, RUN, SPRINT } from './gait';
+import { dressAdventurer } from './outfit';
 import { makeSkiClips } from './skiing';
 
 /**
@@ -14,15 +15,21 @@ import { makeSkiClips } from './skiing';
  *
  * Where a clip carries the root along (a roll, a dash, the climb onto a ledge), the root's travel is taken out of it, so that the figure
  * is moved by its body and stopped by what is solid, rather than run through it by the clip: `Move.travel`.
+ *
+ * A kind of body may be dressed (`BodyKind.dress`): the adventurers are the base man and woman in a ranger's clothes (`outfit.ts`),
+ * dressed once when first asked for and copied for every figure after (`source`).
  */
 
-export interface BodyKind { id: string; label: string; file: string }
+/** A kind of body: its file, and what it is dressed in, if anything (`outfit.ts`). */
+export interface BodyKind { id: string; label: string; file: string; dress?: 'adventurer' }
 
 export const BODIES: BodyKind[] = [
   { id: 'mannequin', label: 'Mannequin', file: 'clips.glb' },
   { id: 'mannequin-f', label: 'Mannequin, woman', file: 'mannequin-f.glb' },
   { id: 'base-man', label: 'Base man', file: 'superhero-male.glb' },
   { id: 'base-woman', label: 'Base woman', file: 'superhero-female.glb' },
+  { id: 'adventurer', label: 'Adventurer', file: 'superhero-male.glb', dress: 'adventurer' },
+  { id: 'adventurer-f', label: 'Adventurer, woman', file: 'superhero-female.glb', dress: 'adventurer' },
 ];
 
 /** A clip as a figure plays it. */
@@ -70,6 +77,7 @@ function hipsOf(model: Object3D): number {
 export class FigureLibrary {
   private readonly fitted = new Map<string, Map<string, Move>>();
   private readonly sources = new Map<string, Promise<GLTF>>();
+  private readonly made = new Map<string, Promise<Object3D>>();
 
   private constructor(private readonly base: string, private readonly loader: GLTFLoader, readonly clips: AnimationClip[], private readonly hips: number, mannequin: GLTF) {
     this.sources.set('mannequin', Promise.resolve(mannequin));
@@ -94,13 +102,26 @@ export class FigureLibrary {
   /** The mannequin as it was loaded, whom the clips are made for: to make more clips on (`makeDownhillRun`), not to show. */
   async mannequin(): Promise<Object3D> { return (await this.sources.get('mannequin')!).scene; }
 
+  /**
+   * A body of the kind `id` as it is made, dressed if it is dressed: to be copied, or to make clips and live poses on (`Rider`), not to
+   * show. Each kind is fetched and dressed once.
+   */
+  source(id: string): Promise<Object3D> {
+    const kind = BODIES.find((b) => b.id === id) ?? BODIES[0];
+    let made = this.made.get(kind.id);
+    if (!made) {
+      let file = this.sources.get(kind.file === 'clips.glb' ? 'mannequin' : kind.file);
+      if (!file) { file = loadFile(this.loader, this.base, kind.file); this.sources.set(kind.file, file); }
+      made = file.then((gltf) => (kind.dress === 'adventurer' ? dressAdventurer(gltf.scene) : gltf.scene));
+      this.made.set(kind.id, made);
+    }
+    return made;
+  }
+
   /** A new figure's body of the kind `id`. Each kind is fetched once, and copied for every figure. */
   async body(id: string): Promise<Rigged> {
     const kind = BODIES.find((b) => b.id === id) ?? BODIES[0];
-    let source = this.sources.get(kind.id);
-    if (!source) { source = loadFile(this.loader, this.base, kind.file); this.sources.set(kind.id, source); }
-    const gltf = await source;
-    const model = cloneRigged(gltf.scene);
+    const model = cloneRigged(await this.source(kind.id));
     model.traverse((o) => {
       if ((o as Mesh).isMesh) {
         o.castShadow = true;

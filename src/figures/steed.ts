@@ -121,6 +121,8 @@ export class Steed {
     if (this.rider) this.rider.model.removeFromParent();
     this.rider = rider;
     if (rider) this.horse.saddle.add(rider.model);
+    // (Saddled and bridled when ridden.)
+    this.horse.setTack(!!rider);
   }
   get ridden(): boolean { return !!this.rider; }
 
@@ -199,6 +201,8 @@ export class Steed {
     this.root.position.copy(this.position);
     this.root.rotation.set(0, this.heading, 0);
     this.root.updateMatrixWorld(true);
+    // The reins, from the bit to the rider's hands as they are now.
+    if (this.rider) this.horse.setReins(['hand_l', 'hand_r'].map((n) => this.rider!.model.getObjectByName(n)!.getWorldPosition(new Vector3())));
   }
 
   /**

@@ -9,8 +9,8 @@
 //
 //   node tools/buildingLabPage.mjs [out.html] [--fragment] [--figures-beside]      (by default dist/building-lab.html, a whole document)
 //
-// Another lab page the same way: `--page lab/slope.html`, with only the figures' files it needs, `--only clips.glb` (the slope's skier
-// is the mannequin, whose file holds the clips too).
+// Another lab page the same way: `--page lab/slope.html`, with only the figures' files it needs, `--only clips.glb,superhero-male.glb`
+// (the clips, and the base man the slope's adventurer is dressed on).
 import { build } from 'vite';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';

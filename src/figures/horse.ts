@@ -1,20 +1,22 @@
 import {
-  Bone, BoxGeometry, BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Group, Matrix4, Mesh, MeshStandardMaterial, Object3D,
+  Bone, BoxGeometry, BufferAttribute, BufferGeometry, DoubleSide, Group, Matrix4, Mesh, MeshStandardMaterial, Object3D,
   Quaternion, Skeleton, SkinnedMesh, SphereGeometry, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { AirControls, AlpineArm, AlpineFoot, AlpinePose, RideControls } from './alpine';
 import type { BodySpec } from './ragdoll';
+import { bitRings, horseLooks, type Part } from './horseBody';
 
 /**
  * A horse that skis (asked: "a rigged horse model; fantasy/imaginary way for the horse have skis, two bindings per ski - left and right
  * ski (or as an option for horse skiing: four short skis!); same skiing actions, tricks and animations adapted for this skiing horse;
  * with a rider on back or just the horse skiing option").
  *
- * The horse is made here, in code, as the figures' mannequin is made: an artist's wooden horse, its parts the mannequin's gold and its
- * joints its violet, on a skeleton of its own (hips, spine, chest, two bones of neck, head and ears, three of tail, and each leg's
- * upper bone, middle bone, cannon, pastern and hoof), skinned so that the barrel and the neck bend smoothly between their bones. (A
- * horse from Quaternius's free animal pack was looked for first; its files are kept where this machine could not reach them.)
+ * The horse is made here, in code, on a skeleton of its own (hips, spine, chest, two bones of neck, head and ears, three of tail, and
+ * each leg's upper bone, middle bone, cannon, pastern and hoof); how it looks, a bay horse with its mane and tail, and its tack when it
+ * is ridden, is made on that skeleton in `horseBody.ts` and skinned to it. (A horse from Quaternius's free animal pack was looked for
+ * first; its files are kept where this machine could not reach them. The horse was a wooden mannequin's at first, in the figures'
+ * gold and violet; asked for "a realistic horse", it is a horse.)
  *
  * It is posed as the skiers are, by a handful of numbers (`HorsePose`), not by its bones' own axes: the body placed over its skis and
  * turned, leant and pitched about its middle, the back arched, the neck raised or lowered and turned, the head flexed, the ears laid
@@ -65,87 +67,6 @@ const ENDS: Record<string, V3> = { muzzle: [0, 1.58, 1.62], tail_end: [0, 0.62, 
 const REST = new Map<string, Vector3>([...BONES.map(([n, , p]) => [n, new Vector3(...p)] as const), ...Object.entries(ENDS).map(([n, p]) => [n, new Vector3(...p)] as const)]);
 const PARENT = new Map(BONES.map(([n, p]) => [n, p]));
 const rest = (n: string) => REST.get(n)!.clone();
-
-const GOLD = new Color(0xe7aa3a), VIOLET = new Color(0xaa66db), HORN = new Color(0x3a2f2a);
-
-// ------------------------------------------------------------------ making it
-
-/** A piece of the horse's mesh: its shape where the horse rests, its colour, and which bones move each of its points, how much. */
-interface Piece { geometry: BufferGeometry; colour: Color; weights: (p: Vector3) => [string, number][] }
-const rigid = (bone: string) => () => [[bone, 1]] as [string, number][];
-const smooth01 = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
-
-/** A round solid, `r` its half-breadths, at `c`. */
-function ellipsoid(c: V3 | Vector3, r: V3, detail = 18): BufferGeometry {
-  const at = Array.isArray(c) ? new Vector3(...c) : c;
-  return new SphereGeometry(1, detail, Math.round(detail * 0.7)).scale(...r).translate(at.x, at.y, at.z);
-}
-/** A tapering round solid from `a` (half-breadth `ra`) to `b` (`rb`), narrowed across the horse by `squash`. */
-function tube(a: Vector3, b: Vector3, ra: number, rb: number, squash = 1, segments = 12): BufferGeometry {
-  const d = b.clone().sub(a), g = new CylinderGeometry(rb, ra, d.length(), segments, 4, false).scale(squash, 1, 1);
-  g.applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), d.clone().normalize()));
-  const mid = a.clone().add(b).multiplyScalar(0.5);
-  return g.translate(mid.x, mid.y, mid.z);
-}
-
-function pieces(): Piece[] {
-  const out: Piece[] = [];
-  const add = (geometry: BufferGeometry, colour: Color, weights: Piece['weights']) => out.push({ geometry, colour, weights });
-  // The barrel, bending with the hips, the spine and the chest along it; the rump over the hind legs, and the breast before the fore.
-  const along = (p: Vector3): [string, number][] => {
-    const z = p.z;
-    if (z <= -0.45) return [['hips', 1]];
-    if (z >= 0.45) return [['chest', 1]];
-    if (z < 0) { const w = smooth01((z + 0.45) / 0.45); return [['hips', 1 - w], ['spine', w]]; }
-    const w = smooth01(z / 0.45);
-    return [['spine', 1 - w], ['chest', w]];
-  };
-  add(ellipsoid([0, 1.22, 0], [0.3, 0.34, 0.8], 28), GOLD, along);
-  add(ellipsoid([0, 1.26, -0.52], [0.3, 0.3, 0.38]), GOLD, rigid('hips'));
-  add(ellipsoid([0, 1.2, 0.5], [0.27, 0.34, 0.34]), GOLD, rigid('chest'));
-  // The neck, tapering from the withers to the poll, narrow across; a violet crest of mane along its top.
-  const n1 = rest('neck1'), n2 = rest('neck2'), hd = rest('head');
-  const neckW = (p: Vector3): [string, number][] => { const t = (p.y - n1.y) / (hd.y - n1.y), w = smooth01((t - 0.3) / 0.4); return [['neck1', 1 - w], ['neck2', w]]; };
-  add(tube(n1.clone().add(new Vector3(0, -0.12, -0.08)), hd.clone().add(new Vector3(0, -0.04, -0.02)), 0.24, 0.12, 0.62, 16), GOLD, neckW);
-  for (let i = 0; i < 6; i++) {
-    const t = (i + 0.5) / 6, p = n1.clone().lerp(hd, t).add(new Vector3(0, 0.14 - 0.05 * t, -0.13 + 0.06 * t));
-    add(ellipsoid(p, [0.035, 0.1, 0.07], 10), VIOLET, t < 0.5 ? rigid('neck1') : rigid('neck2'));
-  }
-  void n2;
-  // The head: long, from the poll down to the muzzle, a cheek round under the poll.
-  const mz = rest('muzzle');
-  add(tube(hd.clone().add(new Vector3(0, 0.02, 0.02)), mz, 0.12, 0.085, 0.72, 14), GOLD, rigid('head'));
-  add(ellipsoid([0, 1.86, 1.22], [0.09, 0.13, 0.13]), GOLD, rigid('head'));
-  add(ellipsoid(mz, [0.075, 0.075, 0.08]), GOLD, rigid('head'));
-  for (const k of ['l', 'r'] as const) add(tube(rest(`ear_${k}`), rest(`ear_tip_${k}`), 0.04, 0.008, 0.6, 8), GOLD, rigid(`ear_${k}`));
-  // The tail, in three bones, a violet tuft at its end.
-  const t1 = rest('tail1'), t2 = rest('tail2'), t3 = rest('tail3'), te = rest('tail_end');
-  add(tube(t1, t2, 0.055, 0.045, 1, 8), GOLD, rigid('tail1'));
-  add(tube(t2, t3, 0.045, 0.04, 1, 8), GOLD, rigid('tail2'));
-  add(tube(t3, te, 0.04, 0.03, 1, 8), GOLD, rigid('tail3'));
-  add(ellipsoid(te.clone().add(new Vector3(0, 0.02, 0)), [0.07, 0.16, 0.07], 12), VIOLET, rigid('tail3'));
-  // The legs: each bone a tapering solid, the elbow and the knee, the stifle and the hock and each fetlock a violet ball, the hoof horn.
-  for (const k of ['l', 'r'] as const) {
-    for (const f of ['f', 'h'] as const) {
-      const up = rest(`${f}_up_${k}`), mid = rest(`${f}_mid_${k}`), low = rest(`${f}_low_${k}`), pas = rest(`${f}_pas_${k}`), hoof = rest(`${f}_hoof_${k}`);
-      if (f === 'f') {
-        add(tube(up, mid, 0.12, 0.09, 0.8), GOLD, rigid(`f_up_${k}`));
-        add(tube(mid, low, 0.085, 0.055, 0.85), GOLD, rigid(`f_mid_${k}`));
-      } else {
-        add(ellipsoid(up.clone().lerp(mid, 0.45).add(new Vector3(0, 0.02, 0)), [0.13, 0.22, 0.17]), GOLD, rigid(`h_up_${k}`));
-        add(tube(mid, low, 0.09, 0.055, 0.8), GOLD, rigid(`h_mid_${k}`));
-      }
-      add(tube(low, pas, 0.045, 0.04, 0.85, 10), GOLD, rigid(`${f}_low_${k}`));
-      add(tube(pas, hoof, 0.04, 0.045, 0.85, 10), GOLD, rigid(`${f}_pas_${k}`));
-      const sole = hoof.clone().add(new Vector3(0, -0.07, 0.02));
-      add(tube(hoof, sole, 0.055, 0.068, 1, 12), HORN, rigid(`${f}_hoof_${k}`));
-      add(ellipsoid(mid, [0.075, 0.075, 0.075], 12), VIOLET, rigid(`${f}_mid_${k}`));
-      add(ellipsoid(low, [0.062, 0.062, 0.062], 12), VIOLET, rigid(`${f}_low_${k}`));
-      add(ellipsoid(pas, [0.05, 0.05, 0.05], 10), VIOLET, rigid(`${f}_pas_${k}`));
-    }
-  }
-  return out;
-}
 
 /** The horse's skis: a long one under each side, a binding for each hoof; or a short one under each hoof. Its sole on y = 0, along +z. */
 const SKIS: Record<HorseSkis, { length: number; ahead: number; width: number }> = {
@@ -230,6 +151,10 @@ export class Horse {
   private readonly wp = new Map<string, Vector3>();
   private skiKind: HorseSkis;
   private skiMeshes: Mesh[] = [];
+  /** Its saddle, cloth, girth, stirrups and bridle; the reins; and where the bit's rings are from the head's joint. */
+  private readonly tack: SkinnedMesh[];
+  private readonly reins: Mesh;
+  private readonly bits: Vector3[];
   /** The skis' turns and places as last posed (in the horse's frame), by `l`, `r` or by leg. */
   private readonly skiAt = new Map<string, { at: Vector3; q: Quaternion }>();
   /** How far each leg was stretched to reach its ski as last posed, as a share of its length. */
@@ -249,30 +174,49 @@ export class Horse {
     const root = this.bones.get('root')!;
     this.model.add(root);
     this.model.updateMatrixWorld(true);
-    const all = [...this.bones.values()], index = new Map(all.map((b, i) => [b.name, i]));
-    // The mesh: every piece given its colour and its bones, made one.
-    const made = pieces().map(({ geometry, colour, weights }) => {
-      geometry.deleteAttribute('uv');
-      const g = geometry;
-      const n = g.getAttribute('position').count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), col = new Float32Array(n * 3), p = new Vector3();
-      for (let i = 0; i < n; i++) {
-        p.fromBufferAttribute(g.getAttribute('position') as BufferAttribute, i);
-        const w = weights(p).filter(([, x]) => x > 1e-4);
-        w.forEach(([b, x], j) => { si[i * 4 + j] = index.get(b)!; sw[i * 4 + j] = x; });
-        col.set([colour.r, colour.g, colour.b], i * 3);
-      }
-      g.setAttribute('skinIndex', new BufferAttribute(si, 4));
-      g.setAttribute('skinWeight', new BufferAttribute(sw, 4));
-      g.setAttribute('color', new BufferAttribute(col, 3));
-      return g;
-    });
-    const geometry = mergeGeometries(made);
-    this.mesh = new SkinnedMesh(geometry, new MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }));
-    this.mesh.castShadow = this.mesh.receiveShadow = true;
-    this.mesh.frustumCulled = false;
-    this.model.add(this.mesh);
-    this.mesh.updateMatrixWorld(true);
-    this.mesh.bind(new Skeleton(all));
+    const all = [...this.bones.values()], index = new Map(all.map((b, i) => [b.name, i])), skeleton = new Skeleton(all);
+    // Its look (`horseBody.ts`): coat, hair, eyes, and tack for when it is ridden; each part's points given to their bones.
+    const looks = horseLooks(rest);
+    const skinned = (parts: Part[], material: MeshStandardMaterial) => {
+      const made = parts.map(({ geometry, weights, colours }) => {
+        const g = geometry.index ? geometry.toNonIndexed() : geometry;
+        // (Made without its index, each point's bones and colour are looked up by the point it came from.)
+        const from = geometry.index ? Array.from(geometry.index.array) : null;
+        const n = g.getAttribute('position').count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          const o = from ? from[i] : i;
+          weights[o].filter(([, x]) => x > 1e-4).forEach(([b, x], j) => { si[i * 4 + j] = index.get(b)!; sw[i * 4 + j] = x; });
+          const c = colours[o];
+          col.set([c.r, c.g, c.b], i * 3);
+        }
+        g.setAttribute('skinIndex', new BufferAttribute(si, 4));
+        g.setAttribute('skinWeight', new BufferAttribute(sw, 4));
+        g.setAttribute('color', new BufferAttribute(col, 3));
+        for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'skinIndex', 'skinWeight', 'color'].includes(name)) g.deleteAttribute(name);
+        return g;
+      });
+      const mesh = new SkinnedMesh(mergeGeometries(made), material);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      this.model.add(mesh);
+      mesh.updateMatrixWorld(true);
+      mesh.bind(skeleton);
+      return mesh;
+    };
+    this.mesh = skinned(looks.coat, new MeshStandardMaterial({ vertexColors: true, roughness: 0.52 }));
+    skinned(looks.hair, new MeshStandardMaterial({ vertexColors: true, roughness: 0.62, side: DoubleSide }));
+    skinned(looks.eyes, new MeshStandardMaterial({ vertexColors: true, roughness: 0.12 }));
+    this.tack = [
+      skinned(looks.tack, new MeshStandardMaterial({ vertexColors: true, roughness: 0.75, side: DoubleSide })),
+      skinned(looks.steel, new MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.85 })),
+    ];
+    // The reins, from the bit's rings to a rider's hands, drawn anew each time they are moved (`setReins`).
+    this.bits = bitRings(rest).map((p) => p.sub(rest('head')));
+    this.reins = new Mesh(new BufferGeometry(), new MeshStandardMaterial({ color: 0x3e2614, roughness: 0.8 }));
+    this.reins.frustumCulled = false;
+    this.reins.castShadow = true;
+    this.model.add(this.reins);
+    this.setTack(false);
     // (The seat is on the top of the barrel over the spine; a rider's frame stands 0.6 under it.)
     this.saddle.position.set(0, 1.22 + 0.34 - 0.6 - 1.32, -0.02);
     this.bones.get('spine')!.add(this.saddle);
@@ -281,6 +225,33 @@ export class Horse {
   }
 
   get skis(): HorseSkis { return this.skiKind; }
+  /** Puts its tack on (ridden) or takes it off. */
+  setTack(on: boolean): void { for (const m of this.tack) m.visible = on; this.reins.visible = on; }
+  /**
+   * Draws the reins from the bit's rings to `hands` (a rider's left and right hands, in the world), each hanging a little between;
+   * none, without hands.
+   */
+  setReins(hands: Vector3[] | null): void {
+    if (!hands || !this.reins.visible) { this.reins.visible = this.reins.visible && !!hands; return; }
+    const head = this.bones.get('head')!, toModel = this.model.matrixWorld.clone().invert(), pos: number[] = [], index: number[] = [];
+    const sides = 5, along = 10, r = 0.007;
+    this.bits.forEach((bit, k) => {
+      const a = head.localToWorld(bit.clone()).applyMatrix4(toModel), b = hands[k].clone().applyMatrix4(toModel), base = pos.length / 3;
+      const dir = b.clone().sub(a).normalize(), side = Math.abs(dir.y) > 0.9 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0).cross(dir).normalize(), up = dir.clone().cross(side).normalize();
+      for (let i = 0; i <= along; i++) {
+        const t = i / along, c = a.clone().lerp(b, t).add(new Vector3(0, -0.06 * Math.sin(Math.PI * t), 0));
+        for (let j = 0; j < sides; j++) { const th = (j / sides) * Math.PI * 2, p = c.clone().addScaledVector(side, Math.cos(th) * r).addScaledVector(up, Math.sin(th) * r); pos.push(p.x, p.y, p.z); }
+      }
+      for (let i = 0; i < along; i++) for (let j = 0; j < sides; j++) {
+        const q = base + i * sides + j, w = base + i * sides + ((j + 1) % sides);
+        index.push(q, w, q + sides, w, w + sides, q + sides);
+      }
+    });
+    const g = this.reins.geometry;
+    g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    g.setIndex(index);
+    g.computeVertexNormals();
+  }
   /** Its skis changed: a long pair, or four short. */
   setSkis(kind: HorseSkis): void {
     for (const m of this.skiMeshes) { m.removeFromParent(); m.geometry.dispose(); }

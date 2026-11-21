@@ -254,7 +254,9 @@ async function start() {
   const base = (window as unknown as { __figureBase?: string }).__figureBase ?? new URL('../figures/', location.href).href;
   const library = await FigureLibrary.load(base);
   const idle = library.clips.find((c) => c.name === 'Idle_Loop')!;
-  const source = await library.mannequin();
+  // (The skier, and a horse's rider, an adventurer: a ranger's clothes on a base body, `src/figures/outfit.ts`; `?body=mannequin`
+  // for the plain mannequin, or any other body's name.)
+  const source = await library.source(query.get('body') ?? 'adventurer');
   const run = makeDownhillRun(source, idle, STEP);
   const live = new Rider(source, idle), model = live.model;
   const shade = (m: Object3D) => m.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
@@ -344,7 +346,9 @@ async function start() {
   };
   let who: Who = (['horse', 'mounted'] as Who[]).find((w) => w === query.get('skier')) ?? 'person', skier = skiers[who];
   /** The rider back in its saddle, if there is one. */
-  const seat = () => { if (who === 'mounted') horse.saddle.add(jockey.model); else jockey.model.removeFromParent(); };
+  const seat = () => { if (who === 'mounted') horse.saddle.add(jockey.model); else jockey.model.removeFromParent(); horse.setTack(who === 'mounted'); };
+  /** The reins from the bit to the rider's hands, as they are now; none once the rider is thrown. */
+  const reinsNow = () => { if (who === 'mounted') { rider.updateMatrixWorld(true); horse.setReins(crash ? null : ['hand_l', 'hand_r'].map((n) => jockey.model.getObjectByName(n)!.getWorldPosition(new Vector3()))); } };
   rider.add(skier.object);
   seat();
 
@@ -929,6 +933,7 @@ async function start() {
     }
     keepSlopeAbout(at.down, at.left);
     placeView(at, dt);
+    reinsNow();
     showTold();
     $('speed').textContent = (at.speed * 3.6).toFixed(0);
     $('down').textContent = at.down.toFixed(0);

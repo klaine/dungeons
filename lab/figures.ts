@@ -232,7 +232,8 @@ async function start(): Promise<void> {
 
   // ---------------------------------------------------------------- horses, and riders for them
   const steeds: Steed[] = [];
-  const idle = library.clips.find((c) => c.name === 'Idle_Loop')!, mannequin = await library.mannequin();
+  // (A rider is an adventurer, in a ranger's clothes: `src/figures/outfit.ts`.)
+  const idle = library.clips.find((c) => c.name === 'Idle_Loop')!, mannequin = await library.source('adventurer');
   const riderFor = () => {
     const r = new Rider(mannequin, idle);
     r.model.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
@@ -518,7 +519,7 @@ async function start(): Promise<void> {
   addSteed(true, new Vector3(-4.5, 0, 9.5));
   followed.copy(chosen!.root.position);
   // (For drivers in `tools/browser/`: the figures, the horses, the stage and the view.)
-  Object.assign(window, { figureLab: { figures, steeds, addSteed, stage, camera, controls, choose, takeSpot, pause: (on: boolean) => { paused = on; }, ready: true } });
+  Object.assign(window, { figureLab: { figures, steeds, addSteed, addFigure, stage, camera, controls, choose, takeSpot, pause: (on: boolean) => { paused = on; }, ready: true } });
 
   // ---------------------------------------------------------------- size and the loop
   const resize = () => {

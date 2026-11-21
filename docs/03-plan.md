@@ -873,6 +873,37 @@ The machine this is developed on now has a graphics card, and tablets were repor
     at every 0.3, the treads' own depth, two steps could fall between two looks and read as one step of 0.34. Not done: a way found
     round what is in its way (it walks straight); the figures are not in its way at all (it walks through them, and they through
     it); a horse in the world.
+70. **A horse that looks a horse, and an adventurer to ride it and ski.** Asked: "now improve the skins/visuals for the horse and
+    rider/skier: horse, a realistic horse; human skier/rider: a medieval fantasy adventurer type". *Done:* the horse's look is made
+    anew on the same skeleton (`src/figures/horseBody.ts`), so that everything it did it still does: surfaces lofted through a
+    horse's cross-sections, each section's breadth and its depth above and below its middle given along the body (the trunk from the
+    point of the buttock over the croup and the barrel, deep at the girth and tucked up at the flank, to the breast; the neck from
+    inside the chest past the withers to the poll, crested; the head broad at the cheeks and the forehead, its jaw deep, narrowing down
+    the face to a muzzle; each leg from inside the shoulder or the haunch over the forearm or the gaskin, the knee or the hock, the
+    cannon with its tendons behind, the fetlock, the pastern and the hoof), every point shared between the bones either side of where
+    it lies, blended across the joints; ears as leaves; glossy dark eyes set in the head's sides; dark nostrils; the mane, the tail
+    and the hair of the tail as strands laid from the crest and the dock and given to the neck's and the tail's bones. Its coat a bay's:
+    red brown, darker along the back and the crest, black from the knees and the hocks down, black mane and tail, a dark muzzle, a
+    soft white star. Ridden, it wears a mediaeval saddle with a high pommel and cantle on a blue cloth bordered in gold, a girth,
+    stirrups, and a bridle with its bit; the reins are drawn each frame from the bit's rings to the rider's hands (`setReins`). First
+    looks: the shoulders and thighs of the legs' lofts stood out of the trunk in creases (now kept inside it), the ears were spikes,
+    the muzzle was too thin, the eyes sat on the head like beads, a forelock of flat strands lay on the forehead like a patch (taken
+    off), the mane fell on the side no view sees. The adventurer (`src/figures/outfit.ts`): a ranger's clothes on any body on the
+    figures' skeleton, made from the body itself, each garment a copy of the body's skin where it covers (by the bone that moves each
+    point most, and by where it is), lifted off along its normal by the garment's thickness, so that it bends bone for bone as the
+    body does: a quilted green gambeson skirted over the hips, grey wool hose, tall boots with turned cuffs, gloves, leather bracers, a
+    russet hood open at the face and pointed behind, and a mantle over the shoulders, longer behind. The base bodies are made for
+    heroes, every muscle in their skin, and cloth copied off them showed pecs: each garment is smoothed after it is lifted, its edge
+    left where it was lifted to (smoothed too, it drew in and opened gaps between garments); the body is no longer drawn where its
+    clothes cover it, which it showed through where the smoothing drew a garment inside its swells; cloth is drawn from both sides.
+    A short cloak hangs down the back, a belt is laid round the waist as broad as the body is there every way round, with its buckle,
+    a pouch at the right hip and a sword in its scabbard at the left: each made as a solid in the body's frame and given to the bones
+    it hangs from. The face's opening in the hood is sized by the head's own height (the woman's hood first closed over her eyes).
+    `BODIES` has *Adventurer* and *Adventurer, woman* (the base man and woman dressed), dressed once when first asked for (`source`
+    in `library.ts`); the slope's skier and the horse's rider on the slope and in the figure lab are adventurers. *Checked:* pictures
+    of the adventurer from four sides standing and walking, of both faces under their hoods, of the horse from the side, three
+    quarters, before, behind and at its head, through its four gaits, ridden and skiing; the kicker trials as before, with the person
+    and with the horse and rider (the same landings and falls); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
 
 ## Risks
 
