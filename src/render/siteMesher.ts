@@ -2,20 +2,22 @@ import { Vector3 } from 'three';
 import { cells3, fbm2, fbm3, Rng } from '../core/rng';
 import { Furnisher, Rect } from './furnish';
 import { anyAngle } from './coast';
-import { Building, Place, shoreOf, Side, Site, SKIES, Way } from '../core/site';
+import { Building, Place, POINTED_VAULT, ROUND_TREAD, roundStair, shoreOf, Side, Site, SKIES, stairEnds, vaultRise, Way } from '../core/site';
+import { toplineOf } from '../core/cathedral';
+import { buildCathedral, cathedralWindows, spireTops } from './cathedral';
 import { buildDoorLeaf } from './doorLeaf';
 import { indoorField, outdoorFieldAt } from './fields';
-import { Frame, Kit, Opening } from './geom/kit';
+import { archSdf, Frame, Kit, Opening } from './geom/kit';
 import { MasonryStyle } from './geom/masonry';
 import { alongSheet, carveRock, smin } from './geom/rock';
 import { buildCamp } from './camp';
 import { buildMineYard } from './mine';
 import { boulderForm, cliffRelief, erode, Grid2, monolithForm, ROCK, Strata } from './geom/rockForms';
-import { beam, plank, stoneStyles } from './geom/styles';
+import { beam as beamBuilt, plank as plankBuilt, stoneStyles } from './geom/styles';
 import { FAR_RING, crestAt, farHeights, layMountains, layTerrain, turfColour } from './landscape';
 import { MeshBuilder } from './geom/meshBuilder';
 import { layBeam } from './geom/timber';
-import { buildBuilding, solids } from './buildings';
+import { buildBuilding, buildingTools, solids } from './buildings';
 import { placeHouse } from './housePlacing';
 import { buildLandmark } from './landmarks';
 import { footprintOf, groundOf, plinthOf, stepsUp } from '../core/building';
@@ -24,8 +26,12 @@ import { lakeLevelAt, siteFrame, toSite, worldLand } from '../core/worldLand';
 import { Colour, growConifer, growTree, layLimb, layTrunk, Planting } from './planting';
 import { CardSet, DoorDesc, SceneDescription, SeaDesc, TorchSpec } from './scene';
 import { buildIsland } from './island';
+import { landAt as islandLandAt } from '../core/island';
 import { buildMountain } from './mountain';
 import { buildTown } from './town';
+import { layWall } from './walls';
+import { bartizan, buildCastle } from './castle';
+import { castleOff } from '../core/castle';
 
 /**
  * Turns a site document into geometry, using the kit of parts.
@@ -46,7 +52,7 @@ interface Hole extends Opening {
 }
 
 /** A window in an outer wall of a house that stands free: a way into nowhere, there only to be cut through the wall. */
-type OuterWindow = Way & { outer: true };
+type OuterWindow = Way & { outer: true; circle?: boolean };
 
 /** One flat face of a roof of tiles, through the given corners, wound to face away from `inside`. */
 function tileFace(mesh: MeshBuilder, pts: Vector3[], colour: [number, number, number], inside: Vector3): void {
@@ -85,15 +91,90 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const rng = new Rng(site.seed).fork('mesh');
   const T = site.wallThickness;
   const places = site.places;
-  const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint } = stoneStyles(site.setting.stone);
+  const built = stoneStyles(site.setting.stone);
+  // (A castle's walls and vaults are not laid stone by stone but in plain faces, drawn with coursed stone (`castle`): as the castle's
+  // own walls and towers are, and as the buildings of the valley are built, of plain solids. Each face a block or two, so the light
+  // still has points every metre or so to be baked at. Its floors, door surrounds and copings are laid as they were.)
+  const plainStone = site.castle ? { ...built.ashlar, course: [4, 4] as const, length: [9, 9] as const, joint: 0.001, bevel: 0.001, depth: 0, proud: 0, relief: 0, maxSeg: 1.2, chip: 0, tintVar: 0.02, hueVar: 0.01, uvScale: 0.5 } : null;
+  // (A cathedral is too large to be laid stone by stone: its walls, vaults, arches and floors are plain surfaces with their courses in
+  // the picture, `ashlar`, as the buildings of the towns are drawn. See `MasonryStyle.flat`.)
+  const flatOf = (st: MasonryStyle, cell = 0.6): MasonryStyle => ({ ...st, flat: true, material: 'ashlar', maxSeg: cell, uvScale: 1 / 2.4, tint: [st.tint[0] * 1.08, st.tint[1] * 1.08, st.tint[2] * 1.08] });
+  const { ashlar, dressed, vaultStone, flag, hallFlag, coping, tint: stoneTint }: typeof built = site.cathedral
+    ? { ...built, ashlar: flatOf(built.ashlar), dressed: flatOf(built.dressed, 0.35), vaultStone: flatOf(built.vaultStone), flag: flatOf(built.flag, 0.8), hallFlag: flatOf(built.hallFlag, 0.8), coping: flatOf(built.coping, 0.6) }
+    : { ...built, ashlar: plainStone ?? built.ashlar, vaultStone: plainStone ? { ...plainStone, tint: built.vaultStone.tint } : built.vaultStone };
+  // (Laid in the plain style, it is drawn in coursed stone; told by its measures, which no other style has, so that copies of it count.)
+  const castleStone = (material: string, st: { course: readonly [number, number]; length: readonly [number, number] }) => (material === 'stone' && st.course[0] === 4 && st.length[0] === 9 ? 'castle' : material);
+  if (plainStone) kit.materialFor = castleStone;
+  /**
+   * In a cathedral a wall more than a storey or two high is laid in larger blocks, as the great churches were, in courses half a
+   * metre high and up to a metre and a half long (and its cost, forty metres of wall, stays within bounds).
+   */
+  // (Over a cathedral's floors, where nothing is seen close, the lattice its surfaces are cut on is coarser.)
+  const big: MasonryStyle = { ...ashlar, maxSeg: 1.1 }, midStone = ashlar, bigDressed = dressed, bigVault = vaultStone;
+  const NEAR = 6.5;
   const sky = SKIES[site.setting.hour];
   // Where sheep graze, if anywhere: worked out with the planting of each kind of place.
   let flockSpots: { x: number; z: number; r: number; count: number }[] | undefined;
   // And rooks over a valley's woods, if it has any.
   let rookSpots: { x: number; y: number; z: number }[] | undefined;
   let fireflySpots: number[] | undefined;
+  // A valley's fields (`site.fields`): which one a point is in, -1 if none; or whether it is within `m` of one. (Looked up by their
+  // boxes first: this is asked of every point of the ground's sheet and of every tuft.)
+  const fieldList = (site.fields ?? []).map((f) => {
+    const xs = f.corners.map((c) => c[0]), zs = f.corners.map((c) => c[1]);
+    return { ...f, x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs) };
+  });
+  const inPolygon = (c: [number, number][], x: number, z: number): boolean => {
+    let inside = false;
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) if ((c[i][1] > z) !== (c[j][1] > z) && x < ((c[j][0] - c[i][0]) * (z - c[i][1])) / (c[j][1] - c[i][1] || 1e-9) + c[i][0]) inside = !inside;
+    return inside;
+  };
+  const edgeOff = (c: [number, number][], x: number, z: number): number => {
+    let best = Infinity;
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+      const [ax, az] = c[j], [bx, bz] = c[i], l2 = (bx - ax) ** 2 + (bz - az) ** 2 || 1, t = Math.min(1, Math.max(0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) / l2));
+      best = Math.min(best, Math.hypot(x - ax - (bx - ax) * t, z - az - (bz - az) * t));
+    }
+    return best;
+  };
+  const fieldAt = (x: number, z: number, m = 0): number => {
+    for (let k = 0; k < fieldList.length; k++) {
+      const f = fieldList[k];
+      if (x < f.x0 - m || x > f.x1 + m || z < f.z0 - m || z > f.z1 + m) continue;
+      if (inPolygon(f.corners, x, z) || (m > 0 && edgeOff(f.corners, x, z) < m)) return k;
+    }
+    return -1;
+  };
+
+  /** The colour of a field's crop in the season, as a tint on the turf (as the town's fields have it). */
+  const cropTint = (crop: NonNullable<Site['fields']>[number]['crop']): Colour => {
+    const season = site.setting.season ?? 'spring', ripe = season === 'summer' ? 0.6 : season === 'autumn' ? 1 : 0;
+    switch (crop) {
+      case 'wheat': return ripe ? [1.25 + 0.25 * ripe, 1.05 + 0.1 * ripe, 0.45] : [0.85, 1.12, 0.6];
+      case 'barley': return ripe ? [1.35 + 0.2 * ripe, 1.2 + 0.05 * ripe, 0.6] : [0.92, 1.15, 0.66];
+      case 'oats': return ripe ? [1.15 + 0.2 * ripe, 1.1, 0.62] : [0.8, 1.05, 0.62];
+      case 'roots': return [0.6, 0.85, 0.45];
+      case 'fallow': return [0.9, 0.8, 0.6];
+      default: return [1, 1, 1];
+    }
+  };
 
   // ------------------------------------------------------------------ helpers
+  // (A cathedral's places stand at heights of their own, and not under one roofline: see `cathedral.ts`.)
+  const cath = site.cathedral;
+  // (A cathedral's boards and beams too are plain surfaces, their grain the picture's.)
+  const plank: MasonryStyle = cath ? { ...plankBuilt, flat: true, maxSeg: 0.9 } : plankBuilt, beam: MasonryStyle = cath ? { ...beamBuilt, flat: true, maxSeg: 1.5 } : beamBuilt;
+  /** The top of the masonry over a place: the house's roofline, or in a cathedral the place's own. */
+  const topOf = (p: Place) => (cath ? toplineOf(p) : site.top);
+  /** How high what is solid over a place goes: to its top, or to the floor of whatever room lies over it. */
+  const overlaps = (a: { x0: number; x1: number; z0: number; z1: number }, b: { x0: number; x1: number; z0: number; z1: number }) => a.x0 < b.x1 - 0.01 && b.x0 < a.x1 - 0.01 && a.z0 < b.z1 - 0.01 && b.z0 < a.z1 - 0.01;
+  const solidTop = (p: Place) => {
+    let top = topOf(p);
+    for (const q of places) if (q.role !== 'approach' && (q.level ?? 0) > (p.level ?? 0) && q.floor > p.floor && overlaps(p, q)) top = Math.min(top, q.floor - 0.035);
+    return top;
+  };
+  /** The places on storeys under a place that lie under part of it. */
+  const placesUnder = (p: Place) => places.filter((q) => q.role !== 'approach' && (q.level ?? 0) < (p.level ?? 0) && q.floor < p.floor && overlaps(p, q));
   /** The wall face of a place on one side, looking into the place, lengthened by `e` at both ends. */
   const frameOf = (p: Place, side: Side, e: number): Frame => {
     switch (side) {
@@ -115,13 +196,21 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const flip: Record<Side, Side> = { n: 's', s: 'n', e: 'w', w: 'e' };
   const sideOf = (w: Way, p: Place): Side => (w.a === p.id ? w.side : flip[w.side]);
 
-  const shape = (w: Way): { y0: number; ys: number } => {
+  const shape = (w: Way): { y0: number; ys: number; point?: number; circle?: boolean } => {
     const lo = Math.min(places[w.a].floor, places[w.b].floor);
     const hi = Math.max(places[w.a].floor, places[w.b].floor);
-    // (A window in an outer wall of a house that stands free: tall and arched in a room lit by day, a slit where torches light it.)
-    if ((w as OuterWindow).outer) { const p = places[w.a]; return { y0: p.floor + 1.05, ys: p.floor + Math.min(p.wall - 0.55, w.halfWidth < 0.3 ? 2.3 : 2.75) }; }
-    if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35 };
-    return { y0: lo - 0.1, ys: hi + (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0) };
+    // (A pointed arch, as a church's are: two arcs each as broad as the opening.)
+    const point = w.pointed ? 2 : undefined;
+    // (A window in an outer wall of a house that stands free: tall and arched in a room lit by day, a slit where torches light it.
+    // A church's windows say where they begin and spring.)
+    if ((w as OuterWindow).outer) {
+      const p = places[w.a];
+      if ((w as OuterWindow).circle) return { y0: p.floor + w.spring! - w.halfWidth, ys: p.floor + w.spring!, circle: true };
+      if (w.spring !== undefined) return { y0: p.floor + (w.sill ?? 1.05), ys: p.floor + w.spring, point };
+      return { y0: p.floor + 1.05, ys: p.floor + Math.min(p.wall - 0.55, w.halfWidth < 0.3 ? 2.3 : 2.75) };
+    }
+    if (w.kind === 'window') return { y0: hi + 1.55, ys: hi + 2.35, point };
+    return { y0: lo - 0.1, ys: hi + (w.spring ?? (w.natural ? 2.5 : w.kind === 'arch' ? 1.9 : 2.0)), point };
   };
   // A secret door shows no dressed stone on the side it is hidden from: the wall runs up to it.
   const hiddenFrom = (w: Way, p: Place) => w.door?.leaf === 'secret' && p.id !== site.secret;
@@ -131,7 +220,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     : [...outerWindows.values()].flat().filter((w) => w.side === 's' && Math.abs(places[w.a].z1 + T - p.z0) < 0.05);
   // (The stretches of a free house's front that stand on the forecourt's line, where its front is the forecourt's wall. A room set back
   // from that line has an outer wall of its own, with its windows; a front drawn across from end to end stood before it as a blank screen.)
-  const frontPieces = (p: Place, fx0: number, fx1: number): [number, number][] => !free ? [[fx0, fx1]]
+  const frontPieces = (p: Place, fx0: number, fx1: number): [number, number][] => cath ? [] : !free ? [[fx0, fx1]]
     : runs.filter((r) => r.side === 's' && Math.abs(r.at - p.z0) < 0.05).map((r): [number, number] => [Math.max(fx0, r.from), Math.min(fx1, r.to)]).filter(([a, b]) => b - a > 0.05);
   const buildFront = (p: Place, fx0: number, fx1: number) => {
     for (const [a, b] of frontPieces(p, fx0, fx1)) kit.wallFace('stone', kit.frame(a, p.z0, b, p.z0), p.floor - 0.7, site.top, ashlar, { openings: holesOn(p, 'n', 0).filter((h) => h.at > a && h.at < b).map((h) => ({ ...h, c: h.at - a })) });
@@ -142,11 +231,15 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
   const span = (p: Place) => (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0);
   const isEndWall = (p: Place, side: Side) => (p.axis === 'x') === (side === 'e' || side === 'w');
+  /** The radius of a pointed vault's arcs over its half span, or 1 for a half-round one. */
+  const pointOf = (p: Place) => (p.pointed ? POINTED_VAULT : 1);
+  /** Whether a room is a cathedral's great space, whose ring of candles is a corona hung high. */
+  const coronaOf = (p: Place) => !!cath && span(p) > 8 && ['nave', 'choir', 'crossing'].includes(p.name);
   const wallTop = (p: Place, side: Side): number => {
-    if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? span(p) / 2 + 0.3 : 0.12);
+    if (p.roof === 'barrel') return p.floor + p.wall + (isEndWall(p, side) ? vaultRise(p) + 0.3 : 0.12);
     if (p.roof === 'timber') return p.floor + p.wall + 0.1;
     if (p.roof === 'cave') return p.floor + p.wall + 1.3;
-    return site.top;
+    return topOf(p);
   };
 
   /**
@@ -183,7 +276,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     for (const k of [-0.13, 0.13]) solid('metal', corners(wallBox(f, u + k - 0.02, u + k + 0.02, top + 0.012, top + 0.265, mid + 0.155, mid - 0.155)), gold);
     // The windows glazed: each a lattice of coloured panes, deep blue and red with gold and green among them, the leading dark between.
     const glass = rng.fork(`glass${p.id}`), hues: [number, number, number][] = [[0.08, 0.18, 0.75], [0.7, 0.06, 0.06], [0.85, 0.62, 0.1], [0.08, 0.45, 0.18], [0.35, 0.1, 0.55]];
-    for (const w of outerWindows.get(p.id) ?? []) {
+    // (A cathedral's windows are glazed in colour with its outside: see `cathedral.ts`.)
+    for (const w of cath ? [] : outerWindows.get(p.id) ?? []) {
       const q = places[p.id], wf = frameOf(q, w.side, 0.1), c = alongFrame(q, w.side, w.at, 0.1), { y0, ys } = shape(w);
       const cols = Math.max(2, Math.round((w.halfWidth * 2) / 0.16)), rows = Math.max(4, Math.round((ys - y0) / 0.16)), cw = (w.halfWidth * 2) / cols, ch = (ys - y0) / rows;
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
@@ -221,15 +315,29 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       : side === 'w' ? { x0: p.x0, x1: p.x0 + deep, z0: lo, z1: hi } : { x0: p.x1 - deep, x1: p.x1, z0: lo, z1: hi };
   };
   /** What a stair is made of: how many steps, how deep each, which way it climbs along its wall, and how broad. */
-  const flightOf = (w: Way) => {
-    const steps = Math.max(1, Math.round((places[w.b].floor - places[w.a].floor) / STEP)), to = w.to ?? w.at;
+  const flightOf = (w: Way & { base?: number }) => {
+    const steps = Math.max(1, Math.round((places[w.b].floor - places[w.a].floor - (w.base ?? 0)) / STEP)), to = w.to ?? w.at;
     return { steps, tread: Math.abs(to - w.at) / steps, dir: to >= w.at ? 1 : -1, wide: w.halfWidth * 2, to };
+  };
+  /**
+   * A stair that climbs round the walls (`round`), as the straight flight of its last leg, which comes up through the floor above,
+   * and how high over the lower floor that leg begins (`base`). A straight stair as it is.
+   */
+  const headLeg = (w: Way): Way & { base?: number } => {
+    if (!w.round) return w;
+    const { legs } = roundStair(site, w), last = legs[legs.length - 1];
+    return { ...w, side: last.side, at: last.from, to: last.to, round: undefined, base: last.y0 };
   };
   // How many steps can be climbed before the head comes to the beams of the ceiling: the well must have begun by then.
   // (With room to spare: whoever climbs is a stride deep, front to back, as well as a man high.)
-  const stepsUnderCeiling = (w: Way) => Math.max(0, Math.floor((places[w.a].wall - 0.27 - 2.3) / STEP));
+  const stepsUnderCeiling = (w: Way & { base?: number }) => Math.max(0, Math.floor((places[w.a].wall - 0.27 - 2.3 - (w.base ?? 0)) / STEP));
   /** Where a stair stands on the floor of the lower place, and the well it comes up through in the floor of the upper. */
   const flightRect = (w: Way): Rect => strip(places[w.a], w.side, w.at, flightOf(w).to, flightOf(w).wide);
+  /** Of a stair round the walls, the floor its legs and landings stand over within the first three metres of its climb. */
+  const lowLegs = (w: Way): Rect[] => {
+    const { legs, landings, width } = roundStair(site, w), p = places[w.a];
+    return [...legs.filter((l) => l.y0 < 3.2).map((l) => strip(p, l.side, l.from, l.to, width)), ...landings.filter((l) => l.y < 3.2)];
+  };
   const wellRect = (w: Way): Rect => {
     const f = flightOf(w);
     // The well begins where there would otherwise be less than a man's height over the steps.
@@ -270,7 +378,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   type Run = { side: Side; at: number; from: number; to: number };
   const runs: Run[] = [];
   const outerWindows = new Map<number, OuterWindow[]>();
-  if (free) {
+  if (free && cath) for (const [id, list] of cathedralWindows(site)) outerWindows.set(id, list as OuterWindow[]);
+  if (free && !cath) {
     const C = 0.1, ox = Math.min(...outerRects.map((r) => r.x0)) - C, oz = Math.min(...outerRects.map((r) => r.z0)) - C;
     const nx = Math.round((Math.max(...outerRects.map((r) => r.x1)) + C - ox) / C) + 1, nz = Math.round((Math.max(...outerRects.map((r) => r.z1)) + C - oz) / C) + 1;
     const solid = new Uint8Array(nx * nz);
@@ -492,10 +601,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     if (p.roof === 'barrel') {
       const a0 = p.axis === 'x' ? p.x0 : p.z0;
       const length = p.axis === 'x' ? p.x1 - p.x0 : p.z1 - p.z0;
-      const ribs = Math.max(0, Math.round(length / 3.4) - 1);
+      // (In a church, the ribs mark its bays: between its arcade's arches where it has one, every six metres or so where it has not.
+      // Under a vault of more than one span, they go over its columns, every three metres or so.)
       const sides: Side[] = p.axis === 'x' ? ['n', 's'] : ['w', 'e'];
+      const arcade = cath ? site.ways.filter((w) => w.kind === 'arch' && (w.a === p.id || w.b === p.id) && sideOf(w, p) === sides[0]).map((w) => w.at).sort((a, b) => a - b) : [];
+      const ribs = !cath ? Math.max(0, Math.round(length / 3.4) - 1) : arcade.length >= 2 ? arcade.length - 1 : Math.max(0, Math.round(length / ((p.spans ?? 1) > 1 ? 3.2 : 5.8)) - 1);
       for (let k = 1; k <= ribs; k++) {
-        const pos = a0 + (length * k) / (ribs + 1);
+        const pos = arcade.length >= 2 ? (arcade[k - 1] + arcade[k]) / 2 : a0 + (length * k) / (ribs + 1);
         for (const side of sides) {
           const clear = !holesOn(p, side, 0).some((h) => Math.abs(h.at - pos) < h.w + 0.95);
           slots.push({ pos, side, clear });
@@ -505,6 +617,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     pilasterSlots.set(p.id, slots);
 
     const list: TorchSpec[] = [];
+    const inward = (side: Side): Vector3 => ({ n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) })[side];
     if (p.roof !== 'sky') {
       const area = (p.x1 - p.x0) * (p.z1 - p.z0);
       // Torches where the site asks for them; a daylit room gets one only if it is large; a dark room, none. (A long hall, of two cells
@@ -540,17 +653,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
       // A ring of candles hung over the middle of a great room, high enough to walk under and clear of the ceiling.
-      const ringChance = ({ refectory: 0.6, 'chapter house': 0.6, gatehall: 0.35, dormitory: 0.3, sanctum: 0.5, scriptorium: 0.4, solar: 0.3 } as Record<string, number>)[p.name] ?? 0;
-      const ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : p.floor + p.wall;
+      // (In a cathedral, a great corona of candles in the nave, the choir and under the crossing, hung high on a long chain.)
+      const ringChance = ({ refectory: 0.6, 'chapter house': 0.6, gatehall: 0.35, dormitory: 0.3, sanctum: 0.5, scriptorium: 0.4, solar: 0.3, ...(cath ? { nave: 1, choir: 0.85, crossing: 0.7, shrine: 0.6 } : {}) } as Record<string, number>)[p.name] ?? 0;
+      const ceiling = p.roof === 'barrel' ? p.floor + p.wall + vaultRise(p) : p.floor + p.wall;
       if (built && area >= 26 && ceiling - p.floor >= 3.3 && ringChance && lq.chance(ringChance)) {
-        const at = V((p.x0 + p.x1) / 2, Math.max(p.floor + 2.55, Math.min(ceiling - 0.8, p.floor + 3.0)), (p.z0 + p.z1) / 2);
+        const great = coronaOf(p), at = V((p.x0 + p.x1) / 2, great ? p.floor + 4.6 : Math.max(p.floor + 2.55, Math.min(ceiling - 0.8, p.floor + 3.0)), (p.z0 + p.z1) / 2);
         ringOf.set(p.id, at);
-        const wicks = Array.from({ length: 6 }, (_, k) => V(at.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), at.y + 0.2, at.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)));
+        const R = great ? 1.3 : 0.5, n = great ? 12 : 6;
+        const wicks = Array.from({ length: n }, (_, k) => V(at.x + R * Math.cos((k / n) * Math.PI * 2), at.y + 0.2, at.z + R * Math.sin((k / n) * Math.PI * 2)));
         list.push({ position: at.clone().setY(at.y + 0.15), out: V(0, -1, 0), flames: wicks });
       }
       // A standing candelabrum in a corner clear of doors and stairs, and far enough along each wall from its middle to keep clear of
       // whatever stands against it there.
-      const standChance = ({ sanctum: 0.7, 'chapter house': 0.4, vestry: 0.5, reliquary: 0.6, antechamber: 0.3, 'muniment room': 0.3, scriptorium: 0.3 } as Record<string, number>)[p.name] ?? 0;
+      const standChance = ({ sanctum: 0.7, 'chapter house': 0.4, vestry: 0.5, reliquary: 0.6, antechamber: 0.3, 'muniment room': 0.3, scriptorium: 0.3, ...(cath ? { shrine: 0.9, crypt: 0.8, chapel: 0.7, sacristy: 0.6, library: 0.5 } : {}) } as Record<string, number>)[p.name] ?? 0;
       if (built && standChance && lq.chance(standChance)) {
         const corners = [[p.x0 + 0.5, p.z0 + 0.5, 'w', 'n'], [p.x1 - 0.5, p.z0 + 0.5, 'e', 'n'], [p.x0 + 0.5, p.z1 - 0.5, 'w', 's'], [p.x1 - 0.5, p.z1 - 0.5, 'e', 's']] as [number, number, Side, Side][];
         const fits = corners.filter(([x, z, sx, sz]) => {
@@ -565,13 +680,24 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           list.push({ position: V(x, top + 0.1, z), out: V(0, -1, 0), flames: wicks });
         }
       }
+      // Up a stair that climbs round the walls, a torch on the wall over every other landing, so that it is never dark long.
+      // (On the wall of the leg that comes up to the landing, a little short of it: over its last steps, with headroom under it.)
+      for (const w of stairsFrom(p).filter((x) => x.round)) {
+        const { legs, landings } = roundStair(site, w);
+        landings.forEach((l, k) => {
+          const leg = legs[k];
+          if (k % 2 === 1 || !leg) return;
+          const along = leg.to - Math.sign(leg.to - leg.from) * 0.8, off = 0.24;
+          const at = leg.side === 'n' ? V(along, 0, p.z0 + off) : leg.side === 's' ? V(along, 0, p.z1 - off) : leg.side === 'w' ? V(p.x0 + off, 0, along) : V(p.x1 - off, 0, along);
+          list.push({ position: at.setY(p.floor + l.y + 2.3), out: inward(leg.side) });
+        });
+      }
       const extra = list.length;
       const want = Math.max(0, (p.roof === 'cave' ? 0 : p.light === 'torch' ? (area < 22 ? 1 : area < 50 ? 2 : area < 90 ? 3 : 4) : p.light === 'day' ? (area >= 90 ? 2 : area >= 40 ? 1 : 0) : 0) - (extra ? 1 : 0)) + extra;
       // Candidates: the front of each free pilaster, else the middle of each wall that has room.
       const candidates: TorchSpec[] = [];
-      const inward: Record<Side, Vector3> = { n: V(0, 0, 1), s: V(0, 0, -1), w: V(1, 0, 0), e: V(-1, 0, 0) };
       const onWall = (side: Side, at: number, off: number): TorchSpec => {
-        const out = inward[side];
+        const out = inward(side);
         const base = side === 'n' ? V(at, 0, p.z0) : side === 's' ? V(at, 0, p.z1) : side === 'w' ? V(p.x0, 0, at) : V(p.x1, 0, at);
         return { position: base.addScaledVector(out, off).setY(p.floor + 2.25), out };
       };
@@ -590,8 +716,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       // No torch on the wall where a stair stands against it.
       for (const w of [...stairsFrom(p), ...stairsInto(p)]) {
-        const r = flightRect(w);
-        for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
+        for (const r of w.round && w.a === p.id ? lowLegs(w) : [flightRect(headLeg(w))]) {
+          for (let i = candidates.length - 1; i >= 0; i--) { const c = candidates[i].position; if (c.x > r.x0 - 0.5 && c.x < r.x1 + 0.5 && c.z > r.z0 - 0.5 && c.z < r.z1 + 0.5) candidates.splice(i, 1); }
+        }
       }
       // (Nor on the wall over a hearth.)
       const hearth = hearthOf.get(p.id);
@@ -796,6 +923,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   };
 
   const buildApproach = (p: Place) => {
+    // (For finding where the time goes: with DBG_T set, as `DBG_T=1 npx tsx tools/land.ts 1`, each stage says how long it took.)
+    let __t = performance.now();
+    const __T = (label: string) => { if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_T) console.log('  ', label, (performance.now() - __t).toFixed(0), 'ms'); __t = performance.now(); };
     kit.group = `p${p.id}`;
     kit.field = outdoorFieldAt(p.floor, 1.2);
     const doorway = holesOn(p, 'n', 0)[0];
@@ -890,6 +1020,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       return { at: (z: number) => read(g, z), fade: (z: number) => Math.max(6, 1.8 * Math.abs(read(g, z) - read(land, z))) };
     })() : null;
     const graded = grade?.at;
+    /** How far the land about a castle is lowered, that its hill may stand: the hill's height near it, coming back to nothing over sixty metres. */
+    const castleBasin = (x: number, z: number) => (site.castle ? site.castle.rise * (1 - smooth((castleOff(site.castle, x, z) - 10) / 60)) : 0);
     const swells = (x: number, z: number): number => {
       const fromPath = Math.max(0, Math.abs(x - pathAt(z)) - pathHalf);
       // (Level on the promontory a keep stands on, as a castle's court would be; swelling elsewhere as it always did.)
@@ -899,6 +1031,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // down; not tilted across the track, which keeps the level the land has under its middle.)
       if (vale?.terrain) {
         const land = valleyLand(vale, p.floor, p, x, z), mid = graded ? graded(z) : valleyLand(vale, p.floor, p, pathAt(z), z), floor = land + (mid - land) * (1 - Math.min(1, fromPath / (grade ? grade.fade(z) : 6)));
+        // (About a castle, only its own ground is held level: held across the whole head of the valley, as about a house, the level
+        // met the land rising at the valley's sides in a bank, drawn as rock all round the head. And the castle stands on a hill: its
+        // bailey level, a walk's breadth level outside its wall, and from there the ground falls away, some way in thirty metres, to
+        // the land lowered by the hill's height about it, which comes back to itself over sixty metres more.)
+        const c = site.castle;
+        if (c) {
+          const off = castleOff(c, x, z);
+          if (off <= 0) return p.floor - 0.03;
+          const low = floor - castleBasin(x, z);
+          // (On a seat of its own, at the brow of the land over the valley, the ground about its wall comes back to the land within ten
+          // metres: drawn out over thirty, as about a hill made for it, it stood out from the brow as a terrace.)
+          return p.floor - 0.03 + (low - p.floor + 0.03) * smooth((off - 1.5) / (c.rise > 0 ? 30 : 10)) * level;
+        }
         return p.floor - 0.03 + (floor - p.floor) * smooth((z - p.z1 - 2) / 30) * level;
       }
       return p.floor - 0.03 + (fbm2(x * 0.035 + s2, z * 0.035 + s1, 3) - 0.5) * 5.5 * Math.min(1, fromPath / 9) * smooth((z - p.z0 - 4) / 14) * level;
@@ -911,18 +1056,49 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // So does a building; `hx` and `hz` are half its ground across the valley and along it, with what overhangs.
     // (A building of brick stands in a street, deep from its front: it is set at the height of the ground before its door, so that the
     // street runs level to its step; any other at the height of the ground under its middle.)
+    // Where a point is in a building's own measures: `u` along its front, `v` back from it. (By the bearing its front faces, which for
+    // one standing square to the valley is east or west, and for one turned to face a road wherever it runs is its `turn`.)
+    const frontOf2 = (b: { x: number; z: number; d: number; faces: 'e' | 'w'; turn?: number }, x: number, z: number) => {
+      const th = b.turn ?? (b.faces === 'w' ? Math.PI : 0), c = Math.cos(th), sn = Math.sin(th), dx = x - b.x, dz = z - b.z;
+      return { u: -dz * c + dx * sn, v: b.d / 2 - (dx * c + dz * sn) };
+    };
+    /** Back from a building's own measures to the world. */
+    const fromFront = (b: { x: number; z: number; d: number; faces: 'e' | 'w'; turn?: number }, u: number, v: number): [number, number] => {
+      const th = b.turn ?? (b.faces === 'w' ? Math.PI : 0), c = Math.cos(th), sn = Math.sin(th);
+      return [b.x + u * sn + (b.d / 2 - v) * c, b.z - u * c + (b.d / 2 - v) * sn];
+    };
     const frontOf = (b: Building) => { const turn = b.faces === 'w' ? 1 : -1; return swells(b.x - (turn * b.d) / 2 - turn * 1.2, b.z); };
-    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => ({ ...b, base: b.style === 'brick' ? frontOf(b) : swells(b.x, b.z), hx: b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz: b.w / 2 + 0.5, rects: footprintOf(b) }));
+    // (One turned to a road is given the larger of its two half breadths both ways, as anything that asks only how far it reaches across and along may.)
+    // (`reach`: how far from its middle anything of it reaches, its wings and steps with it: past that and four and a half metres more,
+    // a point's ground is not its.)
+    // (A village's house, turned to face its road wherever it bends, is set into the slope it stands on, as houses on a hillside are: its
+    // floor at the height of the ground before its door, so that one steps in from the road, and the land coming to its walls as it
+    // lies, rising against its back wall where the slope goes up behind it and falling from it, onto its footing, where it goes down;
+    // only the ground before its door, and along its sides near the front, is levelled with its floor. Its floor is raised only as much
+    // as keeps the land behind it from rising more than a metre up its back wall, under its windows. Levelled all round at its middle's
+    // height, as before, the ground before the house stood in a bank over the road, a stride high, and behind it fell away from it.)
+    const setIn = (b: Building) => b.turn !== undefined && b.style === 'timber';
+    const sitOf = (b: Building) => {
+      const at = (u: number, v: number) => { const [x, z] = fromFront(b, u, v); return swells(x, z); };
+      // (Over a half basement or a cellar, at the road before its door, whatever lies behind: that is what they are for.)
+      if (b.sunk || b.cellar) return at(0, -1.5);
+      let high = -Infinity;
+      for (const [u, v] of [[-b.w / 2, b.d + 0.3], [0, b.d + 0.3], [b.w / 2, b.d + 0.3], [-b.w / 2 - 0.3, b.d / 2], [b.w / 2 + 0.3, b.d / 2]]) high = Math.max(high, at(u, v));
+      return Math.max(at(0, -1.5), high - 1.0);
+    };
+    const houses = (site.grounds ? site.buildings ?? [] : []).map((b) => { const hx = b.d / 2 + (b.style === 'imperial' ? 2.0 : 0.6), hz = b.w / 2 + 0.5, big = Math.max(hx, hz), rects = footprintOf(b); return { ...b, set: setIn(b), base: b.style === 'brick' ? frontOf(b) : setIn(b) ? sitOf(b) : swells(b.x, b.z), hx: b.turn !== undefined ? big : hx, hz: b.turn !== undefined ? big : hz, rects, reach: Math.max(...rects.map((r) => Math.max(Math.hypot(r.u0, r.v0 - b.d / 2), Math.hypot(r.u1, r.v0 - b.d / 2), Math.hypot(r.u0, r.v1 - b.d / 2), Math.hypot(r.u1, r.v1 - b.d / 2)))) + 4 }; });
+    /** How near a point is to the village's houses and the castle's wall, for what grows: whether it is within `m` metres of either. */
+    const nearBuilt = (x: number, z: number, m: number) => (!!site.castle && castleOff(site.castle, x, z) < m + 6) || houses.some((b) => Math.abs(x - b.x) + Math.abs(z - b.z) < (b.reach + m) * 1.415 && outside(b, x, z) < m);
     // Whether a point is under a building, within its outer walls.
     // Whether a point is under a building, within its outer walls (wings and all).
     const footprint = (b: (typeof houses)[number], x: number, z: number) => {
-      const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+      const { u, v } = frontOf2(b, x, z);
       return b.rects.some((r) => u > r.u0 && u < r.u1 && v > r.v0 && v < r.v1);
     };
     // (With room about it: half a metre, and before a classical building's door the depth of its steps. A dressed one's steps stand
     // before whatever stands forward, its middle or its pavilions, and are as deep as its plinth is high.)
     const outside = (b: (typeof houses)[number], x: number, z: number) => {
-      const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+      const { u, v } = frontOf2(b, x, z);
       const run = b.dress ? Math.max(1.45, stepsUp(plinthOf(b)).run + 0.1) : 1.45;
       return Math.min(...b.rects.map((r, i) => Math.max(r.u0 - u, u - r.u1, (b.style === 'imperial' && (i === 0 || (b.dress && r.v1 <= 0)) ? r.v0 - run : r.v0) - v, v - r.v1))) - 0.55;
     };
@@ -1268,7 +1444,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           on[side][i] = Math.max(on[side][i], 1 - smooth((d - 2) / 18));
         }
       };
-      for (let i = 0; i < n; i++) on.w[i] = on.e[i] = 1 - smooth((zA + i - frontZ - 10) / 22);
+      // (Not about a castle, which stands free on the open ground at the valley's head: there the head's sides are the land's too.)
+      if (!site.castle) for (let i = 0; i < n; i++) on.w[i] = on.e[i] = 1 - smooth((zA + i - frontZ - 10) / 22);
       for (const q of grottoes) { const reach = q.hall ? q.hall.width / 2 + 6 : q.r * 1.3 + 5; near(q.side, q.z - reach, q.z + reach); }
       for (const t of terraces) near(t.side, Math.min(t.z0, t.z1) - t.run - 3, Math.max(t.z0, t.z1) + t.run + 3);
       for (const st of site.streams ?? []) if (st.from === 'fall' && st.course.length) {
@@ -1320,12 +1497,26 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         if (d < r * 1.7) { const k = 1 - smooth((d - r * 0.9) / (r * 0.75)); y += (campBase - y) * k; even = Math.min(even, 1 - 0.9 * k); }
       }
       y += heapAt(x, z);
+      // (Where two houses' levelled ground meets, the nearer house's is the ground: laid one after the other, the later pulled the ground
+      // at the walls of the one before to its own level, and on a slope the earlier stood a metre over the ground at its side.)
+      let lay: { k: number; d: number; y: number } | null = null;
       for (const b of houses) {
         // A building on level ground has it levelled about it. One set into rising ground has the ground about it rise from its
         // front to its back, as much as the document says, and stand at that height behind it for some way before it gives back to the land.
-        const d = outside(b, x, z), sunk = b.sunk ?? 0, v = (b.faces === 'w' ? 1 : -1) * (x - b.x) + b.d / 2, u = (b.faces === 'w' ? 1 : -1) * (z - b.z);
+        if ((!b.sunk || b.set) && Math.abs(x - b.x) + Math.abs(z - b.z) > (b.reach + (b.set ? 7.5 : 4.6)) * 1.415) continue;
+        const d = outside(b, x, z), sunk = b.sunk ?? 0, { u, v } = frontOf2(b, x, z);
         let k: number;
-        if (!sunk) {
+        if (b.set && (b.sunk || b.cellar)) {
+          // Over a half basement or a cellar: level with its floor before its door, rising (or falling) along its sides to the height
+          // of its back door, and a yard at that height behind it, some three metres deep, before the land.
+          const before = Math.max(0, -v), aside = Math.max(0, Math.abs(u) - b.w / 2), behind = Math.max(0, v - b.d);
+          if (before > 4.5 || aside > 3.5 || behind > 7) continue;
+          k = (1 - smooth((before - 1.4) / 2.6)) * (1 - smooth((aside - 0.6) / 2.4)) * (1 - smooth((behind - 3.2) / 3.2));
+        } else if (b.set) {
+          const before = Math.max(0, -v), aside = Math.max(0, Math.abs(u) - b.w / 2), back = Math.max(0, v - 0.6);
+          if (before > 4.5 || aside > 3) continue;
+          k = (1 - smooth((before - 1.4) / 2.6)) * (1 - smooth((aside - 0.4) / 2.2)) * (1 - smooth(back / 2.2));
+        } else if (!sunk) {
           if (d > 4.5) continue;
           k = 1 - smooth((d - 0.9) / 3.2);
         } else {
@@ -1335,9 +1526,11 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           if (v < -9 || aside > 14 || v > b.d + 38) continue;
           k = v < 0 ? 1 - smooth((Math.max(aside, -v - 2.4) - 0.9) / 3.2) : (1 - smooth((aside - 1.2) / 11)) * (1 - smooth((v - b.d - 22) / 16));
         }
-        y += (b.base + groundOf(b, v, u) - y) * k;
-        even = Math.min(even, 1 - k);
+        // (A cellar's ground falls from the front to the back as a half basement's rises.)
+        const to = b.cellar ? -b.cellar * smooth(v / b.d) : groundOf(b, v, u);
+        if (!lay || k > lay.k + 1e-6 || (k > lay.k - 1e-6 && d < lay.d)) lay = { k, d, y: b.base + to };
       }
+      if (lay) { y += (lay.y - y) * lay.k; even = Math.min(even, 1 - lay.k); }
       for (const t of towers) {
         const d = Math.max(Math.abs(x - t.x), Math.abs(z - t.z));
         if (d > t.half + 5) continue;
@@ -1413,7 +1606,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // (A valley that was found has the land it was found in beyond its sides, rising behind the crags: not hills made up.)
         // (Behind its crags too the ground goes on up, as behind a drawn valley's, a little less; under that the land it was found in.
         // Where that land rose less than the crag stood, the top of the crag was left as a level shelf: the rim of a quarry.)
-        if (vale.terrain) { y += smooth((beyond - 2) / 90) * 15 * stands * crag; if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) + 0.5 * smooth(-inside / 6) * crag); }
+        // (Lowered as the floor is about a castle's hill, or the two met at the valley's side in a step its height.)
+        if (vale.terrain) { y += smooth((beyond - 2) / 90) * 15 * stands * crag; if (inside < 0) y = Math.max(y, valleyLand(vale, p.floor, p, x, z) - castleBasin(x, z) + 0.5 * smooth(-inside / 6) * crag); }
         else y += smooth((beyond - 2) / 90) * 23 * stands + smooth((beyond - 40) / 200) * 24 + (fbm2(x * 0.011 + s1, z * 0.011 + s2, 4) - 0.5) * 22 * smooth(beyond / 60);
       }
       // Where water comes over, it has worn a notch in the top of the wall and a channel back from it.
@@ -1571,6 +1765,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     let depthInBand = (_x: number, _z: number): number => 0;
     const MARGIN = 3.2;
     const lx0 = Math.min(...patches.map((c) => c.x0)) - MARGIN, lz0 = Math.min(...patches.map((c) => c.z0)) - MARGIN, lx1 = Math.max(...patches.map((c) => c.x1)) + MARGIN, lz1 = Math.max(...patches.map((c) => c.z1)) + MARGIN;
+    __T('the shape of the valley, its track and ground');
     const land = new Grid2(lx0, lz0, WORN, Math.round((lx1 - lx0) / WORN) + 1, Math.round((lz1 - lz0) / WORN) + 1);
     const known = new Uint8Array(land.data.length);
     // In front of the house the meadow runs level up to the wall; the scarp behind the wall is not this piece's business.
@@ -1860,6 +2055,27 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (On a footpath, how far from its middle plus two hundred: the material for ground tells the one from the other.)
       const foot = offFoot(x, z);
       lay.track = Math.abs(off) < 6 ? 100 + off : foot < 3 ? 200 + foot : 0;
+      // The castle's bailey is trodden earth, worn bare where people and carts go and greener along the foot of its walls.
+      if (site.castle) {
+        const off = castleOff(site.castle, x, z);
+        if (off < 0) lay.bare = Math.max(lay.bare, (0.62 + 0.3 * fbm2(x * 0.35 + 3.1, z * 0.35, 2)) * smooth((-off - site.castle.thick / 2 - 0.6) / 2.2));
+      }
+      // The village's square is trodden earth; half its plots are gardens, in beds of dug earth with paths between.
+      const vl = site.village;
+      if (vl?.square && inPolygon(vl.square, x, z)) { lay.bare = Math.max(lay.bare, 0.75 + 0.15 * fbm2(x * 0.4, z * 0.4, 2)); return turfColour(x, z, s1); }
+      if (vl) for (const [n, pl] of vl.plots.entries()) if (n % 2 === 0 && inPolygon(pl, x, z)) {
+        const row = Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7);
+        lay.bare = Math.max(lay.bare, smooth((row - 0.15) / 0.12) * 0.9);
+        break;
+      }
+      // In a field, its crop: ploughed earth where it lies fallow, and roots in rows with the earth between.
+      const fi = fieldList.length ? fieldAt(x, z) : -1;
+      if (fi >= 0) {
+        const f = fieldList[fi], tc = cropTint(f.crop), c = turfColour(x, z, s1);
+        if (f.crop === 'fallow') lay.bare = Math.max(lay.bare, 0.7 + 0.2 * fbm2(x * 0.3, z * 0.3, 2));
+        if (f.crop === 'roots') { const row = Math.abs((((x * 0.6 + z * 0.08) % 1.6) + 1.6) % 1.6 - 0.8); lay.bare = Math.max(lay.bare, smooth((row - 0.3) / 0.2) * 0.85); }
+        return [c[0] * tc[0], c[1] * tc[1], c[2] * tc[2]];
+      }
       return turfColour(x, z, s1);
     };
     const cliff = site.top - p.floor + 0.5;
@@ -1919,6 +2135,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     };
     kit.group = `p${p.id}`;
     // Behind the house front, between the ends of the wall, there is nothing to see and nothing is made.
+    __T('the land lattice and the rock along the sides');
     carveLand(meadowPatch, (m) => kit.mesh(m), (at) => at.z > behind - CELL || at.x < p.x0 - 0.2 || at.x > p.x1 + 0.2);
     // The rim of the valley is too steep to climb, but nobody is to leave by it whatever they find.
     // (A grotto runs in under the edge; the rock itself keeps whoever is in it. There the fence
@@ -2089,6 +2306,18 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // The time of year colours everything that grows: fresh greens and blossom in spring, deeper
     // greens and drier grass in summer, and in autumn gold, orange and rust with the grass gone to straw.
     const season = site.setting.season ?? 'spring';
+    // Nothing wild grows in the fields: their crops are planted by themselves, below. In a pasture, its grass only.
+    let cropping = false;
+    const vlg = site.village;
+    if (fieldList.length || vlg || site.castle) planting.keepOut = (set, x, z) => {
+      if (cropping) return false;
+      // (In the bailey, trodden as it is, no flowers, ferns or herbs; grass only along the foot of the walls, where nobody walks.)
+      if (site.castle) { const off = castleOff(site.castle, x, z); if (off < 0) return set !== planting.grass || off < -(site.castle.thick / 2 + 1.6); }
+      if (vlg?.square && inPolygon(vlg.square, x, z)) return true;
+      if (vlg) for (const [n, pl] of vlg.plots.entries()) if (n % 2 === 0 && inPolygon(pl, x, z)) return set !== planting.herbs || Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7) > 0.2;
+      const k = fieldList.length ? fieldAt(x, z) : -1;
+      return k >= 0 && (fieldList[k].crop !== 'pasture' || set !== planting.grass);
+    };
     // (And in winter the broadleaf trees are bare: what they keep is the brown of an oak's dead leaves, and far off the grey-brown haze
     // of their twigs; the grass is straw, mostly under the snow, and nothing flowers.)
     const winter = season === 'winter';
@@ -2119,6 +2348,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     let grown = 0;
     const oakBark: Colour = [0.66, 0.58, 0.5], ashBark: Colour = [0.86, 0.84, 0.8];
     let planted = 0;
+    // (Within a castle's bailey, one: an old tree in a castle's yard is as it should be, and five were an orchard. Each is still dealt
+    // from the stream, into nothing, so that all after it stands where it stood.)
+    const meadowTrees = site.castle ? 1 : 5;
     for (let tries = 0; tries < 60 && planted < 5; tries++) {
       const x = r.range(p.x0 + 4.5, p.x1 - 4.5), z = r.range(p.z0 + 4, p.z1 - 3);
       if (Math.abs(x - pathAt(z)) < 3.6) continue;
@@ -2126,14 +2358,16 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const base = ground(x, z);
       const height = r.range(5.2, 7.6), girth = r.range(0.19, 0.28);
       const tall = height * 1.25, oak = grown % 3 !== 1;
-      kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
+      if (planted < meadowTrees) kit.mass(V(x - girth * 0.6, base, z - girth * 0.6), V(x + girth * 0.6, base + tall * (oak ? 0.3 : 0.48), z + girth * 0.6));
       const green = leafOf(plant.pick(greens));
       spent.broadleaf(x, base, z, height + 0.4, r.range(2.3, 3.1), 620, green, plant, 0.72);
-      growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 60 : 0) : 1500, cardSize: 0.74, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true), bare: winter }, rng.fork(`tree${grown++}`));
+      if (planted < meadowTrees) growTree(planting, kit.mesh(oak ? 'bark' : 'barkAsh'), x, base, z, tall, girth * 1.25, { kind: oak ? 'oak' : 'ash', detail: 1, cards: winter ? (oak ? 60 : 0) : 1500, cardSize: 0.74, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, soft: woodOf(oak ? 'oak' : 'ash', true), bare: winter }, rng.fork(`tree${grown++}`));
+      else grown++;
       trees.push([x, z]);
       planted++;
     }
 
+    __T('the meadow, the head, crags and stones');
     // ---- the ground beyond the meadow: a fine sheet over the valley and its rim, a coarse one
     // out to the hills, and mountains behind them
     // (The fine sheet's edges lie on six-metre lines, where it is eased onto the coarse one, and on its own cells' lines, where what is
@@ -2143,13 +2377,41 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const snap = (v: number, up: boolean) => (up ? Math.ceil(v / 6) : Math.floor(v / 6)) * 6;
     const snapFine = (v: number, up: boolean) => (up ? Math.ceil(v / every) : Math.floor(v / every)) * every;
     const fine = { x0: snapFine(g.x0 - 34, false), x1: snapFine(g.x1 + 34, true), z0: snapFine(Math.min(houseZ0 - 40, g.z0 - 34), false), z1: snapFine(g.z1 + 34, true) };
+    // (And of that box, only the blocks within reach of the valley: within thirty-four metres of its sides, as the box is of its ends,
+    // or of the house. The coarse sheet lies on the rest. A valley that runs down from a castle's seat on a slant across a hillside has
+    // a box a third larger than itself, and the fine sheet over all of it doubled the time a valley took to build.)
+    const BLOCK = every, bnx = Math.round((fine.x1 - fine.x0) / BLOCK), bnz = Math.round((fine.z1 - fine.z0) / BLOCK), reachFine = 34 + BLOCK * 0.71;
+    const fineMask = new Uint8Array(bnx * bnz);
+    for (let j = 0; j < bnz; j++) for (let i = 0; i < bnx; i++) {
+      const x = fine.x0 + (i + 0.5) * BLOCK, z = fine.z0 + (j + 0.5) * BLOCK;
+      const nearHouse = Math.max(houseX0 - x, x - houseX1, houseZ0 - z, z - p.z1) < 40 + BLOCK * 0.71;
+      fineMask[j * bnx + i] = !vale || nearHouse || insideAt(x, z) > -reachFine ? 1 : 0;
+    }
+    const fineBlock = (i: number, j: number) => i >= 0 && j >= 0 && i < bnx && j < bnz && fineMask[j * bnx + i] === 1;
+    /** Whether a point is where the fine sheet is laid. */
+    const inFineSheet = (x: number, z: number) => fineBlock(Math.floor((x - fine.x0) / BLOCK), Math.floor((z - fine.z0) / BLOCK));
+    /** How far inside the fine sheet a point is, from the nearest edge of it: up to a block's breadth. */
+    const fineInside = (x: number, z: number) => {
+      const i = Math.floor((x - fine.x0) / BLOCK), j = Math.floor((z - fine.z0) / BLOCK);
+      let best = Math.min(x - fine.x0, fine.x1 - x, z - fine.z0, fine.z1 - z);
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        if ((!di && !dj) || fineBlock(i + di, j + dj)) continue;
+        const bx0 = fine.x0 + (i + di) * BLOCK, bz0 = fine.z0 + (j + dj) * BLOCK;
+        best = Math.min(best, Math.hypot(Math.max(bx0 - x, 0, x - bx0 - BLOCK), Math.max(bz0 - z, 0, z - bz0 - BLOCK)));
+      }
+      return best;
+    };
+    /** The ground as the coarse sheet's corners have it, every six metres, and between them as a plane. */
+    const coarse6 = (x: number, z: number) => {
+      const gx = Math.floor(x / 6) * 6, gz = Math.floor(z / 6) * 6, fx = (x - gx) / 6, fz = (z - gz) / 6;
+      return ground(gx, gz) * (1 - fx) * (1 - fz) + ground(gx + 6, gz) * fx * (1 - fz) + ground(gx, gz + 6) * (1 - fx) * fz + ground(gx + 6, gz + 6) * fx * fz;
+    };
     // Near its edge the fine sheet is eased onto the coarse one's corners, so the two meet exactly.
     const eased = (x: number, z: number): number => {
-      const inside = Math.min(x - fine.x0, fine.x1 - x, z - fine.z0, fine.z1 - z);
+      const inside = fineInside(x, z);
       const y = ground(x, z);
       if (inside >= 6) return y;
-      const gx = Math.floor(x / 6) * 6, gz = Math.floor(z / 6) * 6, fx = (x - gx) / 6, fz = (z - gz) / 6;
-      const coarse = ground(gx, gz) * (1 - fx) * (1 - fz) + ground(gx + 6, gz) * fx * (1 - fz) + ground(gx, gz + 6) * (1 - fx) * fz + ground(gx + 6, gz + 6) * fx * fz;
+      const coarse = coarse6(x, z);
       return coarse + (y - coarse) * smooth(inside / 6);
     };
     const overlaps = (c: { x0: number; x1: number; z0: number; z1: number }, x0: number, x1: number, z0: number, z1: number) => c.x1 > x0 && c.x0 < x1 && c.z1 > z0 && c.z0 < z1;
@@ -2163,6 +2425,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // meadow behind the wall: a cell lying across that would be a ramp through the doorway.
       skip: (c) => {
         const mx = (c.x0 + c.x1) / 2, mz = (c.z0 + c.z1) / 2;
+        if (!inFineSheet(mx, mz)) return true;
         // (Round a house that stands free, the sheet is the ground all the way to its walls, and none of it is under the house.)
         if (free) return carved(mx, mz) || insideOuter(mx, mz) || houses.some((b) => footprint(b, mx, mz));
         // Behind the front wall the sheet is the hilltop, right up to the wall; everywhere else
@@ -2193,7 +2456,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // point of its outline, which is the edge of one of its rectangles not inside another.)
         for (const b of houses) {
           if (!footprint(b, x, z)) continue;
-          const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
+          const { u, v } = frontOf2(b, x, z);
           const within = (pu: number, pv: number) => b.rects.some((r) => pu > r.u0 + 0.01 && pu < r.u1 - 0.01 && pv > r.v0 + 0.01 && pv < r.v1 - 0.01);
           let best: [number, number] = [u, v], least = Infinity;
           for (const r of b.rects) {
@@ -2203,8 +2466,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
               if (d < least && !within(pu, pv)) { least = d; best = [pu, pv]; }
             }
           }
-          x = b.x + turn * (best[1] - b.d / 2);
-          z = b.z + turn * best[0];
+          [x, z] = fromFront(b, best[0], best[1]);
         }
         for (const o of openings) {
           if (x <= o.x0 || x >= o.x1 || z <= o.z0 || z >= o.z1) continue;
@@ -2224,17 +2486,35 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.box('stone', V(o.x0 - k, y0, o.z0), V(o.x0, y1, o.z1), coping, coping, `kerbw${o.id}`);
       kit.box('stone', V(o.x1, y0, o.z0), V(o.x1 + k, y1, o.z1), coping, coping, `kerbe${o.id}`);
     }
-    const reach = 246;
-    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), ground, {
+    // Each sheet ends where a finer one begins, and none lies over another at its own height. (The far land's ring began two hundred
+    // and fifteen metres from the meadow, inside the coarse sheet's square, and once the valley had grown long enough for a castle, a
+    // village, fields and a forest, inside the fine sheet too, where the player arrives. Lying one on another at nearly the same height,
+    // whichever stood the higher showed, a cell at a time: hard-edged pieces of two grounds, and steps of light and shade.) So the far
+    // land begins beyond the fine sheet's farthest corner, and the coarse sheet fills what lies between, out to that circle and on
+    // under the far land's first thirty metres, where the far land is let into it in patches (`ringShare` in the far material), and
+    // no further: its corners beyond drawn in onto the circle there. Under the far land it lies a metre and a quarter lower than its
+    // own ground, so that the far land is always the higher where both are drawn, and the ground shows only where the far land lets it.
+    // (Ending at the ring itself, the far land's patches there opened onto the sky.)
+    const farRing = Math.max(FAR_RING, Math.ceil(Math.max(...([[fine.x0, fine.z0], [fine.x1, fine.z0], [fine.x0, fine.z1], [fine.x1, fine.z1]] as const).map(([x, z]) => Math.hypot(x - cxA, z - czA))) + 6));
+    const UNDER = 30, coarseEnd = farRing + UNDER;
+    const reach = Math.max(246, snap(coarseEnd + 3, true));
+    const ringOut = (x: number, z: number) => Math.hypot(x - cxA, z - czA) - farRing;
+    // (Where it meets the fine sheet, along the edge of one of its blocks, it is the plane between the corners, as the fine sheet is
+    // eased to there: its own points between those corners, at the ground's own height, stood a hand over or under the fine sheet's edge.)
+    const meetsFine = (x: number, z: number) => inFineSheet(x + 0.01, z + 0.01) || inFineSheet(x - 0.01, z + 0.01) || inFineSheet(x + 0.01, z - 0.01) || inFineSheet(x - 0.01, z - 0.01);
+    const underFar = (x: number, z: number) => (meetsFine(x, z) ? coarse6(x, z) : ground(x, z)) - 1.25 * smooth(ringOut(x, z) / 4);
+    layTerrain(sceneryMesh('turf'), sceneryMesh('rockSheet'), underFar, {
       ...terrain, area: { x0: snap(cxA - reach, false), x1: snap(cxA + reach, true), z0: snap(czA - reach, false), z1: snap(czA + reach, true) }, cell: 3,
+      warp: (x, z) => { const out = ringOut(x, z) - UNDER; if (out <= 0) return [x, z]; const k = coarseEnd / (out + coarseEnd); return [cxA + (x - cxA) * k, czA + (z - czA) * k]; },
       // (Out here what is steeper than a hillside can be walked is rock. As turf, the banks beyond the valley's mouth were smooth
       // rounded pillars the colour of the season's grass, with nothing growing on them: the sheet is too coarse to be a slope of
       // grass, and nothing is planted on ground so steep. As rock they are low crags, which is what such banks are.)
       // (Where the valley was found its hills are the land's own, with long slopes of forty and fifty degrees that are turf and
       // trees in such country; at six metres to a cell they came out as grey slabs. There only the steepest is bare.)
       bare: vale?.terrain ? 0.42 : 0.8,
-      skip: (c) => c.x0 >= fine.x0 && c.x1 <= fine.x1 && c.z0 >= fine.z0 && c.z1 <= fine.z1,
+      skip: (c) => inFineSheet((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2) || [ringOut(c.x0, c.z0), ringOut(c.x1, c.z0), ringOut(c.x0, c.z1), ringOut(c.x1, c.z1)].every((d) => d >= UNDER),
     });
+    __T('the fine and coarse sheets');
     // Far land is drawn with a material of its own, and stops nobody: nobody gets there.
     wild.group = 'soft';
     const farLand = wild.mesh('far');
@@ -2263,7 +2543,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       // (Fewer where the far land begins, coming in to the whole over 180 metres, as the woods it paints do: they stood there one to
       // every thirteen square metres, against one to a hundred or so in the valley's own woods just inside, and from any height the
       // open ground about the valley was ringed by a wall of forest. Here about as thick as those woods, at first.)
-      const outOfRing = Math.hypot(x - cxA, z - czA) - FAR_RING;
+      const outOfRing = ringOut(x, z);
       if (own01(x, z, 61) > 0.12 + 0.88 * smooth(outOfRing / 180)) return;
       // (In winter a far broadleaf, a whole crown painted on one card, is a dark ball: in the wood it is lost among the others, but
       // standing alone on the snow, as they do where the wood is thin, it was a blot. There the trees standing alone are firs.)
@@ -2273,7 +2553,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const c: Colour = winter && fir ? [c0[0] * 0.6 + SNOWED[0] * 0.4, c0[1] * 0.6 + SNOWED[1] * 0.4, c0[2] * 0.6 + SNOWED[2] * 0.4] : c0;
       const tall = fir ? 7.5 + 6.5 * ((own * 3.7) % 1) : 6 + 4.5 * ((own * 3.7) % 1);
       planting.farTree(fir, x, y - 0.5, z, tall * (fir ? 0.42 : 0.95), tall, own * 6.283, [c[0] * t, c[1] * t, c[2] * t]);
-    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined);
+    }, landmarks.map((l) => ({ x: l.x, z: l.z, r: l.r, y: l.y })), ground, vale?.terrain ? hills : undefined, farRing);
     // Crags. The hills are a sheet, too coarse to be rock and drawn with a material that only suggests it; so the stone of the valley
     // was never seen at any size but a cliff's. Here and there on the nearer hills a mass of it now stands out of the sheet: a tor
     // forty to eighty metres high, with a summit or two, faces to its foot, buttresses, gullies and clefts, carved as the cliffs are
@@ -2357,8 +2637,9 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     wild.group = 'wild';
     // What far land is covered with, for whatever draws it: its woods and its open ground, by the season.
     const mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
-    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06], ring: [cxA, czA, FAR_RING] };
+    farCover = { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : winter ? [0.3, 0.27, 0.2] : [0.15, 0.24, 0.06], ring: [cxA, czA, farRing] };
 
+    __T('the far land, its crags and woods');
     // ---- what lies and grows in the valley
     // (The yard before a mine: the ground between its mouth and the tip, and the shed's and the stacks' beside the mouth.)
     const inYard = (x: number, z: number, m: number) => grottoes.some((q) => { if (!q.mine) return false; const inside = (x - q.edge) * q.inw, off = Math.abs(z - q.z); return inside > 1 && ((inside < 8 + q.mine.heap && off < 1.6 + m) || (inside < 13.5 && off < 7 + m)); });
@@ -2527,6 +2808,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const firBark: Colour = [0.62, 0.5, 0.42], pineBark: Colour = [0.98, 0.6, 0.42], pineGreen: Colour = [0.07, 0.15, 0.07];
     const canopies: [number, number, number, number][] = trees.map((t) => [t[0], t[1], 3.4, 0.75]);
     const tree = (x: number, z: number, y: number, detail: number, pick?: { oak: boolean; roll: number; old?: boolean }) => {
+      // (Not in a field, nor so near one that its crown hangs over the wall.)
+      if (fieldList.length && fieldAt(x, z, 3) >= 0) return;
       const lift = y - p.floor;
       const kind = fbm2(x * 0.018 + s1, z * 0.018 + s2, 2) + lift * 0.006;
       const inBlossom = season === 'spring' && fbm2(x * 0.03 - s2, z * 0.03 + s1 * 2, 2) > 0.7;
@@ -2572,13 +2855,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // (In winter: near, bare, an oak keeping a few of its dead leaves; far, where twigs are too fine to draw, their haze.)
         // (Painted sprays a metre and a half across stood for the far twigs at first, and from any height the bare woods were full
         // brown crowns, an autumn's: a trace of them is left.)
-        const wintry = !winter ? 1 : detail > 0.5 ? (oak ? 0.04 : 0) : 0.05;
+        const wintry = !winter ? 1 : detail > 0.5 ? (oak ? 0.04 : 0) : 0.05, builtNear = nearBuilt(x, z, 14);
         const reach = growTree(planting, woodOf(oak ? 'oak' : 'ash'), x, y, z, height * (oak ? 1.2 : 1.45) * (1 + 0.45 * old) * tall, girth * (oak ? 1.2 : 0.9) * (1 + 1.1 * old) * stout, {
           bare: winter, kind: oak ? 'oak' : 'ash', detail, cards: Math.round((110 + 1050 * detail) * (1 + 0.7 * old) * leafy * wintry), cardSize: (1.8 - 1.02 * detail) * (1 + 0.15 * old) * (giant > 1 || epic ? 1.15 : 1) * (epic ? 1.15 : 1), wide, leaf: winter ? leafOf(detail <= 0.5 ? [0.2, 0.18, 0.18] : [0.3, 0.18, 0.09]) : green, bark: oak ? oakBark : ashBark, shaded: true, soft: woodOf(oak ? 'oak' : 'ash', true),
           // (Its boughs kept out of the house: a great oak by a house standing free reached over its roofs and drooped into its court,
           // and through the arch from the court, where it stopped whoever walked through.)
           // (Nor low over the track and the paths, where a bough at head height stopped whoever walked up from the gap.)
-          keepOut: (q) => (q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4)) || (q.y < y + 2.6 && Math.min(offTrack(q.x, q.z), offFoot(q.x, q.z)) < 1.2),
+          // (Nor into a house of the village, nor over the castle's wall.)
+          keepOut: (q) => (q.y < site.top + 1.5 && inHouse(q.x, q.z, 0.4)) || (q.y < y + 2.6 && Math.min(offTrack(q.x, q.z), offFoot(q.x, q.z)) < 1.2) || (builtNear && q.y < y + 16 && nearBuilt(q.x, q.z, 0.9)),
         }, rng.fork(`tree${grown++}`));
         canopies.push([x, z, Math.max(spread, reach) * 1.1, 0.75]);
       }
@@ -2586,16 +2870,32 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // (A wood is close in its heart and thins out tree by tree towards its edge. Laid one to a cell wherever a patch said wood, with
     // the cells ten metres apart beyond the valley, the hills round about were planted as an orchard: young firs evenly spaced on a
     // lawn. Now a tree stands less often the nearer the patch's edge, and in its heart, now and then a second in the cell.)
+    // (In a castle's valley the woods are where the valley has them: a forest at its foot where the player comes in, thinning to a
+    // few trees about the fields and the village, and the castle's ground open. Leaned on the patches, so their edges stay ragged.)
+    const zones = site.zones;
+    // (And about a castle, asked for: more forest and trees round it. Its hill is wooded from some fourteen metres off its wall, where
+    // the ground kept open for the walls' sake ends, out for a furlong and more, thinning towards the road and the village along it.)
+    const castleWoods = (x: number, z: number) => {
+      const c = site.castle;
+      if (!c) return 0;
+      const off = castleOff(c, x, z);
+      return smooth((off - 14) / 14) * (1 - smooth((off - 120) / 70)) * smooth((offTrack(x, z) - 9) / 14);
+    };
+    const woodLean = (x: number, z: number): number => !zones ? 0
+      : z > zones.forest[0] ? 0.2 * smooth((z - zones.forest[0]) / 25) - 0.3 * (1 - smooth((z - zones.forest[0] + 6) / 18))
+      : Math.max(z > zones.fields[0] ? -0.3 : z > zones.village[0] ? -0.32 : -0.45, -0.45 + 0.62 * castleWoods(x, z));
     const woods = (area: { x0: number; x1: number; z0: number; z1: number }, step: number, f: (x: number, z: number) => number, skip: (x: number, z: number) => boolean) => {
       for (let gz = area.z0; gz < area.z1; gz += step) for (let gx = area.x0; gx < area.x1; gx += step) {
         const x0 = gx + plant.range(0.1, 0.9) * step, z0 = gz + plant.range(0.1, 0.9) * step;
-        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3);
+        const thick = fbm2(x0 * 0.03 + s2, z0 * 0.03 + s1, 3) + woodLean(x0, z0);
         const pair = step > 8 && thick > 0.6 && own01(x0, z0, 51) < 0.5 ? 2 : 1;
         for (let k = 0; k < pair; k++) {
           const x = k ? gx + own01(x0, z0, 52) * step : x0, z = k ? gz + own01(x0, z0, 53) * step : z0;
-          if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5)) continue;
+          // (Nor in or against a house of the village, or within the castle's wall or by it: the woods' trees knew nothing of either while
+          // the castle's ground and the village were kept clear of woods, and stood in them once woods came round them.)
+          if (skip(x, z) || inHouse(x, z, 3) || inMeadow(x, z, 2.5) || nearBuilt(x, z, 3)) continue;
           if (offTrack(x, z) < 3.2 || offFoot(x, z) < 1.8 || !clearOfStones(x, z, 0.8) || clearOfFeatures(x, z) < 3) continue;
-          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) : thick;
+          const here = k ? fbm2(x * 0.03 + s2, z * 0.03 + s1, 3) + woodLean(x, z) : thick;
           if (here < 0.46 || slopeOf(f, x, z, 1.5) > 0.75) continue;
           if (step > 8 && own01(x, z, 54) < 0.85 * (1 - smooth((here - 0.46) / 0.12))) continue;
           // Full detail anywhere the player can stand, and for a stone's throw beyond, so that the wood the valley lies in goes on as
@@ -2623,7 +2923,31 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const shelfEnds = terraces.map((t) => { const z = t.rise === 'n' ? t.z1 - 2.4 : t.z0 + 2.4; return [sideAt(t.side, z) + (t.side === 'w' ? 1 : -1) * (4.7 + t.depth * 0.62), z]; });
     const row = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('treerow') : null; // (no woods when a row is asked for, so the row stands alone)
     if (!row) woods(fine, 6.2, eased, (x, z) => (!!site.keep && Math.hypot(x - site.keep.x, z - site.keep.z) < (site.keep.kind === 'castle' ? 34 : 16)) || shelfEnds.some(([lx, lz]) => Math.hypot(x - lx, z - lz) < 4.5));
-    if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, inFine);
+    if (!row) woods({ x0: cxA - reach + 6, x1: cxA + reach - 6, z0: czA - reach + 6, z1: czA + reach - 6 }, 10, ground, (x, z) => inFine(x, z) || ringOut(x, z) > -4);
+    // Trees among the village's houses (asked for: some near the buildings): a fruit tree in a garden or yard behind a house more often
+    // than not, a broad old tree at a corner of the square, and now and then one beside a house, off its gable. Young and spreading,
+    // and from a stream of their own, so that nothing else moves.
+    if (!row && site.village) {
+      const vt = rng.fork('village trees'), tq = rng.fork('village tree ages');
+      const ok = (x: number, z: number, m: number) => !nearBuilt(x, z, m) && offTrack(x, z) > 3 && offFoot(x, z) > 1.6 && clearOfFeatures(x, z) > 3 && clearOfStones(x, z, 0.8) && (!fieldList.length || fieldAt(x, z, 3) < 0);
+      for (const pl of site.village.plots) {
+        if (!vt.chance(0.65)) continue;
+        const cx = pl.reduce((a, q) => a + q[0], 0) / pl.length, cz = pl.reduce((a, q) => a + q[1], 0) / pl.length;
+        const x = cx + vt.range(-1.2, 1.2), z = cz + vt.range(-1.2, 1.2);
+        if (ok(x, z, 2.2)) tree(x, z, ground(x, z), 1, { oak: true, roll: tq.range(0.72, 0.95) });
+      }
+      const sq = site.village.square;
+      if (sq && vt.chance(0.8)) {
+        const k = vt.int(0, sq.length - 1), [qx, qz] = sq[k], mx = sq.reduce((a, q) => a + q[0], 0) / sq.length, mz = sq.reduce((a, q) => a + q[1], 0) / sq.length;
+        const x = qx + (mx - qx) * 0.22, z = qz + (mz - qz) * 0.22;
+        if (ok(x, z, 2.5)) tree(x, z, ground(x, z), 1, { oak: true, roll: tq.range(0.3, 0.6), old: true });
+      }
+      for (const b of houses) {
+        if (!b.set || !vt.chance(0.35)) continue;
+        const side = vt.chance(0.5) ? 1 : -1, [x, z] = fromFront(b, side * (b.w / 2 + vt.range(3.2, 4.5)), b.d * vt.range(0.3, 0.9));
+        if (ok(x, z, 2.6)) tree(x, z, ground(x, z), 1, { oak: vt.chance(0.6), roll: tq.range(0.55, 0.9) });
+      }
+    }
     // `?treerow=x,z`: a row of every kind of broadleaf in turn, seven metres apart along x, for looking at.
     if (row) {
       const [rx, rz] = row.split(',').map(Number);
@@ -2771,6 +3095,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     planting.muted = false;
 
     const heather: Colour = season === 'spring' ? [0.1, 0.18, 0.06] : winter ? [0.18, 0.1, 0.11] : [0.42, 0.14, 0.34];
+    __T('what lies and grows');
     // ---- a second, taller growth, from a stream of its own so that nothing above is disturbed
     const lush = rng.fork('lush');
     // Meadow grass: knee-high and close where the ground is moist and nobody walks, thinning to
@@ -2796,6 +3121,55 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       planting.tuft(planting.grass, x, y - 0.05, z, 0.55 + 0.4 * tall, tall, turn, straw([(0.16 + 0.2 * dry) * c[0] * tone, (0.3 + 0.03 * dry) * c[1] * tone, (0.05 + 0.05 * dry) * c[2] * tone], tone));
     }
     planting.muted = false;
+    // The fields: their crops, close in rows across them; and dry-stone walls about them, with a gateway on the side towards the track.
+    if (fieldList.length) {
+      const cq = rng.fork('crops');
+      cropping = true;
+      for (const [k, f] of fieldList.entries()) {
+        for (let gz = f.z0; gz < f.z1; gz += 0.62) for (let gx = f.x0; gx < f.x1; gx += 0.62) {
+          const x = gx + cq.range(0, 0.62), z = gz + cq.range(0, 0.62), yaw = cq.range(0, Math.PI * 2);
+          if (!inPolygon(f.corners, x, z) || edgeOff(f.corners, x, z) < 0.9) continue;
+          const y = ground(x, z);
+          if (f.crop === 'wheat' || f.crop === 'barley' || f.crop === 'oats') {
+            // (In winter the fields are stubble under the snow: a crop's tufts stand short and straw-coloured.)
+            const tc = cropTint(f.crop), tall = (f.crop === 'oats' ? 0.75 : 0.85) * (season === 'spring' ? 0.45 : winter ? 0.22 : 1) * cq.range(0.85, 1.1);
+            planting.tuft(planting.grass, x, y - 0.04, z, cq.range(0.5, 0.7), tall, yaw, [0.3 * tc[0], 0.3 * tc[1], 0.12 * tc[2]]);
+          } else if (f.crop === 'roots') {
+            const row = Math.abs((((x * 0.6 + z * 0.08) % 1.6) + 1.6) % 1.6 - 0.8);
+            if (row < 0.3 && !winter) planting.tuft(planting.herbs, x, y - 0.04, z, cq.range(0.5, 0.7), cq.range(0.3, 0.45), yaw, [0.1, 0.22, 0.06]);
+          } else if (f.crop === 'pasture' && cq.chance(0.5)) {
+            // (Grazed short, and in winter straw.)
+            planting.tuft(planting.grass, x, y - 0.04, z, cq.range(0.45, 0.7), cq.range(0.12, 0.22), yaw, winter ? [0.46, 0.36, 0.15] : [0.17 + 0.1 * parched, 0.3, 0.06]);
+          }
+        }
+        // Its wall: round the field in short lengths, with a gateway halfway along the side by the track.
+        const line: [number, number][] = [], gaps: [number, number][] = [], c = f.corners;
+        for (let e = 0; e < c.length; e++) {
+          const [ax, az] = c[e], [bx, bz] = c[(e + 1) % c.length], n = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.6));
+          const start = line.length;
+          for (let i = 0; i < n; i++) line.push([ax + ((bx - ax) * i) / n, az + ((bz - az) * i) / n]);
+          if (e === c.length - 1) gaps.push([start + Math.floor(n / 2) - 1, start + Math.floor(n / 2) + 1]);
+        }
+        line.push(c[0]);
+        layWall((m) => wild.mesh(m), { line, gaps, fallen: [], height: cq.range(0.95, 1.2) }, ground, [0.62 * (0.6 + 0.4 * stoneTint[0]), 0.6 * (0.6 + 0.4 * stoneTint[1]), 0.56 * (0.6 + 0.4 * stoneTint[2])], cq.fork(`wall${k}`));
+      }
+      cropping = false;
+    }
+    // The village's gardens: greens in rows on their beds.
+    if (site.village && !winter) {
+      const gq = rng.fork('gardens');
+      cropping = true;
+      for (const [n, pl] of site.village.plots.entries()) {
+        if (n % 2) continue;
+        const xs = pl.map((q) => q[0]), zs = pl.map((q) => q[1]);
+        for (let gz = Math.min(...zs); gz < Math.max(...zs); gz += 0.45) for (let gx = Math.min(...xs); gx < Math.max(...xs); gx += 0.45) {
+          const x = gx + gq.range(0, 0.45), z = gz + gq.range(0, 0.45);
+          if (!inPolygon(pl, x, z) || edgeOff(pl, x, z) < 0.6 || Math.abs((((x * 0.7 + z * 0.3) % 1.4) + 1.4) % 1.4 - 0.7) > 0.18) continue;
+          planting.tuft(planting.herbs, x, ground(x, z) - 0.04, z, gq.range(0.35, 0.5), gq.range(0.22, 0.4), gq.range(0, Math.PI * 2), [0.09 + gq.range(0, 0.05), 0.2 + gq.range(0, 0.06), 0.06]);
+        }
+      }
+      cropping = false;
+    }
     // Down the middle of the track, between the ruts, grass in clumps: thick for a few strides, then none.
     {
       const strip = rng.fork('strip');
@@ -2979,7 +3353,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // ground not too steep. (A valley of pasture with nothing on it to graze it was a lawn kept by nobody.)
     {
       const q = rng.fork('flocks'), want = q.chance(0.8) ? q.int(1, 2) : 0, out: { x: number; z: number; r: number; count: number }[] = [];
-      for (let tries = 0; tries < 400 && out.length < want; tries++) {
+      // (Where the valley has a pasture, the sheep are in it, within its walls.)
+      for (const f of fieldList) if (f.crop === 'pasture') {
+        const cx = f.corners.reduce((a, c) => a + c[0], 0) / f.corners.length, cz = f.corners.reduce((a, c) => a + c[1], 0) / f.corners.length;
+        out.push({ x: cx, z: cz, r: Math.max(4, Math.min(12, edgeOff(f.corners, cx, cz) - 2)), count: q.int(5, 9) });
+      }
+      for (let tries = 0; tries < 400 && out.length < want && !fieldList.length; tries++) {
         const x = q.range(g.x0, g.x1), z = q.range(g.z0, g.z1);
         if (!inGrounds(x, z, 10) || inHouse(x, z, 18) || offTrack(x, z) < 8 || offFoot(x, z) < 4 || shadeAt(x, z) > 0.12 || clearOfFeatures(x, z) < 8) continue;
         if (waterOver(x, z, ground(x, z)) > -1 || slopeOf(ground, x, z, 3) > 0.25 || out.some((f) => Math.hypot(f.x - x, f.z - z) < 50)) continue;
@@ -3037,6 +3416,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     }
     censuses.push(census);
 
+    __T('the second growth');
     // ---- what has been built or set up out here
     if (site.camp) {
       const way = (site.paths ?? []).find((q) => q.to === 'camp'), made = buildCamp(site.camp, ground, sceneryMesh, rng.fork('campbuild'), way ? way.points[way.points.length - 1] : null, (x, z) => turfColour(x, z, s1));
@@ -3351,13 +3731,38 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       finds.push({ at: V(cx - q.inw * 0.8, fy + 0.4, q.z + 0.5), what: 'a lamp of green glass, cold for years, on the floor of the grotto' });
     });
     for (const t of towers) buildTower(t, t.base);
+    // The castle: its curtain wall along the brow of its hill, its towers and its gate (`render/castle.ts`). Its keep is among `towers`.
+    if (site.castle) {
+      const wasGroup = wild.group;
+      wild.group = 'castle';
+      buildCastle({ c: site.castle, mesh: (material) => wild.mesh(material), ground: swells, floor: p.floor, stone: stoneTint });
+      wild.group = wasGroup;
+    }
     // Buildings by the track. (The first timber house of a row is its inn.)
     houses.forEach((b, i) => {
       wild.group = 'house';
       // (Made in meshes of its own and then laid, so that its rooms can be marked as indoors and the feet of its walls damp: see `placeHouse`.)
-      const local = new Map<string, MeshBuilder>();
-      buildBuilding(b, b.base, (material) => { if (!local.has(material)) local.set(material, new MeshBuilder()); return local.get(material)!; }, rng.fork(`building${i}`), [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]], i === 0 && !b.wheel);
-      placeHouse(b, b.base, local, (material) => wild.mesh(material), { facing: b.turn ?? (b.faces === 'w' ? Math.PI : 0), foot: ground });
+      const local = new Map<string, MeshBuilder>(), into = (material: string) => { if (!local.has(material)) local.set(material, new MeshBuilder()); return local.get(material)!; };
+      // (A house turned to face a road wherever it bends is built facing west about its own middle and turned into place, as a town's
+      // are: built where it stands, the builder set it square to the valley, while its ground was levelled, and the ground's sheet cut
+      // away, for it as it was turned, and its corners stood out over the slope.)
+      const turned = b.turn !== undefined, own: Building = turned ? { ...b, x: 0, z: 0, faces: 'w', turn: undefined } : b, stone: Colour = [0.86 * stoneTint[0], 0.77 * stoneTint[1], 0.63 * stoneTint[2]];
+      buildBuilding(own, b.base, into, rng.fork(`building${i}`), stone, i === 0 && !b.wheel);
+      // Its footing: where the ground about it lies below its floor, as it does on a slope, stone from under its floor down into the
+      // ground under its main block and its wings, as a town's houses have.
+      {
+        let low = b.base;
+        for (const r of b.rects) for (const [u, v] of [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1], [(r.u0 + r.u1) / 2, r.v0], [(r.u0 + r.u1) / 2, r.v1], [r.u0, (r.v0 + r.v1) / 2], [r.u1, (r.v0 + r.v1) / 2]]) {
+          const [x, z] = fromFront(b, u, v);
+          low = Math.min(low, ground(x, z));
+        }
+        // (Not under a cellar, whose walls its builder raises.)
+        if (low < b.base - 0.05 && !b.cellar) {
+          const { box } = buildingTools(own, b.base, into), tone: Colour = [stone[0] * 0.85, stone[1] * 0.85, stone[2] * 0.85];
+          for (const r of b.rects) box('stone', r.u0 - 0.05, r.u1 + 0.05, low - b.base - 0.6, 0.02, r.v0 - 0.05, r.v1 + 0.05, tone);
+        }
+      }
+      placeHouse(b, b.base, local, (material) => wild.mesh(material), { facing: b.turn ?? (b.faces === 'w' ? Math.PI : 0), foot: ground, ...(turned ? { turn: { angle: b.turn! - Math.PI, x: b.x, z: b.z } } : {}) });
       wild.group = 'wild';
       // A mill's waterwheel: two rims of short timbers, spokes from the hub to each, paddles between the rims, and the axle into the wall.
       if (b.wheel) {
@@ -3378,6 +3783,56 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         layBeam(wood, V(w.x - 0.55, cy, w.z), V(b.x + dir * (b.d / 2 - 0.5), cy, w.z), 0.22, 0.22, oak, 90);
       }
     });
+    // The village's plots, walled in dry stone on three sides, the house standing across the fourth; and the well in its square.
+    if (site.village) {
+      const vq = rng.fork('village walls'), wallStone: Colour = [0.62 * (0.6 + 0.4 * stoneTint[0]), 0.6 * (0.6 + 0.4 * stoneTint[1]), 0.56 * (0.6 + 0.4 * stoneTint[2])];
+      for (const [n, pl] of site.village.plots.entries()) {
+        // (Its corners go round from the far side's left: the side by the house, from the third to the fourth, is not walled.)
+        const sides = [pl[3], pl[0], pl[1], pl[2]], line: [number, number][] = [];
+        for (let e = 0; e < 3; e++) {
+          const [ax, az] = sides[e], [bx, bz] = sides[e + 1], m = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5));
+          for (let i = 0; i < m; i++) line.push([ax + ((bx - ax) * i) / m, az + ((bz - az) * i) / m]);
+        }
+        line.push(sides[3]);
+        layWall((m) => wild.mesh(m), { line, gaps: [], fallen: [], height: vq.range(0.75, 1.0) }, ground, wallStone, vq.fork(`plot${n}`));
+      }
+      // The churchyard, walled all round in dry stone a little higher, with a gateway before the church's door.
+      const cy = site.village.churchyard;
+      if (cy) {
+        const line: [number, number][] = [];
+        let gate = 0, best = Infinity;
+        for (let e = 0; e < 4; e++) {
+          const [ax, az] = cy.ring[e], [bx, bz] = cy.ring[(e + 1) % 4], m = Math.max(2, Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5));
+          for (let i = 0; i < m; i++) {
+            const x = ax + ((bx - ax) * (i + 0.5)) / m, z = az + ((bz - az) * (i + 0.5)) / m, d = Math.hypot(x - cy.gate[0], z - cy.gate[1]);
+            if (d < best) { best = d; gate = line.length; }
+            line.push([ax + ((bx - ax) * i) / m, az + ((bz - az) * i) / m]);
+          }
+        }
+        line.push(cy.ring[0]);
+        layWall((m) => wild.mesh(m), { line, gaps: [[gate - 1, gate + 1]], fallen: [], height: vq.range(1.0, 1.2) }, ground, wallStone, vq.fork('churchyard'));
+      }
+      if (site.village.well) {
+        const [wx, wz] = site.village.well, wy = ground(wx, wz), made = solids((material) => wild.mesh(material));
+        const { solid } = anyAngle((m) => wild.mesh(m));
+        const ring = (r: number, y0: number, y1: number, colour: Colour) => {
+          const n = 10;
+          for (let k = 0; k < n; k++) {
+            const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2, ri = r - 0.28;
+            const p = (a: number, rr: number, y: number): [number, number, number] => [wx + Math.cos(a) * rr, y, wz + Math.sin(a) * rr];
+            solid('stone', [p(a0, ri, y0), p(a1, ri, y0), p(a1, r, y0), p(a0, r, y0), p(a0, ri, y1), p(a1, ri, y1), p(a1, r, y1), p(a0, r, y1)], colour, 0.6);
+          }
+        };
+        // Its round kerb of stone, the water dark below; two posts, a beam with its windlass, and a little roof of tiles over all.
+        ring(0.95, wy - 0.4, wy + 0.85, wallStone);
+        made.block('stone', V(wx - 0.68, wy + 0.2, wz - 0.68), V(wx + 0.68, wy + 0.22, wz + 0.68), [0.03, 0.04, 0.05]);
+        const oak: Colour = [0.24, 0.16, 0.1];
+        for (const s of [-1, 1]) made.block('wood', V(wx + s * 0.9 - 0.08, wy + 0.6, wz - 0.08), V(wx + s * 0.9 + 0.08, wy + 2.35, wz + 0.08), oak);
+        made.block('wood', V(wx - 1.05, wy + 1.55, wz - 0.06), V(wx + 1.05, wy + 1.67, wz + 0.06), oak);
+        const tileC: Colour = [0.55, 0.3, 0.22];
+        for (const s of [-1, 1]) solid('tile', [[wx - 1.2, wy + 2.3, wz], [wx + 1.2, wy + 2.3, wz], [wx + 1.2, wy + 2.3, wz + s * 0.02], [wx - 1.2, wy + 2.3, wz + s * 0.02], [wx - 1.2, wy + 1.95, wz + s * 0.95], [wx + 1.2, wy + 1.95, wz + s * 0.95], [wx + 1.2, wy + 2.0, wz + s * 0.95], [wx - 1.2, wy + 2.0, wz + s * 0.95]], tileC, 0.6);
+      }
+    }
     // At the far end of a terrace, where the view is, somebody has built a cairn; and left something by it.
     for (const t of terraces) {
       if (t.keep) continue;
@@ -3653,6 +4108,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   const finds: { at: Vector3; what: string }[] = [];
   const censuses: Record<string, number>[] = [];
   const wild = new Kit(`${site.seed}/wild`);
+  if (plainStone) wild.materialFor = castleStone;
   wild.group = 'wild';
   const scenery: { meshes: Map<string, MeshBuilder>; cards: CardSet[] } = { meshes: wild.meshes, cards: [] };
   const trees: [number, number][] = [];
@@ -3777,6 +4233,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildIsland({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    // The island's castle about the house, as a valley's: its curtain wall on the island's own ground, its towers and gate, and its keep.
+    if (site.castle && site.island) {
+      const isle = site.island, wasGroup = wild.group;
+      wild.group = 'castle';
+      buildCastle({ c: site.castle, mesh: (material) => wild.mesh(material), ground: (x, z) => islandLandAt(isle, p.floor, x, z), floor: p.floor, stone: stoneTint });
+      wild.group = wasGroup;
+      for (const t of (site.towers ?? []).filter((q) => q.castle)) buildTower(t, p.floor);
+    }
     arrival.spawn = made.spawn;
     arrival.track = made.track;
     farCover = made.far;
@@ -3799,7 +4263,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const fx0 = Math.max(p.x0 - 0.2, Math.min(...outerRects.map((r) => r.x0))), fx1 = Math.min(p.x1 + 0.2, Math.max(...outerRects.map((r) => r.x1)));
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
-    const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag });
+    const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag: built.flag });
     smokes.push(...made.smokes);
     paving = made.paving;
     lamps = made.lamps;
@@ -3868,14 +4332,15 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.mass(V(p.x0, p.floor - 1.6, p.z0), V(p.x1, p.floor - 0.7, p.z1));
     } else {
       // The floor: flags on the ground, boards over another room; and left open over any stair that comes up through it.
-      const wells = stairsInto(p).map(wellRect);
+      const wells = stairsInto(p).map(headLeg).map(wellRect);
       for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
         if ((p.level ?? 0) > 0) kit.plane('wood', V(r.x0, p.floor, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, 1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
         else kit.slab('floor', r.x0, r.z0, r.x1, r.z1, p.floor, open ? flag : hallFlag);
       }
       // Solid under it, unless there is a room there.
-      if (!roomUnder(p)) kit.mass(V(p.x0, p.floor - 1.2, p.z0), V(p.x1, p.floor - 0.035, p.z1));
-      for (const w of stairsInto(p)) {
+      // (In a cathedral, rooms lie under parts of others without a stair between: the solid is left out over each.)
+      if (!roomUnder(p)) for (const r of without({ x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 }, placesUnder(p))) kit.mass(V(r.x0, p.floor - 1.2, r.z0), V(r.x1, p.floor - 0.035, r.z1));
+      for (const w of stairsInto(p).map(headLeg)) {
         // The thickness of the floor shows round the well: it is boarded in, on the two sides that are not wall or stair.
         const r = wellRect(w), under = places[w.a], y0 = under.floor + under.wall - 0.27, alongX = w.side === 'n' || w.side === 's', f = flightOf(w);
         const foot = w.at + f.dir * stepsUnderCeiling(w) * f.tread;
@@ -3903,7 +4368,47 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
           railed(xw + (w.side === 'w' ? 0.1 : -0.1), foot - f.dir * 0.05, xi + (w.side === 'w' ? 0.05 : -0.05), foot - f.dir * 0.05);
         }
       }
-      for (const w of stairsFrom(p)) {
+      for (const w of stairsFrom(p).filter((x) => x.round)) {
+        // A stair round the walls: each step a block set into the wall and carried out from it, a hand deeper than a step so that
+        // the flight has a soffit under it; a slab at each landing in the corners; and a rail along the open side, posts and a top
+        // rail following the flight, so that nobody steps off it into the well of the tower.
+        const { legs, landings, width } = roundStair(site, w), stepStyle: MasonryStyle = { ...hallFlag, course: [0.45, 0.45], length: [1.4, 1.4] };
+        const rail = anyAngle((m) => kit.mesh(m)), oak: [number, number, number] = [0.36, 0.25, 0.16];
+        const inner = (side: Side, along: number, off: number): [number, number] => (side === 'n' ? [along, p.z0 + off] : side === 's' ? [along, p.z1 - off] : side === 'w' ? [p.x0 + off, along] : [p.x1 - off, along]);
+        const post = (x: number, z: number, y: number) => kit.box('wood', V(x - 0.05, y - 0.05, z - 0.05), V(x + 0.05, y + 1.0, z + 0.05), beam, beam, 'post');
+        const bar = (a: [number, number, number], b: [number, number, number]) => {
+          const dx = b[0] - a[0], dz = b[2] - a[2], l = Math.hypot(dx, dz) || 1, nx = (-dz / l) * 0.04, nz = (dx / l) * 0.04;
+          rail.solid('wood', [[a[0] - nx, a[1] - 0.05, a[2] - nz], [a[0] + nx, a[1] - 0.05, a[2] + nz], [b[0] + nx, b[1] - 0.05, b[2] + nz], [b[0] - nx, b[1] - 0.05, b[2] - nz], [a[0] - nx, a[1] + 0.04, a[2] - nz], [a[0] + nx, a[1] + 0.04, a[2] + nz], [b[0] + nx, b[1] + 0.04, b[2] + nz], [b[0] - nx, b[1] + 0.04, b[2] - nz]], oak);
+        };
+        // (Each step one stone, its arrises worn: a solid with its edges taken off, and not coursed masonry, of which a tower's
+        // hundreds of steps would be a quarter of a million triangles.)
+        const stepTone: [number, number, number] = [hallFlag.tint[0] * 0.95, hallFlag.tint[1] * 0.95, hallFlag.tint[2] * 0.95];
+        const stone = (b: { min: Vector3; max: Vector3 }) => { const { min: a, max: c } = b; kit.mass(a, c); rail.rounded('floor', [[a.x, a.y, a.z], [c.x, a.y, a.z], [c.x, a.y, c.z], [a.x, a.y, c.z], [a.x, c.y, a.z], [c.x, c.y, a.z], [c.x, c.y, c.z], [a.x, c.y, c.z]], stepTone, 0.02); };
+        void stepStyle;
+        for (const leg of legs) {
+          const fr = frameOf(p, leg.side, 0), dir = leg.to >= leg.from ? 1 : -1;
+          for (let k = 0; k < leg.steps; k++) {
+            const a = leg.from + dir * k * ROUND_TREAD, top = p.floor + leg.y0 + STEP * (k + 1);
+            stone(wallBox(fr, alongFrame(p, leg.side, a, 0), alongFrame(p, leg.side, a + dir * ROUND_TREAD, 0), Math.max(p.floor - 0.05, top - 0.45), top, 0.12, -width));
+          }
+          // (The rail rises a step's height a tread; its posts stand on the steps, a little in from their open edge.)
+          const n = Math.max(2, Math.ceil(Math.abs(leg.to - leg.from) / 1.1) + 1);
+          for (let i = 0; i < n; i++) {
+            const along = leg.from + (leg.to - leg.from) * (i / (n - 1)), [x, z] = inner(leg.side, along, width - 0.07);
+            post(x, z, p.floor + leg.y0 + STEP * Math.max(1, Math.min(leg.steps, Math.ceil((i / (n - 1)) * leg.steps))));
+          }
+          const [ax, az] = inner(leg.side, leg.from, width - 0.07), [bx, bz] = inner(leg.side, leg.to, width - 0.07);
+          bar([ax, p.floor + leg.y0 + STEP + 0.95, az], [bx, p.floor + leg.y0 + STEP * leg.steps + 0.95, bz]);
+        }
+        for (const l of landings) {
+          stone({ min: V(l.x0, p.floor + l.y - 0.4, l.z0), max: V(l.x1, p.floor + l.y, l.z1) });
+          // (Its two open sides are where the flights come onto it and go off it; only its inner corner looks into the well, and a post
+          // stands there, where the rails of the two flights meet.)
+          const cxL = l.x0 <= p.x0 + 0.01 ? l.x1 : l.x0, czL = l.z0 <= p.z0 + 0.01 ? l.z1 : l.z0, wx = l.x0 <= p.x0 + 0.01 ? p.x0 : p.x1, wz = l.z0 <= p.z0 + 0.01 ? p.z0 : p.z1;
+          post(cxL + (cxL > wx ? -0.07 : 0.07), czL + (czL > wz ? -0.07 : 0.07), p.floor + l.y);
+        }
+      }
+      for (const w of stairsFrom(p).filter((x) => !x.round)) {
         // The flight: courses of stone a step high, each a step shorter than the one under it.
         const f = flightOf(w), fr = frameOf(p, w.side, 0), stepStyle: MasonryStyle = { ...hallFlag, course: [STEP, STEP], length: [0.8, 1.3] };
         for (let k = 1; k <= f.steps; k++) {
@@ -3922,15 +4427,18 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const R = span(p) / 2;
       const end = p.roof === 'barrel' && isEndWall(p, side);
       // A cave has masonry only where the builders walled it off to hang a door.
+      // (Under a pointed vault the end wall is cut to its point; under a vault of more than one span it is built up whole, and each
+      // span's vault meets it.)
       if (!cave || holesOn(p, side, 0).some((h) => !h.way.natural)) {
-        kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, top, ashlar, {
-          openings: holesOn(p, side, 0.1),
-          keep: end ? (u, y) => y < roofY + 0.3 || Math.hypot(u - mid, y - roofY) < R + 0.45 : undefined,
-        });
+        const keep = end && (p.spans ?? 1) <= 1 ? (u: number, y: number) => y < roofY + 0.3 || archSdf(u - mid, y - roofY, R, pointOf(p)) < 0.45 : undefined;
+        // (A cathedral's walls higher than a man sees close are of larger blocks, from a course a little over the doors.)
+        const split = cath && top - p.floor > 9 ? p.floor + NEAR : top;
+        kit.wallFace('stone', f, cave ? p.floor - 0.6 : p.floor - 0.1, split, cath ? midStone : ashlar, { openings: holesOn(p, side, 0.1), keep });
+        if (split < top) kit.wallFace('stone', f, split, top, big, { openings: holesOn(p, side, 0.1), keep, courseKey: 'high' });
       }
       // Solid behind the wall, one wall's thickness deep; beyond that is another place or the outside.
       const ext = T / 2 + 0.02;
-      kit.wallMass(frameOf(p, side, ext), T, p.floor - 1.2, p.roof === 'sky' ? top : site.top, holesOn(p, side, ext));
+      kit.wallMass(frameOf(p, side, ext), T, p.floor - 1.2, p.roof === 'sky' ? top : solidTop(p), holesOn(p, side, ext));
     }
 
     // Roof.
@@ -4039,16 +4547,68 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
     } else if (p.roof === 'barrel') {
-      const R = span(p) / 2;
-      const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1);
-      const start = p.axis === 'x' ? V(p.x0 - 0.1, roofY, cz) : V(cx, roofY, p.z0 - 0.1);
+      const n = p.spans ?? 1, R = span(p) / 2 / n, k = pointOf(p);
+      const axis = p.axis === 'x' ? V(1, 0, 0) : V(0, 0, 1), across = p.axis === 'x' ? V(0, 0, 1) : V(1, 0, 0);
       const length = (p.axis === 'x' ? dx : dz) + 0.2;
-      kit.barrelVault('stone', start, axis, length, R, vaultStone);
-      kit.mass(V(p.x0 - T / 2, roofY + R + 0.06, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      // (Each span its own vault; between them, a row of columns under a beam of stone that the vaults spring from.)
+      const offsets = Array.from({ length: n }, (_, i) => -span(p) / 2 + R * (2 * i + 1));
+      for (const o of offsets) {
+        const start = (p.axis === 'x' ? V(p.x0 - 0.1, roofY, cz) : V(cx, roofY, p.z0 - 0.1)).addScaledVector(across, o);
+        kit.barrelVault('stone', start, axis, length, R, cath && R > 1.6 ? bigVault : vaultStone, k);
+      }
+      kit.mass(V(p.x0 - T / 2, roofY + vaultRise(p) + 0.06, p.z0 - T / 2), V(p.x1 + T / 2, solidTop(p), p.z1 + T / 2));
+      if (n > 1) {
+        const lo = p.axis === 'x' ? p.x0 : p.z0, hi = p.axis === 'x' ? p.x1 : p.z1, bays = Math.max(2, Math.round((hi - lo) / 3.2));
+        for (let i = 1; i < n; i++) {
+          const line = (p.axis === 'x' ? cz : cx) - span(p) / 2 + 2 * R * i;
+          const at = (along: number, acr: number, y: number) => (p.axis === 'x' ? V(along, y, acr) : V(acr, y, along));
+          const box = (a0: number, a1: number, c0: number, c1: number, y0: number, y1: number, style: MasonryStyle, tag: string) => {
+            const A0 = at(a0, c0, y0), A1 = at(a1, c1, y1);
+            kit.box('stone', V(Math.min(A0.x, A1.x), y0, Math.min(A0.z, A1.z)), V(Math.max(A0.x, A1.x), y1, Math.max(A0.z, A1.z)), style, coping, tag);
+          };
+          // The beam the two vaults spring from, from wall to wall over the columns.
+          box(lo - 0.1, hi + 0.1, line - 0.28, line + 0.28, roofY - 0.42, roofY + R * 0.55, dressed, 'beam');
+          for (let j = 1; j < bays; j++) {
+            const a = lo + ((hi - lo) * j) / bays;
+            // A column: a square base, a round shaft as a drum of stone (here eight-sided), and a cushion capital under the beam.
+            box(a - 0.36, a + 0.36, line - 0.36, line + 0.36, p.floor - 0.05, p.floor + 0.32, coping, 'base');
+            const c = at(a, line, 0), drum = anyAngle((m) => kit.mesh(m)), r = 0.24, sides = 8, y0 = p.floor + 0.32, y1 = roofY - 0.62;
+            for (let q = 0; q < sides; q++) {
+              const t0 = (q / sides) * Math.PI * 2, t1 = ((q + 1) / sides) * Math.PI * 2, ca = Math.cos(t0) * r, sa = Math.sin(t0) * r, cb2 = Math.cos(t1) * r, sb = Math.sin(t1) * r;
+              drum.face('stone', [[c.x + ca, y0, c.z + sa], [c.x + cb2, y0, c.z + sb], [c.x + cb2, y1, c.z + sb], [c.x + ca, y1, c.z + sa]], [0.78 * stoneTint[0], 0.72 * stoneTint[1], 0.62 * stoneTint[2]], [c.x, (y0 + y1) / 2, c.z]);
+            }
+            box(a - 0.34, a + 0.34, line - 0.34, line + 0.34, roofY - 0.62, roofY - 0.42, coping, 'capital');
+          }
+        }
+      }
+
+      // In a cathedral's crypt, tombs: a chest of stone in each bay of its side spans, an effigy lying on its lid, clear of the doors
+      // and of the stair's foot; the middle span is the way through.
+      if (cath && p.name === 'crypt' && n > 2) {
+        const lo = p.axis === 'x' ? p.x0 : p.z0, hi = p.axis === 'x' ? p.x1 : p.z1, bays = Math.max(2, Math.round((hi - lo) / 3.2)), tq = rng.fork(`tombs${p.id}`);
+        const sidesAcross: Side[] = p.axis === 'x' ? ['n', 's'] : ['w', 'e'];
+        for (const [k2, o] of [[0, offsets[0]], [1, offsets[n - 1]]] as [number, number][]) {
+          const doors = holesOn(p, sidesAcross[k2], 0);
+          for (let j = 0; j < bays; j++) {
+            const a0 = lo + ((hi - lo) * j) / bays, a1 = lo + ((hi - lo) * (j + 1)) / bays, am = (a0 + a1) / 2;
+            if (a1 - a0 < 2.8 || doors.some((h) => Math.abs(h.at - am) < h.w + 2.2) || !tq.chance(0.75)) continue;
+            const c = (p.axis === 'x' ? cz : cx) + o, L = Math.min(2.2, a1 - a0 - 0.9), W = Math.min(0.95, R * 1.1);
+            const at = (along: number, acr: number) => (p.axis === 'x' ? [along, acr] : [acr, along]);
+            const [x0, z0] = at(am - L / 2, c - W / 2), [x1, z1] = at(am + L / 2, c + W / 2);
+            kit.box('stone', V(Math.min(x0, x1), p.floor - 0.05, Math.min(z0, z1)), V(Math.max(x0, x1), p.floor + 0.78, Math.max(z0, z1)), dressed, coping, 'tomb');
+            kit.box('stone', V(Math.min(x0, x1) - 0.06, p.floor + 0.78, Math.min(z0, z1) - 0.06), V(Math.max(x0, x1) + 0.06, p.floor + 0.92, Math.max(z0, z1) + 0.06), coping, coping, 'tomblid');
+            // The effigy: a figure lying with its hands joined, as a long block with a head at one end and a cushion under it.
+            const [e0x, e0z] = at(am - L / 2 + 0.25, c - W * 0.22), [e1x, e1z] = at(am + L / 2 - 0.45, c + W * 0.22);
+            kit.box('stone', V(Math.min(e0x, e1x), p.floor + 0.92, Math.min(e0z, e1z)), V(Math.max(e0x, e1x), p.floor + 1.12, Math.max(e0z, e1z)), dressed, dressed, 'effigy');
+            const [hx, hz] = at(am + L / 2 - 0.3, c);
+            kit.box('stone', V(hx - 0.13, p.floor + 0.92, hz - 0.13), V(hx + 0.13, p.floor + 1.18, hz + 0.13), dressed, dressed, 'effigyhead');
+          }
+        }
+      }
 
       const slots = pilasterSlots.get(p.id)!;
       for (const pos of new Set(slots.map((s) => s.pos))) {
-        kit.rib('stone', p.axis === 'x' ? V(pos, roofY, cz) : V(cx, roofY, pos), axis, R, 0.52, 0.3, dressed);
+        for (const o of offsets) kit.rib('stone', (p.axis === 'x' ? V(pos, roofY, cz) : V(cx, roofY, pos)).addScaledVector(across, o), axis, R, n > 1 ? 0.36 : 0.52, n > 1 ? 0.2 : 0.3, cath && R > 2 ? bigDressed : dressed, k);
       }
       for (const s of slots) {
         // In the wall's own terms: along it, and out of the wall into the room (negative depth).
@@ -4056,7 +4616,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const u = alongFrame(p, s.side, s.pos, 0);
         if (s.clear) {
           const b = wallBox(f, u - 0.26, u + 0.26, p.floor - 0.1, roofY - 0.2, 0.05, -0.3);
-          kit.box('stone', b.min, b.max, ashlar);
+          kit.box('stone', b.min, b.max, roofY - p.floor > 9 ? big : ashlar);
         }
         const c = wallBox(f, u - 0.33, u + 0.33, roofY - 0.2, roofY + 0.02, 0.05, -0.37);
         kit.box('stone', c.min, c.max, coping, coping, 'impost');
@@ -4064,7 +4624,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     } else if (p.roof === 'timber') {
       const alongX = dx >= dz;
       // Boards on beams; with a well left in them wherever a stair goes up through to the room above.
-      const wells = stairsFrom(p).map(wellRect);
+      const wells = stairsFrom(p).map(headLeg).map(wellRect);
       for (const r of without({ x0: p.x0 - 0.1, x1: p.x1 + 0.1, z0: p.z0 - 0.1, z1: p.z1 + 0.1 }, wells)) {
         if (alongX) kit.plane('wood', V(r.x0, roofY, r.z0), V(1, 0, 0), V(0, 0, 1), V(0, -1, 0), r.x1 - r.x0, r.z1 - r.z0, plank);
         else kit.plane('wood', V(r.x0, roofY, r.z0), V(0, 0, 1), V(1, 0, 0), V(0, -1, 0), r.z1 - r.z0, r.x1 - r.x0, plank);
@@ -4080,7 +4640,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
       // Solid above, unless there is a room there.
-      if (!roomOver(p)) kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, site.top, p.z1 + T / 2));
+      if (!roomOver(p)) kit.mass(V(p.x0 - T / 2, roofY + 0.08, p.z0 - T / 2), V(p.x1 + T / 2, solidTop(p), p.z1 + T / 2));
     }
 
     // Furnishings by role.
@@ -4215,17 +4775,19 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
       const ring = ringOf.get(p.id);
       if (ring) {
-        // An iron ring of six candles, hung on three chains to a hook and from the hook on one to the ceiling.
-        const R0 = 0.46, R1 = 0.54, n = 16;
+        // An iron ring of six candles, hung on three chains to a hook and from the hook on one to the ceiling. (A cathedral's corona
+        // is greater: twelve candles on a ring two and a half metres across.)
+        const great = coronaOf(p), RR = great ? 1.3 : 0.5, cn = great ? 12 : 6;
+        const R0 = RR - 0.04 - (great ? 0.04 : 0), R1 = RR + 0.04 + (great ? 0.04 : 0), n = great ? 28 : 16;
         for (let k = 0; k < n; k++) {
           const a0 = (k / n) * Math.PI * 2, a1 = ((k + 1) / n) * Math.PI * 2, y0 = ring.y - 0.02, y1 = ring.y + 0.02;
           const c = (r: number, a: number, h: number): [number, number, number] => [ring.x + r * Math.cos(a), h, ring.z + r * Math.sin(a)];
           solid('metal', [c(R0, a0, y0), c(R1, a0, y0), c(R1, a1, y0), c(R0, a1, y0), c(R0, a0, y1), c(R1, a0, y1), c(R1, a1, y1), c(R0, a1, y1)], IRON);
         }
-        const hook = ring.clone().setY(ring.y + 0.8), ceiling = p.roof === 'barrel' ? p.floor + p.wall + span(p) / 2 : roofY;
-        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.5; rod(V(ring.x + 0.5 * Math.cos(a), ring.y + 0.02, ring.z + 0.5 * Math.sin(a)), hook, 0.008, IRON); }
-        rod(hook, hook.clone().setY(ceiling + 0.05), 0.012, IRON);
-        for (let k = 0; k < 6; k++) candle(V(ring.x + 0.5 * Math.cos((k / 6) * Math.PI * 2), ring.y + 0.2, ring.z + 0.5 * Math.sin((k / 6) * Math.PI * 2)), ring.y + 0.02);
+        const hook = ring.clone().setY(ring.y + (great ? 1.6 : 0.8)), ceiling = p.roof === 'barrel' ? p.floor + p.wall + vaultRise(p) : roofY;
+        for (let k = 0; k < 3; k++) { const a = (k / 3) * Math.PI * 2 + 0.5; rod(V(ring.x + RR * Math.cos(a), ring.y + 0.02, ring.z + RR * Math.sin(a)), hook, great ? 0.012 : 0.008, IRON); }
+        rod(hook, hook.clone().setY(ceiling + 0.05), great ? 0.02 : 0.012, IRON);
+        for (let k = 0; k < cn; k++) candle(V(ring.x + RR * Math.cos((k / cn) * Math.PI * 2), ring.y + 0.2, ring.z + RR * Math.sin((k / cn) * Math.PI * 2)), ring.y + 0.02);
       }
       const stand = standOf.get(p.id);
       if (stand) {
@@ -4240,7 +4802,17 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         candle(V(x, y + 1.72, z), y + 1.55);
       }
     }
-    if ((p.role === 'goal' || p.role === 'reward') && !cave) {
+    // On the walk round a tower's spire there is no room for a chest against the parapet: what is kept there lies on a block of stone
+    // in the corner of the walk farthest from where the stair comes up. (A chest there filled the walk, and could only be reached by
+    // its end, a metre from what lay on it.)
+    const walkTop = !!cath && p.roof === 'sky' && (p.level ?? 0) > 0;
+    if (walkTop && site.items.some((it) => it.place === p.id)) {
+      const up = stairsInto(p)[0], head = up ? stairEnds(site, up).head : [cx, cz];
+      const corners: [number, number][] = [[p.x0 + 0.55, p.z0 + 0.55], [p.x1 - 0.55, p.z0 + 0.55], [p.x0 + 0.55, p.z1 - 0.55], [p.x1 - 0.55, p.z1 - 0.55]];
+      const [bx, bz] = corners.sort((a, b) => Math.hypot(b[0] - head[0], b[1] - head[1]) - Math.hypot(a[0] - head[0], a[1] - head[1]))[0];
+      kit.box('stone', V(bx - 0.26, p.floor - 0.02, bz - 0.26), V(bx + 0.26, p.floor + 0.72, bz + 0.26), dressed, coping, 'keyblock');
+      anchors.set(p.id, V(bx, p.floor + 0.72, bz));
+    } else if ((p.role === 'goal' || p.role === 'reward') && !cave && !walkTop) {
       // A stone chest against the wall opposite the way in; the goal's is larger and raised.
       const door = site.ways.find((w) => w.kind === 'door' && (w.a === p.id || w.b === p.id));
       // Against the wall opposite the way in, unless that wall has an opening of its own (a
@@ -4292,13 +4864,14 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       }
     }
     for (const w of stairsFrom(p)) {
-      // The flight itself, and the floor at its foot.
+      // The flight itself, and the floor at its foot. (Of a stair round the walls, all of it that stands low.)
+      if (w.round) { keepClear.push(...lowLegs(w)); continue; }
       const f = flightOf(w);
       keepClear.push(flightRect(w), strip(p, w.side, w.at - f.dir * 1.3, w.at, f.wide + 0.4));
       const foot = strip(p, w.side, w.at - f.dir * 0.9, w.at - f.dir * 0.5, f.wide);
       doorPoints.push([(foot.x0 + foot.x1) / 2, (foot.z0 + foot.z1) / 2]);
     }
-    for (const w of stairsInto(p)) {
+    for (const w of stairsInto(p).map(headLeg)) {
       // The well, with room to walk round it, and the floor at the head of the stair.
       const f = flightOf(w), r = wellRect(w);
       keepClear.push({ x0: r.x0 - 0.5, x1: r.x1 + 0.5, z0: r.z0 - 0.5, z1: r.z1 + 0.5 }, strip(p, w.side, f.to, f.to + f.dir * 1.3, f.wide + 0.4));
@@ -4358,7 +4931,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       const c = alongFrame(p, w.side, w.at, 0.1);
       const op: Opening = { c, w: w.halfWidth, ...shape(w) };
       const secret = w.door?.leaf === 'secret';
-      kit.openingTrim('stone', f, op, T, dressed, secret ? (p.id === site.secret ? 'front' : 'back') : 'both');
+      kit.openingTrim('stone', f, op, T, cath && (op.ys - op.y0 > 4 || op.w > 1.4) ? bigDressed : dressed, secret ? (p.id === site.secret ? 'front' : 'back') : 'both');
       if (w.kind === 'window') {
         const sill = wallBox(f, c - w.halfWidth - 0.22, c + w.halfWidth + 0.22, op.y0 - 0.14, op.y0, -0.07, T + 0.07);
         kit.box('stone', sill.min, sill.max, coping, coping);
@@ -4393,16 +4966,18 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         const yaw = Math.atan2(-d.z, d.x);
         const faces = Math.sign(Math.sin(yaw) * towardsHigh.x + Math.cos(yaw) * towardsHigh.z) || 1;
         const barred = w.door.barredFrom;
-        const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + 3.2, t - 0.14, t + 0.14);
+        // (The leaf fills its doorway, which in a church may be higher than a man's door.)
+        const leafSpring = Math.max(2.0, op.ys - hi), leafTop = leafSpring > 2.01 ? Math.max(3.2, leafSpring + w.halfWidth * 2 + 0.2) : 3.2;
+        const block = wallBox(f, c - w.halfWidth, c + w.halfWidth, hi - 0.3, hi + leafTop, t - 0.14, t + 0.14);
         // A door that starts shut is baked shut, so a locked room does not fill with its neighbour's light.
         if (w.door.leaf === 'shut' || secret) {
-          const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + 3.2, t - 0.03, t + 0.03);
+          const slab = wallBox(f, c - w.halfWidth - 0.05, c + w.halfWidth + 0.05, hi - 0.3, hi + leafTop, t - 0.03, t + 0.03);
           kit.mass(slab.min, slab.max);
         }
         const leafSeed = `${site.seed}/door${site.ways.indexOf(w)}`;
         doors.push({
-          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: 2.0, thickness: thick,
-          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(leafSeed, lw, 2.0, thick, secret ? { ...ashlar, length: [0.4, 0.8], course: [0.27, 0.36] } : undefined),
+          way: site.ways.indexOf(w), hinge, yaw, swing: -faces * 1.62, halfWidth: lw, spring: leafSpring, thickness: thick,
+          leaf: w.door.leaf === 'gate' ? null : buildDoorLeaf(leafSeed, lw, leafSpring, thick, secret ? { ...ashlar, length: [0.4, 0.8], course: [0.27, 0.36] } : undefined),
           material: secret ? 'stone' : 'wood',
           blocker: block,
           centre: f.a.clone().addScaledVector(f.dir, c).addScaledVector(f.normal, -t).setY(hi + 1.2),
@@ -4414,7 +4989,12 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
 
   // ------------------------------------------------------------------ the outside of a house that stands free
   yield { label: 'Walling and roofing the house', at: 0.92 };
-  if (free) {
+  if (free && cath) {
+    // A cathedral's outside is its own: see `cathedral.ts`.
+    kit.field = outdoorFieldAt(places.find((q) => q.role === 'approach')!.floor, 1.0);
+    buildCathedral({ kit, wild, finds, site, outerWindows, shape, ashlar: big, plain: midStone, dressed, coping, stoneTint, rng: rng.fork('cathedral') });
+  }
+  if (free && !cath) {
     const yard = places.find((q) => q.role === 'approach')!, low = yard.floor;
     const ox0 = Math.min(...outerRects.map((r) => r.x0)), ox1 = Math.max(...outerRects.map((r) => r.x1));
     // (Where the house front meets the forecourt it is built with the forecourt, and that stretch is left out here.)
@@ -4445,6 +5025,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         // A plinth along its foot, a band at the height of the rooms' floors upstairs, and a cornice under the roof.
         ledge(r, a, b, low - 0.4, low + 0.42, 0.14, coping, 'plinth');
         ledge(r, a, b, site.top - 0.34, site.top + 0.12, 0.24, coping, 'cornice');
+        // (A castle's hall and ranges are finished with a battlement along the tops of their outer walls, on the cornice, the roofs
+        // behind it: what most tells a castle's buildings from a cloister's.)
+        if (site.castle) {
+          ledge(r, a, b, site.top + 0.12, site.top + 1.15, -0.55, ashlar, 'parapet');
+          const teeth = Math.max(1, Math.round((b - a) / 1.7));
+          for (let m = 0; m < teeth; m++) ledge(r, a + ((b - a) * (m + 0.2)) / teeth, a + ((b - a) * (m + 0.72)) / teeth, site.top + 1.15, site.top + 1.75, -0.55, ashlar, 'merlon');
+        }
       }
     }
     // The windows dressed through the thickness of the wall, each with a sill.
@@ -4462,7 +5049,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     const ridgeOf = new Map<number, { y: number; alongX: boolean; a: number; b: number; c: number }>();
     for (const q of places) {
       if (q.role === 'approach' || (q.level ?? 0) !== 0 || q.roof === 'sky' || q.fallen) continue;
-      const sanctum = q.role === 'goal', pitch = sanctum ? 1.05 : 0.62;
+      const sanctum = q.role === 'goal', pitch = sanctum ? 1.05 : site.castle ? 0.42 : 0.62;
       const e = T / 2 + 0.34, x0 = q.x0 - e, x1 = q.x1 + e, z0 = q.z0 - e, z1 = q.z1 + e, y = site.top + 0.12;
       const alongX = x1 - x0 >= z1 - z0, half = (alongX ? z1 - z0 : x1 - x0) / 2, rise = half * pitch, cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
       const tone: [number, number, number] = [roofTone[0] * (0.94 + 0.12 * ((q.id * 7919) % 11) / 11), roofTone[1] * 0.98, roofTone[2] * 0.97];
@@ -4478,6 +5065,20 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
       kit.box('stone', V(x0, site.top - 0.02, z0), V(x1, y, z1), coping, coping, 'plate');
       kit.box('tile', alongX ? V(r0.x - 0.05, y + rise - 0.06, cz - 0.13) : V(cx - 0.13, y + rise - 0.06, r0.z - 0.05), alongX ? V(r1.x + 0.05, y + rise + 0.1, cz + 0.13) : V(cx + 0.13, y + rise + 0.1, r1.z + 0.05), coping, coping, 'ridge');
       ridgeOf.set(q.id, { y: y + rise, alongX, a: alongX ? r0.x : r0.z, b: alongX ? r1.x : r1.z, c: alongX ? cz : cx });
+      // A castle's chapel shows as one from outside: a bell-cote on its ridge, two piers of dressed stone with the bell hung between
+      // them under a capping, and a cross of iron over it. (Asked for: a chapel that shows as one from outside.)
+      if (site.castle && /chapel/.test(q.name)) {
+        const bx = alongX ? r1.x : cx, bz = alongX ? cz : r1.z, top = y + rise + 0.05;
+        for (const off of [-0.5, 0.5]) {
+          const px = alongX ? bx : bx + off, pz = alongX ? bz + off : bz;
+          kit.box('stone', V(px - 0.16, top - 0.3, pz - 0.16), V(px + 0.16, top + 1.2, pz + 0.16), dressed, coping, 'chapelcote');
+        }
+        kit.box('stone', V(bx - 0.75, top + 1.2, bz - 0.75), V(bx + 0.75, top + 1.36, bz + 0.75), coping, coping, 'chapelcap');
+        kit.box('stone', V(bx - 0.42, top + 1.36, bz - 0.42), V(bx + 0.42, top + 1.62, bz + 0.42), coping, coping, 'chapeltop');
+        kit.box('metal', V(bx - 0.19, top + 0.5, bz - 0.19), V(bx + 0.19, top + 0.98, bz + 0.19), coping, coping, 'chapelbell');
+        kit.box('metal', V(bx - 0.035, top + 1.62, bz - 0.035), V(bx + 0.035, top + 2.5, bz + 0.035), coping, coping, 'chapelcross');
+        kit.box('metal', alongX ? V(bx - 0.035, top + 2.12, bz - 0.28) : V(bx - 0.28, top + 2.12, bz - 0.035), alongX ? V(bx + 0.035, top + 2.2, bz + 0.28) : V(bx + 0.28, top + 2.2, bz + 0.035), coping, coping, 'chapelarm');
+      }
       if (sanctum) {
         // The gables: walls of ashlar up under the roof, in courses that step in as the roof narrows; and a bell-cote on the one nearer the front.
         for (const end of [0, 1]) {
@@ -4487,6 +5088,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
             if (alongX) kit.box('stone', V(at - 0.3, y0, cz - w), V(at + 0.3, y1, cz + w), ashlar, coping, 'gable'); else kit.box('stone', V(cx - w, y0, at - 0.3), V(cx + w, y1, at + 0.3), ashlar, coping, 'gable');
           }
         }
+        if (site.castle) continue;
         const front = alongX ? (Math.abs(x1 - yard.z0) < Math.abs(x0 - yard.z0) ? x1 : x0) : (z1 > z0 ? z1 - 0.3 : z0 + 0.3), top = y + rise + 0.05;
         const bx = alongX ? front + (front > cx ? -0.3 : 0.3) : cx, bz = alongX ? cz : front;
         for (const off of [-0.55, 0.55]) {
@@ -4511,6 +5113,8 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     // Buttresses against the outside of every vaulted room, where the ribs of its vault come down within, to take their thrust;
     // in two stages, each with a sloping coping; and a clasping buttress round every outer corner.
     const buttress = (r: Run, at: number) => {
+      // (A castle's walls are thick enough to need none: buttresses down every wall are a church's, or a cloister's.)
+      if (site.castle) return;
       const mid = low + (site.top - low) * 0.55;
       ledge(r, at - 0.38, at + 0.38, low - 0.4, mid, 0.9, ashlar, 'buttress');
       ledge(r, at - 0.44, at + 0.44, mid, mid + 0.16, 0.98, coping, 'weathering');
@@ -4551,12 +5155,22 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         }
       }
     }
+    const turrets = new Set<string>();
     for (const r of runs) for (const end of [r.from, r.to]) {
       const dir = end === r.from ? -1 : 1, [ox, oz] = outward[r.side], along = r.side === 'n' || r.side === 's';
       // (A point just past the end of the run and just inside the wall: if that is outside the house, the corner is an outer one.)
       const px = along ? end + dir * 0.2 : r.at - ox * 0.2, pz = along ? r.at - oz * 0.2 : end + dir * 0.2;
       if (insideOuter(px, pz)) continue;
       kit.group = 'roofs';
+      if (site.castle) {
+        // A castle's hall has a turret corbelled out at each outer corner of its top instead. (Each corner is met by two runs: once.)
+        const cx = along ? end : r.at, cz = along ? r.at : end, key = `${Math.round(cx * 10)},${Math.round(cz * 10)}`;
+        if (turrets.has(key)) continue;
+        turrets.add(key);
+        const dx = ox + (along ? dir : 0), dz = oz + (along ? 0 : dir), l = Math.hypot(dx, dz) || 1, tr = 1.35;
+        bartizan((m) => kit.mesh(m), cx + (dx / l) * tr * 0.72, cz + (dz / l) * tr * 0.72, tr, site.top - 3.2, site.top + 1.9, [0.62 * stoneTint[0], 0.6 * stoneTint[1], 0.56 * stoneTint[2]], Math.atan2(dz, dx));
+        continue;
+      }
       ledge(r, dir < 0 ? end : end - 0.95, dir < 0 ? end + 0.95 : end, low - 0.4, site.top - 0.75, 0.42, ashlar, 'corner');
       ledge(r, dir < 0 ? end : end - 1.05, dir < 0 ? end + 1.05 : end, site.top - 0.75, site.top - 0.6, 0.5, coping, 'cornercap');
     }
@@ -4597,7 +5211,7 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
   }
 
   // ------------------------------------------------------------------ result
-  const min = V(Infinity, -3, Infinity), max = V(-Infinity, site.top + 2, -Infinity);
+  const min = V(Infinity, -3, Infinity), max = V(-Infinity, Math.max(site.top, ...(cath ? spireTops(site) : [])) + 2, -Infinity);
   for (const p of places) {
     min.x = Math.min(min.x, p.x0 - 3); min.z = Math.min(min.z, p.z0 - 3);
     max.x = Math.max(max.x, p.x1 + 3); max.z = Math.max(max.z, p.z1 + 3);

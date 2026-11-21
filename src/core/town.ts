@@ -332,6 +332,23 @@ function classical(rng: Rng, bays: number, d: number, colour: [number, number, n
   const bk = rng.fork('brick'), brick = bk.chance(0.32) ? (bk.chance(0.5) ? 'stucco' as const : 'bare' as const) : undefined;
   return { style: 'imperial', w: round(bays * 2.55 + 1.6), d: round(d), storeys, heights, bays, colour, portico: bays >= 7 || (bays === 5 && rng.chance(0.4)), ...(brick ? { brick } : {}) };
 }
+/** How high a building's walls rise over the ground before its door: to its eaves. */
+function eavesOf(b: Building): number {
+  return b.style === 'imperial' ? floorOf(b, b.storeys) : b.style === 'timber' ? timberFloor(b, b.storeys) : b.style === 'canal' ? canalEaves(b) : (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0);
+}
+
+/**
+ * How high a building stands over its own ground, to the top of its roof, reckoned generously: its eaves, and over them a roof as
+ * steep as its kind's are (a gable is about as high as half its breadth, a classical roof lower), and any tower on its corners.
+ * A cathedral is made higher than the highest of these about the square (`cathedral.ts`).
+ */
+export function buildingHeight(b: Building): number {
+  const eaves = eavesOf(b), span = Math.min(b.w, b.d), storey = b.heights.length ? b.heights.reduce((s, h) => s + h, 0) / b.heights.length : 3.5;
+  const roof = span / 2 * (b.style === 'imperial' || b.style === 'wooden' ? 0.6 : 1.1);
+  const tower = Math.max(0, ...(b.towers ?? []).map((t) => t.extra * storey + t.size * 0.7));
+  return Math.max(eaves + roof, eaves + tower);
+}
+
 /** A timber house of the town's kind: narrow to the street, gable or eaves to it, two to four storeys. */
 function timber(rng: Rng, w: number, d: number, colour: [number, number, number]): Omit<Building, 'x' | 'z' | 'faces'> {
   const storeys = rng.pick([2, 2, 3, 3, 3, 4]), tall = rng.fork('heights');
@@ -954,7 +971,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // ground, so that no window is made that would look into a wall a stride or two off (`near`, `blinded`)
   {
     const reach = (b: Building) => Math.hypot(b.w / 2, b.d + Math.max(0, ...(b.wings ?? []).map((g) => g.length)));
-    const wallTop = (b: Building) => (b.y ?? 0) + (b.style === 'imperial' ? floorOf(b, b.storeys) : b.style === 'timber' ? timberFloor(b, b.storeys) : b.style === 'canal' ? canalEaves(b) : (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0));
+    const wallTop = (b: Building) => (b.y ?? 0) + eavesOf(b);
     const tenth = (x: number) => Math.round(x * 10) / 10;
     for (const b of t.buildings) {
       const own = footprintOf(b), m = CLOSE + 0.8;

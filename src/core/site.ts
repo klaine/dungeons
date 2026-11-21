@@ -60,9 +60,22 @@ export interface Place {
    * Which storey the place is on: 0, or left out, for the ground storey that all the places of
    * version 1 stand on; 1 for a room over one of those; -1 for a cellar under one. A place on
    * another storey has the same outline as the place it is over or under, and is reached from
-   * it by a stair.
+   * it by a stair. (In a cathedral, storeys go further: a tower's rooms are 1 to 3 over its foot,
+   * and the rooms under the church are reached from one another as well as by stairs, so that a
+   * cell of its dungeon lies under part of a transept, and not under the whole of any one place.)
    */
   level?: number;
+  /**
+   * Of a vaulted place (`barrel`): that its vault is pointed, two arcs of a circle half as broad
+   * again as the place meeting along its crown, as a Gothic vault is, and not half round. Its crown
+   * then stands half as high again over its springing as a half-round vault's would.
+   */
+  pointed?: boolean;
+  /**
+   * Of a vaulted place (`barrel`): how many vaults side by side carry its ceiling, each running its
+   * length, carried between them on rows of columns, as in a crypt. Left out, one across its whole span.
+   */
+  spans?: number;
 }
 
 /** Keys are told apart by their metal. */
@@ -124,6 +137,25 @@ export interface Way {
    * door and no steps; its floor slopes from the one chamber's level to the other's.
    */
   natural?: boolean;
+  /**
+   * Of an arch or a door, how high over the higher of its two floors its arch springs, where that is
+   * not a doorway's height: the arcades of a church, the arch into its crossing. A window in a church
+   * says the same of its own place's floor, and `sill` where it begins.
+   */
+  spring?: number;
+  sill?: number;
+  /** That its arch is pointed (two arcs, each as broad as the opening, meeting at its head), as a Gothic arch is. */
+  pointed?: boolean;
+  /**
+   * Of a stair: that it climbs round the walls of the lower place, as a tower's stair does, and does
+   * not go straight up one of them. It starts at `at` along `side` and climbs along that wall the way
+   * of the sun seen from above (along `n` towards greater x, then `e` towards greater z, `s` towards
+   * lesser x, `w` towards lesser z), turning at each corner onto the next wall by a square landing as
+   * broad as the flight, until it reaches the floor over it; it comes up through that floor along the
+   * wall it ends on, at `to`. Its steps are a step high and a quarter of a metre deep, and nothing is
+   * under them but the wall they are set in. See `roundStair`.
+   */
+  round?: boolean;
 }
 
 /** Something out in the valley. */
@@ -471,8 +503,11 @@ export interface BuildingPlan {
 }
 
 export interface Building {
-  /** Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`), Hanseatic brick (`brick`), or a canal house (`canal`). */
-  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal';
+  /**
+   * Timber-framed (`timber`), stuccoed classical (`imperial`), a classical house of weatherboards on a stone basement (`wooden`),
+   * Hanseatic brick (`brick`), a canal house (`canal`), a village's church of stone (`chapel`, with `chapel`), or a shed of boards (`shed`).
+   */
+  style: 'timber' | 'imperial' | 'wooden' | 'brick' | 'canal' | 'chapel' | 'shed';
   x: number;
   z: number;
   w: number;
@@ -545,9 +580,24 @@ export interface Building {
    * For a building set into rising ground: how much higher the ground stands at its back than
    * before its door. Its lowest storey is then half a basement, open to the front and buried at
    * the back, and it has a second door in the back wall, at `backDoor` across it, onto the ground there.
+   * Of a timber house, a village's on its hillside: its stone ground storey is the half basement, its windows to the street alone, and
+   * its first framed storey has the second door, in the middle bay of its back wall, onto a yard levelled there.
    */
   sunk?: number;
   backDoor?: number;
+  /**
+   * Of a timber house on a hillside that falls away behind it: a cellar under it, as deep as this below its floor, its walls of rough
+   * stone, open to the ground behind the house by a door and a barred window in its back wall, onto a yard levelled there.
+   */
+  cellar?: number;
+  /**
+   * Of a village's church (style `chapel`): its nave is `w` long, along its front, and `d` broad, its walls `heights[0]` high, its door in
+   * the middle of its front's half towards the tower. At one end (`end`, -1 for the left as one stands before the front) a square
+   * tower `tower` metres a side, its walls rising to `height` over the ground before the door, under a spire: `pyramid`, `needle` (eight
+   * sides, tall) or `saddle` (a ridged roof between two gables); at the other a choir `choir` metres long, narrower and lower than the
+   * nave, ending in a half-round apse where `apse`.
+   */
+  chapel?: { end: -1 | 1; tower: number; height: number; spire: 'pyramid' | 'needle' | 'saddle'; spireHeight: number; choir: number; apse: boolean };
   /**
    * Wings reaching back from the ends of the main block, making the building an L (one) or a U
    * (two) about a court behind it. `side` is -1 for the left end as one stands before it and 1
@@ -666,12 +716,16 @@ export interface Town {
  * ground; there are slit windows above. It is no part of the house and has nothing to do with
  * its doors and keys.
  */
+import type { Castle } from './castle';
+
 export interface Tower {
   x: number;
   z: number;
   half: number;
   storeys: number;
   door: 'e' | 'w';
+  /** One of the castle's towers, standing astride its curtain wall. */
+  castle?: boolean;
 }
 
 export interface Stream {
@@ -1035,7 +1089,7 @@ export interface Site {
    * Footpaths: worn lines in the turf, narrower than the track, from it to something off it.
    * Each is its points in order from where it leaves the track, and what it leads to.
    */
-  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' }[];
+  paths?: { points: [number, number][]; to: 'cave' | 'ruin' | 'stones' | 'pond' | 'tower' | 'keep' | 'mill' | 'shrine' | 'camp' | 'mine' | 'lighthouse' | 'castle' | 'chapel' | 'mansion' | 'summit' | 'gallery' | 'scramble' | 'lane' }[];
   /** A camp of charcoal burners in the valley's woods: see `Camp`. */
   camp?: Camp;
   /** Running water in the valley, if there is any. */
@@ -1055,6 +1109,20 @@ export interface Site {
    * against one another, of the kinds in `BrickWork`, and where there is room a church of brick.
    */
   settlement?: 'village' | 'hamlet' | 'manor' | 'town';
+  /**
+   * A valley's stretches from its head down, each as the range of `z` it spans: the castle about the house at the head, the
+   * village below it, then fields and a pasture, and the forest at the foot, where the player arrives.
+   */
+  zones?: { castle: [number, number]; village: [number, number]; fields: [number, number]; forest: [number, number] };
+  /** The castle at a valley's head, about the house, which is its hall and keep, on its hill: see `Castle`. */
+  castle?: Castle;
+  /**
+   * The village at a castle's foot, besides its houses (in `buildings`) and its lanes (in `paths`): its little square beside the road
+   * below the gate, as its corners round, with the well in its middle; and the plots behind its houses, each its corners round, walled.
+   */
+  village?: { square?: [number, number][]; well?: [number, number]; plots: [number, number][][]; churchyard?: { ring: [number, number][]; gate: [number, number] } };
+  /** The valley's fields, in their stretch on either side of the track: each its corners and its crop; a pasture among them for the sheep. */
+  fields?: Town['fields'];
   /**
    * The keep over a village: a tower, or a tower within the curtain walls of a small castle, on
    * top of a promontory over the valley: the terrace in `terraces` marked `keep`, high and broad,
@@ -1093,6 +1161,8 @@ export interface Site {
      */
     deep?: { from: number; leg: number; toward: -1 | 1; x: number; z: number; rx: number; rz: number; height: number; drop: number; join?: { toward: -1 | 1; run: number } };
   };
+  /** If present, the house is a cathedral: see `Cathedral`. (In a harbour town, at the head of its square.) */
+  cathedral?: Cathedral;
   /** Where the player starts. */
   start: number;
   /** Thickness of the walls between places. */
@@ -1107,6 +1177,47 @@ export interface Site {
   /** One sentence describing the place. */
   title: string;
 }
+
+/**
+ * A cathedral: a great church with its towers, its crypt and dungeon under it and its cloister beside it, built of places as any house
+ * is (its nave, aisles, crossing, transepts, choir and shrine are places of the ground storey; its towers' rooms are storeys over their
+ * feet). What is here is what its outside is made of, and what was measured to make it as high as it is.
+ */
+export interface Cathedral {
+  /** What each place of the church proper is: its outside is built from these. (The cloister's rooms and those under the church are ordinary rooms.) */
+  parts: { place: number; part: CathedralPart }[];
+  /**
+   * Its towers that can be climbed, each from its foot (`foot`, the place on the ground storey), its rooms one over another, to its top
+   * (`roof`, open to the sky, a walk behind a parapet round whatever crowns it). `spire` is what does: a spire of stone, crocketed;
+   * of lead or of copper, on a timber frame; or nothing but the parapet and its pinnacles. Its point stands `spireHeight` over the
+   * top's floor.
+   */
+  towers: { foot: number; roof: number; spire: SpireKind; spireHeight: number }[];
+  /**
+   * A tower over the crossing, which is not climbed: its parapet's top stands `top` metres over the crossing's floor, and its spire's
+   * point `spireHeight` over that.
+   */
+  lantern?: { top: number; spire: SpireKind; spireHeight: number };
+  /** Where there is no tower over the crossing: a slender spire of the roofs' metal standing on their ridge over it, so high over the ridge. */
+  fleche?: number;
+  /** What the roofs are covered with: lead, grey; copper gone green; or glazed tiles, dark. */
+  roof: 'lead' | 'copper' | 'tile';
+  /** How steep the roofs of the nave, the transepts and the choir are: their rise over half their breadth. */
+  pitch: number;
+  /** Arched struts over the aisles' roofs, from the buttresses along the aisles' walls to the clerestory, at each bay. */
+  flyers: boolean;
+  /** A round window in the gable of the west front and at the transepts' ends, over the doors, rather than a tall window of lights. */
+  rose: boolean;
+  /**
+   * How it was made as high as it is: the height of the tallest buildings about the square (`near`, from their own ground to their
+   * ridges), and the height of the nave's ridge over the church's floor (`ridge`), at least half as high again as those and at most
+   * three times; unless the least that a nave with aisles and a clerestory over them can be (`least`) is more than that.
+   */
+  measure: { near: number; ridge: number; least: number };
+}
+
+export type CathedralPart = 'narthex' | 'tower' | 'chapel' | 'nave' | 'aisle' | 'crossing' | 'transept' | 'choir' | 'choir aisle' | 'shrine';
+export type SpireKind = 'stone' | 'lead' | 'copper' | 'none';
 
 export type Stone = 'limestone' | 'sandstone' | 'greystone' | 'basalt';
 export type Hour = 'morning' | 'midday' | 'evening' | 'sunset' | 'dusk' | 'night';
@@ -1189,9 +1300,16 @@ export function neighbours(site: Site): Map<number, number[]> {
  * the flight's breadth. Walking from one to the other in a straight line is walking the stair.
  */
 export function stairEnds(site: Site, w: Way): { foot: [number, number]; head: [number, number] } {
-  const p = site.places[w.a], to = w.to ?? w.at, dir = to >= w.at ? 1 : -1, off = w.halfWidth;
-  const at = (u: number): [number, number] => (w.side === 'n' ? [u, p.z0 + off] : w.side === 's' ? [u, p.z1 - off] : w.side === 'w' ? [p.x0 + off, u] : [p.x1 - off, u]);
-  return { foot: at(w.at - dir * 0.6), head: at(to + dir * 0.6) };
+  const p = site.places[w.a], off = w.halfWidth;
+  const at = (side: Side, u: number): [number, number] => (side === 'n' ? [u, p.z0 + off] : side === 's' ? [u, p.z1 - off] : side === 'w' ? [p.x0 + off, u] : [p.x1 - off, u]);
+  if (w.round) {
+    // (Its foot on the wall it starts on; its head on the wall its last leg runs along, which goes the way of the sun round the room.)
+    const { legs } = roundStair(site, w), first = legs[0], last = legs[legs.length - 1];
+    const dir = (side: Side) => (side === 'n' || side === 'e' ? 1 : -1);
+    return { foot: at(first.side, first.from - dir(first.side) * 0.6), head: at(last.side, last.to + dir(last.side) * 0.6) };
+  }
+  const to = w.to ?? w.at, dir = to >= w.at ? 1 : -1;
+  return { foot: at(w.side, w.at - dir * 0.6), head: at(w.side, to + dir * 0.6) };
 }
 
 /** Number of independent loops in the walkable graph: edges minus places plus one, for a connected site. */
@@ -1215,4 +1333,69 @@ export function allReachable(site: Site): boolean {
     }
   }
   return seen.size === site.places.length;
+}
+
+/** How high a place's vault (or ceiling) rises over the top of its walls: half its span for a half-round vault, more for a pointed one. */
+export function vaultRise(p: Place): number {
+  if (p.roof !== 'barrel') return 0;
+  const half = (p.axis === 'x' ? p.z1 - p.z0 : p.x1 - p.x0) / 2 / (p.spans ?? 1);
+  return p.pointed ? half * POINTED_RISE : half;
+}
+/**
+ * A pointed vault or arch is two arcs of a circle whose radius is so many times half its span (a vault), or its whole span (an arch);
+ * its crown stands `POINTED_RISE` times half its span over its springing.
+ */
+export const POINTED_VAULT = 1.5;
+export const POINTED_RISE = Math.sqrt(POINTED_VAULT * POINTED_VAULT - (POINTED_VAULT - 1) * (POINTED_VAULT - 1));
+
+/** The height of a step, and the depth of a tread on a stair that climbs round walls. */
+export const STEP_RISE = 0.17;
+export const ROUND_TREAD = 0.25;
+
+/** A leg of a stair that climbs round walls: along the wall on `side`, from `from` to `to` along it, from `y0` over the lower floor, `steps` steps. */
+export interface StairLeg { side: Side; from: number; to: number; y0: number; steps: number }
+/** The next wall round, the way of the sun seen from above. */
+export const SUNWISE: Record<Side, Side> = { n: 'e', e: 's', s: 'w', w: 'n' };
+/**
+ * The legs and the landings of a stair that climbs round the walls of its lower place (`round`): each leg a straight flight against
+ * a wall; between each and the next a square landing in the corner, as broad as the flight. Measures are over the lower floor.
+ */
+export function roundStair(site: Site, w: Way): { legs: StairLeg[]; landings: { x0: number; x1: number; z0: number; z1: number; y: number }[]; width: number } {
+  const p = site.places[w.a], q = site.places[w.b];
+  return roundLegs(p, Math.max(1, Math.round((q.floor - p.floor) / STEP_RISE)), w.side, w.at, w.halfWidth * 2);
+}
+
+/** The same, for a stair of `steps` steps `W` broad starting at `at` along `side` in place `p`, before there is a way for it. */
+export function roundLegs(p: { x0: number; x1: number; z0: number; z1: number }, steps: number, side: Side, at: number, W: number): { legs: StairLeg[]; landings: { x0: number; x1: number; z0: number; z1: number; y: number }[]; width: number } {
+  let left = steps;
+  const legs: StairLeg[] = [], landings: { x0: number; x1: number; z0: number; z1: number; y: number }[] = [];
+  let from = at, y = 0;
+  for (let guard = 0; guard < 64 && left > 0; guard++) {
+    const dir = side === 'n' || side === 'e' ? 1 : -1;
+    // (The leg runs to the landing in the corner ahead: a flight's breadth short of the wall it meets.)
+    const end = side === 'n' ? p.x1 - W : side === 'e' ? p.z1 - W : side === 's' ? p.x0 + W : p.z0 + W;
+    const room = Math.max(0, (end - from) * dir), n = Math.min(left, Math.floor(room / ROUND_TREAD + 1e-6));
+    const to = from + dir * n * ROUND_TREAD;
+    if (n > 0) legs.push({ side, from, to, y0: y, steps: n });
+    left -= n;
+    y += n * STEP_RISE;
+    if (left <= 0) break;
+    // The landing in the corner, and on round onto the next wall.
+    const x0 = side === 'n' || side === 'e' ? p.x1 - W : p.x0, z0 = side === 'e' || side === 's' ? p.z1 - W : p.z0;
+    landings.push({ x0, x1: x0 + W, z0, z1: z0 + W, y });
+    side = SUNWISE[side];
+    from = side === 'n' ? p.x0 + W : side === 'e' ? p.z0 + W : side === 's' ? p.x1 - W : p.z1 - W;
+  }
+  return { legs, landings, width: W };
+}
+
+/**
+ * The points to walk a stair through, from a stride before its foot to a stride beyond its head: two for a straight stair, and for
+ * one that climbs round walls, the middle of each landing between.
+ */
+export function stairPath(site: Site, w: Way): [number, number][] {
+  const { foot, head } = stairEnds(site, w);
+  if (!w.round) return [foot, head];
+  const { landings } = roundStair(site, w);
+  return [foot, ...landings.map((l): [number, number] => [(l.x0 + l.x1) / 2, (l.z0 + l.z1) / 2]), head];
 }

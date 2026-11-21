@@ -460,12 +460,45 @@ export class Furnisher {
         for (const side of longWalls) wallRow(side, 0.86, Math.min(1.95, short / 2 - 0.7), 0.6, (r) => this.bed(r));
         break;
       }
+      case 'chapel': {
+        // The castle's chapel: benches down both long walls facing in, as in a choir, and an altar against one end wall, a table of
+        // stone under its cloth, with the candlesticks on it.
+        for (const side of longWalls) wallRow(side, 2.0, 0.34, 0.5, (r) => this.bench(r));
+        const end = rng.chance(0.5), half = 0.9, deep = 0.45;
+        const altar: Rect = alongX ? { x0: end ? p.x1 - 0.35 - deep * 2 : p.x0 + 0.35, x1: end ? p.x1 - 0.35 : p.x0 + 0.35 + deep * 2, z0: cz - half, z1: cz + half }
+          : { x0: cx - half, x1: cx + half, z0: end ? p.z1 - 0.35 - deep * 2 : p.z0 + 0.35, z1: end ? p.z1 - 0.35 : p.z0 + 0.35 + deep * 2 };
+        if (this.table(altar)) this.setTable(altar, 'desk');
+        break;
+      }
+      case 'dungeon': {
+        // Under the castle: barrels and sacks heaped in its corners, and a bench or two along its walls for whoever was kept here.
+        cluster(rng.int(0, 3));
+        if (rng.chance(0.6)) cluster(rng.int(0, 3));
+        wallRow(rng.pick(longWalls), 1.6, 0.34, 9, (r) => this.bench(r));
+        break;
+      }
       case 'chapter house':
       case 'gallery':
       case 'gatehall': {
         for (const side of longWalls) wallRow(side, 2.0, 0.34, 0.5, (r) => this.bench(r));
         break;
       }
+      // A cathedral's nave: pews in rows across it either side of a walk down the middle, from a little in from its west end, clear
+      // of its aisles' arches (`bench` keeps the way to every doorway open).
+      case 'nave': {
+        const walk = 1.5, edge = short / 2 - 1.7;
+        if (edge - walk < 1.2) break;
+        for (let at = lo + 3; at + 0.45 < lo + long - 2.4; at += 1.12) {
+          for (const o of [-1, 1]) this.bench(rectAlong(at, at + 0.42, o < 0 ? mid - edge : mid + walk, o < 0 ? mid - walk : mid + edge));
+        }
+        break;
+      }
+      // Its choir: the stalls, two long rows facing each other across the middle.
+      case 'choir': {
+        for (const o of [-1, 1]) centreRow(o * Math.min(short / 2 - 1.9, 2.6), Math.min(3.2, long - 2.4), 0.5, 0.35, (r) => this.bench(r));
+        break;
+      }
+      case 'library':
       case 'scriptorium': {
         // Desks in a row under one wall, each with a stool; books on shelves.
         const side = rng.pick(longWalls);
@@ -512,6 +545,7 @@ export class Furnisher {
         break;
       }
       case 'vestry':
+      case 'sacristy':
       case 'reliquary':
       case 'antechamber': {
         shelves(2, 'books');

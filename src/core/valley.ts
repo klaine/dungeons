@@ -70,7 +70,7 @@ export function valleyLand(v: Valley, floor: number, meadow: { x0: number; x1: n
   return (uplandHeight(highlands(t.seed), u, w, out) - t.base) * RELIEF + floor;
 }
 
-export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot; world?: string }): { valley: Valley; middle: (z: number) => number } {
+export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: number; z0?: number } = meadow, free = false, found?: { seed: number; spot: ValleySpot; world?: string }, extra = 0, seated = false): { valley: Valley; middle: (z: number) => number } {
   const round = (x: number) => Math.round(x * 10) / 10;
   // (A valley that was found: the line down its middle is its stream's, turned into the site's frame, and its breadth on either
   // hand is where the land has risen four metres over the stream. Both read once, at every second metre down its length.)
@@ -92,11 +92,15 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   const landAtV = (x: number, z: number) => valleyLand({ z0: 0, step: 2, west: [], east: [], mouth: 0, terrain }, meadow.floor, meadow, x, z);
   const landHalf = (z: number, k: number): number => {
     const c = courseAt(z), floor = landAtV(c, z), dir = k === 0 ? -1 : 1;
-    for (let r = 4; r <= 70; r += 1) if (landAtV(c + dir * r, z) > floor + 4) return r;
-    return 70;
+    // (Out to where it has risen seven metres: at four, as it was, the play area was a corridor; with a castle at its head, a village
+    // below that, fields, and a forest at its foot, a valley wants the breadth of its floor and the lower slopes of its sides.)
+    for (let r = 4; r <= 95; r += 1) if (landAtV(c + dir * r, z) > floor + 7) return r;
+    return 95;
   };
   // (`front` is the house front, where the meadow begins; the valley's own record begins further north if it has arms.)
-  const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(95, 150), mouth = Math.round((front + length) / step) * step;
+  // (Long enough for a castle, a village, fields and a forest one below another: some two hundred metres from the house front.)
+  // (And longer by `extra` where the castle stands on the high ground beside the valley, for the way down to its floor: `findSeat`.)
+  const step = 2, front = meadow.z0, length = meadow.z1 - meadow.z0 + rng.range(185, 235) + extra, mouth = Math.round((front + length) / step) * step;
   const mid = (meadow.x0 + meadow.x1) / 2, head = (meadow.x1 - meadow.x0) / 2 + rng.range(5.5, 10);
   const s = rng.range(0, 500), gate = rng.range(7.4, 9.2);
   // It bends: once or twice in its length, and less the nearer the house, which it must stay square to.
@@ -108,11 +112,14 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   if (found) for (const k of [0, 1]) {
     const raw: number[] = [];
     for (let z = front; z <= mouth + 2; z += step) raw.push(landHalf(z, k));
-    for (let i = 0; i < raw.length; i++) { let sum = 0, n = 0; for (let j = i - 3; j <= i + 3; j++) if (j >= 0 && j < raw.length) { sum += raw[j]; n++; } breadth[k].push(sum / n); }
+    // (Below a castle on the high ground beside the valley, evened over thirty-odd metres: across a hillside the land rises seven metres
+    // now near and now far, and the side jumped in and out by tens of metres from one stride to the next.)
+    const even = seated ? 8 : 3;
+    for (let i = 0; i < raw.length; i++) { let sum = 0, n = 0; for (let j = i - even; j <= i + even; j++) if (j >= 0 && j < raw.length) { sum += raw[j]; n++; } breadth[k].push(sum / n); }
   }
   // Each side has its own breadth, a bay somewhere (more often than not), and its own unevenness.
   const sides = (['w', 'e'] as const).map((_, k) => ({
-    full: rng.range(30, 58), open: rng.range(14, 30), close: rng.range(15, 24),
+    full: rng.range(42, 72), open: rng.range(14, 30), close: rng.range(15, 24),
     bay: rng.chance(0.65) ? { at: front + length * rng.range(0.3, 0.8), deep: rng.range(8, 18), long: rng.range(8, 16) } : null,
     seed: s + 40 + k * 91,
   }));
@@ -125,7 +132,8 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
   const arming = rng.fork('arms'), count = arming.pick([0, 1, 1, 1, 2, 2]), first = arming.chance(0.5) ? 0 : 1;
   const arms = [0, 1].map((k) => (count === 2 || (count === 1 && k === first) ? { length: arming.range(36, 72), width: arming.range(16, 28), seed: arming.range(0, 500) } : null));
   // A house that stands free has the valley all round it: on either side a breadth of open ground, and behind it a bowl that closes some way back.
-  const round_ = free && house.z0 !== undefined ? { gap: [arming.range(16, 26), arming.range(16, 26)], back: house.z0 - arming.range(18, 32), seed: arming.range(0, 500) } : null;
+  // (Broad enough on either hand and behind for the castle's curtain wall, its towers and a walk round outside it.)
+  const round_ = free && house.z0 !== undefined ? { gap: [arming.range(32, 42), arming.range(32, 42)], back: house.z0 - arming.range(30, 42), seed: arming.range(0, 500) } : null;
   const z0 = round_ ? Math.floor((round_.back - 26) / step) * step : front - Math.ceil(Math.max(0, ...arms.map((q) => (q ? q.length + 4 : 0))) / step) * step;
   const roundAt = (k: number, z: number): number => {
     const base = (k === 0 ? mid - house.x0 : house.x1 - mid) + round_!.gap[k] * (1 + 0.3 * (fbm2(z / 15, round_!.seed + k * 17, 2) - 0.5));
@@ -147,8 +155,8 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     let w = side.full * (1 + 0.5 * (fbm2(z / 40, side.seed, 2) - 0.5)) + (fbm2(z / 11, side.seed + 7, 2) - 0.5) * 5;
     if (side.bay) w += side.bay.deep * Math.exp(-(((z - side.bay.at) / side.bay.long) ** 2));
     if (narrows) w *= 1 - narrows.by * Math.exp(-(((z - narrows.at) / narrows.long) ** 2));
-    // (A valley that was found is as broad as the land has it, not less than fourteen metres to a side nor more than sixty-five.)
-    if (found) w = Math.min(65, Math.max(14, breadth[k][Math.min(breadth[k].length - 1, Math.max(0, Math.round((z - front) / step)))]));
+    // (A valley that was found is as broad as the land has it, not less than twenty-two metres to a side nor more than eighty-five.)
+    if (found) w = Math.min(85, Math.max(seated ? 34 : 22, breadth[k][Math.min(breadth[k].length - 1, Math.max(0, Math.round((z - front) / step)))]));
     // From the corner of the ridge it opens out, or on from the mouth of an arm; to the gap it draws in.
     const start = round_ ? roundAt(k, front - 0.01) : edge[k] + armAt(k, front - 0.01);
     w = Math.max(w, 15, start * 0.9);
@@ -162,7 +170,86 @@ export function shapeValley(meadow: Place, rng: Rng, house: { x0: number; x1: nu
     valley.west.push(round(c - half(sides[0], z, 0)));
     valley.east.push(round(c + half(sides[1], z, 1)));
   }
+  // (And a side draws in no faster than seven metres in ten down the valley, only ever by standing further out where it drew in faster:
+  // the middle line runs on a slant down the hillside under the castle, and a side measured square to the valley's length came in
+  // across the way down in a stride or two.)
+  // (Not where it draws in to the gap at the valley's foot, which is a gap between two crags and is drawn so: over the forty metres
+  // before the last eighty it comes back to the side as it was.)
+  if (seated) for (const [line, out] of [[valley.west, -1], [valley.east, 1]] as const) {
+    const most = 0.7 * step, was = line.slice(), upto = (mouth - 80 - z0) / step, fade = 40 / step;
+    for (let i = 1; i < line.length; i++) line[i] = out < 0 ? Math.min(line[i], line[i - 1] + most) : Math.max(line[i], line[i - 1] - most);
+    for (let i = line.length - 2; i >= 0; i--) line[i] = out < 0 ? Math.min(line[i], line[i + 1] + most) : Math.max(line[i], line[i + 1] - most);
+    for (let i = 0; i < line.length; i++) line[i] = round(was[i] + (line[i] - was[i]) * smooth((upto - i) / fade));
+  }
   return { valley, middle };
+}
+
+/**
+ * A seat for a castle by the head of a valley that was found: the land's own high ground beside it, at the brow of the slope over the
+ * valley, rather than the valley's floor at its head on a hill made up for it. (Asked, of a castle on the floor at its head: would it
+ * not be more natural on the high ground beside the valley, with the village planned along the slope under it? And a larger play area
+ * is fine, if that is what fits them.) Castles are built so, Beynac on its crag over the Dordogne, Gruyères on its hill over the
+ * Sarine, Cochem on its spur over the Moselle: on ground level enough on top for the bailey, at the edge of where it falls away to the
+ * valley, high enough over the valley to command it, with a way up from it that a cart can climb, along which the village is built.
+ *
+ * Looked for over the ground within some three hundred and forty metres of the valley's head, beside its upper stretch: ground standing
+ * twelve to seventy-five metres over the stream, level within eight metres over the castle's reach (`reach` from its middle), falling
+ * away towards the stream just beyond its walls and by three metres or more on four of sixteen bearings, with nothing higher between it
+ * and the stream, and no steeper to climb from the stream than three in ten. Returns the frame for the site, its middle the meadow's
+ * (`dx`, `dz` from the castle's middle in the site's measures), turned so that the site's south runs from the castle down the slope on a
+ * slant, as a road goes down a hillside, and then on down the valley; its course the way down to the stream and then the stream's; and
+ * how much longer the valley is for the way down. Or null where there is no such ground.
+ */
+export function findSeat(found: { seed: number; spot: ValleySpot; world?: string }, reach: number, dx: number, dz: number, rng: Rng): { spot: ValleySpot; extra: number } | null {
+  const { spot } = found, scale = found.world ? 1 : RELIEF;
+  // (The land as the site will have it: a world's at its own height, an upland's at the share of it a valley found in it is given.)
+  const raw: (u: number, v: number) => number = found.world ? ((land) => (u: number, v: number) => landAt(land, u, v))(worldLand(found.world)) : ((h) => (u: number, v: number) => uplandHeight(h, u, v))(highlands(found.seed));
+  const L = (u: number, v: number) => raw(u, v) * scale;
+  const course = spot.course, along = [0];
+  for (let k = 1; k < course.length; k++) along.push(along[k - 1] + Math.hypot(course[k][0] - course[k - 1][0], course[k][1] - course[k - 1][1]));
+  const FAR = 340;
+  // Which way the stream runs at a point of it.
+  const flowAt = (i: number) => { const a = course[Math.max(0, Math.min(i, course.length - 4))], b = course[Math.min(course.length - 1, Math.max(i, 0) + 3)]; return Math.atan2(b[1] - a[1], b[0] - a[0]); };
+  let best: { score: number; u: number; v: number; i: number; d: number; lo: number; hi: number } | null = null;
+  for (let du = -FAR; du <= FAR; du += 12) for (let dv = -FAR; dv <= FAR; dv += 12) {
+    if (du * du + dv * dv > FAR * FAR) continue;
+    const u = spot.u + du, v = spot.v + dv;
+    // Beside the valley's upper stretch: the nearest point of the stream within its first hundred and ten metres.
+    let d = Infinity, i = 0;
+    for (let k = 0; k < course.length; k++) { const e = Math.hypot(course[k][0] - u, course[k][1] - v); if (e < d) { d = e; i = k; } }
+    if (d < 45 || along[i] > 110) continue;
+    const [pu, pv] = course[i], top = L(u, v), h = top - L(pu, pv);
+    if (h < 12 || h > 75 || h / d > 0.3) continue;
+    // (Not where the stream runs back towards it: the way down and the valley below would run against each other.)
+    if (Math.cos(flowAt(i) - Math.atan2(pv - v, pu - u)) < -0.3) continue;
+    // At the brow: towards the stream, just beyond its walls, the land has fallen away.
+    if (L(u + ((pu - u) / d) * (reach + 25), v + ((pv - v) / d) * (reach + 25)) > top - 4) continue;
+    let lo = top, hi = top, falls = 0;
+    for (let a = 0; a < 16; a++) {
+      const c = Math.cos((a / 16) * Math.PI * 2), sn = Math.sin((a / 16) * Math.PI * 2);
+      for (const f of [0.5, 1]) { const y = L(u + c * reach * f, v + sn * reach * f); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      if (L(u + c * (reach + 18), v + sn * (reach + 18)) < top - 3) falls++;
+    }
+    if (hi - lo > 8 || falls < 4) continue;
+    let between = -Infinity;
+    for (let t = 0.2; t < 0.95; t += 0.1) between = Math.max(between, L(u + (pu - u) * t, v + (pv - v) * t));
+    if (between > top + 1) continue;
+    const score = falls * 0.3 + Math.min(h, 45) * 0.08 - (hi - lo) * 0.5 - d * 0.006 + rng.range(0, 1);
+    if (!best || score > best.score) best = { score, u, v, i, d, lo, hi };
+  }
+  if (!best) return null;
+  // The way down meets the stream where it is nearest; the site's south is turned halfway between straight down the slope and down the
+  // stream, so that the way down goes on a slant across the hillside and the valley below runs on south, each as much as the other.
+  // (Turned only a little off straight down, a valley whose stream ran across the foot of the slope ran across the site.)
+  const [ju, jv] = course[best.i], down = Math.atan2(jv - best.v, ju - best.u), flow = flowAt(best.i);
+  const head = Math.atan2(Math.sin(down) + Math.sin(flow), Math.cos(down) + Math.cos(flow)), turn = head - Math.PI / 2;
+  const steps = Math.max(1, Math.round(best.d / 6)), way: [number, number][] = [];
+  for (let k = 0; k < steps; k++) way.push([best.u + ((ju - best.u) * k) / steps, best.v + ((jv - best.v) * k) / steps]);
+  const [u, v] = valleyFrame({ u: best.u, v: best.v, turn }, 0, 0, dx, dz);
+  // (Longer by as much of the way down as is more than the stretch below a castle at its head: the stream's valley still runs on
+  // some way below where the way reaches it, for the fields and the forest.)
+  const extra = Math.max(0, best.d * Math.cos(down - head) - 80);
+  return { spot: { u, v, turn, base: (best.lo + best.hi) / 2 / scale, course: [...way, ...course.slice(best.i)] }, extra };
 }
 
 /** The shape of a valley that was recorded only as a box, as they once all were: straight sides, drawing in at its foot to a gap. */
