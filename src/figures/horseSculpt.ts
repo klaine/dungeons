@@ -50,8 +50,10 @@ export function horseMasses(rest: (n: string) => Vector3): Mass[] {
   add('breast', V(0, 1.15, 0.58), Z, [0.195, 0.18, 0.2], 0.08, () => [['chest', 1]]);
   add('withers', V(0, 1.47, 0.36), V(0, 0.3, 1), [0.09, 0.24, 0.12], 0.08, () => [['chest', 1]]);
   add('loin', V(0, 1.42, -0.22), Z, [0.2, 0.3, 0.13], 0.08, trunk);
-  add('croup', V(0, 1.34, -0.56), Z, [0.245, 0.29, 0.22], 0.08, () => [['hips', 1]]);
-  for (const s of [1, -1]) add('buttock', V(0.105 * s, 1.22, -0.79), V(0, -0.25, 1), [0.135, 0.19, 0.23], 0.07, () => [['hips', 1]]);
+  add('croup', V(0, 1.34, -0.55), Z, [0.245, 0.27, 0.22], 0.08, () => [['hips', 1]]);
+  // (The points of the buttocks no further back than over the points of the hocks, as a horse's are: further back and larger, they had
+  // made the quarters one great ball reaching out behind the legs.)
+  for (const s of [1, -1]) add('buttock', V(0.1 * s, 1.24, -0.68), V(0, -0.3, 1), [0.12, 0.13, 0.19], 0.06, () => [['hips', 1]]);
   // The neck, crested above, from the withers to behind the poll: many masses along a smooth line, each overlapping the next well, so
   // that it is one smooth neck rather than a string of beads; the crest a second string along its top.
   {
@@ -75,11 +77,17 @@ export function horseMasses(rest: (n: string) => Vector3): Mass[] {
       const up = smooth((p.y - 1.05) / 0.25), low = smooth((0.86 - p.y) / 0.16);
       return [['hips', up * (1 - low)], [`h_up_${k}`, (1 - up) * (1 - low)], [`h_mid_${k}`, low]];
     };
-    add('thigh', V(0.175 * s, 1.04, -0.58), V(0.01 * s, 1, -0.06), [0.12, 0.31, 0.235], 0.08, thighBones);
-    add('stifle', stifle.clone().add(V(0.005 * s, 0.03, 0)), V(0, 1, 0), [0.06, 0.08, 0.06], 0.07, () => [[`h_up_${k}`, 0.6], [`h_mid_${k}`, 0.4]]);
-    add('hamstring', V(0.175 * s, 0.8, -0.75), along(V(0.18 * s, 0.98, -0.81), V(0.17 * s, 0.6, -0.73)), [0.075, 0.2, 0.085], 0.07,
-      between(V(0.18 * s, 0.98, -0.81), V(0.17 * s, 0.6, -0.73), `h_up_${k}`, `h_mid_${k}`, 0.1, 0.6));
-    add('gaskin', stifle.clone().lerp(hock, 0.42).add(V(0, 0, -0.03)), along(stifle, hock), [0.075, 0.25, 0.1], 0.06, between(stifle, hock, `h_up_${k}`, `h_mid_${k}`, -0.3, 0.2));
+    // The haunch, broad, and under it the lower thigh, narrower, tapering into the gaskin: one mass from the croup to below the stifle
+    // had ended round and low, the quarters' bottom hanging over the legs.
+    // (The quarters widest high, at the points of the hips, falling straight to the stifle and slimming into the gaskin: widest low,
+    // they had swelled into a pear seen from behind, a lump hanging over the legs.)
+    add('point of hip', V(0.19 * s, 1.4, -0.44), V(0, 0, 1), [0.06, 0.09, 0.06], 0.08, () => [['hips', 1]]);
+    add('haunch', V(0.16 * s, 1.17, -0.57), V(0.01 * s, 1, -0.04), [0.105, 0.21, 0.2], 0.08, thighBones);
+    add('lower thigh', V(0.175 * s, 0.93, -0.53), V(0.02 * s, 1, 0.12), [0.065, 0.12, 0.12], 0.08, thighBones);
+    add('stifle', stifle.clone().add(V(-0.01 * s, 0.03, 0)), V(0, 1, 0), [0.055, 0.075, 0.06], 0.06, () => [[`h_up_${k}`, 0.6], [`h_mid_${k}`, 0.4]]);
+    add('hamstring', V(0.15 * s, 0.86, -0.715), along(V(0.155 * s, 1.1, -0.75), V(0.155 * s, 0.62, -0.71)), [0.05, 0.24, 0.062], 0.06,
+      between(V(0.155 * s, 1.1, -0.75), V(0.155 * s, 0.62, -0.71), `h_up_${k}`, `h_mid_${k}`, 0.2, 0.7));
+    add('gaskin', stifle.clone().lerp(hock, 0.42).add(V(-0.01 * s, 0, -0.03)), along(stifle, hock), [0.062, 0.25, 0.095], 0.05, between(stifle, hock, `h_up_${k}`, `h_mid_${k}`, -0.3, 0.2));
     add('hock', hock.clone().add(V(0, 0.035, -0.025)), along(stifle, hock), [0.048, 0.075, 0.062], 0.05, between(stifle, hock, `h_mid_${k}`, `h_low_${k}`, 0.85, 1.05));
     // The shoulder from under the withers to the point of the shoulder; the upper arm; the point of the elbow; the forearm.
     const blade = j(`f_sc_${k}`), point = j(`f_up_${k}`), elbow = j(`f_mid_${k}`), knee = j(`f_low_${k}`);

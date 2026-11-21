@@ -928,6 +928,18 @@ The machine this is developed on now has a graphics card, and tablets were repor
     *Checked:* pictures from the side, three quarters behind, behind, below, three quarters before, at the gallop and the trot, before
     and after; ridden, and on the slope skiing, braking and fallen; leg reach through every gait and ski pose; the kicker trials with a
     horse and rider on four skis, the same landings and falls; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+72. **The quarters, again.** Reported: "the butt is still too outward extending lump". Measured rather than judged from pictures:
+    how far back the body reaches at each height and how wide its quarters are. The rear's line was right in shape, the points of the
+    buttocks 5 centimetres behind the root of the tail, but it reached 0.89 metres back, a quarter of a metre behind the hind legs,
+    where a horse's point of the buttock stands about over the point of the hock; and the quarters were widest low (half-widths of
+    0.29 to 0.30 at 0.85 to 1 metre up, against 0.26 at the hips) and wide down to the hock: seen from behind a pear, seen from behind
+    and aside a ball hanging over the legs. *Done:* the buttocks smaller and forward, the croup shorter; the one mass of the thigh
+    split into a broad haunch high and a narrower lower thigh that slims into the gaskin; small points of the hips, so the quarters
+    are widest there; a slimmer hamstring and gaskin; and in the skeleton the stifle brought in from 0.24 to 0.21 out from the
+    middle and the hock from 0.17 to 0.16, so that the leg hangs under the quarter rather than bowing out of it. The rear now reaches
+    0.815 back (the point of the hock, 0.75), falling nearly straight from 1.4 metres to the hamstring; the quarters are 0.25 to 0.26
+    wide from the hips to the stifle and narrow to 0.21 at the hock. *Checked:* pictures from the side, behind and behind aside, before
+    and after; the legs' reach through every gait and ski pose; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
 
 ## Risks
 

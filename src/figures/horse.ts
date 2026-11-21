@@ -57,7 +57,7 @@ const BONES: [string, string | null, V3][] = (() => {
     // (The shoulder blade, from under the withers down to the point of the shoulder, where the upper arm hangs from it.)
     b.push([`f_sc_${k}`, 'chest', [0.15 * s, 1.48, 0.4]], [`f_up_${k}`, `f_sc_${k}`, [0.2 * s, 1.18, 0.62]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.4]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.44]],
       [`f_pas_${k}`, `f_low_${k}`, [0.15 * s, 0.17, 0.48]], [`f_hoof_${k}`, `f_pas_${k}`, [0.15 * s, 0.07, BINDINGS / 2 - 0.02]]);
-    b.push([`h_up_${k}`, 'hips', [0.22 * s, 1.22, -0.58]], [`h_mid_${k}`, `h_up_${k}`, [0.24 * s, 0.92, -0.36]], [`h_low_${k}`, `h_mid_${k}`, [0.17 * s, 0.56, -0.7]],
+    b.push([`h_up_${k}`, 'hips', [0.22 * s, 1.22, -0.58]], [`h_mid_${k}`, `h_up_${k}`, [0.21 * s, 0.92, -0.36]], [`h_low_${k}`, `h_mid_${k}`, [0.16 * s, 0.56, -0.7]],
       [`h_pas_${k}`, `h_low_${k}`, [0.15 * s, 0.17, -0.64]], [`h_hoof_${k}`, `h_pas_${k}`, [0.15 * s, 0.07, -BINDINGS / 2 - 0.02]]);
   }
   return b;
