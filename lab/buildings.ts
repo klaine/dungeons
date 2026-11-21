@@ -24,7 +24,7 @@ import { Building, Hour, SKIES, Stone } from '../src/core/site';
 import { solids as plainSolids } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
-import { makeGroundMaterial, makePaneMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
+import { makeGroundMaterial, makePaneMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, renderUniforms, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../src/render/vegetation';
 import { CardSet } from '../src/render/scene';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
@@ -64,6 +64,8 @@ interface State {
   overlays: boolean;
   /** Look mode: the right button held and the mouse moved turns the view where it stands, as in walking, instead of sliding it. */
   look: boolean;
+  /** Whether what is built shows its age, as the game shows it: render come away, brick flaked, stone chipped, rain streaked. */
+  weathered: boolean;
   /** The season: the green of the leaves, and how dry the grass is. */
   season: Season;
   /** What has been laid with the brushes (see `Painted` in `nature.ts`). */
@@ -76,7 +78,7 @@ const query = new URLSearchParams(location.search);
 const STONES: Stone[] = ['limestone', 'sandstone', 'greystone', 'basalt'];
 const DEFAULTS: State = {
   items: [], next: 1, selected: null, tool: 'move', hour: 'morning', stone: 'greystone', snap: 0.5, turnSnap: 15,
-  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, look: false, season: 'summer',
+  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, look: false, weathered: true, season: 'summer',
   paint: { ground: [], plants: [], rock: [] }, brush: { layer: 'ground', ground: 3, plant: 0, dig: false, size: 2 },
 };
 /** What was painted, read from storage or a file, made safe: lists of lists of numbers, and no more of them than can be built. */
@@ -389,16 +391,27 @@ async function start(): Promise<void> {
     brick: generateTextureSet('brick', size, 83),
   };
   doneGenerating();
+  /**
+   * What buildings are made of, made as `main.ts` makes them, with the same options: stone and timber with their edges rounded and
+   * chipped, render come away, roofs and brick weathered, rain streaks. Unless the lab shows them new (`weathered` under Scene, or
+   * `?chips=0` as in the game), when they are made plain. If what `main.ts` gives a maker changes, change it here too.
+   */
+  const buildingMaterials = (weathered: boolean): Record<string, Material> => ({
+    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0, bevel: 0.02, chips: weathered, weather: weathered }),
+    slate: makeSiteMaterial(T.stone, T.moss, { normalScale: 0.7, roughness: 0.8 }),
+    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0, bevel: 0.012, chips: weathered, timber: weathered, weather: weathered }),
+    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8, render: weathered, weather: weathered }),
+    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3, roof: weathered }),
+    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
+    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2, ...(weathered ? { bond: 'wendish' as const, weather: true } : {}) }),
+    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3, ...(weathered ? { bond: 'running' as const, weather: true } : {}) }),
+  });
+  if (query.get('chips') === '0') state.weathered = false;
+  renderUniforms.uChips.value = state.weathered ? 1 : 0;
   const materials: Record<string, Material> = {
-    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0 }),
+    ...buildingMaterials(state.weathered),
     floor: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.2 }),
-    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0 }),
     leaf: makeSiteMaterial(T.moss, T.moss, { normalScale: 2.4 }),
-    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8 }),
-    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3 }),
-    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
-    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
-    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3 }),
     metal: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.25, roughness: 0.5 }),
     copper: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
     glass: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1 }),
@@ -419,6 +432,14 @@ async function start(): Promise<void> {
   siteUniforms.uBake.value = 1;
   const clay = new MeshStandardNodeMaterial({ color: new Color(0.42, 0.41, 0.4), roughness: 0.92, metalness: 0 });
   const materialOf = (name: string) => (state.clay ? clay : materials[name] ?? materials.stone);
+  /** Shows what is built weathered, or new: its materials made again, and put on. */
+  const weather = (on: boolean) => {
+    const made = buildingMaterials(on);
+    for (const k of Object.keys(made)) materials[k]?.dispose();
+    Object.assign(materials, made);
+    renderUniforms.uChips.value = on ? 1 : 0;
+    dress();
+  };
 
   // ------------------------------------------------------------------ light from the sky, as the game gives what it does not bake
   /** Writes into a mesh's points the share of the whole sky's light that reaches each, from how much of the sky it sees. */
@@ -426,7 +447,16 @@ async function start(): Promise<void> {
     const S = SKIES[state.hour], L = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
     const g = mesh.geometry, open = mesh.userData.open as Float32Array;
     const sh = (['aSHr', 'aSHg', 'aSHb'] as const).map((n) => g.getAttribute(n) as InterleavedBufferAttribute), bk = g.getAttribute('aBake') as InterleavedBufferAttribute;
+    // (Indoors, as the game lights the rooms of its houses (`placeHouse` marks them with a share of sky less than nothing): a dim light
+    // come in at the windows, from the sky and the sunlit ground, about a fifth of a shaded wall's out of doors, as much from every side.)
+    const sd = S.sun, up = Math.max(0, sd[1] / (Math.hypot(sd[0], sd[1], sd[2]) || 1));
+    const G = [0, 1, 2].map((c) => (0.2 * (0.6 * S.intensity * S.colour[c] * up + Math.PI * 0.9 * L[c])) / Math.PI);
     for (let i = 0; i < open.length; i++) {
+      if (open[i] < 0) {
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]), 0, 0, 0);
+        bk.setXY(i, 0.05, 0.6);
+        continue;
+      }
       const o = 0.3 + 0.7 * open[i];
       for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * o, 0, (Math.PI / 2) * L[c] * 0.8 * o, 0);
       bk.setXY(i, o, 0.6);
@@ -1759,6 +1789,7 @@ async function start(): Promise<void> {
     ['overlays', () => state.overlays, (v) => { state.overlays = v; showOverlays(); remember(); }, 'H. The grid, outlines, knobs, rings and the brush: off, the picture alone'],
     ['grid', () => state.grid, (v) => { state.grid = v; showOverlays(); remember(); }, 'A line every metre'],
     ['clay', () => state.clay, (v) => { state.clay = v; dress(); remember(); }, 'C. Everything in one plain grey: the shapes alone'],
+    ['weathered', () => state.weathered, (v) => { state.weathered = v; weather(v); remember(); }, 'As the game builds them: render come away, brick flaked, stone chipped, roofs worn, rain streaked. Off, all new'],
     ['air', () => state.air, (v) => { state.air = v; atmosphere.uniforms.uEnabled.value = v ? 1 : 0; remember(); }, 'Haze and the light in the air, as the game draws them'],
   ]);
   /**

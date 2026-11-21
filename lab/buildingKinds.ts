@@ -14,6 +14,7 @@ import { Vector3 } from 'three';
 import { BrickWork, Building, CanalWork, ClassicalDress, Stone, Town } from '../src/core/site';
 import { canalEaves, dealCanalHouse, planCanal } from '../src/core/canal';
 import { buildBuilding } from '../src/render/buildings';
+import { placeHouse } from '../src/render/housePlacing';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { stoneStyles } from '../src/render/geom/styles';
@@ -527,7 +528,16 @@ export function buildItem(item: Item, stone: Stone, mesh: (material: string) => 
   if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return {}; }
   const b = documentOf(item);
   if (near?.length) b.near = near;
-  buildBuilding(b, 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  // Laid into the lab's meshes as the game lays a house into its place (`placeHouse`): its rooms marked as indoors, out of the sky's
+  // light, and each point of its outer walls and timber carrying the height of the ground at its foot, which is what the materials
+  // weather it by: damp risen in the foot of a wall, render come away, rain splash, timber faded and paint peeling. (Built straight into
+  // the lab's meshes, nothing was marked, and its buildings stood as new and lit within as if roofless, whatever the materials were.)
+  // Built facing west at the middle, as the lab builds every building, and standing on the square: on its own ground the lift lower.
+  const local = new Map<string, MeshBuilder>();
+  const into = (m: string) => { let x = local.get(m); if (!x) local.set(m, (x = new MeshBuilder())); return x; };
+  buildBuilding(b, 0, into, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  const ground = -liftOf(item);
+  placeHouse(b, 0, local, mesh, { facing: Math.PI, foot: () => ground });
   return {};
 }
 

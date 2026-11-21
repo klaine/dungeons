@@ -579,6 +579,19 @@ The machine this is developed on now has a graphics card, and tablets were repor
     on a slow machine; what is in the hands (an axe for chopping, a sword); and the orders' clips are the free libraries', so some
     (talking, mending) are the same whatever is clicked.
 
+57. **The building lab's buildings weathered as the game's.** Asked: "Do we have the updated materials for buildings in this lab now as
+    well?" They had not been: the game's stone, timber, plaster, tiles and brick had been weathered on 19 November (chipped arrises, rain
+    streaks, render come away, brick flaked and its mortar raked, timber faded and paint peeling), by options `main.ts` gives
+    `makeSiteMaterial`, and the lab made its materials without them; and most of the weathering is drawn only on a wall that says how
+    high the ground at its foot is, which `placeHouse` marks as it lays a house into its place, and the lab built straight into its
+    meshes. *Done:* the lab makes its buildings' materials as `main.ts` does (and slate), and lays each building in through `placeHouse`
+    (`buildItem` in `lab/buildingKinds.ts`), which also marks its rooms indoors, lit as the game lights them, dimly through the windows;
+    *weathered* under Scene, or `?chips=0`, shows them new. The cathedral's ashlar, the castle's rubble and stained glass are not in it:
+    nothing the lab builds is made of them. *Checked:* in headless Chromium the lab's brick street and timber house, weathered and new:
+    6 and 5 per cent of the picture differs between them (0.1 and 0.7 before the walls were marked); a look inside the classical
+    building; `tools/buildingLab.ts 60` as before (its one failure, a canal house with a point that is not a number when its measures
+    are pushed past their ends, is there without this change too); `tools/browser/crew.cjs` (below).
+
 ## Risks
 
 | Risk | Mitigation |
