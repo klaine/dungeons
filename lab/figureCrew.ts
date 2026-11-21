@@ -56,6 +56,10 @@ const ORDERS: OrderKind[] = [
   { id: 'roll', label: 'Roll', group: 'Fight', target: 'here', clip: 'Roll_RM', note: 'Click which way to roll.' },
   { id: 'block', label: 'Block', group: 'Fight', target: 'now', clip: 'Sword_Block', note: '' },
   { id: 'fall', label: 'Fall', group: 'Fight', target: 'now', clip: 'Death01', note: 'Falls down, and stays down until given another order.' },
+  // (Played where it stands, with skis and poles to carry: see `src/figures/skiing.ts`.)
+  { id: 'skiClassic', label: 'Cross-country', group: 'Ski', target: 'now', clip: 'Ski_Classic_Loop', note: '' },
+  { id: 'skiDownhill', label: 'Downhill', group: 'Ski', target: 'now', clip: 'Ski_Downhill_Loop', note: '' },
+  { id: 'skiJump', label: 'Ski jump', group: 'Ski', target: 'now', clip: 'Ski_Jump', note: '' },
   { id: 'stop', label: 'Stop', group: '', target: 'now', key: '0', note: '' },
 ];
 const MOVES = new Set(['walk', 'run', 'sneak']);

@@ -693,7 +693,8 @@ The machine this is developed on now has a graphics card, and tablets were repor
     up, a telemark landing with the arms out, and the outrun. While one plays, the figure carries skis, and poles for the first two
     (`src/figures/gear.ts`): laid out as the skeleton stands at rest and hung on its bones by the inverse of where each stood, so that
     they fit every body; on the toes where the binding holds only those (cross-country, jumping), under the whole foot for downhill.
-    They come off when it does anything else. All three are played in place. *Checked:* the clips as played, without a browser: no
+    They come off when it does anything else. All three are played in place: in the figure lab from its clips (*Skiing*), in the
+    building lab from the orders palette (*Ski*). *Checked:* the clips as played, without a browser: no
     foot under the snow, the legs within their reach, the free foot clear of the snow in the stride's swing and the jump's flight;
     filmed in the figure lab at twelve (fourteen for the jump) times each, from the side and from ahead or a quarter, and on the base
     woman; the gear on and off as the clips start and stop; `tools/browser/figures.cjs` and `tools/browser/crew.cjs` pass. Not done:
