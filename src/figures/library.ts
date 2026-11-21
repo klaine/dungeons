@@ -2,10 +2,12 @@ import { AnimationClip, KeyframeTrack, Mesh, Object3D, SkinnedMesh, Vector3, Vec
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
 import { makeRun, RUN, SPRINT } from './gait';
+import { makeSkiClips } from './skiing';
 
 /**
  * The figures' bodies and their clips, as `tools/figures.ts` makes them from Quaternius's packs (CC0): one skeleton of 65 bones shared by
- * every body, and 85 clips on it; and two made here on the same skeleton when they are loaded, a run and a sprint (`gait.ts`). A clip
+ * every body, and 85 clips on it; and five made here on the same skeleton when they are loaded, a run and a sprint (`gait.ts`) and
+ * three of skiing (`skiing.ts`). A clip
  * is made for the male mannequin; another body takes it as it stands but for the hips, whose height in the clip is the mannequin's: it
  * is scaled by how much higher or lower the body's own hips are (only the hips and the root are ever moved along; every other bone is
  * only turned, so a body's own proportions are kept).
@@ -80,9 +82,10 @@ export class FigureLibrary {
   static async load(base: string): Promise<FigureLibrary> {
     const loader = new GLTFLoader();
     const gltf = await loadFile(loader, base, 'clips.glb');
-    // (With the run and the sprint, made on the mannequin from its idle's first frame: see `gait.ts`.)
+    // (With the run and the sprint, and three clips of skiing, made on the mannequin from its idle's first frame: see `gait.ts` and
+    // `skiing.ts`.)
     const idle = gltf.animations.find((c) => c.name === 'Idle_Loop');
-    const made = idle ? [RUN, SPRINT].map((s) => makeRun(gltf.scene, idle, s).clip) : [];
+    const made = idle ? [...[RUN, SPRINT].map((s) => makeRun(gltf.scene, idle, s).clip), ...makeSkiClips(gltf.scene, idle)] : [];
     return new FigureLibrary(base, loader, [...gltf.animations, ...made], hipsOf(gltf.scene), gltf);
   }
 

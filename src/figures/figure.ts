@@ -1,7 +1,8 @@
-import { AnimationAction, AnimationClip, AnimationMixer, Group, LoopOnce, LoopRepeat, Vector2, Vector3 } from 'three';
+import { AnimationAction, AnimationClip, AnimationMixer, Group, LoopOnce, LoopRepeat, Object3D, Vector2, Vector3 } from 'three';
 import { Player, type Colliders } from '../app/player';
 import { type Move, type Rigged, travelAt } from './library';
 import { RUN, SPRINT, strideOf } from './gait';
+import { GEAR_OF, putOn, takeOff } from './gear';
 import type { Route } from './nav';
 
 /**
@@ -230,7 +231,13 @@ export class Figure {
     this.enter('act');
     this.show(m, 0.2, loop ? LoopRepeat : LoopOnce);
     this.doing = name.replace(/_/g, ' ').replace(/ Loop$/, '').toLowerCase();
+    // (With what it wants in hand or underfoot: skis and poles for the ski clips.)
+    if (GEAR_OF[name]) this.gear = putOn(this.rig.model, GEAR_OF[name]);
   }
+
+  /** What the figure is carrying for the clip it plays (`gear.ts`), taken off as it does anything else. */
+  private gear: Object3D[] = [];
+  private dropGear(): void { if (this.gear.length) { takeOff(this.gear); this.gear = []; } }
 
   /** Whether it is following an order. */
   get busy(): boolean { return !!this.order; }
@@ -276,6 +283,7 @@ export class Figure {
   private enter(state: FigureState): void {
     this.state = state;
     this.stateTime = 0;
+    this.dropGear();
     if (state === 'air') { this.fallSpeed = 0; this.doing = 'in the air'; }
     if (state === 'sitting') { this.doing = 'sitting down'; this.show(this.move('Sitting_Enter'), 0.2, LoopOnce); }
     if (state === 'seated') this.doing = 'sitting';
@@ -288,6 +296,7 @@ export class Figure {
   private toGround(fade: number): void {
     this.state = 'ground';
     this.stateTime = 0;
+    this.dropGear();
     this.current = null;
     this.currentMove = null;
     this.loco.to = 1;

@@ -1,5 +1,5 @@
-import { AnimationClip, AnimationMixer, Bone, Object3D, Quaternion, QuaternionKeyframeTrack, Vector3, VectorKeyframeTrack } from 'three';
-import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
+import { AnimationClip, Object3D, Vector3 } from 'three';
+import { keyed, type Leg, Poser, qx, qy, qz, rad, smooth } from './posing';
 
 /**
  * A run made rather than taken from the packs (asked: "the running animation looks super silly, make a better one"). The packs' only
@@ -47,9 +47,6 @@ export interface RunStyle {
   elbowSwing: number;
 }
 
-/** How far the arms are let down from level, out at the sides as the skeleton rests, to hang a little out from the body, in degrees. */
-const HANG = 78;
-
 /** Where in the cycle the left foot comes down. */
 export const LEFT_DOWN = 0.05;
 
@@ -65,29 +62,7 @@ export const SPRINT: RunStyle = {
 /** How far a cycle (two steps) carries the body: its speed over the time of two steps. */
 export const strideOf = (s: RunStyle): number => (s.speed * 120) / s.cadence;
 
-const G = 9.81, rad = (d: number) => (d * Math.PI) / 180;
-const smooth = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
-/** A cubic from (0, a) with slope `da` to (1, b) with slope `db`. */
-const hermite = (t: number, a: number, da: number, b: number, db: number) => {
-  const t2 = t * t, t3 = t2 * t;
-  return (2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * da + (-2 * t3 + 3 * t2) * b + (t3 - t2) * db;
-};
-/**
- * A smooth curve through keys `[t, value]`, never going past the keys either side of it (each key's slope is the harmonic mean of
- * the slopes to its neighbours, or level where it is a peak or a trough: Fritsch and Carlson's), with the slopes at its ends given.
- */
-const keyed = (t: number, keys: [number, number][], start: number, end: number): number => {
-  const n = keys.length, slopes = keys.map((_, i) => {
-    if (i === 0) return start;
-    if (i === n - 1) return end;
-    const a = (keys[i][1] - keys[i - 1][1]) / (keys[i][0] - keys[i - 1][0]), b = (keys[i + 1][1] - keys[i][1]) / (keys[i + 1][0] - keys[i][0]);
-    return a * b <= 0 ? 0 : (2 * a * b) / (a + b);
-  });
-  let i = 0;
-  while (i < n - 2 && t > keys[i + 1][0]) i++;
-  const [t0, v0] = keys[i], [t1, v1] = keys[i + 1], h = t1 - t0;
-  return hermite((t - t0) / h, v0, slopes[i] * h, v1, slopes[i + 1] * h);
-};
+const G = 9.81;
 
 /** What `makeRun` found of the clip it made: for checking it. */
 export interface RunMade {
@@ -108,124 +83,38 @@ export interface RunMade {
  * (the idle's first frame: arms hanging, hands loose), which is kept for everything the run does not move (the fingers).
  */
 export function makeRun(source: Object3D, base: AnimationClip, s: RunStyle, frames = 36): RunMade {
-  const model = cloneRigged(source);
-  const bone = (n: string) => { const b = model.getObjectByName(n); if (!b) throw new Error(`a figure without ${n}`); return b as Bone; };
-  const bones: Bone[] = [];
-  model.traverse((o) => { if ((o as Bone).isBone) bones.push(o as Bone); });
-  // The base pose is the skeleton as it rests, upright, its feet flat and straight ahead and its arms out level, which is the same on
-  // either side (the idle's is not: it stands with its weight on one leg, a foot turned out and a hand ahead of the other), with the
-  // arms let down to hang (`HANG`, below) and only the fingers taken from the idle's first frame, loosely curled as a runner's are.
-  // Read in the figure's own frame: forward +z, up +y, its left +x.
-  model.updateMatrixWorld(true);
-  const W0 = new Map(bones.map((b) => [b, b.getWorldQuaternion(new Quaternion())]));
-  const basePos = new Map(bones.map((b) => [b, b.position.clone()]));
-  const restLocal = new Map(bones.map((b) => [b, b.quaternion.clone()]));
-  const mixer = new AnimationMixer(model);
-  mixer.clipAction(base).play();
-  mixer.update(0);
-  const finger = /thumb|index|middle|ring|pinky/;
-  const baseLocal = new Map(bones.map((b) => [b, (finger.test(b.name) ? b.quaternion : restLocal.get(b)!).clone()]));
-  for (const b of bones) { b.quaternion.copy(restLocal.get(b)!); b.position.copy(basePos.get(b)!); }
-  model.updateMatrixWorld(true);
-  const P0 = (n: string) => bone(n).getWorldPosition(new Vector3());
-  const side = (k: 'l' | 'r') => {
-    const hip = P0(`thigh_${k}`), knee = P0(`calf_${k}`), ankle = P0(`foot_${k}`), ball = P0(`ball_${k}`), toe = P0(`ball_leaf_${k}`);
-    return {
-      k, sign: k === 'l' ? 1 : -1, thighLen: hip.distanceTo(knee), shinLen: knee.distanceTo(ankle),
-      dThigh: knee.clone().sub(hip).normalize(), dShin: ankle.clone().sub(knee).normalize(), dFoot: ball.clone().sub(ankle).normalize(), dToe: toe.clone().sub(ball).normalize(),
-      // (Where the ankle is from the ball of the foot, standing flat; and how high the ball stands.)
-      ankleFromBall: ankle.clone().sub(ball), ballUp: ball.y,
-    };
-  };
-  const legs = [side('l'), side('r')];
-  // (Where the foot comes down and leaves is reckoned from the hip joint, over the ground.)
-  const pelvisAt = P0('pelvis'), hipZ = P0('thigh_l').z;
-  // The foot flat on the ground in the base pose, as the rest pose has it. (Its length from the ankle to the ball.)
+  const P = new Poser(source, base), legs = [P.legs.l, P.legs.r];
   const T = 120 / s.cadence, v = s.speed, stance = (s.reach + s.push) / v, beta = stance / T, flight = T / 2 - stance;
   if (flight <= 0.01) throw new Error(`${s.name}: no time in the air between steps`);
   const vUp = (G * flight) / 2, sink = (vUp * stance) / Math.PI;
-
-  const pelvis = bone('pelvis'), root = pelvis.parent!;
-  const X = new Vector3(1, 0, 0), Y = new Vector3(0, 1, 0), Z = new Vector3(0, 0, 1);
-  const qx = (a: number) => new Quaternion().setFromAxisAngle(X, a), qy = (a: number) => new Quaternion().setFromAxisAngle(Y, a), qz = (a: number) => new Quaternion().setFromAxisAngle(Z, a);
-  /** Puts a bone at a rotation in the figure's frame, given its parent's. */
-  const setWorld = (b: Object3D, w: Quaternion, parentW: Quaternion) => { b.quaternion.copy(parentW.clone().invert().multiply(w)); };
-  const worldOf = (b: Object3D) => b.getWorldQuaternion(new Quaternion());
-  /** The rotation that takes a bone's direction in the base pose to `dir`, put before its rotation in the base pose. */
-  const aimed = (b: Bone, from: Vector3, dir: Vector3) => new Quaternion().setFromUnitVectors(from, dir.clone().normalize()).multiply(W0.get(b)!);
   const cyc = (p: number) => ((p % 1) + 1) % 1;
 
   /** The pelvis and everything above it at phase `p`, with the hips at height `h`. */
   const upper = (p: number, h: number) => {
-    for (const b of bones) { b.quaternion.copy(baseLocal.get(b)!); b.position.copy(basePos.get(b)!); }
+    P.begin();
     const c = Math.cos(2 * Math.PI * (p - LEFT_DOWN)), mid = Math.cos(2 * Math.PI * (p - LEFT_DOWN - beta / 2));
     // (Its left side forward as the left foot comes down; dropping on the side of the free leg; a little over the foot that bears it.)
     const dPelvis = qy(-rad(s.turn) * c).multiply(qx(rad(s.tilt))).multiply(qz(rad(3) * mid));
-    const at = new Vector3(0.014 * mid, h, pelvisAt.z);
-    root.updateMatrixWorld(true);
-    pelvis.position.copy(root.worldToLocal(at));
-    setWorld(pelvis, dPelvis.clone().multiply(W0.get(pelvis)!), worldOf(root));
+    P.pelvis(new Vector3(0.014 * mid, h, P.pelvisAt.z), dPelvis);
     // The chest turned against the pelvis (its right shoulder forward as the left foot comes down), leaning; the head level.
     const chest = (k: number) => qy(rad(s.chest) * c * k).multiply(qx(rad(s.lean) * (0.6 + 0.4 * k)));
-    const spines = ['spine_01', 'spine_02', 'spine_03'], dSpine = [chest(0.3), chest(0.65), chest(1)];
-    let parentW = dPelvis.clone().multiply(W0.get(pelvis)!);
-    spines.forEach((n, i) => { const b = bone(n), w = dSpine[i].clone().multiply(W0.get(b)!); setWorld(b, w, parentW); parentW = w; });
-    const dChest = dSpine[2];
-    const neck = bone('neck_01'), head = bone('Head'), wNeck = qx(rad(s.lean * 0.4)).multiply(W0.get(neck)!), wHead = qx(rad(2)).multiply(W0.get(head)!);
-    setWorld(neck, wNeck, parentW); setWorld(head, wHead, wNeck);
-    // The arms: each swinging against the leg on its own side, the elbow bent, closing as the arm comes forward.
+    P.trunk(dPelvis, [chest(0.3), chest(0.65), chest(1)], qx(rad(s.lean * 0.4)), qx(rad(2)));
+    // The arms: each swinging against the leg on its own side, the elbow bent, closing as the arm comes forward; a little across the
+    // body as it comes forward.
     for (const k of ['l', 'r'] as const) {
       const fwd = k === 'r' ? c : -c, sway = Math.cos(2 * Math.PI * (p - LEFT_DOWN - 0.03)) * (k === 'r' ? 1 : -1);
-      const clav = bone(`clavicle_${k}`), up = bone(`upperarm_${k}`), low = bone(`lowerarm_${k}`), hand = bone(`hand_${k}`);
-      const wClav = dChest.clone().multiply(W0.get(clav)!);
-      setWorld(clav, wClav, parentW);
-      // The arm let down from level to hang a little out from the side, its palm to the thigh: a turn about the figure's forward. Then
-      // swung: forward is a turn about the figure's left, the arm hanging down, a negative one; a little across the body as it comes
-      // forward. The elbow bent forward from hanging, and the wrist a little.
-      const hang = qz(rad(HANG) * (k === 'l' ? -1 : 1));
-      const swing = rad(-s.armBack + s.arm * sway), inward = rad(6) * Math.max(0, sway) * (k === 'l' ? -1 : 1);
-      const swung = dChest.clone().multiply(qy(inward)).multiply(qx(-swing));
-      const wUp = swung.clone().multiply(hang).multiply(W0.get(up)!);
-      setWorld(up, wUp, wClav);
-      const bend = rad(s.elbow + s.elbowSwing * fwd), bent = swung.clone().multiply(qx(-bend)), wLow = bent.clone().multiply(hang).multiply(W0.get(low)!);
-      setWorld(low, wLow, wUp);
-      setWorld(hand, bent.clone().multiply(qx(rad(-8))).multiply(hang).multiply(W0.get(hand)!), wLow);
+      P.arm(k, { swing: rad(-s.armBack + s.arm * sway), inward: rad(6) * Math.max(0, sway) * (k === 'l' ? -1 : 1), bend: rad(s.elbow + s.elbowSwing * fwd) });
     }
-    model.updateMatrixWorld(true);
+    P.update();
   };
 
-  /** A leg put so that its segments point along the given directions (thigh, shin, foot, toes). */
-  const putLeg = (L: (typeof legs)[number], dThigh: Vector3, dShin: Vector3, dFoot: Vector3, dToe: Vector3) => {
-    const thigh = bone(`thigh_${L.k}`), calf = bone(`calf_${L.k}`), foot = bone(`foot_${L.k}`), ball = bone(`ball_${L.k}`);
-    const wT = aimed(thigh, L.dThigh, dThigh), wC = aimed(calf, L.dShin, dShin), wF = aimed(foot, L.dFoot, dFoot), wB = aimed(ball, L.dToe, dToe);
-    setWorld(thigh, wT, worldOf(pelvis)); setWorld(calf, wC, wT); setWorld(foot, wF, wC); setWorld(ball, wB, wF);
-  };
-  const hipOf = (L: (typeof legs)[number]) => bone(`thigh_${L.k}`).getWorldPosition(new Vector3());
   /**
-   * The bearing leg, its ball planted at `ballAt` with the heel lifted by `lift`: its knee found so that thigh and shin reach from the
-   * hip to the ankle, bent forward. Gives back the thigh's and the knee's angles (forward from upright; how far bent) and how far the
-   * leg was stretched, as a share of its length.
+   * The bearing leg, its ball planted at `ballAt` with the heel lifted by `lift`, reaching from the hip; the toes stay flat on the
+   * ground as the heel lifts.
    */
-  const plant = (L: (typeof legs)[number], ballAt: Vector3, lift: number) => {
-    const ankle = ballAt.clone().add(L.ankleFromBall.clone().applyQuaternion(qx(lift)));
-    const hip = hipOf(L), d = ankle.clone().sub(hip), len = d.length(), most = (L.thighLen + L.shinLen) * 0.995, reach = Math.min(len, most);
-    const u = d.clone().normalize(), w = u.clone().cross(X).normalize();
-    const cosA = (L.thighLen ** 2 + reach ** 2 - L.shinLen ** 2) / (2 * L.thighLen * reach), a = Math.acos(Math.min(1, Math.max(-1, cosA)));
-    const knee = hip.clone().addScaledVector(u, Math.cos(a) * L.thighLen).addScaledVector(w, Math.sin(a) * L.thighLen);
-    const end = hip.clone().addScaledVector(u, reach);
-    const dT = knee.clone().sub(hip), dS = end.clone().sub(knee);
-    const dF = L.ankleFromBall.clone().negate().applyQuaternion(qx(lift));
-    // (The toes stay flat on the ground as the heel lifts.)
-    putLeg(L, dT, dS, dF, L.dToe.clone());
-    const thighA = Math.atan2(dT.z, -dT.y), shinA = Math.atan2(dS.z, -dS.y);
-    return { thighA, kneeA: thighA - shinA, stretch: len / (L.thighLen + L.shinLen) };
-  };
+  const plant = (L: Leg, ballAt: Vector3, lift: number) => P.reachLeg(L.k, P.ankleFor(L.k, ballAt, lift), P.footDir(L.k, lift), L.dToe.clone());
   /** The free leg, by its thigh's angle forward from upright, the knee's bend, the foot's pitch (heel up) and the toes'. */
-  const swingLeg = (L: (typeof legs)[number], thighA: number, kneeA: number, pitch: number, toePitch: number) => {
-    const shinA = thighA - kneeA, dT = new Vector3(0, -Math.cos(thighA), Math.sin(thighA)), dS = new Vector3(0, -Math.cos(shinA), Math.sin(shinA));
-    const dF = L.ankleFromBall.clone().negate().applyQuaternion(qx(pitch));
-    putLeg(L, dT, dS, dF, L.dToe.clone().applyQuaternion(qx(toePitch)));
-  };
+  const swingLeg = (L: Leg, thighA: number, kneeA: number, pitch: number, toePitch: number) => P.angleLeg(L.k, thighA, kneeA, P.footDir(L.k, pitch), P.toeDir(L.k, toePitch));
 
   /** How high the hips are at phase `p`, for hips `h0` high where a foot comes down: lowest under the bearing foot, thrown between. */
   const hipsAt = (p: number, h0: number) => {
@@ -235,16 +124,16 @@ export function makeRun(source: Object3D, base: AnimationClip, s: RunStyle, fram
     return h0 + vUp * f - (G * f * f) / 2;
   };
   /** Where a foot is in its cycle: bearing (`u` of the way through) or free (`w` of the way through). */
-  const legPhase = (L: (typeof legs)[number], p: number) => {
+  const legPhase = (L: Leg, p: number) => {
     const tau = cyc(p - LEFT_DOWN - (L.k === 'r' ? 0.5 : 0));
     return tau < beta ? { bearing: true, u: tau / beta } : { bearing: false, u: (tau - beta) / (1 - beta) };
   };
   /** The heel's lift while the foot bears the body: flat, then rising from a little before the body is over it. */
   const liftAt = (u: number) => rad(s.heel) * smooth((u - 0.42) / 0.58);
-  const ballOf = (L: (typeof legs)[number], u: number) => new Vector3(L.sign * 0.078, L.ballUp, hipZ + s.reach - v * u * stance);
+  const ballOf = (L: Leg, u: number) => new Vector3(L.sign * 0.078, L.ballUp, P.hipZ + s.reach - v * u * stance);
 
   // The hips as high as the legs allow: the leg stretched to no more than its length anywhere under the body.
-  let h0 = pelvisAt.y;
+  let h0 = P.pelvisAt.y;
   for (let tries = 0; tries < 200; tries++, h0 -= 0.003) {
     let most = 0;
     for (let i = 0; i <= 20; i++) {
@@ -278,8 +167,7 @@ export function makeRun(source: Object3D, base: AnimationClip, s: RunStyle, fram
     return { thighA, kneeA, pitch: -shinA + rel };
   };
 
-  // The frames: every bone's turn, and the hips' place.
-  const times: number[] = [], rot = new Map(bones.map((b) => [b, [] as number[]])), hipsPos: number[] = [];
+  // The frames.
   let slide = 0, clearance = Infinity, kneeMost = 0, stretch = 0;
   const planted = new Map<string, Vector3>();
   for (let i = 0; i <= frames; i++) {
@@ -296,22 +184,19 @@ export function makeRun(source: Object3D, base: AnimationClip, s: RunStyle, fram
         swingLeg(L, a.thighA, a.kneeA, a.pitch, a.pitch * smooth(lp.u / 0.2));
       }
     }
-    model.updateMatrixWorld(true);
+    P.update();
     // (Checked: the bearing ball where it came down, the ground carried back at the run's speed; the free foot clear of the ground.)
     for (const L of legs) {
-      const lp = legPhase(L, p), ballW = bone(`ball_${L.k}`).getWorldPosition(new Vector3());
+      const lp = legPhase(L, p), ballW = P.at(`ball_${L.k}`);
       if (lp.bearing) {
         const ground = ballW.clone().setZ(ballW.z + v * lp.u * stance), key = `${L.k}`;
         if (lp.u === 0 || !planted.has(key)) planted.set(key, ground);
         slide = Math.max(slide, ground.distanceTo(planted.get(key)!));
       } else if (lp.u > 0.08 && lp.u < 0.92) {
-        for (const n of [`ball_${L.k}`, `ball_leaf_${L.k}`, `foot_${L.k}`]) clearance = Math.min(clearance, bone(n).getWorldPosition(new Vector3()).y - (n.startsWith('foot') ? 0.09 : 0));
+        for (const n of [`ball_${L.k}`, `ball_leaf_${L.k}`, `foot_${L.k}`]) clearance = Math.min(clearance, P.at(n).y - (n.startsWith('foot') ? 0.09 : 0));
       }
     }
-    times.push(p * T);
-    for (const b of bones) rot.get(b)!.push(...b.quaternion.toArray());
-    hipsPos.push(...pelvis.position.toArray());
+    P.keep(p * T);
   }
-  const tracks = [new VectorKeyframeTrack(`${pelvis.name}.position`, times, hipsPos), ...bones.map((b) => new QuaternionKeyframeTrack(`${b.name}.quaternion`, times, rot.get(b)!))];
-  return { clip: new AnimationClip(s.name, T, tracks), stride: strideOf(s), hips: h0, stretch, slide, clearance, kneeMost: (kneeMost * 180) / Math.PI };
+  return { clip: P.clip(s.name, T), stride: strideOf(s), hips: h0, stretch, slide, clearance, kneeMost: (kneeMost * 180) / Math.PI };
 }

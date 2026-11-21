@@ -679,6 +679,26 @@ The machine this is developed on now has a graphics card, and tablets were repor
     run; `tools/browser/figures.cjs` (the paces, sitting, lying, climbing, dropping, the clips that carry a figure) and
     `tools/browser/crew.cjs` pass.
 
+62. **Skiing.** Asked: "after improved run, create also animations that resemble: nordic/cross country skiing, downhill skiing, ski
+    jump, and show then me similar grids as well to see". *Done:* three clips made in code on the figures' skeleton as the run is
+    (`src/figures/skiing.ts`), with what made the run (setting the pelvis, the trunk, the arms and reaching legs, each by how it is to
+    lie in the figure's frame) drawn out into `src/figures/posing.ts` for all four (the run made through it comes out the same to the
+    last bit). `Ski_Classic_Loop`, the diagonal stride: the kick with the ski still on the snow and the heel lifting from it, the leg
+    carried up behind with the ski's tail off the snow and its tip kept on it, brought forward low to glide; the pole planted ahead as
+    the other leg kicks, pushed past the hip and let go behind; the trunk thirty degrees forward, the hips dropping before each kick.
+    `Ski_Downhill_Loop`, carved turns left and right: skis parallel, edged and turned across the slope, swung out from under a body
+    leaning into the turn, the chest kept down the hill and tilted back over the outside ski, sat low with the shins forward and the
+    hips back, rising between turns, the inside pole flicked to the snow as each turn begins. `Ski_Jump`, once through in six
+    seconds: the in-run crouch with the arms back, the take-off, the flight laid forward over the skis spread in a V with their tips
+    up, a telemark landing with the arms out, and the outrun. While one plays, the figure carries skis, and poles for the first two
+    (`src/figures/gear.ts`): laid out as the skeleton stands at rest and hung on its bones by the inverse of where each stood, so that
+    they fit every body; on the toes where the binding holds only those (cross-country, jumping), under the whole foot for downhill.
+    They come off when it does anything else. All three are played in place. *Checked:* the clips as played, without a browser: no
+    foot under the snow, the legs within their reach, the free foot clear of the snow in the stride's swing and the jump's flight;
+    filmed in the figure lab at twelve (fourteen for the jump) times each, from the side and from ahead or a quarter, and on the base
+    woman; the gear on and off as the clips start and stop; `tools/browser/figures.cjs` and `tools/browser/crew.cjs` pass. Not done:
+    a figure that moves with them (travelling, the jump's arc along a hill), and skating, double poling or a tuck.
+
 ## Risks
 
 | Risk | Mitigation |
