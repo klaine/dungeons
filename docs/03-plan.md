@@ -985,6 +985,31 @@ The machine this is developed on now has a graphics card, and tablets were repor
     metres in a second, ski-jump flights of 21 to 25, backflips (held tall all the way, short and fallen), 360s, a 360 with a backflip
     short and fallen; a horse and rider on four skis the same at a kicker on a flatter stretch; on the groomed slope the kicker trials
     as before (straight air 14 metres in a second, a flight 19, a 720 21 in 1.4 seconds); switching between the two while riding.
+75. **Down a crest from the summit.** Asked: "you can scale down a bit the part above 300m elevation if it helps? also riding down
+    along a mountain ridge/crest could be cool! it doesnt need to be 100m skiable, part of it has only visual purpose lets se 20m
+    minimum is plenty wide skiable path, 100m wide "nearland" as accurate near terrain is for visual purposes". *Done*
+    (`src/core/skiRun.ts`, `lab/slopeLand.ts`, `lab/slope.ts`): the land is marked where a path twenty metres broad can be skied
+    (three quarters of the land within eight metres no steeper than 36 degrees over sixteen), and lines are let go through it,
+    preferring ways along a crest (the land forty metres either side lower) and keeping the land across the path, ten metres either
+    way, within 22 degrees of level; come to a corner where nothing within the tightest curve goes on (a spur's end turning into a
+    glen), a line may turn up to an eighth of the way round. The slice's land above 300 metres is brought to half its height over
+    that (`RUN.squash`): with it at two thirds, the runs still started at the range's foot, under 470 metres; at a half, one starts
+    at 832 metres in the world's terms, beside `w2`'s highest summit, The Silent Warden (846), and comes down the crest of a spur
+    into the glen above Weneford at 209: 1.02 kilometres, falling 360 metres of the slice's land, nineteen degrees on the whole and
+    thirty at most over forty metres, about a third of it along a crest. The run kept is the one that starts highest (worth twice
+    its drop), then falls furthest, the longest and most along a crest. The slice keeps its path's edges (`piste`): out from the
+    line as far as the snow is skiable, each edge kept to the narrowest it comes within sixteen metres and smoothed over thirty-two,
+    never nearer than ten metres: 24 metres broad at the narrowest of the crest, some eighty where the land allows. The page keeps
+    the skier on the path, turning it back near the edges (the nearer, the narrower the path), the kickers on it, the watched run in
+    it (drawn in where the path is narrower than the run was made); the path is groomed and white, beyond it loose snow, and rock
+    where the world's own land (not the slice's, lowered) is steeper than some forty degrees, faded in over a few metres from the
+    path's edge; poles along its edges every twenty metres. A lower sun and less of the sky's light on the world's land, so that its
+    slopes shade; the snow's pictures drawn to repeat without seams. *Mended on the way:* a skier kept in from a narrowing edge onto
+    higher snow had seemed to rise as fast as it was moved, and was thrown a hundred metres up; rising is now judged where it went,
+    before it is kept on the path, and never faster than it goes. *Checked* (headless, drawing in software): ridden from the top
+    straight and holding turns and tucks either way, to the foot in 60 to 79 seconds at up to 97 km/h, never thrown; at its kickers
+    (130, 602, 720 and 850 metres down), straight air of 11 to 19 metres, flights of 22 to 24, backflips coming round when tucked in
+    the air and falling short held tall; the groomed slope as before; about 0.73 million triangles drawn.
 ## Risks
 
 | Risk | Mitigation |

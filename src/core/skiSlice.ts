@@ -3,7 +3,8 @@
  * lying on the world's land about it, at three grains.
  *
  * - `snow`: within `half` metres of the line, at a metre: the near land as the walk page makes it (`makeSquare` in `stream.ts`),
- *   smoothed a little as snow lies on it and a little deeper. Nothing (`NaN`) further off.
+ *   smoothed a little as snow lies on it and a little deeper. Nothing (`NaN`) further off. Of it, the skiable path is what lies within
+ *   the run's `piste`; the rest is there to be seen.
  * - `near`: the same snow about the run, some hundreds of metres out, at four metres.
  * - `far`: the land of the country round about, some kilometres out, at sixteen metres; and what lies on it (`COVER`), at the same grain.
  *
@@ -17,8 +18,12 @@ export interface Grid { x0: number; z0: number; cell: number; nx: number; nz: nu
 export interface SkiSlice {
   /** The world's seed and name; the peak the run comes down from, and how far from it. */
   world: string; worldName: string; peak: string;
-  /** The line (a point every `step` metres from its top, in the world's coordinates), the land's height along it, and what it is like. */
-  run: { step: number; points: [number, number][]; heights: number[]; drop: number; length: number; mean: number; steepest: number };
+  /**
+   * The line (a point every `step` metres from its top, in the world's coordinates), the snow's height along it, and what it is like;
+   * at each point of it, how far to its right (less than nothing) and its left the skiable path reaches (`piste`); and how the land
+   * above some height was brought lower for the slice (`squash`: heights over `above` kept at `keep` of what they were over it).
+   */
+  run: { step: number; points: [number, number][]; heights: number[]; drop: number; length: number; mean: number; steepest: number; piste: [number, number][]; squash: { above: number; keep: number } };
   /** How far either side of the line the snow at a metre reaches. */
   half: number;
   snow: Grid; near: Grid; far: Grid;

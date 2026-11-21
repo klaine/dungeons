@@ -23,8 +23,10 @@ export interface Frame { s: number; left: number; dx: number; dz: number }
 export interface Land {
   /** What it is called (and shortly), and what the run is like, for the page to say. */
   name: string; short: string; about: string;
-  /** How long the run is, horizontally (`Infinity` for one that goes on); how far either side of its line it may be skied. */
+  /** How long the run is, horizontally (`Infinity` for one that goes on); how far either side of its line its snow reaches. */
   length: number; half: number;
+  /** Where the skiable path's edges are `s` along the run: how far to the left of its line each lies (the right edge less than nothing). */
+  edges(s: number): [number, number];
   /** The snow's height at a point of the scene. */
   height(x: number, z: number): number;
   /** Where a point lies against the run; `hint`, the `s` of a point near it, makes it quicker. */
@@ -36,8 +38,8 @@ export interface Land {
   /** What is seen of it, and keeping that about a point as it moves (the groomed slope's goes on with the skier). */
   group: Group;
   keepAbout(x: number, z: number): void;
-  /** How far the air's haze begins and is whole. */
-  fog: [number, number];
+  /** How far the air's haze begins and is whole; where the sun is (towards it); and how strong the sky's light is. */
+  fog: [number, number]; sun: [number, number, number]; sky: number;
 }
 
 const smooth01 = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
@@ -86,6 +88,7 @@ export function groomedLand(snowMap: Texture): Land {
   }
   return {
     name: 'Groomed slope', short: 'groomed', about: 'a groomed slope at sixteen degrees', length: Infinity, half: 31,
+    edges: () => [-31, 31],
     height: (_x, z) => -z * tan,
     frame: (x, z) => ({ s: z, left: x, dx: 0, dz: 1 }),
     at: (s, left) => ({ x: left, z: s, dx: 0, dz: 1 }),
@@ -97,7 +100,7 @@ export function groomedLand(snowMap: Texture): Land {
       const first = Math.floor(down / TILE) * TILE - TILE;
       tiles.forEach((tile, k) => tile.position.copy(onSlope(first + k * TILE, 0)));
     },
-    fog: [90, 520],
+    fog: [90, 520], sun: [-0.55, 0.75, -0.35], sky: 1.15,
   };
 }
 
@@ -153,11 +156,24 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     }
     return out;
   };
+  /** The skiable path's edges at `s` (from slices made before the path had its own edges, the snow's edge less four metres). */
+  const piste = slice.run.piste ?? line.map(() => [-(slice.half - 4), slice.half - 4] as [number, number]);
+  const edges = (s: number): [number, number] => {
+    const f = Math.max(0, Math.min(n - 1, s / step)), k = Math.min(n - 2, Math.floor(f)), t = f - k, [a, b] = piste[k], [c, d] = piste[k + 1];
+    return [a + (c - a) * t, b + (d - b) * t];
+  };
   const at = (s: number, left: number) => {
     const k = Math.max(0, Math.min(n - 2, Math.floor(s / step))), t = s / step - k, [ax, az] = line[k], [dx, dz] = dirs[k];
     const x = ax + dx * t * step, z = az + dz * t * step;
     return { x: x + dz * left, z: z - dx * left, dx, dz };
   };
+
+  /** How steep the snow is about a point, in degrees, over `e` metres either way: alike whichever grid asks. */
+  const steepAt = (x: number, z: number, e: number) => Math.atan(Math.hypot(height(x + e, z) - height(x - e, z), height(x, z + e) - height(x, z - e)) / (2 * e)) * (180 / Math.PI);
+  /** A height of the slice as the world has it (undoing `squash` in `skiRun.ts`). */
+  const sq = slice.run.squash, worldHeight = (h: number) => (!sq || h <= sq.above ? h : sq.above + (h - sq.above) / sq.keep);
+  /** How steep the world's own land is where the slice's is `steep` degrees at height `y`. */
+  const worldSteep = (steep: number, y: number) => (!sq || y <= sq.above ? steep : (Math.atan(Math.tan((steep * Math.PI) / 180) / sq.keep) * 180) / Math.PI);
 
   // ---- What is seen.
   const group = new Group(), rng = new Rng(`slice ${slice.world}`);
@@ -171,8 +187,8 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
    * triangle pair for each square of four, its normals from the heights about each point, and its colour from how steep it is and
    * what lies there; with a skirt hanging from its outer edges, so that no crack shows where it meets the grid under it.
    */
-  const gridMesh = (g: Grid, lift: (x: number, z: number) => number, uv: (x: number, z: number) => [number, number], skirt: number, coloured: boolean) => {
-    const idx = new Int32Array(g.nx * g.nz).fill(-1), pos: number[] = [], nor: number[] = [], col: number[] = [], uvs: number[] = [], index: number[] = [];
+  const gridMesh = (g: Grid, lift: (x: number, z: number) => number, uv: (x: number, z: number) => [number, number], skirt: number, coloured: boolean, off?: (x: number, z: number) => number) => {
+    const idx = new Int32Array(g.nx * g.nz).fill(-1), pos: number[] = [], nor: number[] = [], col: number[] = [], uvs: number[] = [], index: number[] = [], other: number[] = [], kinds: boolean[] = [];
     const H = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? NaN : g.data[j * g.nx + i]);
     const c = new Color();
     for (let j = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++) {
@@ -188,12 +204,18 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
       nor.push(-gx / nl, 1 / nl, -gz / nl);
       const [a, b] = uv(x, z);
       uvs.push(a, b);
+      // (How far off the skiable path, 0 to 1: the path is groomed and white whatever lies under it, and beyond its edge the loose
+      // snow, and the rock, come in over a few metres.)
+      const away = off ? off(x, z) : 1;
+      kinds.push(away > 0.5);
       if (coloured) {
         // Snow, but where it is too steep to lie (bare rock) or on water (frozen, or the open sea).
-        const steep = Math.atan(Math.hypot(gx, gz)) * (180 / Math.PI), cv = coverAt(x, z);
+        const steep = steepAt(x, z, Math.max(4, g.cell / 2)), cv = coverAt(x, z);
         if (cv === COVER.sea && y < 0.5) c.copy(sea);
         else if (cv === COVER.lake) c.copy(ice);
-        else c.copy(snowWhite).lerp(rock, smooth01((steep - 36) / 12));
+        // (Bare rock where the world's own land is too steep for snow to lie: where the slice has its land brought lower, the steepness
+        // it had. The skiable path's snow is groomed white whatever lies under it.)
+        else c.copy(snowWhite).lerp(rock, smooth01((worldSteep(steep, y) - 38) / 14) * away);
         col.push(c.r, c.g, c.b);
       }
     }
@@ -213,7 +235,8 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     for (let j = 0; j < g.nz - 1; j++) for (let i = 0; i < g.nx - 1; i++) {
       if (!whole(i, j)) continue;
       const a = v(i, j), b = v(i + 1, j), c2 = v(i, j + 1), d = v(i + 1, j + 1);
-      index.push(a, c2, b, b, c2, d);
+      // (A square with any corner of the other kind is of it: the path's edge falls a little outside its edge.)
+      (kinds[a] || kinds[b] || kinds[c2] || kinds[d] ? other : index).push(a, c2, b, b, c2, d);
       if (skirt > 0) {
         if (!whole(i, j - 1)) hang(a, b);
         if (!whole(i, j + 1)) hang(c2, d);
@@ -226,41 +249,48 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     geo.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3));
     geo.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
     if (coloured) geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
-    geo.setIndex(index);
+    // (Two kinds drawn with two materials: the first of the indices, then the other.)
+    geo.setIndex([...index, ...other]);
+    if (off) { geo.addGroup(0, index.length, 0); geo.addGroup(index.length, other.length, 1); }
     geo.computeBoundingSphere();
     return geo;
   };
 
-  // The run's snow at a metre, groomed: its corduroy laid along the run (each point's place against the line, found from the last's).
-  let hint = 0;
+  // The run's snow at a metre: the skiable path groomed, its corduroy laid along the run; beyond its edges loose snow, and bare rock
+  // where it is too steep for snow to lie (each point's place against the line found from the last's).
+  let hint = 0, last: Frame = { s: 0, left: 0, dx: 0, dz: 1 };
   const pisteUv = (x: number, z: number): [number, number] => {
-    // (Found from the last point's place along the line; looked for along all of it if that seems to have lost the way.)
+    // (Looked for along all of the line if the last point's place seems to have lost the way.)
     let f = frame(x, z, hint);
     if (Math.abs(f.left) > slice.half + 2) f = frame(x, z);
-    hint = f.s;
+    hint = f.s; last = f;
     return [f.left / 9, f.s / 9];
   };
+  const offPiste = () => { const [lo, hi] = edges(last.s), out = Math.max(lo - last.left, last.left - hi, -4 - last.s, last.s - length - 4); return smooth01((out + 1) / 6); };
   const pisteMap = snowMap.clone();
   pisteMap.needsUpdate = true;
-  const piste = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, false), new MeshStandardMaterial({ color: 0xffffff, map: pisteMap, roughness: 0.92 }));
-  piste.receiveShadow = true;
-  group.add(piste);
+  const run = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, true, offPiste), [
+    new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: pisteMap, roughness: 0.92 }),
+    new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95 }),
+  ]);
+  run.receiveShadow = true;
+  group.add(run);
   // The land about it at four metres, sunk a little out of sight under the run's snow; and the country at sixteen, sunk out of sight
   // under the land about the run. (Both drawn behind what lies over them where they meet, a little, so as not to flicker through it.)
-  const plainUv = (x: number, z: number): [number, number] => [x / 11, z / 11];
+  const plainUv = (x: number, z: number): [number, number] => [x / 23, z / 23];
   const underSnow = (x: number, z: number) => (Number.isNaN(gridAt(snow, x, z)) ? 0 : -1.2);
   const nearBox = [near.x0, near.z0, near.x0 + (near.nx - 1) * near.cell, near.z0 + (near.nz - 1) * near.cell];
   const underNear = (x: number, z: number) => (x > nearBox[0] + 24 && x < nearBox[2] - 24 && z > nearBox[1] + 24 && z < nearBox[3] - 24 ? -8 : 0);
   const powder = (offset: number) => new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
   const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true), powder(1));
   about.receiveShadow = true;
-  const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 40, z / 40], 0, true), powder(2));
+  const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 61, z / 61], 0, true), powder(2));
   group.add(about, country);
 
-  // Its edges marked with poles every twenty-five metres, four metres in from where the run's snow ends.
+  // The path's edges marked with poles every twenty metres.
   const marks: Matrix4[] = [];
-  for (let s = 0; s <= length; s += 25) for (const side of [-1, 1]) {
-    const p = at(s, side * (slice.half - 4));
+  for (let s = 0; s <= length; s += 20) for (const side of [0, 1]) {
+    const e = edges(s), p = at(s, e[side] + (side ? 1 : -1));
     marks.push(new Matrix4().makeTranslation(p.x, height(p.x, p.z) + 0.75, p.z));
   }
   const poles = new InstancedMesh(POLE, POLE_PAINT, marks.length);
@@ -306,8 +336,9 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
 
   return {
     name: `${slice.worldName}, below ${slice.peak}`, short: `below ${slice.peak}`,
-    about: `${(length / 1000).toFixed(2)} km from ${slice.run.heights[0].toFixed(0)} m to ${slice.run.heights[slice.run.heights.length - 1].toFixed(0)} m`,
-    length, half: slice.half, height, frame, at, kickable, group, keepAbout: () => {}, fog: [380, 5200],
+    // (Its heights as the world has them: the slice's land above some height was brought lower.)
+    about: `${(length / 1000).toFixed(2)} km from ${worldHeight(slice.run.heights[0]).toFixed(0)} m to ${worldHeight(slice.run.heights[slice.run.heights.length - 1]).toFixed(0)} m`,
+    length, half: slice.half, edges, height, frame, at, kickable, group, keepAbout: () => {}, fog: [380, 5200], sun: [-0.6, 0.42, -0.5], sky: 0.8,
   };
 }
 

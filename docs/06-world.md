@@ -685,9 +685,12 @@ its slice kept for the page (`src/core/skiSlice.ts`, `public/slopes/w2.json`): t
 makes it, under snow, fifty metres either side of the run's line, and the land and country about it coarser. What the search showed
 of the world's land: its range is walls, at 200 to 500 metres seven tenths or more of it steeper than 36 degrees over sixteen metres,
 its glens floored flat, its tops rounded but narrow; nowhere in the range does a band a hundred metres broad stay skiable for long, and
-the run found in `w2` starts at the range's foot, at 319 metres, and crosses the upland to the sea. A world with skiable mountains
-would want its range worn into broader shoulders and cirques, or the run allowed to be narrower high up. The page does not stream the
-world; it is a slice, made once, of the land as it is now, and is made again when the land changes (`plan`, item 74).
+the first run found in `w2` started at the range's foot, at 319 metres, and crossed the upland to the sea (`plan`, item 74). Asked
+then for a skiable path of twenty metres within the hundred drawn, down a crest if it could, and allowed to bring the land above 300
+metres lower, the run found comes from beside the highest summit, at 832 metres, down a spur's crest into a glen (item 75), on land
+brought to half its height above 300 metres in the slice alone. A world whose mountains could be skied as they stand would want its
+range worn into broader shoulders and cirques, or less high. The page does not stream the world; it is a slice, made once, of the land
+as it is now, and is made again when the land changes.
 
 ## Where next: the land, and places that fit it
 

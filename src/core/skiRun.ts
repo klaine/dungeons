@@ -22,23 +22,36 @@ import { type Grid, gridAt, type SkiSlice } from './skiSlice';
 export type RunWorld = Pick<World, 'field' | 'cover' | 'places' | 'towns' | 'ways' | 'plan'>;
 
 /** A run: its line, a point every `step` metres from its top (x, z in the world's coordinates), the land's height there; and what it is like. */
-export interface SkiRun { step: number; points: [number, number][]; heights: number[]; drop: number; length: number; score: number; steepest: number; mean: number }
+export interface SkiRun { step: number; points: [number, number][]; heights: number[]; drop: number; length: number; score: number; steepest: number; mean: number; crest: number }
 
 /** How a line is let go, what it keeps to and what it keeps away from. */
 export const RUN = {
-  /** Each step, metres; the tightest curve, metres from its middle; the slice's half-breadth; how far ahead it looks. */
-  step: 4, bend: 110, half: 50, ahead: 40,
+  /**
+   * Each step, metres; the tightest curve, metres from its middle; the slice's half-breadth (the near land, drawn true, for the eye);
+   * the skiable path's least half-breadth (asked: "20m minimum is plenty wide skiable path"); how far ahead the line looks.
+   */
+  step: 4, bend: 60, half: 50, path: 10, ahead: 40,
   /** The longest line let go; the shortest kept; the least drop kept. */
   longest: 4000, shortest: 600, least: 150,
   /** How far the slice keeps from a place (its middle: a place reaches some hundreds of metres about it), from a town or village, and a road. */
   place: 550, town: 300, road: 60,
   /**
-   * Skiable land: no steeper than `steep` degrees over sixteen metres; a band about the line is skiable where so much of the land
-   * within the slice's half-breadth is (`share`). The line falls as steeply as `aim` if it can, never less than `gentle`, and the
-   * land across it, `side` metres either way, tilts no more than `across`.
+   * Skiable land: no steeper than `steep` degrees over sixteen metres; a path about the line is skiable where so much of the land
+   * within its half-breadth is (`share`). The line falls as steeply as `aim` if it can, never less than `gentle`, and the land across
+   * the path, `side` metres either way, tilts no more than `across`; it keeps to a crest where it can, the land `crest` metres either
+   * side lower than it.
    */
-  steep: 38, share: 0.8, aim: 22, gentle: 3, side: 30, across: 22,
+  steep: 36, share: 0.75, aim: 22, gentle: 3, side: 10, across: 22, crest: 40,
+  /**
+   * The land of a run's world above `above` metres brought lower, to `keep` of its height over that (asked: "you can scale down a bit
+   * the part above 300m elevation if it helps?"): the range's walls, in the slice, at a slope a skier can come down. Only in the slice:
+   * the world itself, and every place built in it, keep their land.
+   */
+  squash: { above: 300, keep: 0.5 },
 };
+
+/** A height of the world's land as the slice has it: above `RUN.squash.above`, brought lower. */
+export const squash = (h: number) => (h <= RUN.squash.above ? h : RUN.squash.above + (h - RUN.squash.above) * RUN.squash.keep);
 
 const deg = (r: number) => (r * 180) / Math.PI, rad = (d: number) => (d * Math.PI) / 180;
 
@@ -63,11 +76,11 @@ export function smoothed(f: HeightField, r: number): HeightField {
 }
 
 /**
- * Where on a world's lattice a band the slice's breadth could be skied: points where, within the slice's half-breadth about them,
- * enough of the land is skiable and none of it water; and how far each such point lies inside the land so marked, in metres.
+ * Where on a world's lattice (`f`, the world's land as the slice has it) a path could be skied: points where, within the path's
+ * half-breadth about them, enough of the land is skiable and none of it water; and how far each lies inside the land so marked, metres.
  */
-export function skiableLand(w: RunWorld): { band: Uint8Array; inside: Float32Array } {
-  const f = w.field, { nx, nz } = f, ok = new Uint8Array(nx * nz), wet = new Uint8Array(nx * nz);
+export function skiableLand(w: RunWorld, f: HeightField = w.field): { band: Uint8Array; inside: Float32Array } {
+  const { nx, nz } = f, ok = new Uint8Array(nx * nz), wet = new Uint8Array(nx * nz);
   for (let j = 1; j < nz - 1; j++) for (let i = 1; i < nx - 1; i++) {
     const k = j * nx + i, c = w.cover[k], gx = (f.data[k + 1] - f.data[k - 1]) / (2 * f.cell), gz = (f.data[k + nx] - f.data[k - nx]) / (2 * f.cell);
     wet[k] = c === COVER.sea || c === COVER.lake || c === COVER.marsh ? 1 : 0;
@@ -79,7 +92,7 @@ export function skiableLand(w: RunWorld): { band: Uint8Array; inside: Float32Arr
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) s[(j + 1) * (nx + 1) + i + 1] = src[j * nx + i] + s[j * (nx + 1) + i + 1] + s[(j + 1) * (nx + 1) + i] - s[j * (nx + 1) + i];
     return s;
   };
-  const okSum = table(ok), wetSum = table(wet), r = Math.round(RUN.half / f.cell), area = (2 * r + 1) ** 2, band = new Uint8Array(nx * nz);
+  const okSum = table(ok), wetSum = table(wet), r = Math.max(1, Math.round(RUN.path / f.cell)), area = (2 * r + 1) ** 2, band = new Uint8Array(nx * nz);
   const box = (s: Float64Array, i: number, j: number) => s[(j + r + 1) * (nx + 1) + i + r + 1] - s[(j - r) * (nx + 1) + i + r + 1] - s[(j + r + 1) * (nx + 1) + i - r] + s[(j - r) * (nx + 1) + i - r];
   for (let j = r; j < nz - r; j++) for (let i = r; i < nx - r; i++) band[j * nx + i] = box(okSum, i, j) / area >= RUN.share && box(wetSum, i, j) === 0 ? 1 : 0;
   // How far inside: by passes of the nearest step each way (a chamfer of 1 and the square root of 2, times the lattice's cell).
@@ -104,7 +117,9 @@ export function skiableLand(w: RunWorld): { band: Uint8Array; inside: Float32Arr
 
 /** Looks for the best run in a world; and every run that was kept, best first (for a picture of the search). */
 export function findSkiRun(w: RunWorld): { best: SkiRun | null; kept: SkiRun[]; tried: number } {
-  const f = w.field, soft = smoothed(f, 2), { hx, hz } = w.plan, { nx, nz } = f, { band, inside } = skiableLand(w);
+  const f = new HeightField(w.field.x0, w.field.z0, w.field.cell, w.field.nx, w.field.nz);
+  f.data.set(w.field.data.map(squash));
+  const soft = smoothed(f, 1), { hx, hz } = w.plan, { nx, nz } = f, { band, inside } = skiableLand(w, f);
   const h = (x: number, z: number) => soft.smoothAt(x, z);
   const cellOf = (x: number, z: number) => {
     const i = Math.round((x - f.x0) / f.cell), j = Math.round((z - f.z0) / f.cell);
@@ -115,10 +130,16 @@ export function findSkiRun(w: RunWorld): { best: SkiRun | null; kept: SkiRun[]; 
   const built = (x: number, z: number, more = 0) =>
     w.places.some((p) => Math.hypot(p.x - x, p.z - z) < RUN.place + more) || w.towns.some((t) => Math.hypot(t.x - x, t.z - z) < RUN.town + more)
     || roads.some(([px, pz]) => Math.hypot(px - x, pz - z) < RUN.road + more);
+  /** How far the land at a point stands over the land `RUN.crest` metres either side of the way `a` (a crest's, the more the higher). */
+  const crestAt = (x: number, z: number, a: number) => {
+    const dx = Math.cos(a), dz = Math.sin(a), c = RUN.crest;
+    return h(x, z) - (h(x - dz * c, z + dx * c) + h(x + dz * c, z - dx * c)) / 2;
+  };
   /**
    * How good a way on is, from (`x`, `z`) at `a` (radians from +x towards +z) having turned `turned` to it: none if it does not fall,
-   * leaves the land where a band can be skied, or is too steep anywhere over the way ahead, or the land tilts too much across it; else
-   * how steeply it falls, up to the aim, more the further inside the skiable land it keeps, less for the tilt across it and the turn.
+   * leaves the land where a path can be skied, or is too steep anywhere over the way ahead, or the land tilts too much across it;
+   * else how steeply it falls, up to the aim, more the more it keeps to a crest (asked: "riding down along a mountain ridge/crest could
+   * be cool!") and inside the skiable land, less for the tilt across it and the turn.
    */
   const worth = (x: number, z: number, a: number, turned: number): number | null => {
     const dx = Math.cos(a), dz = Math.sin(a), h0 = h(x, z), parts = 5, seg = RUN.ahead / parts;
@@ -134,7 +155,8 @@ export function findSkiRun(w: RunWorld): { best: SkiRun | null; kept: SkiRun[]; 
     const ex = x + dx * RUN.ahead, ez = z + dz * RUN.ahead;
     const tilt = deg(Math.atan(Math.abs(h(ex - dz * RUN.side, ez + dx * RUN.side) - h(ex + dz * RUN.side, ez - dx * RUN.side)) / (2 * RUN.side)));
     if (tilt > RUN.across) return null;
-    return Math.min(fall, RUN.aim) - 0.5 * Math.max(0, fall - RUN.aim) + 0.08 * Math.min(deep, 60) - 0.3 * tilt - 0.12 * Math.abs(deg(turned));
+    const crest = Math.max(-10, Math.min(20, crestAt(ex, ez, a)));
+    return Math.min(fall, RUN.aim) - 0.5 * Math.max(0, fall - RUN.aim) + 0.3 * crest + 0.1 * Math.min(deep, 16) - 0.3 * tilt - 0.12 * Math.abs(deg(turned));
   };
   const kept: SkiRun[] = [], turnMost = RUN.step / RUN.bend;
   let tried = 0;
@@ -148,27 +170,33 @@ export function findSkiRun(w: RunWorld): { best: SkiRun | null; kept: SkiRun[]; 
     for (let d = 0; d < 360; d += 5) { const v = worth(sx, sz, rad(d), 0); if (v !== null && v > best) { best = v; a = rad(d); } }
     if (best === -Infinity) continue;
     const points: [number, number][] = [[sx, sz]];
-    let x = sx, z = sz;
+    let x = sx, z = sz, why = 'longest';
     while (points.length * RUN.step < RUN.longest) {
       // Each way it could turn to, from as far as a step allows one way to as far the other.
       let pick = -Infinity, to = a;
       for (let t = -turnMost; t <= turnMost + 1e-9; t += turnMost / 3) { const v = worth(x, z, a + t, (t / turnMost) * rad(10)); if (v !== null && v > pick) { pick = v; to = a + t; } }
-      if (pick === -Infinity) break;
+      // (Come to a corner, where the ground it follows turns more sharply than that, as a spur's end into a glen: a sharper turn, up to
+      // an eighth of the way round, where nothing gentler goes on.)
+      if (pick === -Infinity) for (let t = -rad(45); t <= rad(45) + 1e-9; t += rad(5)) { const v = worth(x, z, a + t, t); if (v !== null && v > pick) { pick = v; to = a + t; } }
+      if (pick === -Infinity) { why = 'no way on'; break; }
       a = to;
       x += Math.cos(a) * RUN.step; z += Math.sin(a) * RUN.step;
-      if (Math.abs(x) > hx - 200 || Math.abs(z) > hz - 200 || built(x, z, RUN.half)) break;
+      if (Math.abs(x) > hx - 200 || Math.abs(z) > hz - 200 || built(x, z, RUN.half)) { why = 'built or edge'; break; }
       points.push([x, z]);
     }
     const hs = points.map(([px, pz]) => h(px, pz)), length = (points.length - 1) * RUN.step, drop = hs[0] - hs[hs.length - 1];
     if (length < RUN.shortest || drop < RUN.least) continue;
+    // (How much of it keeps to a crest, the land falling away five metres and more either side.)
+    let onCrest = 0;
+    for (let k = 1; k < points.length; k++) { const [px, pz] = points[k], [qx, qz] = points[k - 1]; if (crestAt(px, pz, Math.atan2(pz - qz, px - qx)) > 5) onCrest += RUN.step; }
     let steepest = 0;
     const per = Math.round(RUN.ahead / RUN.step);
     for (let k = per; k < points.length; k += per) steepest = Math.max(steepest, deg(Math.atan((hs[k - per] - hs[k]) / RUN.ahead)));
     const mean = deg(Math.atan(drop / length));
-    // (The drop, and the height it starts from; and the length, so that a run long enough to ski for a while is chosen over a short
-    // steep one.)
-    const score = drop + 0.4 * hs[0] + 0.25 * length;
-    kept.push({ step: RUN.step, points, heights: hs, drop, length, score, steepest, mean });
+    // (The drop, and the height it starts from, worth most (asked: "starting on high slopes"); the length, so that a run long enough
+    // to ski for a while is chosen over a short steep one; and how much of it is along a crest.)
+    const score = drop + 2 * hs[0] + 0.25 * length + 0.6 * onCrest;
+    kept.push({ step: RUN.step, points, heights: hs, drop, length, score, steepest, mean, crest: onCrest });
   }
   kept.sort((p, q) => q.score - p.score);
   // (Many starts come down the same way: of those that run together for long, keep the best.)
@@ -214,7 +242,7 @@ export function sliceOfRun(w: World, run: SkiRun): SkiSlice {
       const s = makeSquare(grid, tilesFor(grid, i, j).map(([a, b]) => tile(a, b)), i, j, p.n);
       for (let jj = 0; jj < SQUARE.n; jj++) for (let ii = 0; ii < SQUARE.n; ii++) {
         const x = s.x0 + ii, z = s.z0 + jj;
-        if (x >= x0 && x <= x1 && z >= z0 && z <= z1) ground[(z - z0) * nx + (x - x0)] = s.heights[jj * SQUARE.n + ii];
+        if (x >= x0 && x <= x1 && z >= z0 && z <= z1) ground[(z - z0) * nx + (x - x0)] = squash(s.heights[jj * SQUARE.n + ii]);
       }
     }
   // The snow on it: the land smoothed over a few metres (hollows filled, knobs rounded over), and a little deeper.
@@ -228,15 +256,15 @@ export function sliceOfRun(w: World, run: SkiRun): SkiSlice {
     const ci = Math.round((mirror(x, p.hx - 4) - f8.x0) / f8.cell), cj = Math.round((mirror(z, p.hz - 4) - f8.z0) / f8.cell);
     return Math.max(0, Math.min(f8.nz - 1, cj)) * f8.nx + Math.max(0, Math.min(f8.nx - 1, ci));
   };
-  /** The land, or the water over it: the sea's surface, or a lake's (frozen, in winter). */
+  /** The land (as the slice has it, brought lower above `RUN.squash.above`), or the water over it: the sea's surface, or a lake's (frozen, in winter). */
   const water = (x: number, z: number, h: number) => {
     const k = cellOf(x, z);
     if (z > p.hz || w.cover[k] === COVER.sea) return Math.max(h, 0);
-    return w.lake[k] > 0 ? Math.max(h, w.lake[k]) : h;
+    return w.lake[k] > 0 ? Math.max(h, squash(w.lake[k])) : h;
   };
   for (let j = 0; j < fn; j++) for (let i = 0; i < fn; i++) {
     const x = far.x0 + i * fc, z = far.z0 + j * fc;
-    far.data[j * fn + i] = water(x, z, landAt(land, x, z));
+    far.data[j * fn + i] = water(x, z, squash(landAt(land, x, z)));
     cover[j * fn + i] = z > p.hz ? COVER.sea : w.cover[cellOf(x, z)];
   }
   // The land about the run at four metres: the snow, passing over its outermost metres to the country's.
@@ -263,12 +291,37 @@ export function sliceOfRun(w: World, run: SkiRun): SkiSlice {
     const x = x0 + (k % nx), z = z0 + Math.floor(k / nx), t = smooth01((d - (RUN.half - SLICE.edge)) / SLICE.edge);
     snow.data[k] = snowAll[k] + (gridAt(near, x, z) - snowAll[k]) * t;
   }
+  // The skiable path: from the line out either way, as far as the snow is no steeper than skiable (over four metres) and within the
+  // slice; then each edge kept no further out than the nearest point of it over the sixteen metres before and after, and smoothed
+  // over the thirty-two before and after (a path narrowing as it comes onto a crest, not all at once);
+  // never nearer the line than the path's least half-breadth. Beyond it the snow is there to be seen, not skied.
+  const across = (k: number, side: number) => {
+    const [px, pz] = run.points[k], [ax, az] = run.points[Math.max(0, k - 1)], [bx, bz] = run.points[Math.min(run.points.length - 1, k + 1)];
+    const l = Math.hypot(bx - ax, bz - az) || 1, lx = (bz - az) / l, lz = -(bx - ax) / l, steep = Math.tan((RUN.steep * Math.PI) / 180);
+    let out = 0;
+    for (let d = 1; d <= RUN.half - 4; d++) {
+      const x = px + lx * d * side, z = pz + lz * d * side, e = 2;
+      const gx = (gridAt(snow, x + e, z) - gridAt(snow, x - e, z)) / (2 * e), gz = (gridAt(snow, x, z + e) - gridAt(snow, x, z - e)) / (2 * e);
+      if (!(Math.hypot(gx, gz) <= steep)) break;
+      out = d;
+    }
+    return out;
+  };
+  const reachL = run.points.map((_, k) => across(k, 1)), reachR = run.points.map((_, k) => across(k, -1)), within = Math.round(16 / run.step), over = Math.round(32 / run.step);
+  const edge = (reach: number[]) => {
+    const least = reach.map((_, k) => Math.min(...reach.slice(Math.max(0, k - within), k + within + 1)));
+    return least.map((_, k) => { const w = least.slice(Math.max(0, k - over), k + over + 1); return Math.max(RUN.path, w.reduce((a, b) => a + b, 0) / w.length); });
+  };
+  const lefts = edge(reachL), rights = edge(reachR);
   // (Named for the nearest of the world's great peaks.)
   let peak = '', nearest = Infinity;
   w.peaks.forEach((q, k) => { const d = Math.hypot(q.x - run.points[0][0], q.z - run.points[0][1]); if (d < nearest) { nearest = d; peak = w.peakNames[k] ?? ''; } });
   return {
     world: p.seed, worldName: w.name, peak,
-    run: { step: run.step, points: run.points, heights: run.points.map(([x, z]) => gridAt(snow, x, z)), drop: run.drop, length: run.length, mean: run.mean, steepest: run.steepest },
+    run: {
+      step: run.step, points: run.points, heights: run.points.map(([x, z]) => gridAt(snow, x, z)), drop: run.drop, length: run.length, mean: run.mean, steepest: run.steepest,
+      piste: run.points.map((_, k) => [-rights[k], lefts[k]] as [number, number]), squash: { ...RUN.squash },
+    },
     half: RUN.half, snow, near, far, cover,
   };
 }
