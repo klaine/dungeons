@@ -1,18 +1,20 @@
 import { BufferAttribute, BufferGeometry, Color, Vector3 } from 'three';
+import { sculptHorse } from './horseSculpt';
 
 /**
- * The horse's body as it looks (asked: "improve the skins/visuals for the horse ...: horse, a realistic horse"): made in code on the
- * skeleton of `horse.ts`, which it was made to fit, as surfaces lofted through cross-sections a horse's body has, each section's
- * breadth and its depth above and below its middle given where the horse is so shaped: the trunk from the point of the buttock over
- * the croup and the barrel to the breast, deep at the girth and tucked up at the flank; the neck from the withers to the poll, crested
- * above and narrow at the throat; the head from the poll to the muzzle, broad at the cheeks and the forehead, narrowing down the face
- * and flaring a little at the nostrils; and each leg, from inside the shoulder or the haunch down over the forearm or the gaskin, the
- * knee or the hock, the cannon with its tendons behind, the fetlock, the pastern, and the hoof. Ears are leaves; eyes are dark and
- * glossy; the nostrils dark. The mane, the forelock and the tail are hair, strands laid from the crest, the poll and the dock.
+ * The horse's body as it looks (asked: "improve the skins/visuals for the horse ...: horse, a realistic horse"; then "improve horse
+ * skeleton and skin further - the butt and how legs attach to horse body look weird"): made in code on the skeleton of `horse.ts`,
+ * which it was made to fit. Its trunk, neck, quarters, shoulders and upper legs are one solid of rounded masses grown into one another
+ * (`horseSculpt.ts`), so that the thighs grow out of the quarters and the forearms out of the breast; the head, from the poll to the
+ * muzzle, broad at the cheeks and the forehead, narrowing down the face and flaring a little at the nostrils, and each leg from the
+ * knee or the hock down (the cannon with its tendons behind, the fetlock, the pastern, the hoof) are surfaces lofted through cross-
+ * sections, which overlap the solid where they join it. Ears are leaves; eyes are dark and glossy; the nostrils dark. The mane and the
+ * tail are hair, strands laid from the crest (where it is felt for on the solid) and the dock.
  *
  * Its coat is a bay's: a red brown, darker along the back, its legs black from the knees and the hocks down, its mane and tail black,
  * its muzzle dark, a small white star on its forehead. Ridden, it wears tack as a mediaeval horse did: a saddle with a high pommel and
- * cantle on a cloth bordered in another colour, a girth, stirrups hung where a rider's feet are, a bridle with its bit.
+ * cantle on a cloth bordered in another colour, a girth, stirrups hung where a rider's feet are, a bridle with its bit; laid on the
+ * solid's surface where a ray from inside the body comes out through it.
  *
  * Every point is given to the bones that move it, blended across each joint, so that the surfaces bend with the skeleton.
  */
@@ -123,63 +125,21 @@ export function horseLooks(rest: (n: string) => Vector3): HorseLooks {
   const mottled = (c: Color, p: Vector3, by = 0.06) => { const k = 1 + by * (noise(p) * 2 - 1); return new Color(c.r * k, c.g * k, c.b * k); };
   const part = (geometry: BufferGeometry, weights: [string, number][][], colours: Color[]): Part => ({ geometry, weights, colours });
 
-  // ---------------------------------------------------------------- the trunk
-  // Keyed along z, from behind the buttock to before the breast: its middle's height, half-breadth, depth above and below.
-  const TRUNK: [number, number, number, number, number][] = [
-    [-0.97, 1.2, 0.05, 0.05, 0.05], [-0.92, 1.21, 0.16, 0.2, 0.25], [-0.8, 1.24, 0.25, 0.27, 0.35], [-0.6, 1.25, 0.29, 0.29, 0.36],
-    [-0.38, 1.24, 0.28, 0.28, 0.33], [-0.12, 1.21, 0.3, 0.31, 0.39], [0.12, 1.2, 0.31, 0.33, 0.41], [0.34, 1.22, 0.27, 0.36, 0.39],
-    [0.52, 1.22, 0.23, 0.37, 0.34], [0.68, 1.17, 0.215, 0.29, 0.28], [0.8, 1.12, 0.16, 0.19, 0.18], [0.87, 1.1, 0.05, 0.06, 0.06],
-  ];
-  const trunkAt = (z: number) => {
-    let i = 1;
-    while (i < TRUNK.length - 1 && z > TRUNK[i][0]) i++;
-    const a = TRUNK[i - 1], b = TRUNK[i], t = smooth((z - a[0]) / (b[0] - a[0]));
-    return { y: lerp(a[1], b[1], t), w: lerp(a[2], b[2], t), top: lerp(a[3], b[3], t), bottom: lerp(a[4], b[4], t) };
-  };
+  // ---------------------------------------------------------------- the body: trunk, neck, quarters, shoulders, upper legs
+  // One solid of rounded masses grown into one another (`horseSculpt.ts`). Its coat darker where it faces up (the back, the crest),
+  // black down the forearms and gaskins towards the knees and the hocks.
+  const body = sculptHorse(rest);
   {
-    const zs: number[] = [];
-    for (let z = -0.97; z <= 0.8701; z += 0.035) zs.push(z);
-    const sections: Section[] = zs.map((z) => { const s = trunkAt(z); return { c: V(0, s.y, z), side: X.clone(), up: V(0, 1, 0), w: s.w, top: s.top, bottom: s.bottom, square: 2.25 }; });
-    // (The sections stand across the trunk, so the frames are laid by hand: side to the left, up, and the path along +z.)
-    for (const s of sections) s.up = V(0, 1, 0);
-    const { geometry } = loftAlongZ(sections);
-    const P = geometry.getAttribute('position'), w: [string, number][][] = [], c: Color[] = [];
+    const P = body.geometry.getAttribute('position'), N = body.geometry.getAttribute('normal'), c: Color[] = [];
     for (let i = 0; i < P.count; i++) {
-      const p = V(P.getX(i), P.getY(i), P.getZ(i)), z = p.z;
-      // The hips, the spine and the chest share the trunk along it.
-      if (z <= -0.45) w.push([['hips', 1]]);
-      else if (z >= 0.45) w.push([['chest', 1]]);
-      else if (z < 0) { const t = smooth((z + 0.45) / 0.45); w.push([['hips', 1 - t], ['spine', t]]); }
-      else { const t = smooth(z / 0.45); w.push([['spine', 1 - t], ['chest', t]]); }
-      // Darker along the back.
-      const s = trunkAt(z), high = smooth((p.y - s.y) / (s.top * 0.9) - 0.4);
-      c.push(mottled(BAY.clone().lerp(BAY.clone().multiplyScalar(0.72), high), p));
+      const p = V(P.getX(i), P.getY(i), P.getZ(i)), up = N.getY(i);
+      const col = BAY.clone().multiplyScalar(1 - 0.25 * smooth((up - 0.45) / 0.45)).lerp(DARK, smooth((0.68 - p.y) / 0.16));
+      c.push(mottled(col, p));
     }
-    coat.push(part(geometry, w, c));
+    coat.push(part(body.geometry, body.weights, c));
   }
-
-  // ---------------------------------------------------------------- the neck and the head
-  const n1 = rest('neck1'), n2 = rest('neck2'), poll = rest('head'), muzzle = rest('muzzle');
-  // The neck: from inside the chest up past the withers to behind the poll; crested above (its `top` the crest's side).
-  {
-    const pts = [V(0, 1.26, 0.5), V(0, 1.42, 0.7), V(0, 1.6, 0.86), V(0, 1.78, 0.98), V(0, 1.96, 1.08), V(0, 2.06, 1.13)];
-    const { sections, from } = sectionsAlong(pts, 6, X, {
-      w: [[0, 0.21], [1, 0.18], [2, 0.15], [3, 0.125], [4, 0.105], [5, 0.09]],
-      top: [[0, 0.25], [1, 0.23], [2, 0.2], [3, 0.17], [4, 0.13], [5, 0.09]],
-      bottom: [[0, 0.28], [1, 0.23], [2, 0.17], [3, 0.13], [4, 0.11], [5, 0.08]], square: 2.2,
-    });
-    const { geometry, along, angle } = loft(sections);
-    const w: [string, number][][] = [], c: Color[] = [];
-    const P = geometry.getAttribute('position');
-    for (let i = 0; i < P.count; i++) {
-      const u = along[i] * (from[from.length - 1]), p = V(P.getX(i), P.getY(i), P.getZ(i));
-      // (Along the neck: the chest at its root, its two bones, the head at its top.)
-      w.push(u < 1 ? [['chest', 1 - smooth(u)], ['neck1', smooth(u)]] : u < 3 ? chainWeights(['neck1', 'neck2'], (u - 1) / 2 + 0, 0.25) : [['neck2', 1 - smooth((u - 3) / 2)], ['head', smooth((u - 3) / 2)]]);
-      const crest = Math.max(0, Math.sin(angle[i]));
-      c.push(mottled(BAY.clone().lerp(BAY.clone().multiplyScalar(0.75), crest * 0.6), p));
-    }
-    coat.push(part(geometry, w, c));
-  }
+  const n1 = rest('neck1'), poll = rest('head'), muzzle = rest('muzzle');
+  void n1;
   // The head, from behind the poll down to the muzzle: its `top` the forehead and the face, its `bottom` the jaw and the throat.
   const headDir = muzzle.clone().sub(poll).normalize(), faceUp = X.clone().cross(headDir).normalize().negate(), headLen = muzzle.distanceTo(poll);
   const headPoint = (s: number) => poll.clone().addScaledVector(headDir, s * headLen);
@@ -223,31 +183,25 @@ export function horseLooks(rest: (n: string) => Vector3): HorseLooks {
     }
   }
 
-  // ---------------------------------------------------------------- the legs
-  for (const [k, sign] of [['l', 1], ['r', -1]] as const) for (const fore of [true, false]) {
-    const f = fore ? 'f' : 'h', j = (s: string) => rest(`${f}_${s}_${k}`), sole = j('hoof').add(V(0, -0.07, 0.02));
-    // (From inside the shoulder or the haunch, down the joints to the sole.)
-    const top = j('up').add(fore ? V(-0.03 * sign, 0.12, -0.04) : V(-0.03 * sign, 0.12, 0.02));
-    const pts = [top, j('up'), j('mid'), j('low'), j('pas'), j('hoof'), sole];
-    const shape = fore
-      ? { w: [[0, 0.07], [1, 0.08], [2, 0.08], [2.35, 0.075], [2.8, 0.055], [3, 0.058], [3.3, 0.042], [3.8, 0.042], [4, 0.05], [4.5, 0.04], [5, 0.048], [5.8, 0.062], [6, 0.055]] as [number, number][],
-        top: [[0, 0.15], [1, 0.13], [2, 0.09], [2.35, 0.075], [2.8, 0.05], [3, 0.055], [3.3, 0.035], [3.8, 0.035], [4, 0.045], [4.5, 0.04], [5, 0.05], [5.8, 0.07], [6, 0.06]] as [number, number][],
-        bottom: [[0, 0.15], [1, 0.12], [2, 0.11], [2.35, 0.065], [2.8, 0.045], [3, 0.05], [3.3, 0.045], [3.8, 0.045], [4, 0.06], [4.5, 0.035], [5, 0.045], [5.8, 0.055], [6, 0.05]] as [number, number][] }
-      : { w: [[0, 0.09], [1, 0.1], [1.5, 0.11], [2, 0.095], [2.35, 0.075], [2.8, 0.05], [3, 0.055], [3.3, 0.042], [3.8, 0.042], [4, 0.05], [4.5, 0.04], [5, 0.048], [5.8, 0.062], [6, 0.055]] as [number, number][],
-        top: [[0, 0.2], [1, 0.2], [1.5, 0.17], [2, 0.11], [2.35, 0.07], [2.8, 0.05], [3, 0.06], [3.3, 0.04], [3.8, 0.04], [4, 0.045], [4.5, 0.04], [5, 0.05], [5.8, 0.07], [6, 0.06]] as [number, number][],
-        bottom: [[0, 0.2], [1, 0.22], [1.5, 0.2], [2, 0.16], [2.35, 0.1], [2.8, 0.06], [3, 0.07], [3.3, 0.05], [3.8, 0.05], [4, 0.06], [4.5, 0.035], [5, 0.045], [5.8, 0.055], [6, 0.05]] as [number, number][] };
+  // ---------------------------------------------------------------- the legs, from the knees and the hocks down
+  for (const [k] of [['l', 1], ['r', -1]] as const) for (const fore of [true, false]) {
+    const f = fore ? 'f' : 'h', j = (n: string) => rest(`${f}_${n}_${k}`), sole = j('hoof').add(V(0, -0.07, 0.02));
+    // (From inside the forearm or the gaskin, where the body's solid has grown thin, down the joints to the sole.)
+    const pts = [j('mid').lerp(j('low'), fore ? 0.58 : 0.62), j('low'), j('pas'), j('hoof'), sole];
+    const shape = {
+      w: [[0, fore ? 0.05 : 0.052], [1, fore ? 0.058 : 0.055], [1.3, 0.042], [1.8, 0.042], [2, 0.05], [2.5, 0.04], [3, 0.048], [3.8, 0.062], [4, 0.055]] as [number, number][],
+      top: [[0, 0.05], [1, fore ? 0.055 : 0.06], [1.3, fore ? 0.035 : 0.04], [1.8, fore ? 0.035 : 0.04], [2, 0.045], [2.5, 0.04], [3, 0.05], [3.8, 0.07], [4, 0.06]] as [number, number][],
+      bottom: [[0, fore ? 0.05 : 0.065], [1, fore ? 0.05 : 0.072], [1.3, fore ? 0.045 : 0.05], [1.8, fore ? 0.045 : 0.05], [2, 0.06], [2.5, 0.035], [3, 0.045], [3.8, 0.055], [4, 0.05]] as [number, number][],
+    };
     const { sections, from } = sectionsAlong(pts, 7, X, { ...shape, square: 2.2 });
     const { geometry, along } = loft(sections, 20);
     const P = geometry.getAttribute('position'), w: [string, number][][] = [], c: Color[] = [];
-    const bones = [`${f}_up_${k}`, `${f}_up_${k}`, `${f}_mid_${k}`, `${f}_low_${k}`, `${f}_pas_${k}`, `${f}_hoof_${k}`];
+    const bones = [`${f}_mid_${k}`, `${f}_low_${k}`, `${f}_pas_${k}`, `${f}_hoof_${k}`];
     for (let i = 0; i < P.count; i++) {
       const u = along[i] * from[from.length - 1], p = V(P.getX(i), P.getY(i), P.getZ(i));
-      // (Inside the body at its top, the trunk's bone shares it, less and less down to the shoulder or the hip.)
-      if (u < 1) w.push([[fore ? 'chest' : 'hips', 1 - smooth(u)], [bones[0], smooth(u)]]);
-      else w.push(chainWeights(bones, u, 0.2));
-      // Black from the knee or the hock down (the bay's points), the hoof's horn below the coronet.
-      const black = smooth((u - 2.55) / 0.5);
-      c.push(u > 5.05 ? mottled(HOOF, p, 0.04) : mottled(BAY.clone().lerp(DARK, black), p));
+      w.push(chainWeights(bones, u, 0.2));
+      // Black (the bay's points), the hoof's horn below the coronet.
+      c.push(u > 3.05 ? mottled(HOOF, p, 0.04) : mottled(BAY.clone().lerp(DARK, smooth((0.68 - p.y) / 0.16)), p));
     }
     coat.push(part(geometry, w, c));
   }
@@ -274,12 +228,17 @@ export function horseLooks(rest: (n: string) => Vector3): HorseLooks {
   };
   // The mane: from the poll down the crest to the withers, falling on the horse's left (its near side, as it is mostly seen).
   {
-    const crestPts = [V(0, 2.06, 1.1), V(0, 1.96, 1.02), V(0, 1.8, 0.9), V(0, 1.64, 0.78), V(0, 1.52, 0.64), V(0, 1.48, 0.52)];
-    const { at, from } = path(crestPts, 14);
+    // (Its roots where the crest is: felt for from the neck's line, up and back across it.)
+    const neckLine = [V(0, 2.0, 1.12), V(0, 1.93, 1.06), V(0, 1.78, 0.97), V(0, 1.61, 0.85), V(0, 1.45, 0.7), V(0, 1.34, 0.56)];
+    const line = path(neckLine, 14), from = line.from;
+    const at = line.at.map((c, i) => {
+      const dir = line.at[Math.min(line.at.length - 1, i + 1)].clone().sub(line.at[Math.max(0, i - 1)]).normalize(), crest = X.clone().cross(dir).normalize();
+      return body.surface(c, crest.y > 0 ? crest : crest.negate()).at;
+    });
     at.forEach((root, i) => {
       const u = from[i], len = 0.15 + 0.11 * Math.sin(Math.min(1, u / 4.5) * Math.PI) + 0.04 * noise(root);
       const lean = V(0.5 + 0.15 * noise(root.clone().multiplyScalar(2)), -0.85, -0.12 - 0.1 * noise(root.clone().multiplyScalar(3))).normalize();
-      const start = root.clone().add(V(0.015, 0.035, 0));
+      const start = root.clone().add(V(0.012, 0.012, 0));
       const pts = [0, 0.3, 0.6, 1].map((t) => start.clone().addScaledVector(lean, len * t).add(V(0.025 * t * t, 0, 0)));
       const bone: [string, number][] = u < 1.5 ? [['head', 0.4], ['neck2', 0.6]] : u < 3 ? [['neck2', 1]] : u < 4.2 ? [['neck1', 1]] : [['neck1', 0.5], ['chest', 0.5]];
       strand(pts, 0.055, () => V(1, 0.2, 0).normalize(), () => bone, 0.85 + 0.35 * noise(root));
@@ -303,12 +262,10 @@ export function horseLooks(rest: (n: string) => Vector3): HorseLooks {
   }
 
   // ---------------------------------------------------------------- tack, for a ridden horse
-  /** A point on the trunk's surface at `z`, so far round from the top (radians, to the left positive), lifted off it. */
+  /** A point on the body's surface at `z`, so far round from the top (radians, to the left positive), lifted off it. */
   const onTrunk = (z: number, th: number, lift: number) => {
-    const s = trunkAt(z), e = 2 / 2.25, a = Math.PI / 2 - th, cs = Math.cos(a), sn = Math.sin(a);
-    const x = s.w * Math.sign(cs) * Math.abs(cs) ** e, y = (sn >= 0 ? s.top : s.bottom) * Math.sign(sn) * Math.abs(sn) ** e;
-    const p = V(x, s.y + y, z), out = V(x / (s.w * s.w), y / ((sn >= 0 ? s.top : s.bottom) ** 2), 0).normalize();
-    return p.addScaledVector(out, lift);
+    const hit = body.surface(V(0, 1.2, z), V(Math.sin(th), Math.cos(th), 0));
+    return hit.at.addScaledVector(hit.normal, lift);
   };
   const trunkWeight = (z: number): [string, number][] => (z < 0 ? [['hips', 1 - smooth((z + 0.45) / 0.45)], ['spine', smooth((z + 0.45) / 0.45)]] : [['spine', 1 - smooth(z / 0.45)], ['chest', smooth(z / 0.45)]]);
   /** A sheet laid over the trunk between two lengths and two angles round it, lifted by `lift(u, v)`, coloured by `colour(u, v)`. */

@@ -904,6 +904,30 @@ The machine this is developed on now has a graphics card, and tablets were repor
     of the adventurer from four sides standing and walking, of both faces under their hoods, of the horse from the side, three
     quarters, before, behind and at its head, through its four gaits, ridden and skiing; the kicker trials as before, with the person
     and with the horse and rider (the same landings and falls); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+71. **The horse's quarters and the joins of its legs.** Asked: "improve horse skeleton and skin further - the butt and how legs
+    attach to horse body look weird". Looked at from the side, behind, below and in its gaits: the quarters ended in a ball over thin
+    legs with nothing behind them (no hamstring, the thigh a tube from the hip to the stifle), the forearms came straight out from
+    under the chest, the trunk was a sausage; where a lofted leg met the lofted trunk the two surfaces only crossed. *Done:* the
+    skeleton has a shoulder blade over each foreleg (`f_sc`, under the chest from beneath the withers to the point of the shoulder),
+    which swings with the leg a third as far as the leg reaches from where it rests, carrying the point of the shoulder (and so the
+    fore legs' reach: the worst stretch over a stride is now 1.04 of their length, from 1.07). The body is one solid
+    (`src/figures/horseSculpt.ts`), carved as rock is, by marching cubes every two centimetres over a function that says how far
+    outside it any point is: the smooth union of rounded masses (ellipsoids, by Quilez's near distance), each named for what it is on a
+    horse: the barrel, the ribcage, the breast, the withers, the loin, the croup and the points of the buttocks; each quarter and thigh
+    from the croup over the stifle and down the hamstring into the gaskin and the hock; each shoulder, upper arm, point of the elbow and
+    forearm; the neck as many masses along a smooth line with a crest along its top. Masses meet blended over a few centimetres. Each
+    point of the surface takes the bones of the masses it lies on, the nearer a mass the larger its share; a mass spanning a joint
+    shares its bones along it (the thigh the hips above, the femur, the tibia below; the upper arm the shoulder blade, giving way to
+    the upper arm only near the elbow, since moved with the arm it had dragged the skin under the chest back in a sag at the gallop).
+    The head and the legs from the knees and hocks down stay lofted, overlapping the solid; the mane's roots and the tack are laid on
+    the solid's surface, felt for along rays from inside it. First looks and what was done about them: too stout (the blends add
+    volume where masses meet; the masses trimmed and blended over less), the neck beaded (few masses; now many, overlapping), the
+    stifle and hock knobbly, a pot belly at the girth and the breast hanging below the chest (raised), the mane grey (thin strands seen
+    edge on catch the sky's sheen however matt: hair is now drawn without any). Made once and shared by every horse: 0.36 seconds for
+    the first, 27,000 points and 52,000 triangles in all, its points no longer unshared before merging (they had been, 158,000).
+    *Checked:* pictures from the side, three quarters behind, behind, below, three quarters before, at the gallop and the trot, before
+    and after; ridden, and on the slope skiing, braking and fallen; leg reach through every gait and ski pose; the kicker trials with a
+    horse and rider on four skis, the same landings and falls; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
 
 ## Risks
 

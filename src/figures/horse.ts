@@ -1,5 +1,5 @@
 import {
-  Bone, BoxGeometry, BufferAttribute, BufferGeometry, DoubleSide, Group, Matrix4, Mesh, MeshStandardMaterial, Object3D,
+  Bone, BoxGeometry, BufferAttribute, BufferGeometry, DoubleSide, Group, Matrix4, Mesh, MeshLambertMaterial, MeshStandardMaterial, Object3D,
   Quaternion, Skeleton, SkinnedMesh, SphereGeometry, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -54,7 +54,8 @@ const BONES: [string, string | null, V3][] = (() => {
     ['tail1', 'hips', [0, 1.46, -0.84]], ['tail2', 'tail1', [0, 1.24, -0.98]], ['tail3', 'tail2', [0, 0.96, -1.04]],
   ];
   for (const [k, s] of [['l', 1], ['r', -1]] as const) {
-    b.push([`f_up_${k}`, 'chest', [0.2 * s, 1.18, 0.62]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.4]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.44]],
+    // (The shoulder blade, from under the withers down to the point of the shoulder, where the upper arm hangs from it.)
+    b.push([`f_sc_${k}`, 'chest', [0.15 * s, 1.48, 0.4]], [`f_up_${k}`, `f_sc_${k}`, [0.2 * s, 1.18, 0.62]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.4]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.44]],
       [`f_pas_${k}`, `f_low_${k}`, [0.15 * s, 0.17, 0.48]], [`f_hoof_${k}`, `f_pas_${k}`, [0.15 * s, 0.07, BINDINGS / 2 - 0.02]]);
     b.push([`h_up_${k}`, 'hips', [0.22 * s, 1.22, -0.58]], [`h_mid_${k}`, `h_up_${k}`, [0.24 * s, 0.92, -0.36]], [`h_low_${k}`, `h_mid_${k}`, [0.17 * s, 0.56, -0.7]],
       [`h_pas_${k}`, `h_low_${k}`, [0.15 * s, 0.17, -0.64]], [`h_hoof_${k}`, `h_pas_${k}`, [0.15 * s, 0.07, -BINDINGS / 2 - 0.02]]);
@@ -67,6 +68,8 @@ const ENDS: Record<string, V3> = { muzzle: [0, 1.58, 1.62], tail_end: [0, 0.62, 
 const REST = new Map<string, Vector3>([...BONES.map(([n, , p]) => [n, new Vector3(...p)] as const), ...Object.entries(ENDS).map(([n, p]) => [n, new Vector3(...p)] as const)]);
 const PARENT = new Map(BONES.map(([n, p]) => [n, p]));
 const rest = (n: string) => REST.get(n)!.clone();
+/** The horse's look, made once for every horse: its coat, hair, eyes and tack, skinned to the skeleton by bone names' order. */
+let LOOKS: { coat: BufferGeometry; hair: BufferGeometry; eyes: BufferGeometry; tack: BufferGeometry; steel: BufferGeometry } | null = null;
 
 /** The horse's skis: a long one under each side, a binding for each hoof; or a short one under each hoof. Its sole on y = 0, along +z. */
 const SKIS: Record<HorseSkis, { length: number; ahead: number; width: number }> = {
@@ -176,26 +179,25 @@ export class Horse {
     this.model.updateMatrixWorld(true);
     const all = [...this.bones.values()], index = new Map(all.map((b, i) => [b.name, i])), skeleton = new Skeleton(all);
     // Its look (`horseBody.ts`): coat, hair, eyes, and tack for when it is ridden; each part's points given to their bones.
-    const looks = horseLooks(rest);
-    const skinned = (parts: Part[], material: MeshStandardMaterial) => {
-      const made = parts.map(({ geometry, weights, colours }) => {
-        const g = geometry.index ? geometry.toNonIndexed() : geometry;
-        // (Made without its index, each point's bones and colour are looked up by the point it came from.)
-        const from = geometry.index ? Array.from(geometry.index.array) : null;
-        const n = g.getAttribute('position').count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), col = new Float32Array(n * 3);
+    // (Made once, and shared by every horse: sculpting the body takes a second.)
+    const looks = (LOOKS ??= (() => {
+      const made = horseLooks(rest), merge = (parts: Part[]) => mergeGeometries(parts.map(({ geometry, weights, colours }) => {
+        const g = geometry.clone(), n = g.getAttribute('position').count, si = new Uint16Array(n * 4), sw = new Float32Array(n * 4), col = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
-          const o = from ? from[i] : i;
-          weights[o].filter(([, x]) => x > 1e-4).forEach(([b, x], j) => { si[i * 4 + j] = index.get(b)!; sw[i * 4 + j] = x; });
-          const c = colours[o];
-          col.set([c.r, c.g, c.b], i * 3);
+          weights[i].filter(([, x]) => x > 1e-4).slice(0, 4).forEach(([b, x], j) => { si[i * 4 + j] = index.get(b)!; sw[i * 4 + j] = x; });
+          col.set([colours[i].r, colours[i].g, colours[i].b], i * 3);
         }
         g.setAttribute('skinIndex', new BufferAttribute(si, 4));
         g.setAttribute('skinWeight', new BufferAttribute(sw, 4));
         g.setAttribute('color', new BufferAttribute(col, 3));
         for (const name of Object.keys(g.attributes)) if (!['position', 'normal', 'skinIndex', 'skinWeight', 'color'].includes(name)) g.deleteAttribute(name);
+        if (!g.index) g.setIndex(Array.from({ length: n }, (_, i) => i));
         return g;
-      });
-      const mesh = new SkinnedMesh(mergeGeometries(made), material);
+      }));
+      return { coat: merge(made.coat), hair: merge(made.hair), eyes: merge(made.eyes), tack: merge(made.tack), steel: merge(made.steel) };
+    })());
+    const skinned = (geometry: BufferGeometry, material: MeshStandardMaterial | MeshLambertMaterial) => {
+      const mesh = new SkinnedMesh(geometry, material);
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.frustumCulled = false;
       this.model.add(mesh);
@@ -204,7 +206,8 @@ export class Horse {
       return mesh;
     };
     this.mesh = skinned(looks.coat, new MeshStandardMaterial({ vertexColors: true, roughness: 0.52 }));
-    skinned(looks.hair, new MeshStandardMaterial({ vertexColors: true, roughness: 0.62, side: DoubleSide }));
+    // (Hair gives back no sheen at all: thin strands seen edge on caught the sky, however matt, and showed grey.)
+    skinned(looks.hair, new MeshLambertMaterial({ vertexColors: true, side: DoubleSide }));
     skinned(looks.eyes, new MeshStandardMaterial({ vertexColors: true, roughness: 0.12 }));
     this.tack = [
       skinned(looks.tack, new MeshStandardMaterial({ vertexColors: true, roughness: 0.75, side: DoubleSide })),
@@ -321,7 +324,17 @@ export class Horse {
       const [f, k] = leg.split('_') as ['f' | 'h', Side], fore = f === 'f', { at: sole, q } = soles[leg];
       const up = Y.clone().applyQuaternion(q), fwd = Z.clone().applyQuaternion(q);
       const coronet = sole.clone().addScaledVector(up, 0.07).addScaledVector(fwd, -0.02), fetlock = coronet.clone().addScaledVector(up, 0.1).addScaledVector(fwd, -0.07);
-      fk(`${f}_up_${k}`, new Quaternion()); // (its place, from the chest or the hips; its turn is found below)
+      if (fore) {
+        // The shoulder blade swings with the leg, about its top under the withers: a third as far as the leg reaches forward or back
+        // from where it rests, carrying the point of the shoulder with it (as a horse's does; so too its reach).
+        const chestQ = wq.get('chest')!, toBody = chestQ.clone().invert(), blade = rest(`f_sc_${k}`);
+        fk(`f_sc_${k}`, chestQ.clone());
+        const shoulder0 = wp.get(`f_sc_${k}`)!.clone().add(rest(`f_up_${k}`).sub(blade).applyQuaternion(chestQ));
+        const reachNow = fetlock.clone().sub(shoulder0).applyQuaternion(toBody), reachRest = rest(`f_pas_${k}`).sub(rest(`f_up_${k}`));
+        const swing = Math.atan2(reachNow.z, -reachNow.y) - Math.atan2(reachRest.z, -reachRest.y);
+        wq.set(`f_sc_${k}`, chestQ.clone().multiply(qx(-0.33 * Math.max(-0.9, Math.min(0.9, swing)))));
+      }
+      fk(`${f}_up_${k}`, new Quaternion()); // (its place, from the shoulder blade or the hips; its turn is found below)
       const top = wp.get(`${f}_up_${k}`)!, n = (s: string) => `${f}_${s}_${k}`;
       const L1 = rest(n('mid')).distanceTo(rest(n('up'))), L2 = rest(n('low')).distanceTo(rest(n('mid'))), Lc = rest(n('pas')).distanceTo(rest(n('low')));
       const restReach = rest(n('low')).distanceTo(rest(n('up')));
@@ -342,7 +355,7 @@ export class Horse {
       const midAt = top.clone().addScaledVector(u, Math.cos(A) * L1).addScaledVector(w, Math.sin(A) * L1);
       // (Each bone placed at the end of the one above it, then aimed at where the next joint is to be.)
       const step = (bone: string, target: Vector3) => { fk(bone, new Quaternion()); wq.set(bone, aim(bone, target, wq.get(PARENT.get(bone)!)!)); };
-      wq.set(n('up'), aim(n('up'), midAt, wq.get(fore ? 'chest' : 'hips')!));
+      wq.set(n('up'), aim(n('up'), midAt, wq.get(fore ? `f_sc_${k}` : 'hips')!));
       step(n('mid'), top.clone().addScaledVector(u, reach));
       step(n('low'), fetlock);
       step(n('pas'), coronet);
@@ -356,6 +369,7 @@ export class Horse {
     if (n === 'head') return 'muzzle';
     if (n === 'tail3') return 'tail_end';
     if (n.startsWith('ear_')) return `ear_tip_${n.slice(-1)}`;
+    if (n.startsWith('f_sc_')) return `f_up_${n.slice(-1)}`;
     const leg = n.match(/^([fh])_(up|mid|low|pas)_([lr])$/);
     if (leg) return `${leg[1]}_${{ up: 'mid', mid: 'low', low: 'pas', pas: 'hoof' }[leg[2]]}_${leg[3]}`;
     return { hips: 'spine', spine: 'chest', chest: 'neck1', neck1: 'neck2', neck2: 'head', tail1: 'tail2', tail2: 'tail3' }[n] ?? n;
@@ -426,6 +440,7 @@ export class Horse {
     chain('tail1', q('tail_end'));
     fk('tail2', wq.get('tail1')!.clone()); fk('tail3', wq.get('tail1')!.clone());
     this.skiAt.clear();
+    for (const k of ['l', 'r'] as const) fk(`f_sc_${k}`, chestQ.clone());
     for (const leg of HORSE_LEGS) {
       const [f, k] = leg.split('_'), n = (s: string) => `${f}_${s}_${k}`;
       chain(n('up'), q(n('mid'))); chain(n('mid'), q(n('low'))); chain(n('low'), q(n('pas'))); chain(n('pas'), q(n('hoof')));
