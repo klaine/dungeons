@@ -425,6 +425,8 @@ export interface RideControls {
   s: number; ski: number; tuck: number; brake: number; tall: number; flickL: number; flickR: number;
   /** How far down it has sunk to take a landing, or crouched on a ramp (0 to 1); and any turn of the whole body still to come out of. */
   absorb?: number; spin?: number; flip?: number;
+  /** How far its turn is skidded rather than carved (0 to 1): its skis pivoted across the way it goes (in `ski`), flatter on the snow. */
+  skid?: number;
 }
 
 /**
@@ -432,8 +434,14 @@ export interface RideControls {
  * them, any of them together (a tuck held through a turn, as a racer carves the faster turns). The long run's, and the live rider's.
  */
 export function riderPose(h0: number, c: RideControls): AlpinePose {
-  const { s, ski, tuck, brake, tall } = c;
-  const a = carvePose(h0, s, ski, -rad(32) * s - rad(48) * brake, c.flickL, c.flickR);
+  const { s, ski, tuck, brake, tall } = c, skid = c.skid ?? 0;
+  const a = carvePose(h0, s, ski, -rad(32) * s * (1 - 0.4 * skid) - rad(48) * brake, c.flickL, c.flickR);
+  // Skidding a turn: a little lower and back, the feet pushed ahead to drive the tails round, the arms out for balance.
+  if (skid) {
+    a.hips -= 0.04 * skid;
+    a.pelvisPitch -= rad(4) * skid;
+    both(a, (_k, arm, f) => { f.z += 0.06 * skid; arm.hang -= 8 * skid; });
+  }
   // Braking: the feet pushed on down the slope ahead of the body, which sits back and low over its uphill edges, the upper body
   // still facing down the slope, the arms out.
   a.hips -= 0.1 * brake;

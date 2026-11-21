@@ -790,6 +790,20 @@ The machine this is developed on now has a graphics card, and tablets were repor
     yanked the rest after it; the body is now lifted out of the snow as a whole before it starts, and slides some 25 metres and is
     still within five seconds. Ridden in real time by the arrow keys: Down into a kicker, a backflip, short, limp; Enter, the top again;
     Watch and Ride again with no fault. Pictures of each trick from beside and behind, and of the fall.
+67. **Skidded turns at the ends of the range.** Asked: "also extreme control range ends with right and/or left turns should make the
+    turns skidded instead of carved". *Done:* on the ridden slope, a turn asked for past 0.72 of the way to either side of the ring is
+    skidded, wholly so at its end (eased in over a fifth of a second): the skis pivoted across the way the skier goes, into the turn,
+    by up to 38 degrees, so that their tails slide out; the turn comes round up to 1.6 times as quick as a carve at the same speed,
+    leant less (four tenths) and on flatter edges; the sideways slide scrubs speed (6 m/s² times the sine of the pivot); its track is
+    the broad pale band of a skid and snow is thrown out the way the skis slide, to the outside of the turn. The skier sits a little
+    lower and back, its feet pushed ahead to drive the tails round and its arms out (`skid` in `RideControls`, `riderPose`). The ring
+    shades its sides past 0.72 and marks them *Skid*; an arrow key asks 0.62 of the range at once and, held on past a third of a
+    second, pushes out to its end within another second. *Checked:* in headless Chromium through the page's hooks, from 54 km/h
+    heading across to the left and turned to the right through sixty degrees: at 0.5 of the range, carved, 1.9 seconds and 27 metres,
+    coming out at 56; at 0.72, carved, 1.4 seconds and 20 metres, at 55; at 0.85, half skidded, 1.0 seconds and 14 metres, at 51; at
+    the end, skidded, 0.8 seconds and 11 metres, at 48. Six full skids of 1.1 seconds each, each coming round past a hundred degrees,
+    brought it to a stop, as skidding is meant to. An arrow held: no skid for the first 0.8 seconds by the page's clock, wholly
+    skidded by 1.8. The watched run is the same to the last bit. Pictures from above and behind of carved and skidded turns.
 
 ## Risks
 

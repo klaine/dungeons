@@ -372,11 +372,12 @@ async function start() {
   const sprayRng = new Rng('spray');
   const stepSpray = (dt: number, now: Now | null) => {
     if (now && now.skid > 0.45 && now.speed > 3.5) {
-      const go = along(now.way);
+      // (Thrown on along the way it goes, and out the way the skis slide sideways: to the outside of a skidded turn.)
+      const go = along(now.way), skiAlong = along(now.ski), slide = go.clone().addScaledVector(skiAlong, -go.dot(skiAlong));
       for (let i = 0; i < Math.round(now.speed * 0.9); i++) {
         const f = flakes[nextFlake++ % SPRAY], from = skiOnSnow(i % 2);
         f.p.copy(from).addScaledVector(go, 0.35).addScaledVector(LEFT, sprayRng.range(-0.8, 0.8)).addScaledVector(UP, 0.04);
-        f.v.copy(go).multiplyScalar(now.speed * sprayRng.range(0.5, 1)).addScaledVector(UP, sprayRng.range(1.2, 3.2)).addScaledVector(LEFT, sprayRng.range(-1.5, 1.5));
+        f.v.copy(go).multiplyScalar(now.speed * sprayRng.range(0.5, 1)).addScaledVector(UP, sprayRng.range(1.2, 3.2)).addScaledVector(LEFT, sprayRng.range(-1.5, 1.5)).addScaledVector(slide, now.speed * sprayRng.range(0.2, 0.6));
         f.life = sprayRng.range(0.5, 0.9);
       }
     }
@@ -394,11 +395,12 @@ async function start() {
    * The ridden skier: where it is, which way it goes and how fast; the facing of its body (half the way it goes, lagging, so that its
    * chest stays more down the slope than its skis); how far into a tuck, standing tall and braking; its lean into the turn; its
    * poles' flicks, each a time left to run; how high it is over the slope and how fast it rises from it (on a kicker, or in the air);
-   * how far it has sunk to take a landing; and any turn of the whole body it is still coming out of from one.
+   * how far it has sunk to take a landing; any turn of the whole body it is still coming out of from one; how far its turn is skidded
+   * rather than carved (0 to 1); and how long an arrow key has been held to turn.
    */
   const ride = {
     down: 0, left: 0, way: 0, speed: 0, facing: 0, tuck: 0, tall: 0, brake: 0, brakeSide: 1, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0,
-    out: 0, rising: 0, absorb: 0, settle: { spin: 0, flip: 0, left: 0 },
+    out: 0, rising: 0, absorb: 0, settle: { spin: 0, flip: 0, left: 0 }, skid: 0, held: 0,
   };
   /**
    * In the air: what it is doing there (`air`, straight air; `flip`, a backflip; `flight`, a ski jumper's; `hop`, too short a time
@@ -414,6 +416,8 @@ async function start() {
   /** What the rider asks: across (-1 to 1, to the right positive) and up (1 the deepest tuck, -1 standing tallest); and braking. */
   const ask = { x: 0, y: 0 }, want = { x: 0, y: 0, keys: { up: false, down: false, left: false, right: false }, brake: false, brakeKey: false };
   const FLICK = 0.3;
+  /** Where across the range a turn begins to skid (it skids wholly at its end), and how far the skis are pivoted across the way then. */
+  const SKID_FROM = 0.72, SKID_TURN = deg(38);
   /** The weight's pull into the slope, and along it. */
   const INTO = G * Math.cos(ANGLE), ALONG = G * Math.sin(ANGLE);
   /** How long from now until something `out` over the slope and rising at `rising` comes down onto it. */
@@ -435,7 +439,11 @@ async function start() {
   /** The rider's wishes eased in: across and up, the tuck and standing tall, braking. */
   const easeAsk = (dt: number) => {
     const keys = want.keys, keyed = keys.up || keys.down || keys.left || keys.right;
-    const tx = keyed ? (keys.right ? 1 : 0) - (keys.left ? 1 : 0) : want.x, ty = keyed ? (keys.up ? 1 : 0) - (keys.down ? 1 : 0) : want.y;
+    // (An arrow key carves at first; held on, it pushes the turn out to the end of the range, into a skid, as the pointer does at
+    // the edge of the ring.)
+    ride.held = keys.left !== keys.right ? ride.held + dt : 0;
+    const pushed = 0.62 + 0.38 * smooth((ride.held - 0.35) / 0.9);
+    const tx = keyed ? ((keys.right ? 1 : 0) - (keys.left ? 1 : 0)) * pushed : want.x, ty = keyed ? (keys.up ? 1 : 0) - (keys.down ? 1 : 0) : want.y;
     ask.x += (tx - ask.x) * ease(dt, 8);
     ask.y += (ty - ask.y) * ease(dt, 8);
     ride.tuck += (Math.max(0, ask.y) - ride.tuck) * ease(dt, 4);
@@ -493,7 +501,7 @@ async function start() {
 
   /** The run again from the top, going a little. */
   const restart = () => {
-    Object.assign(ride, { down: 0, left: 0, way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, rising: 0, absorb: 0 });
+    Object.assign(ride, { down: 0, left: 0, way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, rising: 0, absorb: 0, skid: 0 });
     ride.settle = { spin: 0, flip: 0, left: 0 };
     Object.assign(ask, { x: 0, y: 0 });
     air = null; crash = null; joints = jointsBefore = null;
@@ -556,9 +564,14 @@ async function start() {
     const braking = want.brake || want.brakeKey;
     if (braking && ride.brake < 0.05) ride.brakeSide = Math.sign(ride.way || ride.lean) || 1;
     ride.brake += ((braking ? 1 : 0) - ride.brake) * ease(dt, 6);
-    // Turning: quicker the faster (a carving ski holds its own curve, some twenty metres across at speed, pushed all the way), if
-    // never too slowly to come round; wider tucked; none while braking.
-    const turning = -ask.x * clamp(ride.speed / 9, 0.5, 1.2) * (1 - 0.35 * ride.tuck) * (1 - ride.brake);
+    // Turning: quicker the faster (a carving ski holds its own curve, some twenty metres across at speed), if never too slowly to come
+    // round; wider tucked; none while braking. Pushed out to the ends of the range (asked: "also extreme control range ends with right
+    // and/or left turns should make the turns skidded instead of carved"), the turn is skidded: the skis pivoted across the way they
+    // go, their tails sliding out, so that the turn comes round quicker than a carve can, flatter on the snow and less leant, scraping
+    // and throwing snow and losing speed as it does.
+    ride.skid += (smooth((Math.abs(ask.x) - SKID_FROM) / (0.97 - SKID_FROM)) * (1 - ride.brake) - ride.skid) * ease(dt, 5);
+    const turning = -ask.x * clamp(ride.speed / 9, 0.5, 1.2) * (1 - 0.35 * ride.tuck) * (1 - ride.brake) * (1 + 0.6 * ride.skid);
+    const pivot = Math.sign(turning) * SKID_TURN * ride.skid;
     ride.way = clamp(ride.way + turning * dt, -1.9, 1.9);
     // The piste's edges, its poles thirty metres out: turned back towards the middle near them, and kept off the trees.
     if (Math.abs(ride.left) > 25 && Math.sign(ride.way) === Math.sign(ride.left)) ride.way -= Math.sign(ride.way) * Math.min(Math.abs(ride.way), dt * 2.2);
@@ -567,7 +580,7 @@ async function start() {
     // down the ramp.
     const g0 = groundAt(ride.down, ride.left), nose = Math.atan(g0.dDown * Math.cos(ride.way) + g0.dLeft * Math.sin(ride.way));
     const drag = 0.0065 + (0.0037 - 0.0065) * ride.tuck + (0.012 - 0.0065) * ride.tall;
-    const pull = ALONG * Math.cos(ride.way) - 0.04 * INTO - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - INTO * Math.sin(nose);
+    const pull = ALONG * Math.cos(ride.way) - 0.04 * INTO - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - 6 * Math.abs(Math.sin(pivot)) - INTO * Math.sin(nose);
     ride.speed = Math.max(0, ride.speed + pull * dt);
     ride.down += ride.speed * Math.cos(nose) * Math.cos(ride.way) * dt;
     ride.left = clamp(ride.left + ride.speed * Math.cos(nose) * Math.sin(ride.way) * dt, -31, 31);
@@ -584,7 +597,7 @@ async function start() {
     ride.rising = (g1.h - ride.out) / dt;
     ride.out = g1.h;
     // The lean into the turn that speed and turning ask, as `makeDownhillRun` reckons it; and the inside pole flicked as a turn begins.
-    const lean = clamp(Math.atan((ride.speed * turning) / G) / ((48 * Math.PI) / 180), -1.3, 1.3) * (1 - ride.brake);
+    const lean = clamp(Math.atan((ride.speed * turning) / G) / ((48 * Math.PI) / 180), -1.3, 1.3) * (1 - ride.brake) * (1 - 0.4 * ride.skid);
     ride.lean += (lean - ride.lean) * ease(dt, 10);
     const side = Math.abs(ride.lean) > 0.2 ? Math.sign(ride.lean) : 0;
     if (side && side !== ride.leanSide) { if (side > 0) ride.flickL = FLICK; else ride.flickR = FLICK; }
@@ -593,7 +606,7 @@ async function start() {
     ride.flickR = Math.max(0, ride.flickR - dt);
     const bump = (left: number) => (left > 0 ? Math.sin((Math.PI * (FLICK - left)) / FLICK) : 0) * (1 - ride.tuck);
     ride.facing += (0.5 * ride.way - ride.facing) * ease(dt, 2);
-    const ski = ride.way + ((ride.brakeSide * 78 * Math.PI) / 180) * ride.brake;
+    const ski = ride.way + pivot + ((ride.brakeSide * 78 * Math.PI) / 180) * ride.brake;
     // Sunk into a landing, coming up out of it; crouched going up a kicker's ramp, the more the steeper; and out of what is left of
     // a turn of the whole body.
     ride.absorb = Math.max(ride.out > 0.05 ? 0.5 * clamp(Math.sin(nose) / 0.34, 0, 1) : 0, ride.absorb - dt * 1.6);
@@ -601,7 +614,7 @@ async function start() {
     ride.settle.left = Math.max(0, ride.settle.left - dt);
     live.pose({
       s: ride.lean, ski: ski - ride.facing, tuck: ride.tuck, brake: ride.brake, tall: ride.tall, flickL: bump(ride.flickL), flickR: bump(ride.flickR),
-      absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling,
+      absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid,
     });
     standAt(ride.down, ride.left, ride.facing, ride.out, nose);
     keepJoints(dt);
@@ -615,6 +628,7 @@ async function start() {
     if (ride.speed < 0.5) return 'Standing';
     if (ride.out > 0.05) return 'Up the kicker';
     const turn = Math.abs(ask.x) > 0.15 ? (ask.x < 0 ? 'turning left' : 'turning right') : '';
+    if (ride.skid > 0.5) return `${ride.tuck > 0.5 ? 'Tucked, skidding' : 'Skidding'} ${turn.split(' ')[1]}`;
     const stance = ride.tuck > 0.5 ? 'Tucked' : ride.tall > 0.5 ? 'Standing tall' : '';
     if (stance && turn) return `${stance}, ${turn}`;
     if (stance) return stance;
@@ -669,7 +683,7 @@ async function start() {
       showKickers(true);
       // (Not to begin in a kicker's snow, if the watched run had got to where one stands.)
       ride.out = groundAt(ride.down, ride.left).h;
-      ride.rising = ride.absorb = 0;
+      ride.rising = ride.absorb = ride.skid = 0;
       ride.settle = { spin: 0, flip: 0, left: 0 };
     } else { clearRideTracks(); showKickers(false); }
     air = null; crash = null; joints = jointsBefore = null;

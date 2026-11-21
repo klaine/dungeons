@@ -28,6 +28,7 @@
       --serif: ui-serif, Georgia, "Times New Roman", serif;
       --ring: rgba(255, 255, 255, .85);
       --ring-shade: rgba(20, 30, 45, .25);
+      --skid: rgba(224, 176, 112, .2);
       --hit: 28px;
       --gutter-l: max(16px, env(safe-area-inset-left, 0px));
       --gutter-r: max(16px, env(safe-area-inset-right, 0px));
@@ -70,7 +71,12 @@
     /* Riding: a ring in the middle of the picture, as far as the pointer steers, with what each way asks and where it is now. */
     #pad { position: fixed; width: calc(var(--r, 200px) * 2); height: calc(var(--r, 200px) * 2); transform: translate(-50%, -50%); pointer-events: none; opacity: .5; transition: opacity .3s; }
     #pad.active { opacity: .9; }
-    #pad .ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px dashed var(--ring); box-shadow: 0 0 0 1px var(--ring-shade) inset; }
+    #pad .ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px dashed var(--ring); box-shadow: 0 0 0 1px var(--ring-shade) inset;
+      /* (Its sides out past 0.72 of the way to its edge, where a turn is skidded rather than carved.) */
+      background: linear-gradient(to right, var(--skid) 0 14%, transparent 14% 86%, var(--skid) 86%); }
+    #pad .skid { position: absolute; top: 50%; transform: translate(-50%, -50%); font: 600 10px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--ring); text-shadow: 0 0 3px var(--ring-shade); }
+    #pad .skid.l { left: 7%; }
+    #pad .skid.r { left: 93%; }
     #pad .cross { position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; border: 1.5px solid var(--ring); }
     #pad .dot { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--brass); border: 2px solid var(--on-brass); }
     #pad .say { position: absolute; padding: 2px 7px; border-radius: 3px; background: var(--chip); color: var(--ink); font-size: 11px; white-space: nowrap; }
@@ -105,12 +111,12 @@
     <div class="name" id="name">Downhill run</div>
     <div class="part" id="part">Long, wide turns</div>
     <div class="numbers"><span><b id="speed">0</b> km/h</span><span><b id="down">0</b> m down</span><span id="clock">0.0 s of 44</span></div>
-    <div class="hint">Point up the picture to tuck, down it to stand tall, to either side to turn. Hold Brake, or Shift, to stop. The arrow keys steer too.
+    <div class="hint">Point up the picture to tuck, down it to stand tall, to either side to turn: carved, or skidded out at the ring's edge. Hold Brake, or Shift, to stop. The arrow keys steer too; held on, they skid.
       Off a kicker: tucked, you fly as a ski jumper; between, straight air; standing tall, a backflip; turning, a spin with it. In the air, point up to turn quicker.</div>
   </div>
   <div id="told" aria-live="polite"><span class="text"></span><span class="small"></span></div>
   <div id="pad" hidden><div class="ring"></div><div class="cross"></div><div class="dot"></div>
-    <span class="say up">Tuck</span><span class="say down">Stand tall</span><span class="say left">Turn left</span><span class="say right">Turn right</span></div>
+    <span class="skid l">Skid</span><span class="skid r">Skid</span><span class="say up">Tuck</span><span class="say down">Stand tall</span><span class="say left">Turn left</span><span class="say right">Turn right</span></div>
   <div id="foot">
     <div id="controls">
       <div class="group" id="modes"><span class="label">Mode</span></div>
