@@ -1,6 +1,7 @@
 import { AnimationClip, Object3D, Vector3 } from 'three';
 import { SKI_THICK } from './gear';
-import { keyed, type Leg, looped, Poser, qx, qy, qz, rad, type Side } from './posing';
+import { makeAlpineClips } from './alpine';
+import { keyed, type Leg, looped, Poser, qx, qy, rad, type Side } from './posing';
 
 /**
  * Three clips of skiing, made in code on the figures' skeleton as the run is (`gait.ts`, `posing.ts`), with skis and poles for them
@@ -22,7 +23,6 @@ import { keyed, type Leg, looped, Poser, qx, qy, qz, rad, type Side } from './po
  * Each is played in place: the figure does not travel with it, and the snow is wherever its feet are.
  */
 
-export const SKI_CLIPS = ['Ski_Classic_Loop', 'Ski_Downhill_Loop', 'Ski_Jump'] as const;
 
 const cyc = (p: number) => ((p % 1) + 1) % 1;
 const deg = (keys: [number, number][]): [number, number][] => keys.map(([t, v]) => [t, rad(v)]);
@@ -106,61 +106,8 @@ export function makeClassicSki(source: Object3D, base: AnimationClip, frames = 4
   return { clip: P.clip('Ski_Classic_Loop', T), stretch, clearance, sunk };
 }
 
-/**
- * Carving: a turn to the left (the first half) and one to the right. `s` says how far into a turn and which way: up to 1 at the
- * middle of the left one, down to -1 at the middle of the right.
- */
-export function makeDownhillSki(source: Object3D, base: AnimationClip, frames = 64): SkiMade {
-  const P = new Poser(source, base), T = 2.2;
-  const turn = (p: number) => Math.sin(2 * Math.PI * p);
-  /** The skis turned across the slope (to the left, positive), a little after the body leans; and on their edges (left edges down, negative). */
-  const yaw = (p: number) => rad(20) * Math.sin(2 * Math.PI * (p - 0.1)), edge = (p: number) => -rad(32) * Math.sin(2 * Math.PI * (p - 0.04));
-  // (Sat lower than a skier walking would stand, the knees well bent and the shins pressed forward into the boots, the hips back over
-  // the heels and the trunk forward to balance them, the hands ahead.)
-  const lean = rad(34);
-  /** The inside pole's flick to the snow, as a turn begins: the left's just before the left turn, the right's half a cycle on. */
-  const flick = (k: Side, p: number) => { const d = cyc(p - (k === 'l' ? 0.96 : 0.46) + 0.5) - 0.5; return Math.exp(-((d / 0.055) ** 2)); };
-
-  const upper = (p: number, h: number) => {
-    P.begin();
-    const s = turn(p), y = yaw(p);
-    // The hips lowest in the turn, rising between; turned a little with the skis, and dropped on the inside.
-    const dPelvis = qy(0.45 * y).multiply(qz(-rad(11) * s)).multiply(qx(rad(24)));
-    P.pelvis(new Vector3(0, h + 0.05 * (1 - Math.abs(s)), P.pelvisAt.z - 0.06), dPelvis);
-    // The chest square down the slope, tilted back over the outside ski.
-    const chest = (k: number) => qy(-0.1 * y * k).multiply(qz(rad(7) * s * k)).multiply(qx(lean * (0.8 + 0.2 * k)));
-    P.trunk(dPelvis, [chest(0.3), chest(0.65), chest(1)], qx(rad(16)), qx(rad(6)));
-    for (const k of ['l', 'r'] as const) {
-      const f = flick(k, p);
-      P.arm(k, { swing: rad(32) + lean + rad(14) * f, bend: rad(48), wrist: rad(34) - rad(55) * f, hang: 62, inward: rad(4) * (k === 'l' ? -1 : 1) });
-    }
-    P.update();
-  };
-  const legs = (p: number) => {
-    const s = turn(p), y = yaw(p), r = edge(p), hinge = new Vector3(1, 0, 0).applyQuaternion(qy(y));
-    let stretch = 0;
-    for (const k of ['l', 'r'] as const) {
-      const L = P.legs[k];
-      // The feet swung out from under the body, away from the turn; the inside foot a little ahead.
-      const ball = onSnow(P, L, L.sign * 0.12 - 0.3 * s, 0.2 + 0.07 * s * L.sign);
-      const ankle = ball.clone().add(L.ankleFromBall.clone().applyQuaternion(qy(y)));
-      const got = P.reachLeg(k, ankle, P.footDir(k, 0, y), P.toeDir(k, 0, y), { hinge, roll: r });
-      stretch = Math.max(stretch, got.stretch);
-    }
-    P.update();
-    return stretch;
-  };
-  const h0 = highest(P.pelvisAt.y, 0.85, (h) => { let most = 0; for (let i = 0; i < 24; i++) { upper(i / 24, h); most = Math.max(most, legs(i / 24)); } return most; });
-  let stretch = 0, sunk = 0;
-  for (let i = 0; i <= frames; i++) {
-    const p = i / frames;
-    upper(p, h0);
-    stretch = Math.max(stretch, legs(p));
-    for (const k of ['l', 'r'] as const) sunk = Math.max(sunk, -footOver(P, k));
-    P.keep(p * T);
-  }
-  return { clip: P.clip('Ski_Downhill_Loop', T), stretch, clearance: Infinity, sunk };
-}
+// (The downhill turns are made in `alpine.ts`, with the jumps that go between them.)
+export { makeDownhillSki } from './alpine';
 
 /** The jump's times: the take-off begins, the skis leave the snow, they meet it again. */
 const JUMP = { takeOff: 1.4, lift: 1.82, land: 4.35, end: 6.0 };
@@ -248,7 +195,7 @@ export function makeSkiJump(source: Object3D, base: AnimationClip, step = 1 / 30
   return { clip: P.clip('Ski_Jump', J.end), stretch, clearance, sunk };
 }
 
-/** All three, made on `source` from its idle's first frame. */
+/** All of them, made on `source` from its idle's first frame: these two, and the downhill turns with their jumps (`alpine.ts`). */
 export function makeSkiClips(source: Object3D, base: AnimationClip): AnimationClip[] {
-  return [makeClassicSki(source, base).clip, makeDownhillSki(source, base).clip, makeSkiJump(source, base).clip];
+  return [makeClassicSki(source, base).clip, ...makeAlpineClips(source, base), makeSkiJump(source, base).clip];
 }

@@ -235,9 +235,13 @@ export class Poser {
     for (const b of this.bones) this.rot.get(b)!.push(...b.quaternion.toArray());
     this.hipsPos.push(...this.pelvisBone.position.toArray());
   }
-  /** The frames kept, as a clip. */
-  clip(name: string, duration: number): AnimationClip {
+  /**
+   * The frames kept, as a clip; with `travel` (how far forward the figure has gone at each frame), a track of its root going along,
+   * which the figure takes as a way to go (`Move.travel` in `library.ts`) rather than playing it.
+   */
+  clip(name: string, duration: number, travel?: number[]): AnimationClip {
     const tracks = [new VectorKeyframeTrack(`${this.pelvisBone.name}.position`, this.times, this.hipsPos), ...this.bones.map((b) => new QuaternionKeyframeTrack(`${b.name}.quaternion`, this.times, this.rot.get(b)!))];
+    if (travel) tracks.push(new VectorKeyframeTrack(`${this.root.name}.position`, this.times, travel.flatMap((z) => [0, 0, z])));
     return new AnimationClip(name, duration, tracks);
   }
 }

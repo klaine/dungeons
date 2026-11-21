@@ -700,6 +700,24 @@ The machine this is developed on now has a graphics card, and tablets were repor
     woman; the gear on and off as the clips start and stop; `tools/browser/figures.cjs` and `tools/browser/crew.cjs` pass. Not done:
     a figure that moves with them (travelling, the jump's arc along a hill), and skating, double poling or a tuck.
 
+63. **Jumps that go with the downhill turns.** Asked: "add animations for few different kind of downhill skiing jumps that you see
+    could be chained together with the downhill skiing (off a cliff, off a man made jump/kicker, ..?)". *Done* (`src/figures/alpine.ts`):
+    a skier's pose is now a handful of numbers (hips, pelvis, chest, head, each arm, each foot and its ski, and the whole body turned
+    about the upright or over and lifted), which can be blended and turned as a whole; the turns are made of them, the same to the last
+    bit as before. Five jumps: `Ski_Pop`, a hop off a roller, half a second in the air; `Ski_Kicker`, straight air off a built jump,
+    tucked, 1.3 seconds; `Ski_Kicker_360`, a full spin about the upright, wound up the other way on the ramp; `Ski_Backflip`, thrown
+    back, tucked, opened to land; `Ski_Cliff_Drop`, rolled off an edge, laid forward over the skis with the arms reaching ahead and the
+    eyes on the landing, taken low. Each begins and ends in the turns' pose where one turn gives way to the next, so that it goes between
+    turns: asked for while the figure is turning, a jump waits for the end of the turn (`Figure.play`), the turns go on after it
+    (`AFTER`), and `Figure.chain` plays a run of them with a turn between each (*Run with jumps* in both labs). The air is a thrown body's
+    (up and down in the time it is off the snow). All are in place but the cliff drop, which carries the figure forward three metres a
+    second: on level ground it is a small hop, but played near an edge the body goes over and falls under its own weight, the clip held
+    in its hang until the body meets the ground, then on into the landing (`DROPS`). *Checked:* the clips as played, without a browser:
+    no foot or ski under the snow on it, the legs within reach, the skis' ends clear of the snow in the air (a cliff drop's tails had
+    gone a centimetre in, and were levelled sooner); filmed from the side and a quarter; the cliff drop filmed going over the figure
+    lab's platform, 1.5 metres, and landing below; a chained run logged, each jump beginning at the end of a turn, a turn between each,
+    the turns after; a kicker asked for in the middle of a turn waiting for its end; `tools/browser/figures.cjs` and `crew.cjs` pass.
+
 ## Risks
 
 | Risk | Mitigation |

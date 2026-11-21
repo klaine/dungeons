@@ -9,6 +9,7 @@
  * Pointing: on a figure chooses it; on the ground sends the chosen one there (Shift: running); on a seat or a bedroll, to sit or lie.
  * Dragging turns the view about the figure; the wheel brings it nearer.
  */
+import { SKI_RUN } from '../src/figures/alpine';
 import {
   ACESFilmicToneMapping, BackSide, BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, Color, DirectionalLight, DoubleSide,
   HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, PCFShadowMap, PerspectiveCamera, Ray, Raycaster, RepeatWrapping, RingGeometry, Scene, SphereGeometry,
@@ -429,6 +430,14 @@ async function start(): Promise<void> {
       b.textContent = n.replace(/_Loop$/, ' ↻').replace(/_/g, ' ');
       b.title = n;
       b.onclick = () => { chosen?.play(n); canvas.focus(); };
+      box.appendChild(b);
+    }
+    // (And the downhill turns with every jump between them, one after another, a turn or two apart.)
+    if (title === 'Skiing') {
+      const b = document.createElement('button');
+      b.textContent = 'Run with jumps ↻';
+      b.title = 'The downhill turns, and each jump in turn between them: a pop, a kicker, a 360, a cliff drop, a backflip';
+      b.onclick = () => { chosen?.chain(SKI_RUN); canvas.focus(); };
       box.appendChild(b);
     }
     clipsBox.append(h, box);

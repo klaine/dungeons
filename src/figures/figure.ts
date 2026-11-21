@@ -3,6 +3,7 @@ import { Player, type Colliders } from '../app/player';
 import { type Move, type Rigged, travelAt } from './library';
 import { RUN, SPRINT, strideOf } from './gait';
 import { GEAR_OF, putOn, takeOff } from './gear';
+import { AFTER, DROPS } from './alpine';
 import type { Route } from './nav';
 
 /**
@@ -17,6 +18,9 @@ import type { Route } from './nav';
  *
  * Forward is +z in the model's frame: a figure facing `facing` looks along (sin facing, 0, cos facing).
  */
+
+/** What a figure playing a clip is said to be doing: its name, read out. */
+const said = (name: string) => name.replace(/_/g, ' ').replace(/ Loop$/, '').toLowerCase();
 
 /** How fast a figure goes at each pace, metres a second: a run and a sprint at the speeds their gaits are made for (`gait.ts`). */
 export const PACES = { walk: 1.3, run: RUN.speed, sprint: SPRINT.speed, crouch: 0.9 };
@@ -225,12 +229,45 @@ export class Figure {
   play(name: string, stay = /Death/.test(name)): void {
     if (!this.rig.moves.has(name)) return;
     if (this.state === 'seated' || this.state === 'asleep') return;
+    // (A jump that goes between downhill turns, asked for while the figure is making them, waits for the end of a turn: `chain`.)
+    if (this.between(name)) { this.queued = [name]; this.tellQueue(); return; }
+    this.queued = [];
+    this.start(name, stay, 0.2);
+  }
+
+  /**
+   * Plays clips one after another: the downhill turns and the jumps that go between them (`alpine.ts`), each jump begun where one
+   * turn gives way to the next, with a turn at least between jumps, and the turns going on after the last.
+   */
+  chain(names: string[]): void {
+    const [first, ...rest] = names.filter((n) => this.rig.moves.has(n));
+    if (!first) return;
+    this.play(first);
+    this.queued.push(...rest);
+    this.tellQueue();
+  }
+
+  /** Whether `name` is a jump that goes between the clip now playing's turns. */
+  private between(name: string): boolean { return this.state === 'act' && !!AFTER[name] && this.currentMove?.clip.name === AFTER[name]; }
+  /** Jumps waiting for the end of a turn. */
+  private queued: string[] = [];
+  /** Which half of the turns' cycle they were in at the last step, to see one turn give way to the next. */
+  private lastLink: number | null = null;
+  private tellQueue(): void { if (this.queued.length) this.doing = [this.currentMove?.clip.name ?? '', ...this.queued].map(said).join(', then '); }
+
+  /** Held in a drop's hang while the body falls. */
+  private falling = false;
+
+  private start(name: string, stay: boolean, fade: number): void {
     this.order = null;
+    this.falling = false;
+    this.lift = 0;
     const m = this.move(name), loop = /_Loop$/.test(name);
     this.stay = stay;
     this.enter('act');
-    this.show(m, 0.2, loop ? LoopRepeat : LoopOnce);
-    this.doing = name.replace(/_/g, ' ').replace(/ Loop$/, '').toLowerCase();
+    this.show(m, fade, loop ? LoopRepeat : LoopOnce);
+    this.lastLink = null;
+    this.doing = said(name);
     // (With what it wants in hand or underfoot: skis and poles for the ski clips.)
     if (GEAR_OF[name]) this.gear = putOn(this.rig.model, GEAR_OF[name]);
   }
@@ -297,6 +334,8 @@ export class Figure {
     this.state = 'ground';
     this.stateTime = 0;
     this.dropGear();
+    this.queued = [];
+    if (this.falling) { this.falling = false; this.lift = 0; }
     this.current = null;
     this.currentMove = null;
     this.loco.to = 1;
@@ -385,7 +424,24 @@ export class Figure {
       const lx = (tmp.x - tmp2.x) / (2 * h) * (t < m.clip.duration ? 1 : 0), lz = (tmp.z - tmp2.z) / (2 * h) * (t < m.clip.duration ? 1 : 0);
       steer.set(lx * Math.cos(f) + lz * Math.sin(f), -lx * Math.sin(f) + lz * Math.cos(f));
     }
-    if (a.loop === LoopOnce && this.done() && !this.stay) this.toGround(0.3);
+    // A jump waiting: begun where one turn gives way to the next (the clip's middle or its end), once the turns have gone on for a turn.
+    if (this.queued.length && a.loop === LoopRepeat) {
+      const half = m.clip.duration / 2, k = Math.floor(a.time / half);
+      if (this.lastLink !== null && k !== this.lastLink && this.stateTime >= half * 0.9) { this.start(this.queued.shift()!, false, 0.25); this.tellQueue(); return; }
+      this.lastLink = k;
+    }
+    // Off an edge: held in the hang while the body falls, then on into the landing as it meets the ground.
+    const drop = DROPS[m.clip.name];
+    if (drop) {
+      if (!this.body.grounded && a.time >= drop.hold - 0.3 && a.time < drop.land) { this.falling = true; a.time = drop.hold; this.lift = -drop.lift; }
+      else if (this.falling && this.body.grounded) { this.falling = false; a.time = drop.land; this.lift = 0; }
+    }
+    const through = drop ? a.time >= m.clip.duration - 0.03 : this.done();
+    if (a.loop === LoopOnce && through && !this.stay) {
+      // (After a jump, the turns again, from where it left them.)
+      const then = AFTER[m.clip.name];
+      if (then) { this.start(then, false, 0.12); this.tellQueue(); } else this.toGround(0.3);
+    }
   }
 
   /** Comes to stand exactly where it sits or lies (or does anything at a spot), facing the right way, before doing so. */

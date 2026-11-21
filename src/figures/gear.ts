@@ -11,8 +11,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
  */
 export type GearKind = 'classic' | 'alpine' | 'jump';
 
-/** Which clips want which gear. */
-export const GEAR_OF: Record<string, GearKind> = { Ski_Classic_Loop: 'classic', Ski_Downhill_Loop: 'alpine', Ski_Jump: 'jump' };
+/** Which clips want which gear: the downhill turns' jumps the turns' skis and poles. */
+export const GEAR_OF: Record<string, GearKind> = {
+  Ski_Classic_Loop: 'classic', Ski_Downhill_Loop: 'alpine', Ski_Jump: 'jump',
+  Ski_Pop: 'alpine', Ski_Kicker: 'alpine', Ski_Kicker_360: 'alpine', Ski_Backflip: 'alpine', Ski_Cliff_Drop: 'alpine',
+};
 
 interface SkiSpec { length: number; width: number; ahead: number; on: 'toes' | 'foot'; colour: number; pole: number }
 /**

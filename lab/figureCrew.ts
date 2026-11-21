@@ -2,6 +2,7 @@
 // a palette over the picture: an order that wants a place (walk there, sit on that, chop that tree, talk to that figure) waits for a
 // click on the picture; the others are done at once. Figures find their way round what is set out, through doors, up stairs and onto
 // ledges and rocks (`src/figures/nav.ts`), over everything solid the lab has built (`src/figures/solids.ts`, kept up by the lab).
+import { SKI_RUN } from '../src/figures/alpine';
 import {
   BufferGeometry, Float32BufferAttribute, Line, LineBasicMaterial, Mesh, MeshBasicMaterial, PerspectiveCamera, Ray, RingGeometry, Scene, SkinnedMesh,
   MeshStandardMaterial, Vector2, Vector3,
@@ -60,6 +61,13 @@ const ORDERS: OrderKind[] = [
   { id: 'skiClassic', label: 'Cross-country', group: 'Ski', target: 'now', clip: 'Ski_Classic_Loop', note: '' },
   { id: 'skiDownhill', label: 'Downhill', group: 'Ski', target: 'now', clip: 'Ski_Downhill_Loop', note: '' },
   { id: 'skiJump', label: 'Ski jump', group: 'Ski', target: 'now', clip: 'Ski_Jump', note: '' },
+  // (Jumps that go between the downhill turns: asked for while turning, each waits for the end of a turn, and the turns go on after.)
+  { id: 'skiPop', label: 'Pop', group: 'Ski', target: 'now', clip: 'Ski_Pop', note: '' },
+  { id: 'skiKicker', label: 'Kicker', group: 'Ski', target: 'now', clip: 'Ski_Kicker', note: '' },
+  { id: 'ski360', label: '360', group: 'Ski', target: 'now', clip: 'Ski_Kicker_360', note: '' },
+  { id: 'skiFlip', label: 'Backflip', group: 'Ski', target: 'now', clip: 'Ski_Backflip', note: '' },
+  { id: 'skiDrop', label: 'Cliff drop', group: 'Ski', target: 'now', clip: 'Ski_Cliff_Drop', note: '' },
+  { id: 'skiRun', label: 'Run with jumps', group: 'Ski', target: 'now', note: '' },
   { id: 'stop', label: 'Stop', group: '', target: 'now', key: '0', note: '' },
 ];
 const MOVES = new Set(['walk', 'run', 'sneak']);
@@ -253,6 +261,7 @@ export class Crew {
       if (o.id === 'stop') f.stop();
       else if (o.id === 'up') f.standUp();
       else if (o.id === 'jump') { if (f.state !== 'ground') f.stop(); f.jump(); }
+      else if (o.id === 'skiRun') { if (['seated', 'asleep'].includes(f.state)) f.stop(); f.chain(SKI_RUN); }
       else if (o.clip) { if (['seated', 'asleep'].includes(f.state)) f.stop(); f.play(o.clip); }
     }
   }
