@@ -405,25 +405,7 @@ export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 
     const s = Math.max(-1.3, Math.min(1.3, Math.atan((speed * turning) / G) / rad(48))) * (1 - brake);
     const ski = carve + (rad(78) - carve) * brake, way = carve * (1 - brake);
     const turnsBig = Math.min(1, at(t, K.across) / 25) * (1 - tuck) * (1 - brake);
-    const a = carvePose(h0, s, ski, -rad(32) * s - rad(48) * brake, flick('l', p) * turnsBig, flick('r', p) * turnsBig);
-    // Braking: the feet pushed on down the slope ahead of the body, which sits back and low over its uphill edges, the upper body
-    // still facing down the slope, the arms out.
-    a.hips -= 0.1 * brake;
-    a.pelvisPitch -= rad(8) * brake;
-    both(a, (_k, arm, f) => { f.z += 0.3 * brake; arm.hang -= 12 * brake; arm.swing += rad(6) * brake; });
-    // The tuck: crouched low with the chest down on the knees, the head up to see ahead; the elbows down by the knees, the forearms
-    // level and the fists together ahead of the chin, the wrists bent back so that the poles run back along the forearms, under the
-    // arms.
-    a.hips -= 0.2 * tuck;
-    a.pelvisPitch += rad(30) * tuck;
-    a.lean += rad(30) * tuck;
-    a.neck -= rad(10) * tuck;
-    a.head -= rad(34) * tuck;
-    both(a, (k, arm, f) => {
-      arm.swing += rad(8) * tuck; arm.bend += (rad(95) - arm.bend) * tuck; arm.hang += (86 - arm.hang) * tuck;
-      arm.inward += (rad(24) * (k === 'l' ? -1 : 1) - arm.inward) * tuck; arm.wrist += (rad(85) - arm.wrist) * tuck;
-      f.z -= 0.04 * tuck;
-    });
+    const a = riderPose(h0, { s, ski, tuck, brake, tall: 0, flickL: flick('l', p) * turnsBig, flickR: flick('r', p) * turnsBig });
     stretch = Math.max(stretch, poseAlpine(P, a));
     for (const k of ['l', 'r'] as const) sunk = Math.max(sunk, -skiOver(P, k, false));
     P.keep(t);
@@ -432,4 +414,73 @@ export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 
     left += speed * Math.sin(way) * step;
   }
   return { clip: P.clip('Ski_Downhill_Run', RUN_LENGTH), samples, stretch, sunk };
+}
+
+/**
+ * What a skier is doing at a moment, as `riderPose` takes it: how far it leans into a turn (`s`, as `carvePose` takes it), which way its
+ * skis point (radians to the left of where it faces), how far it is into a tuck, into braking and into standing tall (each 0 to 1), and
+ * each pole's flick to the snow.
+ */
+export interface RideControls { s: number; ski: number; tuck: number; brake: number; tall: number; flickL: number; flickR: number }
+
+/**
+ * A skier's pose from what it is doing: carving (`carvePose`), with as much of a tuck, of braking and of standing tall as it is into
+ * them, any of them together (a tuck held through a turn, as a racer carves the faster turns). The long run's, and the live rider's.
+ */
+export function riderPose(h0: number, c: RideControls): AlpinePose {
+  const { s, ski, tuck, brake, tall } = c;
+  const a = carvePose(h0, s, ski, -rad(32) * s - rad(48) * brake, c.flickL, c.flickR);
+  // Braking: the feet pushed on down the slope ahead of the body, which sits back and low over its uphill edges, the upper body
+  // still facing down the slope, the arms out.
+  a.hips -= 0.1 * brake;
+  a.pelvisPitch -= rad(8) * brake;
+  both(a, (_k, arm, f) => { f.z += 0.3 * brake; arm.hang -= 12 * brake; arm.swing += rad(6) * brake; });
+  // The tuck: crouched low with the chest down on the knees, the head up to see ahead; the elbows down by the knees, the forearms
+  // level and the fists together ahead of the chin, the wrists bent back so that the poles run back along the forearms, under the
+  // arms.
+  a.hips -= 0.2 * tuck;
+  a.pelvisPitch += rad(30) * tuck;
+  a.lean += rad(30) * tuck;
+  a.neck -= rad(10) * tuck;
+  a.head -= rad(34) * tuck;
+  both(a, (k, arm, f) => {
+    arm.swing += rad(8) * tuck; arm.bend += (rad(95) - arm.bend) * tuck; arm.hang += (86 - arm.hang) * tuck;
+    arm.inward += (rad(24) * (k === 'l' ? -1 : 1) - arm.inward) * tuck; arm.wrist += (rad(85) - arm.wrist) * tuck;
+    f.z -= 0.04 * tuck;
+  });
+  // Standing tall: easing off, the knees straighter and the trunk up, the hands lower.
+  if (tall) {
+    a.hips += 0.08 * tall;
+    a.pelvisPitch -= rad(10) * tall;
+    a.lean -= rad(14) * tall;
+    a.neck -= rad(4) * tall;
+    both(a, (_k, arm) => { arm.swing -= rad(16) * tall; arm.bend -= rad(14) * tall; });
+  }
+  return a;
+}
+
+/**
+ * A skier posed live, moment by moment (the slope page's rider when it is ridden): its own copy of the mannequin, which is what is
+ * shown, and the height its hips are held at in the turns.
+ */
+export class Rider {
+  private readonly P: Poser;
+  readonly h0: number;
+  constructor(source: Object3D, base: AnimationClip) {
+    this.P = new Poser(source, base);
+    this.h0 = turnsHeight(this.P);
+  }
+  get model(): Object3D { return this.P.model; }
+  /**
+   * Puts it in the pose of what it is doing. Gives back how far its legs were stretched. (Posed as it stands alone: the poser reckons
+   * in the figure's own frame, which is the world's only while it stands in nothing, so it is taken out of what holds it meanwhile.)
+   */
+  pose(c: RideControls): number {
+    const holder = this.P.model.parent;
+    holder?.remove(this.P.model);
+    this.P.model.updateMatrixWorld(true);
+    const stretch = poseAlpine(this.P, riderPose(this.h0, c));
+    holder?.add(this.P.model);
+    return stretch;
+  }
 }

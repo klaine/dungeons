@@ -737,6 +737,24 @@ The machine this is developed on now has a graphics card, and tablets were repor
     artifact served as one, with pictures of each part from the views that show it (the tracks from above: wide, tightening, short);
     the tuck's poles first pointed ahead out of the fists, and were turned back under the arms.
 
+65. **The run ridden: turning and tucking together, by the pointer.** Asked: "can the turning and tucking combine? lets add touch/mouse
+    control to the slope lab page for user to control the skier. push forward means more tucked position, closer to screen bottom end
+    more relaxed position, sideways controls turns". *Done:* yes, they combine: the skier's pose takes how far it is into a tuck, into
+    standing tall, into braking and how far it leans into a turn as amounts, mixed freely (`riderPose` in `src/figures/alpine.ts`, which
+    the made run now uses too, the same to the last bit), and a `Rider` poses its own copy of the mannequin from them live, frame by
+    frame. On `lab/slope.html`, *Ride* (or `R`) hands it over from wherever the run had got to: where the pointer is against the middle
+    of the picture, within a ring drawn there, asks for a tuck (up), standing tall (down) and a turn (aside), eased; by mouse wherever it
+    is, by touch where a finger is held, and by the arrow keys; *Brake* (held) or Shift throws the skis across. The skier goes as the
+    slope and its stance let it: its weight down the slope as much as its skis point down it, the snow's friction, the air's drag (some
+    65 km/h in its plain stance, 87 tucked, 51 standing tall, on sixteen degrees), a little lost to turning, much to braking; it turns
+    quicker the faster it goes (some twenty metres across at speed, pushed all the way) and wider tucked, and leans into each turn as
+    speed and turning ask, flicking the inside pole as each begins. The slope and its woods are moved along under it so that it goes on,
+    the skier is kept between the piste poles, and its tracks are laid as it goes. *Checked:* in headless Chromium, through the page's
+    own hooks: the speeds above, a tucked turn to the right and then the left leaning each way, braking from 56 km/h to 14 in 2.5 seconds;
+    the mouse moved up and to the left of the middle asking a tuck while leaning left; pictures from behind, beside and above. The posing
+    had reckoned in the world's frame, which was the figure's own only while it stood in nothing, and the ridden skier at first was posed
+    hundreds of metres from where it stood: it is now taken out of what holds it while it is posed.
+
 ## Risks
 
 | Risk | Mitigation |
