@@ -404,13 +404,18 @@ async function start() {
     pad.classList.toggle('active', Math.hypot(want.x, want.y) > 0.05 || Object.values(want.keys).some(Boolean));
   };
 
-  // The view, following the skier: eased, so that the turns swing the skier across it rather than swinging the view. Riding, behind
+  // The view, following the skier. It keeps pace with the skier exactly down the slope, and eases only what the view does about it: how
+  // far across the slope it follows (so that the turns swing the skier across the picture rather than swinging the view), which way it
+  // looks along, and the change from one view to another. (Eased whole, the view had trailed the skier by its speed over the easing's
+  // rate, twice over: some twelve metres at speed, so that from beside and above the skier ran ahead of the picture.) Riding, behind
   // and above look most of the way along the way it goes.
   let placed = false;
-  const eye = new Vector3(), look = new Vector3(), follow = new Vector3(), lastRider = new Vector3(), ahead = FALL.clone();
+  const eyeOff = new Vector3(), lookOff = new Vector3(), lastRider = new Vector3(), ahead = FALL.clone();
+  let across = 0;
   const placeView = (now: Now, dt: number) => {
     const at = rider.position;
-    follow.lerp(onSlope(now.down, mode === 'ride' ? now.left : now.left * 0.35), placed ? ease(dt, 3) : 1);
+    across += ((mode === 'ride' ? 1 : 0.35) * now.left - across) * (placed ? ease(dt, 3) : 1);
+    const follow = onSlope(now.down, across);
     ahead.lerp(mode === 'ride' ? FALL.clone().lerp(along(now.way), 0.65).normalize() : FALL, placed ? ease(dt, 2) : 1).normalize();
     if (view === 'free') {
       if (!placed) { camera.position.copy(at).addScaledVector(UP, 3).addScaledVector(LEFT, 6).addScaledVector(FALL, -6); controls.target.copy(at); }
@@ -421,11 +426,12 @@ async function start() {
       const wantAt = new Vector3(), aim = new Vector3();
       if (view === 'behind') { wantAt.copy(follow).addScaledVector(ahead, -9).addScaledVector(UP, 3.4); aim.copy(follow).addScaledVector(ahead, 6).addScaledVector(UP, 0.6); }
       else if (view === 'beside') { wantAt.copy(follow).addScaledVector(LEFT, 11).addScaledVector(FALL, 1.5).addScaledVector(UP, 1.8); aim.copy(at).addScaledVector(UP, 0.9); }
-      else { wantAt.copy(follow).addScaledVector(UP, 32).addScaledVector(ahead, -9); aim.copy(follow).addScaledVector(ahead, -9); camera.up.copy(ahead); }
-      eye.lerp(wantAt, placed ? ease(dt, 4) : 1);
-      look.lerp(aim, placed ? ease(dt, 5) : 1);
-      camera.position.copy(eye);
-      camera.lookAt(look);
+      // (From above, looking a little behind the skier, so that it is in the upper part of the picture with its tracks below it.)
+      else { wantAt.copy(follow).addScaledVector(UP, 32).addScaledVector(ahead, -5); aim.copy(follow).addScaledVector(ahead, -5); camera.up.copy(ahead); }
+      eyeOff.lerp(wantAt.sub(at), placed ? ease(dt, 5) : 1);
+      lookOff.lerp(aim.sub(at), placed ? ease(dt, 6) : 1);
+      camera.position.copy(at).add(eyeOff);
+      camera.lookAt(at.clone().add(lookOff));
     }
     lastRider.copy(at);
     placed = true;
@@ -482,6 +488,8 @@ async function start() {
   (window as unknown as Record<string, unknown>).__slope = {
     seek: (to: number) => { t = to; clearSpray(); placed = false; }, pause: (p: boolean) => { playing = !p; reflect(); }, setView, setMode,
     steer: (x: number, y: number) => { want.x = x; want.y = y; }, brake: (on: boolean) => { want.brake = on; }, ride: () => ({ ...ride }),
+    // (Where the skier's hips are in the picture: -1 to 1 across and up it, 0 its middle.)
+    onScreen: () => { const p = rider.position.clone().addScaledVector(UP, 0.9).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; },
     step: (seconds: number) => { let at: Now | null = null; for (let i = 0; i < Math.round(seconds * 120); i++) at = stepRide(1 / 120); if (at) layRide(at); placed = false; return { ...ride }; },
     time: () => t, ready: true, run,
   };

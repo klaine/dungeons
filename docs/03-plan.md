@@ -753,7 +753,13 @@ The machine this is developed on now has a graphics card, and tablets were repor
     own hooks: the speeds above, a tucked turn to the right and then the left leaning each way, braking from 56 km/h to 14 in 2.5 seconds;
     the mouse moved up and to the left of the middle asking a tuck while leaning left; pictures from behind, beside and above. The posing
     had reckoned in the world's frame, which was the figure's own only while it stood in nothing, and the ridden skier at first was posed
-    hundreds of metres from where it stood: it is now taken out of what holds it while it is posed.
+    hundreds of metres from where it stood: it is now taken out of what holds it while it is posed. Then reported: "the beside and above
+    views lag behind the skier / the skier is ahead of the frame". The view had been eased whole towards where it should be, twice
+    over (the point it followed, then the eye), and an eased follower trails a moving thing by its speed over the easing's rate: some
+    twelve metres at speed. It now keeps pace with the skier exactly and eases only its offset from it (how far across the slope it
+    follows, which way it looks along, the change between views); and from above it looks five metres behind the skier, not nine.
+    Measured where the skier's hips fall in the picture, the page's frames stepped at sixty a second: from beside, -0.31 across riding
+    tucked at speed before, the middle after; from above, 0.83 up the picture watching and 1.32 (out of it) riding before, 0.34 after.
 
 ## Risks
 
