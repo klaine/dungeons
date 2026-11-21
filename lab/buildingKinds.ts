@@ -15,7 +15,7 @@ import { BrickWork, Building, CanalWork, ClassicalDress, Place, Site, Stone, Tow
 import { canalEaves, dealCanalHouse, planCanal } from '../src/core/canal';
 import { buildBuilding } from '../src/render/buildings';
 import { buildCastle } from '../src/render/castle';
-import { Castle, layOutCastle } from '../src/core/castle';
+import { Castle, CastleTower, layOutCastle } from '../src/core/castle';
 import { placeHouse } from '../src/render/housePlacing';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
@@ -135,6 +135,9 @@ export const RANGES = {
   // its spire, its choir.)
   chapel: { w: [8, 18], d: [5.5, 9], height: [5, 8.5], tower: [3.6, 5.6], over: [5, 13], spire: [2, 15], choir: [3, 6.5] },
   shed: { w: [1.8, 4.5], d: [1.6, 3.6], height: [2, 3] },
+  // (A castle's wall, from the ground to the walk and through; its towers, by their radius or half breadth and how far they stand over
+  // the walk; a turret, small, corbelled out at the top.)
+  castle: { height: [6, 16], thick: [1.6, 3.4], r: [2.2, 6], over: [1, 14], turretR: [0.7, 1.8], turretOver: [1, 5] },
   boulder: { size: [0.3, 8] },
   canal: { bays: [1, 7], pitch: [1.6, 2.5], margin: 1.1, d: [7, 22], storeys: [2, 7], height: [2.3, 4.8], stoop: [0, 1.6], lean: [0, 0.035], roof: [35, 62] },
   gabled: { w: [5.5, 11], d: [8, 18], storeys: [1, 5], height: [2.4, 5.2], bays: [1, 5], pitch: [40, 66] },
@@ -279,6 +282,12 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     // keeping others off it.)
     s.style = 'timber';
     if (s.castle) {
+      const R = RANGES.castle, c = s.castle;
+      c.height = r2(clamp(c.height, R.height[0], R.height[1])); c.thick = r2(clamp(c.thick, R.thick[0], R.thick[1]));
+      for (const t of c.towers) {
+        const turret = t.kind === 'turret', rr = turret ? R.turretR : R.r, over = turret ? R.turretOver : R.over;
+        t.r = r2(clamp(t.r, rr[0], rr[1])); t.over = r2(clamp(t.over, over[0], over[1]));
+      }
       const xs = s.castle.wall.map((p) => p[0]), zs = s.castle.wall.map((p) => p[1]);
       // (Its front, the gate's side, looks towards +z: its breadth runs along x, its depth along z.)
       s.w = r2(Math.max(...xs) - Math.min(...xs) + 2 * s.castle.thick + 4); s.d = r2(Math.max(...zs) - Math.min(...zs) + 2 * s.castle.thick + 4);
@@ -508,12 +517,26 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
 function dealCastle(rng: Rng): Castle {
   const house = { x0: -9, x1: 9, z0: -8 }, meadow = { x0: -11, x1: 11, z0: 2, z1: 12 } as Place;
   const c = layOutCastle({ towers: [] } as unknown as Site, meadow, house, 0, rng.fork('castle'), () => 1000);
-  const xs = c.wall.map((p) => p[0]), zs = c.wall.map((p) => p[1]), mx = (Math.min(...xs) + Math.max(...xs)) / 2, mz = (Math.min(...zs) + Math.max(...zs)) / 2;
+  return centredCastle(c).c;
+}
+
+/** The middle of the bounds of a castle's wall, to a centimetre. */
+export function castleMiddle(c: Castle): [number, number] {
+  const xs = c.wall.map((p) => p[0]), zs = c.wall.map((p) => p[1]);
+  return [Math.round(((Math.min(...xs) + Math.max(...xs)) / 2) * 100) / 100, Math.round(((Math.min(...zs) + Math.max(...zs)) / 2) * 100) / 100];
+}
+
+/** A castle's record moved so that the middle of its wall's bounds is at the middle (`by`, how far it was moved), everything in it to a centimetre. */
+export function centredCastle(c: Castle): { c: Castle; by: [number, number] } {
+  const [mx, mz] = castleMiddle(c);
   const at = ([x, z]: [number, number]): [number, number] => [Math.round((x - mx) * 100) / 100, Math.round((z - mz) * 100) / 100];
   return {
-    ...c, wall: c.wall.map(at), gate: { ...c.gate, x: at([c.gate.x, c.gate.z])[0], z: at([c.gate.x, c.gate.z])[1] },
-    towers: c.towers.map((t) => { const [x, z] = at([t.x, t.z]); return { ...t, x, z }; }),
-    ranges: c.ranges?.map((r) => ({ ...r, a: at(r.a), b: at(r.b) })), stair: c.stair && { ...c.stair, a: at(c.stair.a), b: at(c.stair.b) }, well: c.well && at(c.well),
+    by: [-mx, -mz],
+    c: {
+      ...c, wall: c.wall.map(at), gate: { ...c.gate, x: at([c.gate.x, c.gate.z])[0], z: at([c.gate.x, c.gate.z])[1] },
+      towers: c.towers.map((t) => { const [x, z] = at([t.x, t.z]); return { ...t, x, z }; }),
+      ranges: c.ranges?.map((r) => ({ ...r, a: at(r.a), b: at(r.b) })), stair: c.stair && { ...c.stair, a: at(c.stair.a), b: at(c.stair.b) }, well: c.well && at(c.well),
+    },
   };
 }
 
@@ -705,6 +728,14 @@ export function nearOf(item: Item, others: Item[]): Building['near'] {
   }
   return out.length ? out : undefined;
 }
+
+/** A tower as one is first set at a corner of a castle by hand, of each kind. */
+export const TOWER_DEALT: Record<CastleTower['kind'], Pick<CastleTower, 'kind' | 'r' | 'over' | 'roof'>> = {
+  round: { kind: 'round', r: 3.8, over: 6.5, roof: 'cone' },
+  half: { kind: 'half', r: 3.8, over: 5, roof: 'cone' },
+  square: { kind: 'square', r: 3.4, over: 5, roof: 'battlement' },
+  turret: { kind: 'turret', r: 1.2, over: 3, roof: 'cone' },
+};
 
 /**
  * A castle's record turned as every item is built (its front, its gate's side, towards -x, `faces: 'w'`): what faced +z faces -x.

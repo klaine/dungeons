@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import type { Castle, CastleTower } from '../core/castle';
+import { castleOff, grounded, inwardOf, type Castle, type CastleTower } from '../core/castle';
 import { MeshBuilder } from './geom/meshBuilder';
 import { outdoorFieldAt } from './fields';
 import { valueNoise3 } from '../core/rng';
@@ -29,7 +29,6 @@ export interface CastleBuild {
 export function buildCastle(b: CastleBuild): void {
   const { c, mesh, ground, floor, stone } = b;
   const T = c.thick, top = floor + c.height, n = c.wall.length;
-  const cx = c.wall.reduce((s, p) => s + p[0], 0) / n, cz = c.wall.reduce((s, p) => s + p[1], 0) / n;
   let count = 0;
   const tone = (k = 1): Colour => { const t = (0.93 + 0.14 * (((count++ * 7919) % 13) / 13)) * k; return [stone[0] * t, stone[1] * t, stone[2] * t]; };
   const slate: Colour = [0.24, 0.25, 0.29], dark: Colour = [0.04, 0.04, 0.045], iron: Colour = [0.13, 0.12, 0.11];
@@ -151,15 +150,16 @@ export function buildCastle(b: CastleBuild): void {
       along('castle', ax + (bx - ax) * f0, az + (bz - az) * f0, ax + (bx - ax) * f1, az + (bz - az) * f1, ix, iz, 0, t, y + 1.0, y + 1.65, tone(1.04));
     }
   };
-  const towerAt = (x: number, z: number) => c.towers.find((t) => Math.hypot(t.x - x, t.z - z) < 0.5);
+  // (A turret is corbelled out at the top: the wall runs on through its corner below it.)
+  const towerAt = (x: number, z: number) => c.towers.find((t) => grounded(t) && Math.hypot(t.x - x, t.z - z) < 0.5);
   const lowest = (pts: [number, number][], sink: number) => Math.min(...pts.map(([x, z]) => ground(x, z))) - sink;
 
   // ---- the curtain wall, a length at a time
   const G = 3.0;
   for (let i = 0; i < n; i++) {
     const [ax, az] = c.wall[i], [bx, bz] = c.wall[(i + 1) % n], len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
-    let ox = dz, oz = -dx;
-    if (ox * ((ax + bx) / 2 - cx) + oz * ((az + bz) / 2 - cz) < 0) { ox = -ox; oz = -oz; }
+    // (Outward, away from the bailey: see `inwardOf`.)
+    const [ix, iz] = inwardOf(c.wall, i), ox = -ix, oz = -iz;
     const tA = towerAt(ax, az), tB = towerAt(bx, bz);
     let runs: [number, number][] = [[tA ? tA.r * 0.55 : -T / 2, len - (tB ? tB.r * 0.55 : -T / 2)]];
     const ug = (c.gate.x - ax) * dx + (c.gate.z - az) * dz, off = Math.abs((c.gate.x - ax) * dz - (c.gate.z - az) * dx);
@@ -204,6 +204,12 @@ export function buildCastle(b: CastleBuild): void {
   for (const t of c.towers) wallTower(t);
   function wallTower(t: CastleTower) {
     const tt = top + t.over, ox = Math.cos(t.out), oz = Math.sin(t.out), r = t.r;
+    if (t.kind === 'turret') {
+      // A turret: round and small, corbelled out over the outer corner of the wall from a little under the walk, with a pointed roof.
+      const d = T / 2 + r * 0.5;
+      bartizan(mesh, t.x + ox * d, t.z + oz * d, r, top - 2.4, tt, tone(), t.out);
+      return;
+    }
     const foot = lowest(Array.from({ length: 8 }, (_, k) => [t.x + Math.cos((k / 8) * Math.PI * 2) * (r + 1), t.z + Math.sin((k / 8) * Math.PI * 2) * (r + 1)] as [number, number]), 1.4);
     if (t.kind === 'square') {
       const ux = -oz, uz = ox, at = (a: number, d: number): [number, number] => [t.x + ux * a * r + ox * d * r, t.z + uz * a * r + oz * d * r];
@@ -300,11 +306,14 @@ export function buildCastle(b: CastleBuild): void {
 
   // ---- the bailey: ranges against the curtain, the stair up to the walk, the well, and what lies about
   const wood: Colour = [0.3, 0.21, 0.14], oak: Colour = [0.36, 0.26, 0.17], roofRed: Colour = [1.1, 1.02, 0.96];
-  /** From a point on the curtain's inner face and a direction along it, the way into the bailey. */
+  /**
+   * From a point on the curtain's inner face and a direction along it, the way into the bailey: the side on which a step from its
+   * middle goes further in from the wall. (Not towards the middle of the corners, which a wall bent in on itself may have outside it.)
+   */
   const inward = (ax: number, az: number, bx: number, bz: number) => {
-    const len = Math.hypot(bx - ax, bz - az) || 1, dx = (bx - ax) / len, dz = (bz - az) / len;
+    const len = Math.hypot(bx - ax, bz - az) || 1, dx = (bx - ax) / len, dz = (bz - az) / len, mx = (ax + bx) / 2, mz = (az + bz) / 2;
     let ix = -dz, iz = dx;
-    if (ix * (cx - (ax + bx) / 2) + iz * (cz - (az + bz) / 2) < 0) { ix = -ix; iz = -iz; }
+    if (castleOff(c, mx + ix * 0.6, mz + iz * 0.6) > castleOff(c, mx - ix * 0.6, mz - iz * 0.6)) { ix = -ix; iz = -iz; }
     return { len, dx, dz, ix, iz };
   };
   /** A dark opening in a wall that faces (`fx`, `fz`): a door or a window, `u0` to `u1` along it from (`x0`, `z0`), `y0` to `y1` high. */
