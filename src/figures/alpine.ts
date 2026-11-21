@@ -118,8 +118,16 @@ const flick = (k: Side, p: number) => { const d = cyc(p - (k === 'l' ? 0.96 : 0.
  * foot a little ahead.
  */
 export function turnsPose(p: number, h: number): AlpinePose {
-  const s = turnOf(p), y = yawOf(p), r = edgeOf(p);
-  const arm = (k: Side): AlpineArm => { const f = flick(k, p); return { swing: rad(32) + lean + rad(14) * f, bend: rad(48), wrist: rad(34) - rad(55) * f, hang: 62, inward: rad(4) * (k === 'l' ? -1 : 1) }; };
+  return carvePose(h, turnOf(p), yawOf(p), edgeOf(p), flick('l', p), flick('r', p));
+}
+
+/**
+ * A skier carving: `s` how far it leans into a turn and which way (1 to the left as far as the turns go, -1 to the right), the skis
+ * turned by `y` and edged by `r`, and each pole's flick to the snow (0 to 1). The turns' pose (`turnsPose`), and the long run's
+ * (`makeDownhillRun`), which drives these by the turns it makes.
+ */
+export function carvePose(h: number, s: number, y: number, r: number, flickL: number, flickR: number): AlpinePose {
+  const arm = (k: Side): AlpineArm => { const f = k === 'l' ? flickL : flickR; return { swing: rad(32) + lean + rad(14) * f, bend: rad(48), wrist: rad(34) - rad(55) * f, hang: 62, inward: rad(4) * (k === 'l' ? -1 : 1) }; };
   const foot = (k: Side): AlpineFoot => { const sign = k === 'l' ? 1 : -1; return { x: sign * 0.12 - 0.3 * s, z: 0.2 + 0.07 * s * sign, up: 0, yaw: y, pitch: 0, edge: r }; };
   return {
     hips: h + 0.05 * (1 - Math.abs(s)), hipsX: 0, hipsZ: -0.06, pelvisYaw: 0.45 * y, pelvisRoll: -rad(11) * s, pelvisPitch: rad(24),
@@ -343,4 +351,85 @@ export const DROPS: Record<string, { hold: number; land: number; lift: number }>
 /** The downhill turns and every jump, made on `source` from its idle's first frame. */
 export function makeAlpineClips(source: Object3D, base: AnimationClip): AnimationClip[] {
   return [makeDownhillSki(source, base).clip, ...JUMPS.map((j) => makeAlpineJump(source, base, j).clip)];
+}
+
+// ------------------------------------------------------------------ a run down a slope
+
+/**
+ * A long run down a slope, played as the skier goes down it (asked: "can the downhill animation be used to visualize long wide turns
+ * tightening to short turns and opening up to straight lining and to tuck it and then braking speed down and continuing downhill
+ * again?"): the turns' pose driven, moment by moment, by what the skier is doing, and the way it goes down the slope with them.
+ *
+ * What it does is set by hand, in time (`RUN_KEYS`): how long a pair of turns takes, how far the skis turn across the slope, how fast
+ * it goes, and when it tucks and when it brakes. From those: the skis' heading, swinging across the slope and back (the turns' rhythm
+ * kept by a phase that runs at their pace, so that turns tighten without a jump); the lean into each turn, as much as speed and how
+ * quickly it turns ask (a body going round leans in until its weight and the turn's pull meet: `atan(speed × turning / g)`), and the
+ * skis' edges with it; the inside pole flicked to the snow as each turn begins; the way it goes, along its skis; the tuck, crouched with
+ * the chest on the knees and the hands together ahead; and the braking, the skis thrown across the slope on their uphill edges with the
+ * upper body still facing down it, sliding on down the slope as it slows.
+ */
+export const RUN_KEYS = {
+  /** How long a pair of turns takes, in seconds. */
+  cycle: [[0, 4.4], [11, 4.2], [19, 1.3], [23, 1.3], [26, 2.6], [36.2, 2.6], [37, 2.8], [44, 2.8]] as [number, number][],
+  /** How far the skis turn across the slope at the end of a turn, in degrees. */
+  across: [[0, 0], [1.2, 0], [3.2, 42], [11, 42], [19, 20], [23, 20], [25.6, 0], [36.4, 0], [38.6, 32], [44, 32]] as [number, number][],
+  /** How fast, in metres a second. */
+  speed: [[0, 5], [3, 10], [11, 11], [19, 8.5], [23, 8], [26, 12], [28, 15], [32, 19], [33, 19], [33.35, 18.6], [34.9, 3], [35.6, 2.6], [37, 6], [44, 10]] as [number, number][],
+  /** How far into a tuck, and into braking (0 to 1). */
+  tuck: [[27.8, 0], [28.5, 1], [32, 1], [32.8, 0]] as [number, number][],
+  brake: [[33.0, 0], [33.35, 1], [34.95, 1], [35.7, 0]] as [number, number][],
+};
+/** The run's parts, for a page to show where it is. */
+export const RUN_PARTS = [
+  { from: 0, to: 11, label: 'Long, wide turns' }, { from: 11, to: 19, label: 'Tightening' }, { from: 19, to: 23, label: 'Short turns' },
+  { from: 23, to: 26, label: 'Opening up' }, { from: 26, to: 28, label: 'Straight line' }, { from: 28, to: 32.8, label: 'Tuck' },
+  { from: 32.8, to: 35.7, label: 'Braking' }, { from: 35.7, to: 44, label: 'On down the hill' },
+];
+export const RUN_LENGTH = 44;
+
+/** Where the skier is at a moment of the run: how far down the slope and to its left (metres), how fast, which way its skis and it go (radians from straight down, to the left), and how much its skis slide sideways (0 to 1). */
+export interface RunSample { t: number; down: number; left: number; speed: number; ski: number; way: number; skid: number; tuck: number; brake: number }
+
+export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 / 30): { clip: AnimationClip; samples: RunSample[]; stretch: number; sunk: number } {
+  const P = new Poser(source, base), h0 = turnsHeight(P), K = RUN_KEYS, n = Math.round(RUN_LENGTH / step);
+  // The turns' phase, run at their pace; the skis' heading from it, swinging across the slope and back.
+  const phase: number[] = [0];
+  for (let i = 1; i <= n + 1; i++) phase.push(phase[i - 1] + step / at((i - 0.5) * step, K.cycle));
+  const carveAt = (i: number) => -rad(at(i * step, K.across)) * Math.cos(2 * Math.PI * phase[Math.max(0, Math.min(n + 1, i))]);
+  const samples: RunSample[] = [];
+  let down = 0, left = 0, stretch = 0, sunk = 0;
+  for (let i = 0; i <= n; i++) {
+    const t = i * step, p = phase[i], speed = at(t, K.speed), tuck = at(t, K.tuck), brake = at(t, K.brake);
+    const carve = carveAt(i), turning = (carveAt(i + 1) - carveAt(i - 1)) / (2 * step);
+    // The lean a body going round needs, as a share of the turns' own (`turnsPose`'s 1, some 48 degrees).
+    const s = Math.max(-1.3, Math.min(1.3, Math.atan((speed * turning) / G) / rad(48))) * (1 - brake);
+    const ski = carve + (rad(78) - carve) * brake, way = carve * (1 - brake);
+    const turnsBig = Math.min(1, at(t, K.across) / 25) * (1 - tuck) * (1 - brake);
+    const a = carvePose(h0, s, ski, -rad(32) * s - rad(48) * brake, flick('l', p) * turnsBig, flick('r', p) * turnsBig);
+    // Braking: the feet pushed on down the slope ahead of the body, which sits back and low over its uphill edges, the upper body
+    // still facing down the slope, the arms out.
+    a.hips -= 0.1 * brake;
+    a.pelvisPitch -= rad(8) * brake;
+    both(a, (_k, arm, f) => { f.z += 0.3 * brake; arm.hang -= 12 * brake; arm.swing += rad(6) * brake; });
+    // The tuck: crouched low with the chest down on the knees, the head up to see ahead; the elbows down by the knees, the forearms
+    // level and the fists together ahead of the chin, the wrists bent back so that the poles run back along the forearms, under the
+    // arms.
+    a.hips -= 0.2 * tuck;
+    a.pelvisPitch += rad(30) * tuck;
+    a.lean += rad(30) * tuck;
+    a.neck -= rad(10) * tuck;
+    a.head -= rad(34) * tuck;
+    both(a, (k, arm, f) => {
+      arm.swing += rad(8) * tuck; arm.bend += (rad(95) - arm.bend) * tuck; arm.hang += (86 - arm.hang) * tuck;
+      arm.inward += (rad(24) * (k === 'l' ? -1 : 1) - arm.inward) * tuck; arm.wrist += (rad(85) - arm.wrist) * tuck;
+      f.z -= 0.04 * tuck;
+    });
+    stretch = Math.max(stretch, poseAlpine(P, a));
+    for (const k of ['l', 'r'] as const) sunk = Math.max(sunk, -skiOver(P, k, false));
+    P.keep(t);
+    samples.push({ t, down, left, speed, ski, way, skid: Math.abs(Math.sin(ski - way)), tuck, brake });
+    down += speed * Math.cos(way) * step;
+    left += speed * Math.sin(way) * step;
+  }
+  return { clip: P.clip('Ski_Downhill_Run', RUN_LENGTH), samples, stretch, sunk };
 }

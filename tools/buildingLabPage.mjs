@@ -8,6 +8,9 @@
 // page but not models, as an artifact on claude.ai does.
 //
 //   node tools/buildingLabPage.mjs [out.html] [--fragment] [--figures-beside]      (by default dist/building-lab.html, a whole document)
+//
+// Another lab page the same way: `--page lab/slope.html`, with only the figures' files it needs, `--only clips.glb` (the slope's skier
+// is the mannequin, whose file holds the clips too).
 import { build } from 'vite';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2), fragment = args.includes('--fragment'), beside = args.includes('--figures-beside');
-const out = resolve(args.find((a) => !a.startsWith('--')) ?? join(root, 'dist/building-lab.html'));
+const valueOf = (flag) => { const i = args.indexOf(flag); return i >= 0 ? args[i + 1] : undefined; };
+const page = valueOf('--page') ?? 'lab/buildings.html', only = valueOf('--only')?.split(',');
+const out = resolve(args.find((a, i) => !a.startsWith('--') && !['--page', '--only'].includes(args[i - 1])) ?? join(root, 'dist/building-lab.html'));
 const tmp = mkdtempSync(join(tmpdir(), 'building-lab-'));
 try {
   await build({
@@ -24,21 +29,21 @@ try {
     build: {
       outDir: tmp, emptyOutDir: true, target: 'es2022', modulePreload: false, assetsInlineLimit: 1e9, cssCodeSplit: false,
       // (One input and its imports in one chunk: there is nowhere to fetch a second from.)
-      rollupOptions: { input: { lab: join(root, 'lab/buildings.html') }, output: { inlineDynamicImports: true } },
+      rollupOptions: { input: { lab: join(root, page) }, output: { inlineDynamicImports: true } },
     },
   });
-  let html = readFileSync(join(tmp, 'lab/buildings.html'), 'utf8');
+  let html = readFileSync(join(tmp, page), 'utf8');
   html = html.replace(/<link rel="modulepreload"[^>]*>\s*/g, '');
   const scripts = [...html.matchAll(/<script type="module" crossorigin src="([^"]+)"><\/script>/g)];
   if (scripts.length !== 1) throw new Error(`expected one script in the built page, found ${scripts.length}`);
-  let code = readFileSync(join(tmp, 'lab', scripts[0][1]), 'utf8');
+  let code = readFileSync(join(tmp, dirname(page), scripts[0][1]), 'utf8');
   // (Inside an inline script the page's parser stops at the first `</script`; written `<\/script` it means the same to the program.)
   code = code.replace(/<\/script/gi, '<\\/script');
   if (code.includes('<!--')) throw new Error('the program has "<!--" in it, which an inline script cannot carry safely');
   html = html.replace(scripts[0][0], '');
   // The figures: where the program finds them (`library.ts`, `figureCrew.ts`), beside the page or in it.
   const figures = join(root, 'public/figures');
-  const glbs = readdirSync(figures).filter((f) => f.endsWith('.glb'));
+  const glbs = readdirSync(figures).filter((f) => f.endsWith('.glb') && (!only || only.includes(f)));
   if (beside) {
     mkdirSync(join(dirname(out), 'figures'), { recursive: true });
     for (const f of glbs) writeFileSync(join(dirname(out), 'figures', `${f}.txt`), readFileSync(join(figures, f)).toString('base64'));

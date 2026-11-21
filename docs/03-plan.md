@@ -718,6 +718,25 @@ The machine this is developed on now has a graphics card, and tablets were repor
     lab's platform, 1.5 metres, and landing below; a chained run logged, each jump beginning at the end of a turn, a turn between each,
     the turns after; a kicker asked for in the middle of a turn waiting for its end; `tools/browser/figures.cjs` and `crew.cjs` pass.
 
+64. **A downhill run, shown on a slope.** Asked: "can the downhill animation be used to visualize long wide turns tightening to short
+    turns and opening up to straight lining and to tuck it and then braking speed down and continuing downhill again? can you create me
+    a separate artifact showing this". *Done:* yes. The turns' pose was split so that it takes what the skier is doing rather than
+    where in a loop it is (`carvePose`; the loop made through it the same to the last bit), and `makeDownhillRun` drives it for 44
+    seconds from a timetable (`RUN_KEYS`): how long a pair of turns takes (4.4 seconds down to 1.3), how far the skis swing across the
+    slope (42 degrees down to 20, then none), how fast (5 to 19 metres a second), when it tucks and when it brakes. The turns' rhythm is a
+    phase run at their pace, so that they tighten without a jump; the lean into each is what speed and the turning ask
+    (`atan(speed × turning / g)`); the pole is flicked as each turn begins while there are turns; the tuck crouches with the forearms
+    level, the fists ahead of the chin and the poles back under the arms; braking throws the skis 78 degrees across the slope on their
+    uphill edges with the upper body still down it, the feet pushed ahead and the body low and back, sliding on down the slope while it
+    slows from 19 to under 3. It also gives where the skier is on the slope at every frame, its skis' heading and how far they slide
+    sideways. `lab/slope.html` shows it: a slope of sixteen degrees with firs and piste poles, the skier going down it, its skis' tracks
+    laid in the snow (thin and dark where carved, a broad pale band where it skids, snow thrown up as it brakes), views from behind,
+    beside, above and free, a timeline of its parts to drag along, and slower speeds; `tools/buildingLabPage.mjs` now makes any lab page
+    one page (`--page`, `--only`). *Checked:* the run's course without a browser: 431 metres, the wide turns some five metres either side,
+    the short ones under one, no foot in the snow, the legs within reach; the page in headless Chromium and the page built for an
+    artifact served as one, with pictures of each part from the views that show it (the tracks from above: wide, tightening, short);
+    the tuck's poles first pointed ahead out of the fists, and were turned back under the arms.
+
 ## Risks
 
 | Risk | Mitigation |

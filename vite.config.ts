@@ -43,6 +43,6 @@ export default defineConfig({
     // Eight pages: the tool itself, the gallery of candidates, the map of a world, a walk over a world's land streamed in at a metre, the
     // small example that reads what it exports, the building lab, the route lab (a way from a town to a valley head, walked), and the
     // figure lab (figures steered and sent about on a small stage).
-    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', walk: 'walk.html', viewer: 'examples/viewer/index.html', buildings: 'lab/buildings.html', route: 'lab/route.html', figures: 'lab/figures.html' } },
+    rollupOptions: { input: { main: 'index.html', gallery: 'gallery.html', world: 'world.html', walk: 'walk.html', viewer: 'examples/viewer/index.html', buildings: 'lab/buildings.html', route: 'lab/route.html', figures: 'lab/figures.html', slope: 'lab/slope.html' } },
   },
 });

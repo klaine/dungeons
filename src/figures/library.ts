@@ -91,6 +91,9 @@ export class FigureLibrary {
 
   get names(): string[] { return this.clips.map((c) => c.name); }
 
+  /** The mannequin as it was loaded, whom the clips are made for: to make more clips on (`makeDownhillRun`), not to show. */
+  async mannequin(): Promise<Object3D> { return (await this.sources.get('mannequin')!).scene; }
+
   /** A new figure's body of the kind `id`. Each kind is fetched once, and copied for every figure. */
   async body(id: string): Promise<Rigged> {
     const kind = BODIES.find((b) => b.id === id) ?? BODIES[0];
