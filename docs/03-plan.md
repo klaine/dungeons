@@ -1025,7 +1025,10 @@ The machine this is developed on now has a graphics card, and tablets were repor
     over the snow behind it, read nothing from the depths at other points and drew the near snow black, and is not done. The three
     choices are kept in the browser. *Checked* (headless, drawing in software, each frame stepped by a sixtieth of a second with
     `?dt=`): behind and beside at 77 km/h, the blur on and off, the menus hidden, the view at 2.2 times; the far slopes softened, the
-    skier sharp. Not yet seen at a real frame rate: published for trying on a laptop and a tablet.
+    skier sharp. Not yet seen at a real frame rate: published for trying on a laptop and a tablet. Then asked: "Show the progress
+    as vertical meters instead of distance": the corner says how far the skier has come down as height below the run's top, in the
+    world's own heights (`Land.drop`; the slice's lowered land undone), out of the run's 623 (`Land.fall`), and the foot of the run
+    the same; on the groomed slope, height come down alone.
 ## Risks
 
 | Risk | Mitigation |

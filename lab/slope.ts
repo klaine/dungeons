@@ -788,7 +788,7 @@ async function start() {
     standAt(new Vector3(ride.x, ride.y, ride.z), normalAt(ride.x, ride.z, 0.5), ride.facing, here);
     keepJoints(dt);
     // At the foot of a world's run: brought to a stop there.
-    if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${(land.length / 1000).toFixed(2)} km in ${ride.time.toFixed(0)} s · Restart run, or Enter`, false, 1e9); }
+    if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${land.fall.toFixed(0)} m vertical in ${ride.time.toFixed(0)} s · Restart run, or Enter`, false, 1e9); }
     return { down: ride.down, left: ride.left, speed: ride.speed, way: ride.way, ski, skid: Math.abs(Math.sin(ski - ride.way)), tuck: ride.tuck, brake: ride.brake };
   };
   /** What the ridden skier is doing, in words. */
@@ -867,7 +867,7 @@ async function start() {
     $('skisets').hidden = who === 'person';
     $('name').textContent = ['Downhill run', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
     landButtons.forEach((b, i) => b.classList.toggle('on', landKinds[i][1] === landKind));
-    $('of').textContent = land.length === Infinity ? '' : ` of ${land.length.toFixed(0)}`;
+    $('of').textContent = land.fall === Infinity ? '' : ` of ${land.fall.toFixed(0)}`;
     document.body.classList.toggle('riding', mode === 'ride');
   };
   $('play').onclick = () => { playing = !playing; reflect(); };
@@ -1124,7 +1124,8 @@ async function start() {
     reinsNow();
     showTold();
     $('speed').textContent = (at.speed * 3.6).toFixed(0);
-    $('down').textContent = Math.max(0, at.down).toFixed(0);
+    // (How far down, as height come down from the top: vertical metres, as the world's heights have it.)
+    $('down').textContent = Math.max(0, land.drop(focus().y)).toFixed(0);
     if (blurLevel > 0) {
       uShutter.value = clamp(1 / 60 / Math.max(dt, 1e-3), 0.005, 3) * blurLevel;
       uBlur.value = blurLevel;

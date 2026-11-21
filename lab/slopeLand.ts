@@ -25,6 +25,11 @@ export interface Land {
   name: string; short: string; about: string;
   /** How long the run is, horizontally (`Infinity` for one that goes on); how far either side of its line its snow reaches. */
   length: number; half: number;
+  /**
+   * How far below the run's top a point `y` high lies, in metres of height as the world has it (a slice's land above some height
+   * having been brought lower); and how far below it the run's foot lies (`Infinity` for a slope that goes on).
+   */
+  drop(y: number): number; fall: number;
   /** Where the skiable path's edges are `s` along the run: how far to the left of its line each lies (the right edge less than nothing). */
   edges(s: number): [number, number];
   /** The snow's height at a point of the scene. */
@@ -89,6 +94,7 @@ export function groomedLand(snowMap: Texture): Land {
   return {
     name: 'Groomed slope', short: 'groomed', about: 'a groomed slope at sixteen degrees', length: Infinity, half: 31,
     edges: () => [-31, 31],
+    drop: (y) => -y, fall: Infinity,
     height: (_x, z) => -z * tan,
     frame: (x, z) => ({ s: z, left: x, dx: 0, dz: 1 }),
     at: (s, left) => ({ x: left, z: s, dx: 0, dz: 1 }),
@@ -338,6 +344,8 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     name: `${slice.worldName}, below ${slice.peak}`, short: `below ${slice.peak}`,
     // (Its heights as the world has them: the slice's land above some height was brought lower.)
     about: `${(length / 1000).toFixed(2)} km from ${worldHeight(slice.run.heights[0]).toFixed(0)} m to ${worldHeight(slice.run.heights[slice.run.heights.length - 1]).toFixed(0)} m`,
+    drop: (y: number) => worldHeight(slice.run.heights[0]) - worldHeight(y),
+    fall: worldHeight(slice.run.heights[0]) - worldHeight(slice.run.heights[slice.run.heights.length - 1]),
     length, half: slice.half, edges, height, frame, at, kickable, group, keepAbout: () => {}, fog: [380, 5200], sun: [-0.6, 0.42, -0.5], sky: 0.8,
   };
 }
