@@ -254,7 +254,7 @@ export class Steed {
     }
     const g = GAITS[gait], cycle = cycleAt(g, Math.max(0.3, this.speed)), stretch = Math.min(REACH, Math.max(0.3, this.speed) * cycle * g.duty);
     for (const leg of HORSE_LEGS) {
-      const isFore = leg[0] === 'f', rest = HOOF_REST[leg], p = cyc(phase - g.at[leg]), mid = rest.z + (isFore ? 0.1 : -0.03);
+      const isFore = leg[0] === 'f', rest = HOOF_REST[leg], p = cyc(phase - g.at[leg]), mid = rest.z + (isFore ? 0.02 : -0.03);
       if (p < g.duty) {
         // Down: where it came down, the body going on over it; the heel lifting as it is about to leave the ground.
         const u = p / g.duty;

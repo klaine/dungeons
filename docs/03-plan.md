@@ -940,6 +940,19 @@ The machine this is developed on now has a graphics card, and tablets were repor
     0.815 back (the point of the hock, 0.75), falling nearly straight from 1.4 metres to the hamstring; the quarters are 0.25 to 0.26
     wide from the hips to the stifle and narrow to 0.21 at the hock. *Checked:* pictures from the side, behind and behind aside, before
     and after; the legs' reach through every gait and ski pose; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+73. **The forelegs further forward.** Asked: "the front legs should probably join the torse a bit more forward?" They had come out
+    from under the girth: the front of the forearm stood 0.50 metres ahead of the horse's middle, and the breast reached a quarter of
+    a metre and more before it, where a horse's points of the shoulder are the front of its body at that height and its forearms
+    come down just behind them. *Done:* the fore leg moved forward in the skeleton, the point of the shoulder from 0.62 to 0.73 (the
+    shoulder blade so laid back about 46 degrees, as a horse's is), the elbow from 0.40 to 0.53, the knee from 0.44 to 0.59 and the
+    hoof from 0.53 to 0.66, the forearm still straight down; the breast a little smaller and further back. The front of the forearm now
+    stands at 0.63 to 0.64, the breast 0.10 to 0.15 before it, and the points of the shoulder are flush with the breast. The hooves'
+    places at rest are now named (`FORE_AT`, `HIND_AT` in `horse.ts`): a long ski's middle is between its two bindings, not under the
+    horse's middle, and it is 2.88 metres long, so as to reach as far before the fore hoof and behind the hind as it did; the fore
+    hooves' strides centred a little less far forward of their rest, and the flight off a kicker a little lower and its four skis less
+    spread, so that no leg reaches further than it did. *Checked:* pictures from the side, close by the shoulder, three quarters
+    before, at the walk and the gallop, before and after; the profile measured at every height; the legs' reach through every gait
+    and ski pose (at most 1.06 of a leg's length at the canter, against 1.04); `tools/browser/figures.cjs` and `crew.cjs`.
 
 ## Risks
 

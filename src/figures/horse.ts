@@ -37,8 +37,12 @@ type Side = 'l' | 'r';
 
 /** How thick a horse's ski is: its hooves stand this much over the snow. */
 const SKI_T = 0.03;
-/** How far apart the fore and hind hooves of a side stand, along the horse, and where between them its middle is. */
-const BINDINGS = 1.1;
+/**
+ * Where the fore and the hind hooves stand along the horse (z), standing square; how far apart they are; and the middle between them,
+ * where a long ski's middle is. (The fore hooves under the points of the shoulders, a little ahead of the trunk's middle more than the
+ * hind are behind it.)
+ */
+const FORE_AT = 0.68, HIND_AT = -0.55, BINDINGS = FORE_AT - HIND_AT, MID = (FORE_AT + HIND_AT) / 2;
 
 // The skeleton, as the horse stands square on the snow (forward +z, up +y, its left +x): each bone's joint, and its parent.
 const BONES: [string, string | null, V3][] = (() => {
@@ -55,10 +59,12 @@ const BONES: [string, string | null, V3][] = (() => {
   ];
   for (const [k, s] of [['l', 1], ['r', -1]] as const) {
     // (The shoulder blade, from under the withers down to the point of the shoulder, where the upper arm hangs from it.)
-    b.push([`f_sc_${k}`, 'chest', [0.15 * s, 1.48, 0.4]], [`f_up_${k}`, `f_sc_${k}`, [0.2 * s, 1.18, 0.62]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.4]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.44]],
-      [`f_pas_${k}`, `f_low_${k}`, [0.15 * s, 0.17, 0.48]], [`f_hoof_${k}`, `f_pas_${k}`, [0.15 * s, 0.07, BINDINGS / 2 - 0.02]]);
+    // (The fore leg standing under the point of the shoulder, the elbow a little behind it and the forearm straight down: set further
+    // back, the legs had come out from under the girth with a long breast before them.)
+    b.push([`f_sc_${k}`, 'chest', [0.15 * s, 1.48, 0.42]], [`f_up_${k}`, `f_sc_${k}`, [0.2 * s, 1.18, 0.73]], [`f_mid_${k}`, `f_up_${k}`, [0.19 * s, 0.95, 0.53]], [`f_low_${k}`, `f_mid_${k}`, [0.17 * s, 0.52, 0.59]],
+      [`f_pas_${k}`, `f_low_${k}`, [0.15 * s, 0.17, FORE_AT - 0.07]], [`f_hoof_${k}`, `f_pas_${k}`, [0.15 * s, 0.07, FORE_AT - 0.02]]);
     b.push([`h_up_${k}`, 'hips', [0.22 * s, 1.22, -0.58]], [`h_mid_${k}`, `h_up_${k}`, [0.21 * s, 0.92, -0.36]], [`h_low_${k}`, `h_mid_${k}`, [0.16 * s, 0.56, -0.7]],
-      [`h_pas_${k}`, `h_low_${k}`, [0.15 * s, 0.17, -0.64]], [`h_hoof_${k}`, `h_pas_${k}`, [0.15 * s, 0.07, -BINDINGS / 2 - 0.02]]);
+      [`h_pas_${k}`, `h_low_${k}`, [0.15 * s, 0.17, HIND_AT - 0.09]], [`h_hoof_${k}`, `h_pas_${k}`, [0.15 * s, 0.07, HIND_AT - 0.02]]);
   }
   return b;
 })();
@@ -74,7 +80,7 @@ let LOOKS: { coat: BufferGeometry; hair: BufferGeometry; eyes: BufferGeometry; t
 /** The horse's skis: a long one under each side, a binding for each hoof; or a short one under each hoof. Its sole on y = 0, along +z. */
 const SKIS: Record<HorseSkis, { length: number; ahead: number; width: number }> = {
   // (Ahead of the middle between the bindings, the rest behind it.)
-  pair: { length: 2.75, ahead: 1.42, width: 0.11 },
+  pair: { length: 2.88, ahead: 1.49, width: 0.11 },
   four: { length: 1.0, ahead: 0.55, width: 0.1 },
 };
 function skiMesh(kind: HorseSkis): Mesh {
@@ -115,8 +121,8 @@ export interface HorsePose {
 export interface Hoof { x: number; y: number; z: number; pitch: number }
 /** Where each hoof's sole rests, the horse standing square. */
 export const HOOF_REST: Record<HorseLeg, Hoof> = {
-  f_l: { x: 0.15, y: 0, z: BINDINGS / 2, pitch: 0 }, f_r: { x: -0.15, y: 0, z: BINDINGS / 2, pitch: 0 },
-  h_l: { x: 0.15, y: 0, z: -BINDINGS / 2, pitch: 0 }, h_r: { x: -0.15, y: 0, z: -BINDINGS / 2, pitch: 0 },
+  f_l: { x: 0.15, y: 0, z: FORE_AT, pitch: 0 }, f_r: { x: -0.15, y: 0, z: FORE_AT, pitch: 0 },
+  h_l: { x: 0.15, y: 0, z: HIND_AT, pitch: 0 }, h_r: { x: -0.15, y: 0, z: HIND_AT, pitch: 0 },
 };
 
 const X = new Vector3(1, 0, 0), Y = new Vector3(0, 1, 0), Z = new Vector3(0, 0, 1);
@@ -302,13 +308,13 @@ export class Horse {
     else for (const k of ['l', 'r'] as const) {
       const s = a.skis[k], sign = k === 'l' ? 1 : -1, Rs = mul(qy(s.yaw), qx(s.pitch), qz(s.edge)), q = R.clone().multiply(Rs);
       if (this.skiKind === 'pair') {
-        const centre = new Vector3(0.15 * sign + s.x, s.up, s.z);
+        const centre = new Vector3(0.15 * sign + s.x, s.up, s.z + MID);
         this.skiAt.set(k, { at: place(centre.clone()), q });
         for (const [f, dz] of [['f', BINDINGS / 2], ['h', -BINDINGS / 2]] as const) soles[`${f}_${k}`] = { at: place(centre.clone().add(new Vector3(0, SKI_T, dz).applyQuaternion(Rs))), q };
       } else {
         // (Each side's two along a line as a long ski's bindings are, turned with it.)
         for (const [f, dz, lift, apart] of [['f', BINDINGS / 2, a.front, a.spread], ['h', -BINDINGS / 2, a.hind, -a.spread]] as const) {
-          const centre = new Vector3(0.15 * sign + s.x, s.up, s.z).add(new Vector3(0, lift, dz + apart).applyQuaternion(Rs));
+          const centre = new Vector3(0.15 * sign + s.x, s.up, s.z + MID).add(new Vector3(0, lift, dz + apart).applyQuaternion(Rs));
           this.skiAt.set(`${f}_${k}`, { at: place(centre.clone()), q });
           soles[`${f}_${k}`] = { at: place(centre.clone().add(new Vector3(0, SKI_T, 0).applyQuaternion(Rs))), q };
         }
@@ -548,12 +554,12 @@ export function horseAirPose(c: AirControls, four: boolean): HorsePose {
   const flight = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
   // (Not laid forward over its skis as a ski jumper is: a horse is level already, and laid forward it dives. It stretches out along
   // them instead, the neck reaching out ahead, the nose along it, the legs long.)
-  Object.assign(flight, { height: 0.02, neck: rad(24), head: rad(-30), ears: 1, tail: 1, arch: rad(-5) });
+  Object.assign(flight, { height: 0, neck: rad(24), head: rad(-30), ears: 1, tail: 1, arch: rad(-5) });
   for (const k of ['l', 'r'] as const) {
     const sign = k === 'l' ? 1 : -1;
     Object.assign(flight.skis[k], { yaw: rad(four ? 10 : 5) * sign, x: (four ? 0.06 : 0.03) * sign, up: 0, pitch: 0 });
   }
-  if (four) flight.spread = 0.16;
+  if (four) flight.spread = 0.12;
   const a = mixHorse(mixHorse(tucked, flight, c.flight), stance, c.open);
   for (const k of ['l', 'r'] as const) a.skis[k].yaw += c.ski;
   a.yaw += 0.95 * c.ski;
