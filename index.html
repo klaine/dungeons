@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Dungeons</title>
+  <style>html,body{color:#e8e2d6;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;background:#0b0a09;height:100%;margin:0;font:13px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;overflow:hidden}#view{cursor:pointer;touch-action:none;width:100%;height:100%;display:block}#hud{pointer-events:none;text-shadow:0 1px 3px #000000e6;justify-content:space-between;align-items:flex-end;gap:24px;display:flex;position:fixed;bottom:16px;left:18px;right:18px}#hud h1{letter-spacing:.14em;text-transform:uppercase;margin:0 0 2px;font:600 15px/1.2 ui-serif,Georgia,serif}#stats,#fps{opacity:.62;font-variant-numeric:tabular-nums}#title{max-width:46em}#place{margin:3px 0 4px}#seed{opacity:.62;margin-right:6px}#browse,#worldmap,#buildingsLab,#figuresLab,#howItWorks{pointer-events:auto;color:inherit;margin:0 4px}#new,#export,#mute,#weather,#exportMenu button{pointer-events:auto;font:inherit;color:inherit;cursor:pointer;background:#0b0a0973;border:1px solid #e8e2d673;border-radius:3px;padding:2px 9px}#new:hover,#again:hover,#export:hover,#mute:hover,#weather:hover,#exportMenu button:hover{background:#e0b07059}#exportMenu[hidden],#weatherMenu[hidden]{display:none}#weatherMenu{pointer-events:auto;background:#0b0a099e;border:1px solid #e8e2d64d;border-radius:4px;grid-template-columns:92px 150px 34px;align-items:center;gap:4px 10px;width:300px;margin:6px 0 4px;padding:8px 12px;display:grid}#weatherMenu input[type=range]{accent-color:#e0b070;width:150px}#weatherMenu select{font:inherit;color:inherit;background:#0b0a0999;border:1px solid #e8e2d673;border-radius:3px}#weatherMenu output{opacity:.7;font-variant-numeric:tabular-nums}#weatherMenu .note{opacity:.6;grid-column:1/-1;font-size:12px}#exportMenu button{margin-left:4px}#keys{min-height:1.45em}#keys span{margin-right:10px;padding-left:14px;display:inline-block;position:relative}#keys span:before{content:"";background:currentColor;width:8px;height:8px;position:absolute;top:.42em;left:0;transform:rotate(45deg)}#keys .iron{color:#a9b3be}#keys .gold{color:#e6b540}#toast{text-align:center;pointer-events:none;opacity:0;background:#0b0a099e;border-radius:4px;max-width:min(80vw,34em);padding:8px 16px;font:15px/1.4 ui-serif,Georgia,serif;transition:opacity .35s;position:fixed;bottom:22%;left:50%;transform:translate(-50%)}#toast.show{opacity:1}#won{text-align:center;background:#0b0a09c7;border:1px solid #e8e2d659;border-radius:6px;max-width:min(84vw,30em);padding:22px 34px 24px;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%)}#won[hidden]{display:none}#intro{text-align:center;z-index:5;box-sizing:border-box;background:#0b0a09db;border:1px solid #e8e2d659;border-radius:6px;width:min(86vw,32em);padding:22px 30px;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%)}#intro[hidden]{display:none}body.intro #hud,body.intro #map,body.intro #jump,body.intro #light,body.intro #stick{visibility:hidden}#intro h2{letter-spacing:.12em;text-transform:uppercase;margin:0 0 8px;font:600 20px/1.2 ui-serif,Georgia,serif}#intro p{margin:0 0 12px;font:15px/1.5 ui-serif,Georgia,serif}#intro .how{opacity:.82;font:13px/1.5 ui-sans-serif,system-ui,sans-serif}#intro label{opacity:.9;margin:0 0 14px;font-size:13px;display:block}#intro select{font:inherit;color:inherit;background:#0b0a0999;border:1px solid #e8e2d673;border-radius:3px;padding:3px 6px}#intro select option{color:#111}#begin{color:inherit;cursor:pointer;letter-spacing:.06em;background:#e0b0704d;border:1px solid #e8e2d680;border-radius:3px;padding:10px 26px;font:600 15px/1 ui-sans-serif,system-ui,sans-serif}#begin:hover{background:#e0b07080}#intro .touch{display:none}body.touch #intro .touch{display:block}body.touch #intro .keys{display:none}#won h2{letter-spacing:.12em;text-transform:uppercase;margin:0 0 6px;font:600 22px/1.2 ui-serif,Georgia,serif}#won p{margin:0 0 16px;font:15px/1.5 ui-serif,Georgia,serif}#again{font:inherit;color:inherit;cursor:pointer;background:#e0b07040;border:1px solid #e8e2d673;border-radius:3px;padding:6px 16px}#hint{text-align:right;opacity:.8;transition:opacity .4s}body.walking #hint .idle,body:not(.walking) #hint .active,#hint .touch{display:none}body.touch #hud{bottom:auto;top:calc(34px + env(safe-area-inset-top));left:calc(18px + env(safe-area-inset-left));right:calc(18px + env(safe-area-inset-right));align-items:flex-start}body.touch #stats,body.touch #title{max-width:52vw}body.touch #new,body.touch #export,body.touch #exportMenu button{padding:6px 12px}body.touch #hint .idle,body.touch #hint .active{display:none}body.touch #hint .touch{display:block}body.touched #hint{opacity:0}#stick{pointer-events:none;opacity:0;background:#0b0a0938;border:1.5px solid #e8e2d661;border-radius:50%;width:112px;height:112px;margin:-56px 0 0 -56px;transition:opacity .15s;position:fixed}#stick.on{opacity:1}#knob{background:#e8e2d680;border-radius:50%;width:46px;height:46px;margin:-23px 0 0 -23px;transition:background .15s;position:absolute;top:50%;left:50%}#stick.run #knob{background:#e0b070}#jump{right:calc(22px + env(safe-area-inset-right));bottom:calc(26px + env(safe-area-inset-bottom));color:#e8e2d6;letter-spacing:.08em;text-transform:uppercase;touch-action:none;-webkit-user-select:none;user-select:none;background:#0b0a0947;border:1.5px solid #e8e2d661;border-radius:50%;width:68px;height:68px;font:600 12px/1 ui-sans-serif,system-ui,sans-serif;display:none;position:fixed}#jump:active,#light:active{background:#e0b07073}#light{right:calc(28px + env(safe-area-inset-right));bottom:calc(108px + env(safe-area-inset-bottom));color:#e8e2d6;letter-spacing:.08em;text-transform:uppercase;touch-action:none;-webkit-user-select:none;user-select:none;background:#e0b0704d;border:1.5px solid #e0b070b3;border-radius:50%;width:56px;height:56px;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;display:none;position:fixed}body.unlit #light{background:#0b0a0947;border-color:#e8e2d661}body.touch #jump,body.touch #light{display:block}#map{cursor:pointer;touch-action:manipulation;border-radius:4px;width:190px;height:190px;transition:width .2s,height .2s;position:fixed;top:16px;right:16px;box-shadow:0 2px 10px #00000080}#map.big{width:min(72vmin,620px);height:min(72vmin,620px)}#map[hidden]{display:none}body.touch #map{right:calc(14px + env(safe-area-inset-right));top:calc(14px + env(safe-area-inset-top));width:132px;height:132px}body.touch #map.big{width:78vmin;height:78vmin}#worldview{cursor:pointer;touch-action:manipulation;background:#f1eadb;border-radius:4px;width:min(72vmin,620px);height:min(72vmin,620px);position:fixed;top:16px;right:16px;box-shadow:0 2px 10px #00000080}#worldview[hidden]{display:none}body.touch #worldview{right:calc(14px + env(safe-area-inset-right));top:calc(14px + env(safe-area-inset-top));width:78vmin;height:78vmin}body.intro #worldview,body.loading #worldview{visibility:hidden}body.touch #hint{margin-right:148px}kbd{font:inherit;border:1px solid #e8e2d666;border-radius:3px;padding:0 5px}#loader{z-index:20;background:#0b0a09;justify-content:center;align-items:center;transition:opacity .5s;display:flex;position:fixed;inset:0}#loader[hidden]{display:none}#loader.gone{opacity:0;pointer-events:none}#loader .box{text-align:center;width:min(80vw,26em)}#loader h2{letter-spacing:.24em;text-transform:uppercase;margin:0 0 22px;font:600 20px/1.2 ui-serif,Georgia,serif}#loaderLabel{min-height:1.4em;font:16px/1.4 ui-serif,Georgia,serif}#loaderTrack{background:#e8e2d626;border-radius:2px;height:3px;margin:12px 0 10px;overflow:hidden}#loaderBar{transform-origin:0;background:#e0b070;height:100%;transition:transform .25s ease-out;transform:scaleX(0)}#loaderDetail{opacity:.62;min-height:1.45em;font-size:12.5px}#loaderTime{opacity:.4;font-variant-numeric:tabular-nums;margin-top:6px;font-size:12px}#loader.failed #loaderLabel{color:#e0856b}body.loading #hud,body.loading #map,body.loading #progress{visibility:hidden}#progress{pointer-events:none;position:fixed;top:0;left:0;right:0}#bar{transform-origin:0;background:#e0b070;height:2px;transition:transform .2s linear;transform:scaleX(0)}#status{opacity:.85;text-shadow:0 1px 3px #000000e6;padding:8px 18px}</style>
+  <script type="module" crossorigin src="./assets/main-Buksr7Cf.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="./assets/BufferGeometryUtils-BAEdUZRo.js">
+  <link rel="modulepreload" crossorigin href="./assets/rolldown-runtime-DK3Fl9T5.js">
+  <link rel="modulepreload" crossorigin href="./assets/player-1DndvXqQ.js">
+  <link rel="modulepreload" crossorigin href="./assets/three.module-BDspuRIh.js">
+  <link rel="modulepreload" crossorigin href="./assets/canal-CMPy77BC.js">
+  <link rel="modulepreload" crossorigin href="./assets/planting-HWI11zAf.js">
+  <link rel="modulepreload" crossorigin href="./assets/water-CBz3dNvn.js">
+  <link rel="modulepreload" crossorigin href="./assets/castle-CV912v2U.js">
+  <link rel="modulepreload" crossorigin href="./assets/site-B7RFkHrn.js">
+  <link rel="modulepreload" crossorigin href="./assets/town-QURlK0tv.js">
+  <link rel="modulepreload" crossorigin href="./assets/generate-LcKku14H.js">
+  <link rel="modulepreload" crossorigin href="./assets/castle-CNxbMI2_.js">
+  <link rel="modulepreload" crossorigin href="./assets/inkWorld-DscYyM6z.js">
+  <link rel="modulepreload" crossorigin href="./assets/worldPlace-O6mC8HkV.js">
+</head>
+<body class="loading">
+  <canvas id="view"></canvas>
+  <canvas id="map" title="Plan of this place. Click to enlarge."></canvas>
+  <canvas id="worldview" hidden title="The world about this place, with what is built in it. Click, or M, for the plan."></canvas>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="won" hidden>
+    <h2>The sanctum</h2>
+    <p id="wonText"></p>
+    <button id="again" type="button">Another place</button>
+  </div>
+  <div id="intro" hidden>
+    <h2 id="introName"></h2>
+    <p id="introText"></p>
+    <p class="how keys">Click to look around, <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> to walk, <kbd>Shift</kbd> to run, <kbd>Space</kbd> to jump. <kbd>L</kbd> raises or lowers your light and <kbd>M</kbd> enlarges the map, and again shows the world about you: click another place on it to go there. Doors and keys need no button: walk up to them.</p>
+    <p class="how touch">Drag on the left of the screen to walk, and push further to run. Drag on the right to look. Doors and keys need no button: walk up to them.</p>
+    <label>Detail <select id="quality">
+      <option value="low">Low: for older phones and laptops</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+      <option value="ultra">Ultra: 2048-pixel surfaces, for desktops with a good card</option>
+    </select></label>
+    <button id="begin" type="button">Begin</button>
+  </div>
+  <div id="loader" role="status" aria-live="polite">
+    <div class="box">
+      <h2>Dungeons</h2>
+      <div id="loaderLabel">Starting</div>
+      <div id="loaderTrack"><div id="loaderBar"></div></div>
+      <div id="loaderDetail"></div>
+      <div id="loaderTime"></div>
+    </div>
+  </div>
+  <div id="progress"><div id="bar"></div><div id="status">Starting</div></div>
+  <div id="hud">
+    <div>
+      <h1>Dungeons</h1>
+      <div id="title"></div>
+      <div id="place"><span id="seed"></span> <button id="new" type="button">New place</button> <button id="kind" type="button">An island</button> <a id="browse" href="gallery.html">Gallery</a> <a id="worldmap" href="world.html">World</a> <a id="buildingsLab" href="lab/buildings.html" title="Set out, move, turn and reshape buildings of every kind">Buildings</a> <a id="figuresLab" href="lab/figures.html" title="Steer figures and send them about on a small stage">Figures</a> <a id="howItWorks" href="how-it-works.html" title="A guided tour of how places are made and drawn">How it works</a> <button id="mute" type="button">Sound on</button> <button id="weather" type="button">Weather</button> <button id="export" type="button">Export</button>
+        <span id="exportMenu" hidden>
+          <button id="exportPlan" type="button">Plan (PNG)</button>
+          <button id="exportInk" type="button">Ink map (PNG)</button>
+          <button id="exportBattle" type="button">Battle map (JPEG)</button>
+          <button id="exportJson" type="button">Site data (JSON)</button>
+          <button id="exportModel" type="button">3D model (GLB)</button>
+          <a href="examples/viewer/" target="_blank" rel="noopener" style="color:inherit;margin-left:6px">Viewer</a>
+        </span>
+      </div>
+      <div id="weatherMenu" hidden>
+        <label for="wHour">Time of day</label>
+        <select id="wHour"><option value="morning">morning</option><option value="midday">midday</option><option value="evening">evening</option><option value="sunset">sunset</option><option value="dusk">dusk</option><option value="night">night</option></select><span></span>
+        <label for="wCloud">Cloud</label><input id="wCloud" type="range" min="0" max="1" step="0.01"><output for="wCloud"></output>
+        <label for="wForm">Cloud lies</label>
+        <select id="wForm"><option value="heaped">heaped</option><option value="layered">in banks</option></select><span></span>
+        <label for="wMist">Mist</label><input id="wMist" type="range" min="0" max="1" step="0.01"><output for="wMist"></output>
+        <label for="wHaze">Haze</label><input id="wHaze" type="range" min="0" max="1" step="0.01"><output for="wHaze"></output>
+        <label for="wWind">Wind</label><input id="wWind" type="range" min="0" max="2.5" step="0.05"><output for="wWind"></output>
+        <span class="note">The weather changes as you watch; a new time of day builds the place again, and puts you back where you stood.</span>
+      </div>
+      <div id="keys"></div>
+      <div id="stats"></div>
+      <div id="fps"></div>
+    </div>
+    <div id="hint">
+      <div class="idle">Click to walk</div>
+      <div class="touch">Drag on the left to move, push further to run · drag on the right to look · Light raises or lowers your lantern</div>
+      <div class="active"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · <kbd>V</kbd> fly · <kbd>L</kbd> light · <kbd>M</kbd> map, twice the world's (<kbd>+</kbd> <kbd>−</kbd> or the wheel to zoom; <kbd>Esc</kbd>, then click a place to go there) · <kbd>F</kbd> fog · <kbd>B</kbd> baked light · <kbd>Esc</kbd> release</div>
+    </div>
+  </div>
+</body>
+</html>

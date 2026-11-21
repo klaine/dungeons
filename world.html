@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dungeons: world</title>
+  <style>:root{--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark;color:#e8e2d6;background:#0b0a09;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}body{max-width:1400px;padding-block:20px 60px;padding-left:max(16px, env(safe-area-inset-left,0px));padding-right:max(16px, env(safe-area-inset-right,0px));color:#e8e2d6;background:#0b0a09;margin:0 auto}h1{letter-spacing:.14em;text-transform:uppercase;margin:0 0 4px;font:600 17px/1.2 ui-serif,Georgia,serif}header p{opacity:.78;max-width:72ch;margin:0 0 14px}a{color:inherit}nav{flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:14px;display:flex}input,button{font:inherit;color:inherit;background:#e8e2d614;border:1px solid #e8e2d659;border-radius:4px;padding:6px 10px}input{width:min(100%,220px)}button{cursor:pointer}button:hover,button[aria-pressed=true]{background:#e0b07059}#status{opacity:.7}#making{max-width:640px;margin:0 0 16px}#making .bar{background:#e8e2d624;border-radius:3px;height:6px;overflow:hidden}#making .bar span{background:#e0b070;width:0;height:100%;display:block}#making p{opacity:.8;font-variant-numeric:tabular-nums;margin:6px 0 0}canvas.dim{opacity:.3}canvas{background:#f1eadb;border-radius:4px;width:100%;height:auto;display:block}#places{grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));gap:8px 12px;margin:0 0 16px;display:grid}#places:empty{display:none}.place{border:1px solid #e8e2d633;border-radius:4px;min-width:0;padding:8px 10px}.place b{font:600 15px/1.3 ui-serif,Georgia,serif;display:block}.place .kind{opacity:.7;letter-spacing:.02em;font-size:12px}.place a{color:#e0b070;margin:4px 12px 0 0;display:inline-block}.place a:focus-visible{outline-offset:2px;outline:2px solid #e0b070}.place .built{color:#e0b070;margin-left:6px;font-size:12px}.place .built.failed{color:#d8806a}</style>
+  <script type="module" crossorigin src="./assets/world-BYJf34k4.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="./assets/canal-CMPy77BC.js">
+  <link rel="modulepreload" crossorigin href="./assets/town-QURlK0tv.js">
+  <link rel="modulepreload" crossorigin href="./assets/inkWorld-DscYyM6z.js">
+  <link rel="modulepreload" crossorigin href="./assets/worldPlace-O6mC8HkV.js">
+</head>
+<body>
+  <header>
+    <h1>Dungeons: world</h1>
+    <p>One country, six kilometres by ten, from the sea and its islands in the south across the low country and the fells to the hills in the north. The islands, the valley heads, the mountain tops and the coastal towns a house could stand on are found in it, not drawn, and marked in red; each can be gone to, a house built on it and played, or its land walked. Making a world takes half a minute or so.</p>
+  </header>
+  <nav>
+    <label>World <input id="seed" spellcheck="false"></label>
+    <button id="make" type="button">Make</button>
+    <button id="another" type="button">Another world</button>
+    <button id="ink" type="button" aria-pressed="true">Ink map</button>
+    <button id="relief" type="button" aria-pressed="false">Relief</button>
+    <button id="save" type="button">Save picture</button>
+    <button id="prebuild" type="button" title="Lay out every place of this world now, and keep them in this browser: going to one is quicker, and the map shows what is built at each.">Build every place</button>
+    <span id="status"></span>
+  </nav>
+  <div id="making" hidden>
+    <div class="bar" role="progressbar" aria-label="Making the world" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div>
+    <p></p>
+  </div>
+  <section id="places" aria-label="The places in this world"></section>
+  <canvas id="map" width="2400" height="3060"></canvas>
+</body>
+</html>

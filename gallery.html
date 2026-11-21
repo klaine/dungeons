@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dungeons: gallery</title>
+  <style>html{color:#e8e2d6;background:#0b0a09;font:14px/1.45 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}body{max-width:1240px;margin:0 auto;padding:20px 16px 60px}h1{letter-spacing:.14em;text-transform:uppercase;margin:0 0 4px;font:600 17px/1.2 ui-serif,Georgia,serif}header p{opacity:.78;max-width:64ch;margin:0 0 14px}a{color:inherit}nav{flex-wrap:wrap;align-items:center;gap:8px 14px;margin-bottom:18px;display:flex}button,select{font:inherit;color:inherit;cursor:pointer;background:#e8e2d614;border:1px solid #e8e2d659;border-radius:4px;padding:6px 12px}button:hover{background:#e0b07059}select option{color:#111}#grid{grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr));gap:16px;display:grid}.card{background:#e8e2d60a;border:1px solid #e8e2d62e;border-radius:6px;text-decoration:none;display:block;overflow:hidden}.card:hover,.card:focus-visible{border-color:#e0b070;outline:none}.card canvas{aspect-ratio:1;width:100%;height:auto;display:block}.card div{padding:10px 12px 12px}.card b{letter-spacing:.04em;font:600 14px/1.3 ui-serif,Georgia,serif;display:block}.card span{opacity:.8;margin-top:3px;font-size:12.5px;display:block}.card i{opacity:.6;font-variant-numeric:tabular-nums;margin-top:6px;font-size:12px;font-style:normal;display:block}#count{opacity:.6}</style>
+  <script type="module" crossorigin src="./assets/gallery-CuLotHRE.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="./assets/canal-CMPy77BC.js">
+  <link rel="modulepreload" crossorigin href="./assets/castle-CV912v2U.js">
+  <link rel="modulepreload" crossorigin href="./assets/site-B7RFkHrn.js">
+  <link rel="modulepreload" crossorigin href="./assets/town-QURlK0tv.js">
+  <link rel="modulepreload" crossorigin href="./assets/generate-LcKku14H.js">
+</head>
+<body>
+  <header>
+    <h1>Dungeons: gallery</h1>
+    <p>Places the generator makes, a dozen at a time. Each plan is drawn from its seed without building the place; choose one to walk through it.</p>
+  </header>
+  <nav>
+    <button id="more" type="button">Another dozen</button>
+    <label>Show <select id="want">
+      <option value="">any place</option>
+      <option value="court">with a court</option>
+      <option value="cave">with a cave</option>
+      <option value="gate">with a portcullis</option>
+      <option value="secret">with a hidden chamber</option>
+      <option value="fallen">with a fallen roof</option>
+      <option value="small">small: seven rooms or fewer</option>
+      <option value="large">large: ten rooms or more</option>
+      <option value="island">islands, seen whole</option>
+      <option value="mountain">mountain tops, seen whole</option>
+    </select></label>
+    <span id="count"></span>
+    <a href="./">The explorer</a>
+    <a href="range.html">What the generator makes</a>
+    <a href="examples/viewer/">Viewer for exports</a>
+  </nav>
+  <main id="grid"></main>
+</body>
+</html>
