@@ -26,11 +26,19 @@
  *
  * Either way, the skier's skis leave their tracks in the snow, carved lines thin and dark and a skid a broad pale band, with snow thrown
  * up as it brakes; watched from behind, beside, above (where the tracks' shape shows best) or, watching, from anywhere.
+ *
+ * Where (asked: "now lets make this have a 100m wide nearland slice of our actual winter gameworld starting on high slopes at suitable
+ * location, no buildings or locations"): a run found in the game's world, `w2` (`?world=` another, for which `tools/skiRun.ts` has
+ * made a slice), down from the foot of its range across the upland below, a hundred metres broad, in winter (`slopeLand.ts`); or, with
+ * `?land=groomed`, the groomed slope the page began with, a plane at sixteen degrees going on for ever. Everything that moves is
+ * worked out in the world's own terms, over whatever land it is on: where it is, east and south, and how high the snow is there; the
+ * pull of its weight down whatever way the snow falls under it; thrown off a kicker or a knoll as any body is, and landing on the
+ * land as it lies. The run's line is only for the edges, the views and where the kickers stand.
  */
 import {
-  ACESFilmicToneMapping, AnimationMixer, BufferAttribute, BufferGeometry, CanvasTexture, Color, ConeGeometry, CylinderGeometry, DirectionalLight, DoubleSide,
+  ACESFilmicToneMapping, AnimationMixer, BufferAttribute, BufferGeometry, CanvasTexture, Color, CylinderGeometry, DirectionalLight, DoubleSide,
   Fog, Group, HemisphereLight, IcosahedronGeometry, InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D,
-  PCFSoftShadowMap, PerspectiveCamera, PlaneGeometry, Quaternion, RepeatWrapping, Scene, SkinnedMesh, SRGBColorSpace, Vector3,
+  PCFSoftShadowMap, PerspectiveCamera, Quaternion, RepeatWrapping, Scene, SkinnedMesh, SRGBColorSpace, Vector3,
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -40,16 +48,17 @@ import { type AirControls, makeDownhillRun, type RideControls, Rider, RUN_LENGTH
 import { type BodySpec, type Ground, HUMAN, humanSpec, JOINTS, Ragdoll } from '../src/figures/ragdoll';
 import { Horse, horseAirPose, horseRidePose, type HorseSkis, saddlePose } from '../src/figures/horse';
 import { Rng } from '../src/core/rng';
+import { readSlice } from '../src/core/skiSlice';
+import { type Frame, groomedLand, type Land, sliceLand } from './slopeLand';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const query = new URLSearchParams(location.search);
 
-// The slope: a plane falling at sixteen degrees, `down` along its fall line and `left` across it, and the way out of it.
-const ANGLE = (16 * Math.PI) / 180, G = 9.81;
-const FALL = new Vector3(0, -Math.sin(ANGLE), Math.cos(ANGLE)), UP = new Vector3(0, Math.cos(ANGLE), Math.sin(ANGLE)), LEFT = new Vector3(1, 0, 0);
-const onSlope = (down: number, left: number, out = 0) => new Vector3().addScaledVector(FALL, down).addScaledVector(LEFT, left).addScaledVector(UP, out);
-/** Which way a skier going `way` (radians to the left of straight down) goes, on the slope. */
-const along = (way: number) => new Vector3().addScaledVector(FALL, Math.cos(way)).addScaledVector(LEFT, Math.sin(way));
+const G = 9.81, UP = new Vector3(0, 1, 0);
+/** Along the run (where it goes at `f`) and to its left, level. */
+const runDir = (f: { dx: number; dz: number }) => new Vector3(f.dx, 0, f.dz), runLeft = (f: { dx: number; dz: number }) => new Vector3(f.dz, 0, -f.dx);
+/** Which way, level, a skier goes whose way is `way` (radians to the left of the run's own way at `f`). */
+const along = (way: number, f: { dx: number; dz: number }) => runDir(f).multiplyScalar(Math.cos(way)).addScaledVector(runLeft(f), Math.sin(way));
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const ease = (dt: number, rate: number) => 1 - Math.exp(-dt * rate);
 const smooth = (t: number) => { const u = clamp(t, 0, 1); return u * u * (3 - 2 * u); };
@@ -58,13 +67,12 @@ const TURN = 2 * Math.PI, deg = (d: number) => (d * Math.PI) / 180;
 /**
  * The kickers on the ridden slope: the foot of the first so far down it, one every so far after it, each set across the piste at its
  * own place; a ramp so long, rising to a lip so high, curving up as the power of the way along it (steepest at the lip, some twenty
- * degrees over the slope), and behind the lip a steep back down to the snow; so broad across its top, its sides sloping down.
+ * degrees over the slope), and behind the lip a steep back down to the snow; so broad across its top, its sides sloping down. On a
+ * world's run, each is put where the land after it falls away enough to land on, up to `shift` further down than its turn.
  */
-const KICK = { first: 70, every: 130, length: 7, height: 1.5, power: 1.7, back: 2.4, half: 2.5, side: 1.2 };
+const KICK = { first: 70, every: 130, length: 7, height: 1.5, power: 1.7, back: 2.4, half: 2.5, side: 1.2, shift: 60 };
 const kickLefts = new Map<number, number>();
-const kickerLeft = (i: number) => { let v = kickLefts.get(i); if (v === undefined) { v = new Rng(`kicker ${i}`).range(-14, 14); kickLefts.set(i, v); } return v; };
-/** The kicker nearest `down`, by its number. */
-const kickerNear = (down: number) => Math.round((down - KICK.first - (KICK.length + KICK.back) / 2) / KICK.every);
+const kickerLeft = (i: number, most = 14) => { let v = kickLefts.get(i); if (v === undefined) { v = new Rng(`kicker ${i}`).range(-1, 1); kickLefts.set(i, v); } return v * most; };
 /** A kicker's height `u` along it from its foot, and how steeply it rises there. */
 const rise = (u: number): [number, number] => {
   const { length: L, height: H, power: P, back: B } = KICK;
@@ -79,7 +87,6 @@ const kickerShape = (u: number, x: number) => {
   const s = ax <= half ? 1 : ax < half + side ? 1 - (ax - half) / side : 0, ds = ax > half && ax < half + side ? -Math.sign(x) / side : 0;
   return { h: f * s, dDown: df * s, dLeft: f * ds };
 };
-const FLAT = { h: 0, dDown: 0, dLeft: 0 };
 /** The watched run's frames are a thirtieth of a second apart. */
 const STEP = 1 / 30;
 
@@ -98,7 +105,6 @@ async function start() {
   renderer.shadowMap.type = PCFSoftShadowMap;
   const scene = new Scene();
   scene.background = new Color(0xa9c8e8);
-  scene.fog = new Fog(0xc9dcee, 90, 520);
   const camera = new PerspectiveCamera(50, 1, 0.1, 1200);
   const controls = new OrbitControls(camera, canvas);
   controls.enabled = false;
@@ -113,8 +119,7 @@ async function start() {
   sun.shadow.bias = -0.0004;
   scene.add(sun, sun.target);
 
-  // The snow: groomed corduroy faintly lined down the fall line, a little uneven in tone; a sheet moved along under the skier by whole
-  // tiles of its picture (nine metres), so that the slope goes on as far as it is ridden.
+  // The snow: groomed corduroy faintly lined along the run, a little uneven in tone; and loose snow off the run, unlined.
   const snowMap = (() => {
     const c = document.createElement('canvas'); c.width = c.height = 512;
     const g = c.getContext('2d')!, rng = new Rng('snow');
@@ -125,72 +130,89 @@ async function start() {
     const t = new CanvasTexture(c); t.wrapS = t.wrapT = RepeatWrapping; t.colorSpace = SRGBColorSpace; t.anisotropy = 8;
     return t;
   })();
-  const W = 252, L = 720;
-  snowMap.repeat.set(W / 9, L / 9);
-  const snow = new Mesh(new PlaneGeometry(W, L), new MeshStandardMaterial({ color: 0xffffff, map: snowMap, roughness: 0.92 }));
-  snow.geometry.rotateX(-Math.PI / 2).rotateX(ANGLE);
-  snow.receiveShadow = true;
-  scene.add(snow);
+  const powderMap = (() => {
+    const c = document.createElement('canvas'); c.width = c.height = 256;
+    const g = c.getContext('2d')!, rng = new Rng('powder');
+    g.fillStyle = '#f4f7fb'; g.fillRect(0, 0, 256, 256);
+    for (let i = 0; i < 40; i++) { g.fillStyle = `rgba(165,185,212,${rng.range(0.02, 0.05)})`; g.beginPath(); g.arc(rng.range(0, 256), rng.range(0, 256), rng.range(20, 70), 0, 7); g.fill(); }
+    for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(${rng.chance(0.6) ? '255,255,255' : '170,188,214'},${rng.range(0.15, 0.35)})`; g.fillRect(rng.range(0, 256), rng.range(0, 256), rng.range(1, 2.5), rng.range(1, 2.5)); }
+    const t = new CanvasTexture(c); t.wrapS = t.wrapT = RepeatWrapping; t.colorSpace = SRGBColorSpace; t.anisotropy = 8;
+    return t;
+  })();
 
-  // Beside the piste, firs on both sides and its edges marked with poles every twenty-five metres: a stretch of 300 metres of them,
-  // laid three times, one after another, about wherever the skier is.
-  const TILE = 300;
-  const tiles: Group[] = [];
-  {
-    const rng = new Rng('woods'), trees: Matrix4[] = [];
-    for (let down = 0; down < TILE; down += rng.range(3, 7)) for (const side of [-1, 1]) {
-      if (rng.chance(0.25)) continue;
-      const h = rng.range(5, 11), left = side * rng.range(36, 100);
-      trees.push(new Matrix4().compose(onSlope(down, left).add(new Vector3(0, h * 0.42, 0)), new Quaternion(), new Vector3(h * 0.34, h, h * 0.34)));
-    }
-    const marks: Matrix4[] = [];
-    for (let down = 0; down < TILE; down += 25) for (const side of [-1, 1]) marks.push(new Matrix4().compose(onSlope(down, side * 30).add(new Vector3(0, 0.75, 0)), new Quaternion(), new Vector3(1, 1, 1)));
-    const firShape = new ConeGeometry(1, 1, 9), firPaint = new MeshStandardMaterial({ color: 0x24402f, roughness: 0.9 });
-    const poleShape = new CylinderGeometry(0.035, 0.035, 1.5, 6), polePaint = new MeshStandardMaterial({ color: 0xd9542b, roughness: 0.6 });
-    for (let k = 0; k < 3; k++) {
-      const fir = new InstancedMesh(firShape, firPaint, trees.length), poles = new InstancedMesh(poleShape, polePaint, marks.length);
-      trees.forEach((m, i) => fir.setMatrixAt(i, m));
-      marks.forEach((m, i) => poles.setMatrixAt(i, m));
-      fir.castShadow = true;
-      // (Moved as a whole: what is in it is not where its bounds were worked out.)
-      fir.frustumCulled = poles.frustumCulled = false;
-      const tile = new Group();
-      tile.add(fir, poles);
-      scene.add(tile);
-      tiles.push(tile);
-    }
-  }
-  /** The slope's sheet and its woods moved along to be about the skier. */
-  const keepSlopeAbout = (down: number, left: number) => {
-    snow.position.copy(onSlope(Math.round(down / 45) * 45 + 220, Math.round(left / 45) * 45));
-    const first = Math.floor(down / TILE) * TILE - TILE;
-    tiles.forEach((tile, k) => tile.position.copy(onSlope(first + k * TILE, 0)));
-    if (kickersOn) placeKickers(down);
+  // The land: a world's run, from its slice beside the page; or the groomed slope (`?land=groomed`, or when the slice cannot be had).
+  // (Its slice is fetched from beside the page, or, in a page made whole, carried in it.)
+  type LandKind = 'world' | 'groomed';
+  const world = query.get('world') ?? 'w2', lands = new Map<LandKind, Land>();
+  const landOf = async (kind: LandKind): Promise<Land> => {
+    let made = lands.get(kind);
+    if (made) return made;
+    if (kind === 'world') {
+      const carried = (window as unknown as { __slopeFiles?: Record<string, string> }).__slopeFiles?.[`${world}.json`];
+      const base = (window as unknown as { __slopeBase?: string }).__slopeBase ?? new URL('../slopes/', location.href).href;
+      const got = carried ?? await fetch(`${base}${world}.json`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+      // (Without its slice, the groomed slope.)
+      made = got ? sliceLand(readSlice(got), snowMap, powderMap) : await landOf('groomed');
+    } else made = groomedLand(snowMap);
+    lands.set(kind, made);
+    return made;
   };
+  let landKind: LandKind = query.get('land') === 'groomed' || location.hash === '#groomed' ? 'groomed' : 'world';
+  $('status').textContent = landKind === 'world' ? `Laying the snow on the run in ${world}…` : 'Making the run…';
+  await new Promise((r) => setTimeout(r, 30));
+  let land = await landOf(landKind);
+  /** Shows a land: its snow and country, and the air's haze as far as it reaches. */
+  const showLand = () => {
+    for (const l of lands.values()) l.group.removeFromParent();
+    scene.add(land.group);
+    scene.fog = new Fog(0xc9dcee, land.fog[0], land.fog[1]);
+    camera.far = land.fog[1] + 400;
+    camera.updateProjectionMatrix();
+    canvas.setAttribute('aria-label', land.length === Infinity ? 'A skier going down a groomed slope' : `A skier going down a run ${land.about}, ${land.name}`);
+  };
+  showLand();
 
-  // The kickers, there only when the slope is ridden. The snow's height over the slope where the skier is, and how it rises along the
-  // slope and across it: on the slope itself none, on a kicker its shape.
+  // The kickers, there only when the slope is ridden: each where the land lets it stand (`Land.kickable`), its shape laid on the land
+  // as it lies there; a few about the skier at a time. The snow's height anywhere is the land's, with a kicker's on it where there is one.
   let kickersOn = false;
-  const groundAt = (down: number, left: number) => {
-    if (!kickersOn) return FLAT;
-    const i = kickerNear(down);
-    return i < 0 ? FLAT : kickerShape(down - (KICK.first + i * KICK.every), left - kickerLeft(i));
+  interface Kicker { i: number; s: number; left: number; x: number; z: number; dx: number; dz: number; group?: Group }
+  const kickerAt = new Map<number, Kicker | null>();
+  const kickerOf = (i: number): Kicker | null => {
+    if (kickerAt.has(i)) return kickerAt.get(i)!;
+    let k: Kicker | null = null;
+    const left = kickerLeft(i, Math.min(14, land.half - 18)), length = KICK.length + KICK.back;
+    for (let shift = 0; shift <= (land.length === Infinity ? 0 : KICK.shift) && !k; shift += 6) {
+      const s = KICK.first + i * KICK.every + shift;
+      if (land.kickable(s, left, length)) { const p = land.at(s, left); k = { i, s, left, ...p }; }
+    }
+    kickerAt.set(i, k);
+    return k;
   };
+  let kicks: Kicker[] = [];
+  /** A kicker's height at a point, if one is under it. */
+  const bumpAt = (x: number, z: number) => {
+    let h = 0;
+    for (const k of kicks) { const rx = x - k.x, rz = z - k.z; h = Math.max(h, kickerShape(rx * k.dx + rz * k.dz, rx * k.dz - rz * k.dx).h); }
+    return h;
+  };
+  /** The snow's height at a point, and how it rises east and south there (over `e` metres); and which way is up from it. */
+  const ground = (x: number, z: number) => land.height(x, z) + bumpAt(x, z);
+  const slopeAt = (x: number, z: number, e = 0.3): [number, number] => [(ground(x + e, z) - ground(x - e, z)) / (2 * e), (ground(x, z + e) - ground(x, z - e)) / (2 * e)];
+  const normalAt = (x: number, z: number, e = 0.3) => { const [gx, gz] = slopeAt(x, z, e); return new Vector3(-gx, 1, -gz).normalize(); };
   /** The ground under a point anywhere, for a body gone limp: how far over it the point is, and which way is up from it. */
   const groundUnder: Ground = (p) => {
-    const g = groundAt(p.dot(FALL), p.dot(LEFT)), up = UP.clone().addScaledVector(FALL, -g.dDown).addScaledVector(LEFT, -g.dLeft), k = up.length();
-    return { above: (p.dot(UP) - g.h) / k, up: up.divideScalar(k) };
+    const up = normalAt(p.x, p.z);
+    return { above: (p.y - ground(p.x, p.z)) * up.y, up };
   };
-  // Each kicker drawn as its shape in snow, the lip dyed blue across its top, a flag either side of the lip; a few of them, moved to be
-  // the ones about the skier.
-  const kickerSurface = (u0: number, u1: number, nu: number, x0: number, x1: number, nx: number, lift: number, xs?: number[]) => {
+  // Each kicker drawn as its shape in snow on the land under it, the lip dyed blue across its top, a flag either side of the lip.
+  const kickerSurface = (k: Kicker, u0: number, u1: number, nu: number, x0: number, x1: number, nx: number, lift: number, xs?: number[]) => {
     const across = xs ?? Array.from({ length: nx + 1 }, (_, j) => x0 + ((x1 - x0) * j) / nx), us: number[] = [];
     for (let i = 0; i <= nu; i++) us.push(u0 + ((u1 - u0) * i) / nu);
     if (u1 > KICK.length && u0 < KICK.length && !us.includes(KICK.length)) { us.push(KICK.length); us.sort((a, b) => a - b); }
     const pos: number[] = [], uv: number[] = [], index: number[] = [], w = across.length;
     for (const u of us) for (const x of across) {
-      const v = onSlope(u, x, kickerShape(u, x).h + lift);
-      pos.push(v.x, v.y, v.z); uv.push(x / 9, u / 9);
+      const px = k.x + k.dx * u + k.dz * x, pz = k.z + k.dz * u - k.dx * x;
+      pos.push(px, land.height(px, pz) + kickerShape(u, x).h + lift, pz); uv.push(x / 9, u / 9);
     }
     for (let i = 1; i < us.length; i++) for (let j = 1; j < w; j++) {
       const a = (i - 1) * w + j - 1, b = a + 1, c = a + w, d = c + 1;
@@ -204,51 +226,53 @@ async function start() {
     return g;
   };
   const kickerParts = (() => {
-    const { length: L, back: B, half, side } = KICK;
-    const xs: number[] = [];
-    for (let j = 0; j <= 3; j++) xs.push(-half - side + (side * j) / 3);
-    for (let j = 1; j < 12; j++) xs.push(-half + (2 * half * j) / 12);
-    for (let j = 0; j <= 3; j++) xs.push(half + (side * j) / 3);
-    const map = snowMap.clone(); map.repeat.set(1, 1); map.needsUpdate = true;
-    const body = kickerSurface(0, L + B, 40, 0, 0, 0, 0.012, xs);
-    const lip = kickerSurface(L - 0.32, L - 0.04, 3, -half, half, 12, 0.022);
     const pole = new CylinderGeometry(0.03, 0.03, 1.7, 6).translate(0, 0.85, 0);
     const flag = new BufferGeometry();
     flag.setAttribute('position', new BufferAttribute(new Float32Array([0, 1.68, 0, 0, 1.28, 0, 0, 1.48, -0.55]), 3));
     flag.computeVertexNormals();
+    const map = snowMap.clone(); map.repeat.set(1, 1); map.needsUpdate = true;
     return {
-      body, lip, pole, flag,
+      pole, flag,
       snow: new MeshStandardMaterial({ color: 0xf7f9fc, map, roughness: 0.9 }),
       dye: new MeshStandardMaterial({ color: 0x2f6fd0, roughness: 0.8 }),
       wood: new MeshStandardMaterial({ color: 0x23262b, roughness: 0.6 }),
       cloth: new MeshStandardMaterial({ color: 0xf07a1a, roughness: 0.7, side: DoubleSide }),
     };
   })();
-  const kickers = Array.from({ length: 4 }, () => {
-    const g = new Group(), body = new Mesh(kickerParts.body, kickerParts.snow), lip = new Mesh(kickerParts.lip, kickerParts.dye);
+  const buildKicker = (k: Kicker) => {
+    const { length: L, back: B, half, side } = KICK, xs: number[] = [];
+    for (let j = 0; j <= 3; j++) xs.push(-half - side + (side * j) / 3);
+    for (let j = 1; j < 12; j++) xs.push(-half + (2 * half * j) / 12);
+    for (let j = 0; j <= 3; j++) xs.push(half + (side * j) / 3);
+    const g = new Group(), body = new Mesh(kickerSurface(k, 0, L + B, 40, 0, 0, 0, 0.012, xs), kickerParts.snow), lip = new Mesh(kickerSurface(k, L - 0.32, L - 0.04, 3, -half, half, 12, 0.022), kickerParts.dye);
     body.castShadow = body.receiveShadow = true;
     lip.receiveShadow = true;
     g.add(body, lip);
-    for (const side of [-1, 1]) {
-      const at = onSlope(KICK.length, side * (KICK.half + KICK.side + 0.4), 0);
+    for (const s of [-1, 1]) {
+      const x = s * (half + side + 0.4), px = k.x + k.dx * L + k.dz * x, pz = k.z + k.dz * L - k.dx * x;
       const pole = new Mesh(kickerParts.pole, kickerParts.wood), flag = new Mesh(kickerParts.flag, kickerParts.cloth);
-      pole.position.copy(at); flag.position.copy(at);
+      pole.position.set(px, land.height(px, pz), pz); flag.position.copy(pole.position);
+      // (The flag flies back up the run, as the old slope's did.)
+      flag.rotation.y = Math.atan2(k.dx, k.dz);
       pole.castShadow = flag.castShadow = true;
       g.add(pole, flag);
     }
-    g.visible = false;
     scene.add(g);
-    return g;
-  });
-  const placeKickers = (down: number) => {
-    const i0 = kickerNear(down) - 1;
-    kickers.forEach((g, k) => {
-      const i = i0 + k;
-      g.visible = kickersOn && i >= 0;
-      if (g.visible) g.position.copy(onSlope(KICK.first + i * KICK.every, kickerLeft(i)));
-    });
+    k.group = g;
   };
-  const showKickers = (on: boolean) => { kickersOn = on; if (!on) for (const g of kickers) g.visible = false; };
+  /** The kickers about `s`: one behind, the next two ahead; built when first come near, and let go of once far behind. */
+  const placeKickers = (s: number) => {
+    const i0 = Math.floor((s - KICK.first) / KICK.every) - 1, near: Kicker[] = [];
+    for (let i = Math.max(0, i0); i <= i0 + 3; i++) { const k = kickerOf(i); if (k && k.s < land.length) near.push(k); }
+    for (const k of kickerAt.values()) if (k?.group && !near.includes(k)) {
+      k.group.removeFromParent();
+      k.group.traverse((o) => { const m = o as Mesh; if (m.isMesh && m.geometry !== kickerParts.pole && m.geometry !== kickerParts.flag) m.geometry.dispose(); });
+      k.group = undefined;
+    }
+    if (kickersOn) for (const k of near) if (!k.group) buildKicker(k);
+    kicks = kickersOn ? near : [];
+  };
+  const showKickers = (on: boolean) => { kickersOn = on; placeKickers(ride.down); };
 
   // The skier: the mannequin, posed live when ridden (`Rider`) and by the made run when watched, with its downhill skis and poles.
   const base = (window as unknown as { __figureBase?: string }).__figureBase ?? new URL('../figures/', location.href).href;
@@ -272,15 +296,16 @@ async function start() {
   putOn(jockey.model, 'mounted');
   const rider = new Group();
   scene.add(rider);
-  const tilt = new Quaternion().setFromAxisAngle(LEFT, ANGLE);
+  const basis = new Matrix4();
   /**
-   * Stands the skier on the slope, facing `facing` (radians to the left of straight down); or `out` over it, its nose `pitch` up (on a
-   * ramp, or in the air).
+   * Stands the skier at `p`, upright to `up` (the snow's, under it), facing `facing` (radians to the left of the run's way at `f`);
+   * its nose `pitch` further up (just off a kicker's lip, in the air).
    */
-  const standAt = (down: number, left: number, facing: number, out = 0, pitch = 0) => {
-    rider.position.copy(onSlope(down, left, out));
-    rider.quaternion.copy(tilt).multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), facing));
-    if (pitch) rider.quaternion.multiply(new Quaternion().setFromAxisAngle(LEFT, -pitch));
+  const standAt = (p: Vector3, up: Vector3, facing: number, f: Frame | { dx: number; dz: number }, pitch = 0) => {
+    const ahead = along(facing, f), fwd = ahead.addScaledVector(up, -ahead.dot(up)).normalize(), side = up.clone().cross(fwd).normalize();
+    rider.position.copy(p);
+    rider.quaternion.setFromRotationMatrix(basis.makeBasis(side, up, fwd));
+    if (pitch) rider.quaternion.multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -pitch));
     rider.updateMatrixWorld(true);
   };
   // A person's joints where they are in the world, as a body gone limp takes them: its bones', and its skis' tips and tails.
@@ -306,7 +331,7 @@ async function start() {
     return out;
   };
   /** Puts a spot on the snow (or on a kicker's), a finger's breadth over it. */
-  const onSnow = (p: Vector3) => p.addScaledVector(UP, -p.dot(UP) + groundAt(p.dot(FALL), p.dot(LEFT)).h + 0.012);
+  const onSnow = (p: Vector3) => { p.y = ground(p.x, p.z) + 0.02; return p; };
   const feet = ['foot_l', 'foot_r'].map((n) => model.getObjectByName(n)!), toes = ['ball_l', 'ball_r'].map((n) => model.getObjectByName(n)!);
 
   /**
@@ -352,10 +377,13 @@ async function start() {
   rider.add(skier.object);
   seat();
 
-  /** Puts the skier where the watched run has it at time `t`, in its pose then. */
+  /**
+   * Puts the skier where the watched run has it at time `t`, in its pose then: so far down the run and so far across it as the run was
+   * made on its plane, laid on this land (on a world's, along the run's own line, as it lies).
+   */
   const watchPose = (t: number): Now => {
-    const s = sampleAt(t);
-    standAt(s.down, s.left, 0);
+    const s = sampleAt(t), p = land.at(s.down, s.left);
+    standAt(new Vector3(p.x, ground(p.x, p.z), p.z), normalAt(p.x, p.z, 0.6), 0, p);
     skier.watch(t, s);
     rider.updateMatrixWorld(true);
     return s;
@@ -378,10 +406,10 @@ async function start() {
     scene.add(mesh);
     return mesh;
   };
-  /** Writes the `j`th step of a strip: the ski's middle, the way it went, and how broad it is (half). */
-  const lay = (mesh: Mesh, j: number, at: Vector3, way: number, half: number) => {
-    const across = new Vector3().addScaledVector(LEFT, Math.cos(way)).addScaledVector(FALL, -Math.sin(way)).multiplyScalar(half);
-    (mesh.geometry.getAttribute('position') as BufferAttribute).set([...at.clone().add(across).toArray(), ...at.clone().sub(across).toArray()], j * 6);
+  /** Writes the `j`th step of a strip: the ski's middle, the way it went (against the run's way at `f`), and how broad it is (half). */
+  const lay = (mesh: Mesh, j: number, at: Vector3, way: number, half: number, f: { dx: number; dz: number }) => {
+    const across = along(way + Math.PI / 2, f).multiplyScalar(half);
+    (mesh.geometry.getAttribute('position') as BufferAttribute).set([...onSnow(at.clone().add(across)).toArray(), ...onSnow(at.clone().sub(across)).toArray()], j * 6);
     const c = groove.clone().lerp(scraped, Math.min(1, (half - 0.035) * 2.5));
     (mesh.geometry.getAttribute('color') as BufferAttribute).set([c.r, c.g, c.b, c.r, c.g, c.b], j * 6);
   };
@@ -392,9 +420,9 @@ async function start() {
   let watchSkis = 2;
   const layWatchTracks = () => {
     for (let i = 0, j = 0; i <= last; i += 2, j++) {
-      const s = watchPose(i * STEP), spots = skier.skis();
+      const s = watchPose(i * STEP), spots = skier.skis(), f = land.at(s.down, s.left);
       watchSkis = spots.length;
-      spots.forEach((p, k) => lay(watchTracks[k], j, onSnow(p), s.way, halfOf(s.skid)));
+      spots.forEach((p, k) => lay(watchTracks[k], j, onSnow(p), s.way, halfOf(s.skid), f));
     }
     for (const m of watchTracks) { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; }
   };
@@ -413,7 +441,7 @@ async function start() {
       for (const m of rideTracks) for (const name of ['position', 'color']) { const arr = (m.geometry.getAttribute(name) as BufferAttribute).array as Float32Array; arr.copyWithin(0, (RIDE_STEPS / 2) * 6); }
       rideLaid = RIDE_STEPS / 2;
     }
-    at.forEach((p, k) => lay(rideTracks[k], rideLaid, p, now.way, halfOf(now.skid)));
+    at.forEach((p, k) => lay(rideTracks[k], rideLaid, p, now.way, halfOf(now.skid), here));
     rideLaid++;
     rideTracks.forEach((m, k) => { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; m.geometry.setDrawRange(0, k < rideSkis ? Math.max(0, rideLaid - 1) * 6 : 0); });
   };
@@ -430,11 +458,11 @@ async function start() {
   const stepSpray = (dt: number, now: Now | null) => {
     if (now && now.skid > 0.45 && now.speed > 3.5) {
       // (Thrown on along the way it goes, and out the way the skis slide sideways: to the outside of a skidded turn.)
-      const go = along(now.way), skiAlong = along(now.ski), slide = go.clone().addScaledVector(skiAlong, -go.dot(skiAlong)), spots = skier.skis();
+      const go = along(now.way, here), skiAlong = along(now.ski, here), slide = go.clone().addScaledVector(skiAlong, -go.dot(skiAlong)), spots = skier.skis(), aside = runLeft(here);
       for (let i = 0; i < Math.round(now.speed * 0.9); i++) {
         const f = flakes[nextFlake++ % SPRAY], from = onSnow(spots[i % spots.length].clone());
-        f.p.copy(from).addScaledVector(go, 0.35).addScaledVector(LEFT, sprayRng.range(-0.8, 0.8)).addScaledVector(UP, 0.04);
-        f.v.copy(go).multiplyScalar(now.speed * sprayRng.range(0.5, 1)).addScaledVector(UP, sprayRng.range(1.2, 3.2)).addScaledVector(LEFT, sprayRng.range(-1.5, 1.5)).addScaledVector(slide, now.speed * sprayRng.range(0.2, 0.6));
+        f.p.copy(from).addScaledVector(go, 0.35).addScaledVector(aside, sprayRng.range(-0.8, 0.8)).addScaledVector(UP, 0.04);
+        f.v.copy(go).multiplyScalar(now.speed * sprayRng.range(0.5, 1)).addScaledVector(UP, sprayRng.range(1.2, 3.2)).addScaledVector(aside, sprayRng.range(-1.5, 1.5)).addScaledVector(slide, now.speed * sprayRng.range(0.2, 0.6));
         f.life = sprayRng.range(0.5, 0.9);
       }
     }
@@ -449,22 +477,25 @@ async function start() {
 
   // ---------------------------------------------------------------- riding: the skier as the pointer and the slope have it
   /**
-   * The ridden skier: where it is, which way it goes and how fast; the facing of its body (half the way it goes, lagging, so that its
-   * chest stays more down the slope than its skis); how far into a tuck, standing tall and braking; its lean into the turn; its
-   * poles' flicks, each a time left to run; how high it is over the slope and how fast it rises from it (on a kicker, or in the air);
-   * how far it has sunk to take a landing; any turn of the whole body it is still coming out of from one; how far its turn is skidded
-   * rather than carved (0 to 1); and how long an arrow key has been held to turn.
+   * The ridden skier: where it is (east, south and up, in the scene), and how fast it is rising there (as the snow under it rose over
+   * its last step), and where that is against the run (`down` along it, `left` across it); which way it goes against the run's own way there, and how fast; the facing of its body (half the way it goes, lagging,
+   * so that its chest stays more down the run than its skis); how far into a tuck, standing tall and braking; its lean into the turn;
+   * its poles' flicks, each a time left to run; how high the kicker under it is, if it is on one; how far it has sunk to take a
+   * landing; any turn of the whole body it is still coming out of from one; how far its turn is skidded rather than carved (0 to 1);
+   * how long an arrow key has been held to turn; and whether it has come to the end of the run.
    */
   const ride = {
-    down: 0, left: 0, way: 0, speed: 0, facing: 0, tuck: 0, tall: 0, brake: 0, brakeSide: 1, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0,
-    out: 0, rising: 0, absorb: 0, settle: { spin: 0, flip: 0, left: 0 }, skid: 0, held: 0,
+    x: 0, y: 0, z: 0, vy: 0, down: 0, left: 0, way: 0, speed: 0, facing: 0, tuck: 0, tall: 0, brake: 0, brakeSide: 1, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0,
+    out: 0, absorb: 0, settle: { spin: 0, flip: 0, left: 0 }, skid: 0, held: 0, ended: false,
   };
+  /** Where the skier is against the run, as its last step left it. */
+  let here: Frame = land.frame(0, 0);
   /**
    * In the air: what it is doing there (`air`, straight air; `flip`, a backflip; `flight`, a ski jumper's; `hop`, too short a time
    * in the air for anything), the spin and the flip it is to make and how far into them it is, how long it has been in the air and how
-   * long it was to be, how fast it goes along the slope and across it, where it left the snow, and how far its nose was up as it did.
+   * long it was to be, how fast it goes and which way, where it left the snow, and how far its nose was up over the land as it did.
    */
-  interface Air { kind: 'air' | 'flip' | 'flight' | 'hop'; spinTo: number; flipTo: number; spin: number; flip: number; t: number; T: number; vDown: number; vLeft: number; from: Vector3; nose: number; name: string }
+  interface Air { kind: 'air' | 'flip' | 'flight' | 'hop'; spinTo: number; flipTo: number; spin: number; flip: number; t: number; T: number; v: Vector3; from: Vector3; nose: number; name: string }
   let air: Air | null = null;
   /** Gone limp, every body of it (a horse and its rider each their own), and why. */
   let crash: { dolls: { body: Body; doll: Ragdoll }[]; why: string } | null = null;
@@ -475,11 +506,30 @@ async function start() {
   const FLICK = 0.3;
   /** Where across the range a turn begins to skid (it skids wholly at its end), and how far the skis are pivoted across the way then. */
   const SKID_FROM = 0.72, SKID_TURN = deg(38);
-  /** The weight's pull into the slope, and along it. */
-  const INTO = G * Math.cos(ANGLE), ALONG = G * Math.sin(ANGLE);
-  /** How long from now until something `out` over the slope and rising at `rising` comes down onto it. */
-  const timeToSnow = (out: number, rising: number) => (rising + Math.sqrt(Math.max(0, rising * rising + 2 * INTO * Math.max(0, out)))) / INTO;
+  /** How long from now until something at `p` going at `v` comes down onto the snow, its weight bringing it down as it goes. */
+  const timeToSnow = (p: Vector3, v: Vector3) => {
+    const q = p.clone(), w = v.clone(), dt = 1 / 60;
+    for (let t = dt; t < 6; t += dt) { w.y -= G * dt; q.addScaledVector(w, dt); if (q.y <= ground(q.x, q.z)) return t; }
+    return 6;
+  };
   const keepJoints = (dt: number) => { if (dt <= 0) return; jointsBefore = joints; joints = skier.bodies().map((b) => b.joints()); jointsDt = dt; };
+  /**
+   * Where the skier now is against the run: its way and its body's facing kept as they were in the world as the run's own way turns
+   * under it; kept on the run, inside its edges and between its top and its foot (and, in the air, going no further out).
+   */
+  const keepOn = () => {
+    let f = land.frame(ride.x, ride.z, ride.down);
+    const most = land.half - 3, end = land.length + 20;
+    if (Math.abs(f.left) > most || f.s < -20 || f.s > end) {
+      const s = clamp(f.s, -20, end), left = clamp(f.left, -most, most), p = land.at(s, left);
+      ride.x = p.x; ride.z = p.z;
+      if (air) { const out = runLeft(f).multiplyScalar(Math.sign(f.left)), o = air.v.dot(out); if (Math.abs(f.left) > most && o > 0) air.v.addScaledVector(out, -o); }
+      f = { ...f, s, left };
+    }
+    const turned = Math.atan2(f.dx * here.dz - f.dz * here.dx, f.dx * here.dx + f.dz * here.dz);
+    ride.way -= turned; ride.facing -= turned;
+    here = f; ride.down = f.s; ride.left = f.left;
+  };
 
   /** What a trick is called. */
   const trickName = (a: Air) => {
@@ -509,37 +559,36 @@ async function start() {
   };
 
   /**
-   * Leaves the snow (the ground fell away under it faster than its weight can bring it down: off a kicker's lip, or its back): what it
-   * does in the air is what it was doing as it left, if it is to be in the air long enough for anything.
+   * Leaves the snow (the ground fell away under it faster than its weight can bring it down: off a kicker's lip, or its back, or the
+   * crest of a knoll taken fast), going at `v`, its nose `nose` up over the land: what it does in the air is what it was doing as it
+   * left, if it is to be in the air long enough for anything.
    */
-  const takeOff = (nose: number) => {
-    const T = timeToSnow(ride.out, ride.rising), long = T > 0.5;
+  const takeOff = (v: Vector3, nose: number) => {
+    const from = new Vector3(ride.x, ride.y, ride.z), T = timeToSnow(from, v), long = T > 0.5;
     const kind: Air['kind'] = !long ? 'hop' : ride.tuck > 0.55 ? 'flight' : ride.tall > 0.5 ? 'flip' : 'air';
     const turns = !long ? 0 : Math.abs(ask.x) > 0.72 ? 2 : Math.abs(ask.x) > 0.3 ? 1 : 0;
-    const flat = ride.speed * Math.cos(nose);
-    air = {
-      kind, spinTo: -Math.sign(ask.x) * turns * TURN, flipTo: kind === 'flip' ? -TURN : 0, spin: 0, flip: 0, t: 0, T,
-      vDown: flat * Math.cos(ride.way), vLeft: flat * Math.sin(ride.way), from: new Vector3(ride.down, ride.left, 0), nose, name: '',
-    };
+    air = { kind, spinTo: -Math.sign(ask.x) * turns * TURN, flipTo: kind === 'flip' ? -TURN : 0, spin: 0, flip: 0, t: 0, T, v, from, nose, name: '' };
     air.name = trickName(air);
   };
 
-  /** Comes down onto the snow: landed, if the turns are near enough made and the blow is not too hard; else gone limp. */
-  const land = () => {
-    const a = air!, g = groundAt(ride.down, ride.left);
-    const blow = Math.max(0, -(ride.rising - g.dDown * a.vDown - g.dLeft * a.vLeft));
+  /** Comes down onto the snow: landed, if the turns are near enough made and the blow (how fast it comes into the snow) not too hard; else gone limp. */
+  const land_ = () => {
+    const a = air!, up = normalAt(ride.x, ride.z, 0.5), into = a.v.dot(up), blow = Math.max(0, -into);
     const flipShort = Math.abs(a.flipTo - a.flip), spinShort = Math.abs(a.spinTo - a.spin);
-    const far = Math.hypot(ride.down - a.from.x, ride.left - a.from.y);
+    const far = Math.hypot(ride.x - a.from.x, ride.z - a.from.z);
     air = null;
     if (flipShort > deg(55) || spinShort > deg(75) || blow > 12.5) {
       const why = blow > 12.5 ? 'landed too hard' : flipShort > deg(55) ? (flipShort > deg(200) ? 'landed on its back' : 'short of the flip') : `short of the ${Math.round(Math.abs(a.spinTo) / TURN) * 360}`;
       fall(why);
       return;
     }
-    ride.speed = Math.hypot(a.vDown, a.vLeft) * (blow > 9 ? 0.9 : 1);
-    ride.way = Math.atan2(a.vLeft, a.vDown);
-    ride.out = g.h;
-    ride.rising = 0;
+    // (Going on as it was going, along the snow: what of its going was into the snow is taken up in the landing.)
+    const along_ = a.v.clone().addScaledVector(up, -into);
+    ride.speed = along_.length() * (blow > 9 ? 0.9 : 1);
+    ride.way = Math.atan2(along_.dot(runLeft(here)), along_.dot(runDir(here)));
+    ride.y = ground(ride.x, ride.z);
+    ride.vy = risingHere();
+    ride.out = bumpAt(ride.x, ride.z);
     ride.absorb = clamp(0.35 + blow / 10, 0, 1);
     ride.settle = { spin: a.spin - a.spinTo, flip: a.flip - a.flipTo, left: 0.25 };
     if (a.kind !== 'hop') tell(a.name, `${far.toFixed(0)} m, ${a.t.toFixed(1)} s in the air`, false, 2.6);
@@ -547,7 +596,7 @@ async function start() {
 
   /** Goes limp: the body goes on as it was going, turning as it was turning, from where its joints were. */
   const fall = (why: string) => {
-    const bodies = skier.bodies(), now = bodies.map((b) => b.joints()), going = along(ride.way);
+    const bodies = skier.bodies(), now = bodies.map((b) => b.joints()), going = along(ride.way, here);
     crash = {
       dolls: bodies.map((body, i) => {
         let before = jointsBefore?.[i] ?? now[i];
@@ -567,9 +616,25 @@ async function start() {
     reflect();
   };
 
+  /** How fast the skier rises going on along the snow as it lies where the skier is (falls, going down it). */
+  const risingHere = () => {
+    const go = along(ride.way, here), [gx, gz] = slopeAt(ride.x, ride.z, 1), rise = gx * go.x + gz * go.z;
+    return (ride.speed * rise) / Math.hypot(1, rise);
+  };
+  /** Puts the skier at `down` along the run and `left` across it, on the snow, going on as the snow lies there. */
+  const putAt = (down: number, left: number) => {
+    const p = land.at(down, left);
+    ride.x = p.x; ride.z = p.z;
+    here = land.frame(p.x, p.z, down);
+    ride.down = here.s; ride.left = here.left;
+    ride.y = ground(p.x, p.z);
+    ride.vy = risingHere();
+  };
   /** The run again from the top, going a little. */
   const restart = () => {
-    Object.assign(ride, { down: 0, left: 0, way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, rising: 0, absorb: 0, skid: 0 });
+    Object.assign(ride, { way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, absorb: 0, skid: 0, ended: false });
+    here = land.frame(0, 0);
+    putAt(0, 0);
     ride.settle = { spin: 0, flip: 0, left: 0 };
     Object.assign(ask, { x: 0, y: 0 });
     air = null; crash = null; joints = jointsBefore = null;
@@ -585,16 +650,14 @@ async function start() {
   const stepAir = (dt: number): Now => {
     const a = air!;
     a.t += dt;
-    const v = Math.hypot(a.vDown, a.vLeft);
-    a.vDown += (ALONG - 0.004 * v * a.vDown) * dt;
-    a.vLeft -= 0.004 * v * a.vLeft * dt;
-    ride.rising -= INTO * dt;
-    ride.down += a.vDown * dt;
-    ride.left = clamp(ride.left + a.vLeft * dt, -31, 31);
-    ride.out += ride.rising * dt;
+    const v = a.v.length();
+    a.v.y -= G * dt;
+    a.v.addScaledVector(a.v, -0.004 * v * dt);
+    ride.x += a.v.x * dt; ride.y += a.v.y * dt; ride.z += a.v.z * dt;
+    keepOn();
     ride.time += dt;
     // Opening up to land, the last few tenths of a second before the snow; a tighter tuck turns it quicker, opening out slower.
-    const left = timeToSnow(ride.out - groundAt(ride.down, ride.left).h, ride.rising), open = a.kind === 'hop' ? 0 : 1 - smooth(left / 0.4);
+    const left = timeToSnow(new Vector3(ride.x, ride.y, ride.z), a.v), open = a.kind === 'hop' ? 0 : 1 - smooth(left / 0.4);
     const quick = (1 + 0.45 * Math.max(0, ask.y) - 0.35 * Math.max(0, -ask.y)) * (1 - 0.5 * open);
     const turned = (now: number, to: number, rate: number) => {
       const short = to - now;
@@ -604,16 +667,19 @@ async function start() {
     };
     a.flip = turned(a.flip, a.flipTo, 1.0);
     a.spin = turned(a.spin, a.spinTo, 1.35);
-    ride.facing += (ride.way - ride.facing) * ease(dt, 6);
+    const way = Math.atan2(a.v.dot(runLeft(here)), a.v.dot(runDir(here)));
+    ride.way = way;
+    ride.facing += (way - ride.facing) * ease(dt, 6);
     ride.flickL = ride.flickR = 0;
     skier.air({
       tuck: Math.max(0, ask.y), flight: a.kind === 'flight' ? smooth(a.t / 0.3) : 0, open,
       throw: a.kind === 'flip' ? 1 - smooth(a.t / 0.35) : 0, wrap: a.spinTo ? smooth(a.t / 0.2) : 0, ski: ride.way - ride.facing, spin: a.spin, flip: a.flip,
     });
-    standAt(ride.down, ride.left, ride.facing, ride.out, a.nose * (1 - smooth(a.t / (0.75 * a.T))));
+    // (Upright to the land under it, smoothed over some metres; its nose up as it left the lip, coming level over the flight.)
+    standAt(new Vector3(ride.x, ride.y, ride.z), normalAt(ride.x, ride.z, 1.5), ride.facing, here, a.nose * (1 - smooth(a.t / (0.75 * a.T))));
     keepJoints(dt);
-    if (ride.out <= groundAt(ride.down, ride.left).h) land();
-    return { down: ride.down, left: ride.left, speed: v, way: Math.atan2(a.vLeft, a.vDown), ski: ride.way, skid: 0, tuck: ride.tuck, brake: 0 };
+    if (ride.y <= ground(ride.x, ride.z)) land_();
+    return { down: here.s, left: here.left, speed: Math.hypot(a.v.x, a.v.z), way, ski: ride.way, skid: 0, tuck: ride.tuck, brake: 0 };
   };
 
   /** Gone limp, a step on. */
@@ -621,8 +687,8 @@ async function start() {
     const was = fallenAt();
     for (const { body, doll } of crash!.dolls) { doll.step(dt); body.poseJoints(doll.joints()); }
     ride.time += dt;
-    const at = fallenAt(), went = at.clone().sub(was);
-    return { down: at.dot(FALL), left: at.dot(LEFT), speed: went.length() / dt, way: ride.way, ski: ride.way, skid: 0, tuck: 0, brake: 0 };
+    const at = fallenAt(), went = at.clone().sub(was), f = land.frame(at.x, at.z, ride.down);
+    return { down: f.s, left: f.left, speed: went.length() / dt, way: ride.way, ski: ride.way, skid: 0, tuck: 0, brake: 0 };
   };
   /** Where what has fallen is, for the view to follow: the first of its bodies (a horse, not the rider thrown from it). */
   const fallenAt = () => crash!.dolls[0].doll.middle().clone();
@@ -633,7 +699,8 @@ async function start() {
     easeAsk(dt);
     if (crash) return stepFallen(dt);
     if (air) return stepAir(dt);
-    const braking = want.brake || want.brakeKey;
+    // (At the foot of the run it brakes to a stop by itself.)
+    const braking = want.brake || want.brakeKey || ride.ended;
     if (braking && ride.brake < 0.05) ride.brakeSide = Math.sign(ride.way || ride.lean) || 1;
     ride.brake += ((braking ? 1 : 0) - ride.brake) * ease(dt, 6);
     // Turning: quicker the faster (a carving ski holds its own curve, some twenty metres across at speed), if never too slowly to come
@@ -645,29 +712,32 @@ async function start() {
     const turning = -ask.x * clamp(ride.speed / 9, 0.5, 1.2) * (1 - 0.35 * ride.tuck) * (1 - ride.brake) * (1 + 0.6 * ride.skid);
     const pivot = Math.sign(turning) * SKID_TURN * ride.skid;
     ride.way = clamp(ride.way + turning * dt, -1.9, 1.9);
-    // The piste's edges, its poles thirty metres out: turned back towards the middle near them, and kept off the trees.
-    if (Math.abs(ride.left) > 25 && Math.sign(ride.way) === Math.sign(ride.left)) ride.way -= Math.sign(ride.way) * Math.min(Math.abs(ride.way), dt * 2.2);
-    // Its speed: its weight down the slope as much as its skis point down it, less the snow's friction, the air's drag (much less
-    // tucked, more standing tall), a little lost to every turn, and a great deal to braking; and, going up a kicker, its weight back
-    // down the ramp.
-    const g0 = groundAt(ride.down, ride.left), nose = Math.atan(g0.dDown * Math.cos(ride.way) + g0.dLeft * Math.sin(ride.way));
+    // The run's edges, its poles four metres in from where its snow ends: turned back towards the middle near them, and kept off them.
+    if (Math.abs(ride.left) > land.half - 14 && Math.sign(ride.way) === Math.sign(ride.left)) ride.way -= Math.sign(ride.way) * Math.min(Math.abs(ride.way), dt * 2.2);
+    // Its speed: its weight pulling it down the snow as much as the snow falls the way it goes, less the snow's friction (its weight
+    // into the snow), the air's drag (much less tucked, more standing tall), a little lost to every turn, and a great deal to braking.
+    // (Going up a kicker, or a rise, its weight pulls it back.)
+    const go = along(ride.way, here), [gx, gz] = slopeAt(ride.x, ride.z), rise = gx * go.x + gz * go.z, level = 1 / Math.hypot(1, rise);
+    // (How steeply a kicker under it rises over the land, from just behind: not across its lip, to its steep back.)
+    const into = G / Math.hypot(1, gx, gz), e = 0.3;
+    const nose = Math.atan((bumpAt(ride.x, ride.z) - bumpAt(ride.x - go.x * e, ride.z - go.z * e)) / e);
     const drag = 0.0065 + (0.0037 - 0.0065) * ride.tuck + (0.012 - 0.0065) * ride.tall;
-    const pull = ALONG * Math.cos(ride.way) - 0.04 * INTO - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - 6 * Math.abs(Math.sin(pivot)) - INTO * Math.sin(nose);
+    const pull = -G * rise * level - 0.04 * into - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - 6 * Math.abs(Math.sin(pivot));
     ride.speed = Math.max(0, ride.speed + pull * dt);
-    ride.down += ride.speed * Math.cos(nose) * Math.cos(ride.way) * dt;
-    ride.left = clamp(ride.left + ride.speed * Math.cos(nose) * Math.sin(ride.way) * dt, -31, 31);
+    ride.x += go.x * ride.speed * level * dt; ride.z += go.z * ride.speed * level * dt;
+    keepOn();
     ride.time += dt;
-    // Over the snow as high as the snow is; unless it falls away faster than the skier's weight can bring it down after it, and the
-    // skier leaves it.
-    const g1 = groundAt(ride.down, ride.left), thrown = ride.out + ride.rising * dt - 0.5 * INTO * dt * dt;
-    if (g1.h < thrown - 1e-4) {
-      ride.out = thrown;
-      ride.rising -= INTO * dt;
-      takeOff(nose);
+    // On the snow as high as the snow is; unless it falls away faster than the skier's weight can bring it down after it (by more than
+    // the snow gives underfoot), and the skier leaves it, rising as it was over its last step (up a kicker's ramp, off its lip).
+    const g1 = ground(ride.x, ride.z), thrown = ride.y + ride.vy * dt - 0.5 * G * dt * dt;
+    if (g1 < thrown - 0.03) {
+      ride.y = thrown;
+      takeOff(go.clone().multiplyScalar(ride.speed * level).setY(ride.vy - G * dt), nose);
       return stepAir(0);
     }
-    ride.rising = (g1.h - ride.out) / dt;
-    ride.out = g1.h;
+    ride.vy = (g1 - ride.y) / dt;
+    ride.y = g1;
+    ride.out = bumpAt(ride.x, ride.z);
     // The lean into the turn that speed and turning ask, as `makeDownhillRun` reckons it; and the inside pole flicked as a turn begins.
     const lean = clamp(Math.atan((ride.speed * turning) / G) / ((48 * Math.PI) / 180), -1.3, 1.3) * (1 - ride.brake) * (1 - 0.4 * ride.skid);
     ride.lean += (lean - ride.lean) * ease(dt, 10);
@@ -688,8 +758,11 @@ async function start() {
       s: ride.lean, ski: ski - ride.facing, tuck: ride.tuck, brake: ride.brake, tall: ride.tall, flickL: bump(ride.flickL), flickR: bump(ride.flickR),
       absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid,
     });
-    standAt(ride.down, ride.left, ride.facing, ride.out, nose);
+    // (Upright to the snow under it, smoothed over half a metre, as skis bridge what is smaller.)
+    standAt(new Vector3(ride.x, ride.y, ride.z), normalAt(ride.x, ride.z, 0.5), ride.facing, here);
     keepJoints(dt);
+    // At the foot of a world's run: brought to a stop there.
+    if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${(land.length / 1000).toFixed(2)} km in ${ride.time.toFixed(0)} s · Restart run, or Enter`, false, 1e9); }
     return { down: ride.down, left: ride.left, speed: ride.speed, way: ride.way, ski, skid: Math.abs(Math.sin(ski - ride.way)), tuck: ride.tuck, brake: ride.brake };
   };
   /** What the ridden skier is doing, in words. */
@@ -697,7 +770,7 @@ async function start() {
     if (crash) return stillFor() > 0.5 ? 'Down in the snow' : 'Tumbling';
     if (air) return air.kind === 'hop' ? 'In the air' : `${air.name}…`;
     if (ride.brake > 0.5) return who === 'person' ? 'Braking' : 'Sliding stop';
-    if (ride.speed < 0.5) return 'Standing';
+    if (ride.speed < 0.5) return ride.ended ? 'At the foot of the run' : 'Standing';
     if (ride.out > 0.05) return 'Up the kicker';
     const turn = Math.abs(ask.x) > 0.15 ? (ask.x < 0 ? 'turning left' : 'turning right') : '';
     if (ride.skid > 0.5) return `${ride.tuck > 0.5 ? 'Tucked, skidding' : 'Skidding'} ${turn.split(' ')[1]}`;
@@ -720,6 +793,28 @@ async function start() {
   const whos: [string, Who][] = [['Person', 'person'], ['Horse', 'horse'], ['Horse & rider', 'mounted']];
   const skiSets: [string, HorseSkis, string][] = [['Two long', 'pair', 'A long ski under each side, the fore and hind hooves bound to it'], ['Four short', 'four', 'A short ski under each hoof']];
   const whoButtons = whos.map(([label, w]) => button('skiers', label, () => setSkier(w)));
+  // The land: the world's run, or the groomed slope; changed where the skier is, the watched run laid on the new land and riding
+  // begun again from its top.
+  const landKinds: [string, LandKind, string][] = [['World run', 'world', `A run down the game's world, ${world}`], ['Groomed', 'groomed', 'A groomed slope at sixteen degrees, going on for ever']];
+  const landButtons = landKinds.map(([label, k, title]) => button('lands', label, () => { void setLand(k); }, title));
+  const setLand = async (kind: LandKind) => {
+    if (kind === landKind) return;
+    $('status').hidden = false;
+    $('status').textContent = kind === 'world' ? `Laying the snow on the run in ${world}…` : 'Making the run…';
+    await new Promise((r) => setTimeout(r, 30));
+    const next = await landOf(kind);
+    $('status').hidden = true;
+    showKickers(false);
+    for (const k of kickerAt.values()) if (k?.group) { k.group.removeFromParent(); k.group = undefined; }
+    kickerAt.clear();
+    landKind = kind;
+    land = next;
+    showLand();
+    layWatchTracks();
+    if (mode === 'ride') { showKickers(true); restart(); } else { placed = false; clearSpray(); }
+    try { history.replaceState(null, '', kind === 'groomed' ? '#groomed' : location.pathname + location.search); } catch { /* (not where the page may not change its address) */ }
+    reflect();
+  };
   const skiButtons = skiSets.map(([label, k, title]) => button('skisets', label, () => setSkier(who, k), title));
   const rateButtons = rates.map(([label, r]) => button('rates', label, () => { rate = r; reflect(); }));
   const viewButtons = views.map(([label, v, key]) => button('views', label, () => setView(v), `${label} (${key})`));
@@ -744,7 +839,9 @@ async function start() {
     whoButtons.forEach((b, i) => b.classList.toggle('on', whos[i][1] === who));
     skiButtons.forEach((b, i) => b.classList.toggle('on', skiSets[i][1] === horse.skis));
     $('skisets').hidden = who === 'person';
-    $('name').textContent = ['Downhill run', { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
+    $('name').textContent = ['Downhill run', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
+    landButtons.forEach((b, i) => b.classList.toggle('on', landKinds[i][1] === landKind));
+    $('of').textContent = land.length === Infinity ? '' : ` of ${land.length.toFixed(0)}`;
     document.body.classList.toggle('riding', mode === 'ride');
   };
   $('play').onclick = () => { playing = !playing; reflect(); };
@@ -755,16 +852,20 @@ async function start() {
     if (m === 'ride') {
       // Ridden from where the watched run had got to, going as it went.
       const s = sampleAt(t);
-      Object.assign(ride, { down: s.down, left: s.left, way: s.way, speed: s.speed, facing: 0, tuck: s.tuck, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0 });
+      Object.assign(ride, { way: s.way, speed: s.speed, facing: 0, tuck: s.tuck, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, ended: false });
       Object.assign(ask, { x: 0, y: s.tuck });
       Object.assign(want, { x: 0, y: s.tuck, brake: false, brakeKey: false });
       showWatchTracks(null);
       clearRideTracks();
       playing = true;
       showKickers(true);
-      // (Not to begin in a kicker's snow, if the watched run had got to where one stands.)
-      ride.out = groundAt(ride.down, ride.left).h;
-      ride.rising = ride.absorb = ride.skid = 0;
+      // (On the snow where the watched run had got to; on a kicker's, if one stands there.)
+      putAt(s.down, s.left);
+      placeKickers(ride.down);
+      ride.y = ground(ride.x, ride.z);
+      ride.vy = risingHere();
+      ride.out = bumpAt(ride.x, ride.z);
+      ride.absorb = ride.skid = 0;
       ride.settle = { spin: 0, flip: 0, left: 0 };
     } else { clearRideTracks(); showKickers(false); }
     air = null; crash = null; joints = jointsBefore = null;
@@ -788,7 +889,7 @@ async function start() {
     seat();
     joints = jointsBefore = null;
     if (mode === 'ride' && crash) restart();
-    if (air) { air = null; ride.out = groundAt(ride.down, ride.left).h; ride.rising = 0; }
+    if (air) { air = null; ride.y = ground(ride.x, ride.z); ride.vy = risingHere(); }
     layWatchTracks();
     clearRideTracks();
     clearSpray();
@@ -847,29 +948,34 @@ async function start() {
   // rate, twice over: some twelve metres at speed, so that from beside and above the skier ran ahead of the picture.) Riding, behind
   // and above look most of the way along the way it goes.
   let placed = false;
-  const eyeOff = new Vector3(), lookOff = new Vector3(), lastRider = new Vector3(), ahead = FALL.clone();
+  const eyeOff = new Vector3(), lookOff = new Vector3(), lastRider = new Vector3(), ahead = new Vector3(0, 0, 1);
   let across = 0;
   /** Where the view is about: the skier's feet, or, gone limp, the snow under its hips. */
-  const focus = () => { if (!crash) return rider.position.clone(); const p = fallenAt(); return onSlope(p.dot(FALL), p.dot(LEFT)); };
+  const focus = () => { if (!crash) return rider.position.clone(); const p = fallenAt(); return p.setY(ground(p.x, p.z)); };
+  /** A point on the snow, or so far over it. */
+  const over = (p: Vector3, up: number) => p.setY(ground(p.x, p.z) + up);
   const placeView = (now: Now, dt: number) => {
-    const at = focus();
+    const at = focus(), f = land.at(now.down, 0);
     across += ((mode === 'ride' ? 1 : 0.35) * now.left - across) * (placed ? ease(dt, 3) : 1);
-    const follow = onSlope(now.down, across);
-    ahead.lerp(mode === 'ride' ? FALL.clone().lerp(along(now.way), 0.65).normalize() : FALL, placed ? ease(dt, 2) : 1).normalize();
+    const p = land.at(now.down, across), follow = new Vector3(p.x, at.y, p.z), down = runDir(f), aside = runLeft(f);
+    ahead.lerp(mode === 'ride' ? down.clone().lerp(along(now.way, f), 0.65).normalize() : down, placed ? ease(dt, 2) : 1).setY(0).normalize();
     if (view === 'free') {
-      if (!placed) { camera.position.copy(at).addScaledVector(UP, 3).addScaledVector(LEFT, 6).addScaledVector(FALL, -6); controls.target.copy(at); }
+      if (!placed) { camera.position.copy(at).addScaledVector(UP, 3).addScaledVector(aside, 6).addScaledVector(down, -6); controls.target.copy(at); }
       else camera.position.add(at.clone().sub(lastRider));
       controls.target.copy(at).addScaledVector(UP, 0.9);
       controls.update();
     } else {
+      // (Each kept over the snow where it is: on a world's land the snow behind and beside the skier can lie well above it.)
       const wantAt = new Vector3(), aim = new Vector3();
-      if (view === 'behind') { wantAt.copy(follow).addScaledVector(ahead, -9).addScaledVector(UP, 3.4); aim.copy(follow).addScaledVector(ahead, 6).addScaledVector(UP, 0.6); }
-      else if (view === 'beside') { wantAt.copy(follow).addScaledVector(LEFT, 11).addScaledVector(FALL, 1.5).addScaledVector(UP, 1.8); aim.copy(at).addScaledVector(UP, 0.9); }
+      if (view === 'behind') { over(wantAt.copy(follow).addScaledVector(ahead, -9), 3.4); over(aim.copy(follow).addScaledVector(ahead, 6), 0.6); wantAt.y = Math.max(wantAt.y, at.y + 1.6); }
+      else if (view === 'beside') { over(wantAt.copy(follow).addScaledVector(aside, 11).addScaledVector(down, 1.5), 1.8); wantAt.y = Math.max(wantAt.y, at.y + 0.8); aim.copy(at).addScaledVector(UP, 0.9); }
       // (From above, looking a little behind the skier, so that it is in the upper part of the picture with its tracks below it.)
-      else { wantAt.copy(follow).addScaledVector(UP, 32).addScaledVector(ahead, -5); aim.copy(follow).addScaledVector(ahead, -5); camera.up.copy(ahead); }
+      else { wantAt.copy(follow).addScaledVector(ahead, -5).setY(at.y + 32); aim.copy(follow).addScaledVector(ahead, -5).setY(at.y); camera.up.copy(ahead); }
       eyeOff.lerp(wantAt.sub(at), placed ? ease(dt, 5) : 1);
       lookOff.lerp(aim.sub(at), placed ? ease(dt, 6) : 1);
       camera.position.copy(at).add(eyeOff);
+      // (Never under the snow, whatever the easing has done.)
+      camera.position.y = Math.max(camera.position.y, ground(camera.position.x, camera.position.z) + 0.6);
       camera.lookAt(at.clone().add(lookOff));
     }
     lastRider.copy(at);
@@ -909,6 +1015,7 @@ async function start() {
         if (t >= RUN_LENGTH) { t = 0; clearSpray(); placed = false; }
       }
       at = watchPose(t);
+      here = { ...land.at(at.down, at.left), s: at.down, left: at.left };
       showWatchTracks(t);
       stepSpray(playing && !scrubbing ? dt * rate : 0, playing && !scrubbing ? at : null);
       const part = RUN_PARTS.find((p) => t >= p.from && t < p.to) ?? RUN_PARTS[RUN_PARTS.length - 1];
@@ -919,8 +1026,8 @@ async function start() {
     } else {
       // (Stepped in small steps, so that a slow frame does not throw the skier off its line.)
       const steps = playing ? Math.ceil(dt / (1 / 120)) : 0;
-      const p = focus();
-      at = { down: p.dot(FALL), left: p.dot(LEFT), speed: crash ? 0 : ride.speed, way: ride.way, ski: ride.way, skid: 0, tuck: ride.tuck, brake: ride.brake };
+      const p = focus(), f = land.frame(p.x, p.z, ride.down);
+      at = { down: f.s, left: f.left, speed: crash ? 0 : ride.speed, way: ride.way, ski: ride.way, skid: 0, tuck: ride.tuck, brake: ride.brake };
       for (let i = 0; i < steps; i++) at = stepRide(dt / steps);
       const onSnow = !air && !crash;
       if (playing && onSnow) layRide(at);
@@ -931,12 +1038,13 @@ async function start() {
       document.body.classList.toggle('hinted', ride.time > 12);
       showPad();
     }
-    keepSlopeAbout(at.down, at.left);
+    land.keepAbout(rider.position.x, rider.position.z);
+    if (kickersOn) placeKickers(at.down);
     placeView(at, dt);
     reinsNow();
     showTold();
     $('speed').textContent = (at.speed * 3.6).toFixed(0);
-    $('down').textContent = at.down.toFixed(0);
+    $('down').textContent = Math.max(0, at.down).toFixed(0);
     await renderer.renderAsync(scene, camera);
     requestAnimationFrame(frame);
   };
@@ -949,9 +1057,14 @@ async function start() {
     step: (seconds: number) => { let at: Now | null = null; for (let i = 0; i < Math.round(seconds * 120); i++) at = stepRide(1 / 120); if (at && !air && !crash) layRide(at); placed = false; return { ...ride }; },
     // (Riding: what is happening in the air or on the ground, the kickers, and to put the skier anywhere going anyhow.)
     state: () => ({ air: air && { ...air }, crash: crash && { why: crash.why, still: stillFor(), at: fallenAt().toArray(), bodies: crash.dolls.map((d) => d.doll.middle().toArray()) }, told: { ...told } }),
-    kicker: (i: number) => ({ down: KICK.first + i * KICK.every, left: kickerLeft(i), length: KICK.length }),
-    put: (o: Partial<typeof ride>) => { Object.assign(ride, o); placed = false; },
+    // (The `i`th kicker that stands, counting from the top; and where the skier is put, by how far down the run and across it.)
+    kicker: (i: number) => { const all = Array.from({ length: 60 }, (_, k) => kickerOf(k)).filter((k): k is Kicker => !!k && k.s < land.length); const k = all[i] ?? all[0]; return { down: k.s, left: k.left, length: KICK.length }; },
+    put: (o: Partial<typeof ride>) => { Object.assign(ride, o); if (o.down !== undefined || o.left !== undefined) { putAt(ride.down, ride.left); placeKickers(ride.down); ride.y = ground(ride.x, ride.z); ride.vy = risingHere(); } placed = false; },
+    land: () => ({ name: land.name, length: land.length, half: land.half, about: land.about }),
     setSkier: (w: Who, skis?: HorseSkis) => setSkier(w, skis), who: () => who,
+    // (What was drawn in the last frame.)
+    drawn: () => ({ triangles: renderer.info.render.triangles, calls: renderer.info.render.drawCalls }),
+    setLand: (k: LandKind) => setLand(k),
     restart, time: () => t, ready: true, run,
   };
   requestAnimationFrame(frame);

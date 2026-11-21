@@ -10,7 +10,8 @@
 //   node tools/buildingLabPage.mjs [out.html] [--fragment] [--figures-beside]      (by default dist/building-lab.html, a whole document)
 //
 // Another lab page the same way: `--page lab/slope.html`, with only the figures' files it needs, `--only clips.glb,superhero-male.glb`
-// (the clips, and the base man the slope's adventurer is dressed on).
+// (the clips, and the base man the slope's adventurer is dressed on); and its slices of the world (`public/slopes/`), beside it in a
+// folder `slopes/` with `--figures-beside`, else in it.
 import { build } from 'vite';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,9 +49,18 @@ try {
     mkdirSync(join(dirname(out), 'figures'), { recursive: true });
     for (const f of glbs) writeFileSync(join(dirname(out), 'figures', `${f}.txt`), readFileSync(join(figures, f)).toString('base64'));
   }
-  const carried = beside
+  let carried = beside
     ? `window.__figureBase = 'figures/'; window.__figureText = true;`
     : `window.__figureFiles = ${JSON.stringify(Object.fromEntries(glbs.map((f) => [f, readFileSync(join(figures, f)).toString('base64')])))};`;
+  // The downhill run's slices of the world (`public/slopes/`, made by `tools/skiRun.ts`): beside it in a folder `slopes/`, or in it.
+  if (page === 'lab/slope.html') {
+    const slopes = join(root, 'public/slopes'), runs = readdirSync(slopes).filter((f) => f.endsWith('.json'));
+    if (beside) {
+      mkdirSync(join(dirname(out), 'slopes'), { recursive: true });
+      for (const f of runs) writeFileSync(join(dirname(out), 'slopes', f), readFileSync(join(slopes, f)));
+      carried += ` window.__slopeBase = 'slopes/';`;
+    } else carried += ` window.__slopeFiles = ${JSON.stringify(Object.fromEntries(runs.map((f) => [f, readFileSync(join(slopes, f), 'utf8')])))};`;
+  }
   // The script goes last, after the elements it looks for.
   html = html.replace('</body>', () => `<script>${carried}</script>\n<script type="module">${code}</script>\n</body>`);
   if (fragment) {

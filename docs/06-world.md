@@ -676,6 +676,19 @@ leaves both the game and the walk working:
    (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
 6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.
 
+## A ski run in winter
+
+Asked, of the downhill run's page (`lab/slope.html`): "a 100m wide nearland slice of our actual winter gameworld starting on high
+slopes at suitable location, no buildings or locations"; and, earlier, that skiing, by people and by horses, is heading for "the
+world game winter mountains and hills". A run is found in a world (`src/core/skiRun.ts`, `npx tsx tools/skiRun.ts w2 [folder]`) and
+its slice kept for the page (`src/core/skiSlice.ts`, `public/slopes/w2.json`): the world's near land at a metre as the walk page
+makes it, under snow, fifty metres either side of the run's line, and the land and country about it coarser. What the search showed
+of the world's land: its range is walls, at 200 to 500 metres seven tenths or more of it steeper than 36 degrees over sixteen metres,
+its glens floored flat, its tops rounded but narrow; nowhere in the range does a band a hundred metres broad stay skiable for long, and
+the run found in `w2` starts at the range's foot, at 319 metres, and crosses the upland to the sea. A world with skiable mountains
+would want its range worn into broader shoulders and cirques, or the run allowed to be narrower high up. The page does not stream the
+world; it is a slice, made once, of the land as it is now, and is made again when the land changes (`plan`, item 74).
+
 ## Where next: the land, and places that fit it
 
 Asked: "do we need better noise/fractal/erosion algorithm for terrain? also we should adapt the

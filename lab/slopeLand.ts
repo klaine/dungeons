@@ -1,0 +1,340 @@
+/**
+ * What the downhill run is skied on (`lab/slope.ts`): a land, with the snow's height at any point, the run's line through it (how far
+ * along the run a point is and how far to its left), and what is seen of it.
+ *
+ * Two lands. The groomed slope the page began with: a plane falling at sixteen degrees, going on as far as it is ridden, firs either
+ * side and its edges marked with poles. And a slice of a world (asked: "a 100m wide nearland slice of our actual winter gameworld
+ * starting on high slopes at suitable location, no buildings or locations"), found in it and kept by `tools/skiRun.ts`
+ * (`src/core/skiRun.ts`): the snow on the world's near land at a metre fifty metres either side of the run, the land about it at four
+ * metres and the country round about at sixteen, in winter: snow on all of it but where the ground is too steep for snow to lie, the
+ * lakes frozen, and snowy firs where the world has woods. Scene coordinates are the world's, less the run's top.
+ */
+import {
+  BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial,
+  PlaneGeometry, Quaternion, type Texture, Vector3,
+} from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Rng } from '../src/core/rng';
+import { type Grid, gridAt, type SkiSlice } from '../src/core/skiSlice';
+
+/** Where a point lies against the run: how far along it (`s`), how far to its left (`left`), and which way the run goes there. */
+export interface Frame { s: number; left: number; dx: number; dz: number }
+
+export interface Land {
+  /** What it is called (and shortly), and what the run is like, for the page to say. */
+  name: string; short: string; about: string;
+  /** How long the run is, horizontally (`Infinity` for one that goes on); how far either side of its line it may be skied. */
+  length: number; half: number;
+  /** The snow's height at a point of the scene. */
+  height(x: number, z: number): number;
+  /** Where a point lies against the run; `hint`, the `s` of a point near it, makes it quicker. */
+  frame(x: number, z: number, hint?: number): Frame;
+  /** The point `s` along the run and `left` to its left, and which way the run goes there. */
+  at(s: number, left: number): { x: number; z: number; dx: number; dz: number };
+  /** Whether a kicker may be built with its foot at (`s`, `left`): the land after its lip falls away enough to land on. */
+  kickable(s: number, left: number, length: number): boolean;
+  /** What is seen of it, and keeping that about a point as it moves (the groomed slope's goes on with the skier). */
+  group: Group;
+  keepAbout(x: number, z: number): void;
+  /** How far the air's haze begins and is whole. */
+  fog: [number, number];
+}
+
+const smooth01 = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c * c * (3 - 2 * c); };
+
+// ------------------------------------------------------------------------------------------------------------------- the groomed slope
+
+/** The groomed slope: a plane falling at sixteen degrees down +z, going on as far as it is ridden. */
+export function groomedLand(snowMap: Texture): Land {
+  const ANGLE = (16 * Math.PI) / 180, tan = Math.tan(ANGLE);
+  const FALL = new Vector3(0, -Math.sin(ANGLE), Math.cos(ANGLE)), LEFT = new Vector3(1, 0, 0);
+  const onSlope = (down: number, left: number) => new Vector3().addScaledVector(FALL, down).addScaledVector(LEFT, left);
+  const group = new Group();
+  // The snow: a sheet moved along under the skier by whole tiles of its picture (nine metres), so that the slope goes on.
+  const W = 252, L = 720, map = snowMap.clone();
+  map.repeat.set(W / 9, L / 9);
+  map.needsUpdate = true;
+  const snow = new Mesh(new PlaneGeometry(W, L), new MeshStandardMaterial({ color: 0xffffff, map, roughness: 0.92 }));
+  snow.geometry.rotateX(-Math.PI / 2).rotateX(ANGLE);
+  snow.receiveShadow = true;
+  group.add(snow);
+  // Beside the piste, firs on both sides and its edges marked with poles every twenty-five metres: a stretch of 300 metres of them,
+  // laid three times, one after another, about wherever the skier is.
+  const TILE = 300, tiles: Group[] = [];
+  {
+    const rng = new Rng('woods'), trees: Matrix4[] = [];
+    for (let down = 0; down < TILE; down += rng.range(3, 7)) for (const side of [-1, 1]) {
+      if (rng.chance(0.25)) continue;
+      const h = rng.range(5, 11), left = side * rng.range(36, 100);
+      trees.push(new Matrix4().compose(onSlope(down, left).add(new Vector3(0, h * 0.42, 0)), new Quaternion(), new Vector3(h * 0.34, h, h * 0.34)));
+    }
+    const marks: Matrix4[] = [];
+    for (let down = 0; down < TILE; down += 25) for (const side of [-1, 1]) marks.push(new Matrix4().compose(onSlope(down, side * 30).add(new Vector3(0, 0.75, 0)), new Quaternion(), new Vector3(1, 1, 1)));
+    const firShape = new ConeGeometry(1, 1, 9), firPaint = new MeshStandardMaterial({ color: 0x24402f, roughness: 0.9 });
+    for (let k = 0; k < 3; k++) {
+      const fir = new InstancedMesh(firShape, firPaint, trees.length), poles = new InstancedMesh(POLE, POLE_PAINT, marks.length);
+      trees.forEach((m, i) => fir.setMatrixAt(i, m));
+      marks.forEach((m, i) => poles.setMatrixAt(i, m));
+      fir.castShadow = true;
+      // (Moved as a whole: what is in it is not where its bounds were worked out.)
+      fir.frustumCulled = poles.frustumCulled = false;
+      const tile = new Group();
+      tile.add(fir, poles);
+      group.add(tile);
+      tiles.push(tile);
+    }
+  }
+  return {
+    name: 'Groomed slope', short: 'groomed', about: 'a groomed slope at sixteen degrees', length: Infinity, half: 31,
+    height: (_x, z) => -z * tan,
+    frame: (x, z) => ({ s: z, left: x, dx: 0, dz: 1 }),
+    at: (s, left) => ({ x: left, z: s, dx: 0, dz: 1 }),
+    kickable: () => true,
+    group,
+    keepAbout: (x, z) => {
+      const down = z / Math.cos(ANGLE);
+      snow.position.copy(onSlope(Math.round(down / 45) * 45 + 220, Math.round(x / 45) * 45));
+      const first = Math.floor(down / TILE) * TILE - TILE;
+      tiles.forEach((tile, k) => tile.position.copy(onSlope(first + k * TILE, 0)));
+    },
+    fog: [90, 520],
+  };
+}
+
+/** A piste's edge marker: an orange pole. */
+const POLE = new CylinderGeometry(0.035, 0.035, 1.5, 6), POLE_PAINT = new MeshStandardMaterial({ color: 0xd9542b, roughness: 0.6 });
+
+// ----------------------------------------------------------------------------------------------------------------- a slice of a world
+
+/** What lies on the world's land (`COVER` in `src/core/world.ts`; the numbers it keeps, not the world's code, which the page does not need). */
+const COVER = { sea: 0, lake: 1, forest: 6 } as const;
+
+/** The land of a world's ski run (`SkiSlice`), its scene's origin at the run's top. */
+export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture): Land {
+  const [ox, oz] = slice.run.points[0], step = slice.run.step;
+  const line = slice.run.points.map(([x, z]) => [x - ox, z - oz] as [number, number]), n = line.length, length = (n - 1) * step;
+  // Each stretch of the line: where it starts and which way it goes.
+  const dirs = line.map((_, k) => {
+    const [ax, az] = line[Math.max(0, Math.min(n - 2, k))], [bx, bz] = line[Math.max(1, Math.min(n - 1, k + 1))], l = Math.hypot(bx - ax, bz - az) || 1;
+    return [(bx - ax) / l, (bz - az) / l] as [number, number];
+  });
+  const shift = (g: Grid): Grid => ({ ...g, x0: g.x0 - ox, z0: g.z0 - oz });
+  const snow = shift(slice.snow), near = shift(slice.near), far = shift(slice.far);
+
+  /** The snow at a metre on a smooth curve through the sixteen points about (Catmull and Rom's), where all of them are snow. */
+  const catmull = (p0: number, p1: number, p2: number, p3: number, t: number) => p1 + 0.5 * t * (p2 - p0 + t * (2 * p0 - 5 * p1 + 4 * p2 - p3 + t * (3 * (p1 - p2) + p3 - p0)));
+  const smoothSnow = (x: number, z: number): number => {
+    const fx = x - snow.x0, fz = z - snow.z0, i = Math.floor(fx), j = Math.floor(fz);
+    if (i < 1 || j < 1 || i > snow.nx - 3 || j > snow.nz - 3) return NaN;
+    const tx = fx - i, tz = fz - j, d = snow.data, w = snow.nx, rows: number[] = [];
+    for (let r = -1; r <= 2; r++) { const k = (j + r) * w + i; rows.push(catmull(d[k - 1], d[k], d[k + 1], d[k + 2], tx)); }
+    return catmull(rows[0], rows[1], rows[2], rows[3], tz);
+  };
+  const height = (x: number, z: number): number => {
+    let h = smoothSnow(x, z);
+    if (Number.isNaN(h)) h = gridAt(snow, x, z);
+    if (Number.isNaN(h)) h = gridAt(near, x, z);
+    if (Number.isNaN(h)) h = gridAt(far, x, z);
+    return Number.isNaN(h) ? 0 : h;
+  };
+
+  /** Where a point lies against the line: the nearest point on it, from the stretches about `hint` if given. */
+  const frame = (x: number, z: number, hint?: number): Frame => {
+    const k0 = hint === undefined ? 0 : Math.max(0, Math.floor(hint / step) - 16), k1 = hint === undefined ? n - 2 : Math.min(n - 2, Math.floor(hint / step) + 16);
+    let best = Infinity, out: Frame = { s: 0, left: 0, dx: dirs[0][0], dz: dirs[0][1] };
+    for (let k = k0; k <= k1; k++) {
+      const [ax, az] = line[k], [dx, dz] = dirs[k], rx = x - ax, rz = z - az;
+      // (Before the first stretch and past the last, the line goes on straight.)
+      let t = (rx * dx + rz * dz) / step;
+      if (k > 0) t = Math.max(0, t);
+      if (k < n - 2) t = Math.min(1, t);
+      const px = ax + dx * t * step, pz = az + dz * t * step, d = Math.hypot(x - px, z - pz);
+      if (d < best) { best = d; out = { s: (k + t) * step, left: (x - px) * dz - (z - pz) * dx, dx, dz }; }
+    }
+    return out;
+  };
+  const at = (s: number, left: number) => {
+    const k = Math.max(0, Math.min(n - 2, Math.floor(s / step))), t = s / step - k, [ax, az] = line[k], [dx, dz] = dirs[k];
+    const x = ax + dx * t * step, z = az + dz * t * step;
+    return { x: x + dz * left, z: z - dx * left, dx, dz };
+  };
+
+  // ---- What is seen.
+  const group = new Group(), rng = new Rng(`slice ${slice.world}`);
+  const snowWhite = new Color(0.94, 0.96, 0.99), rock = new Color(0.34, 0.33, 0.32), ice = new Color(0.78, 0.85, 0.9), sea = new Color(0.09, 0.15, 0.21);
+  const coverAt = (x: number, z: number) => {
+    const i = Math.round((x - far.x0) / far.cell), j = Math.round((z - far.z0) / far.cell);
+    return i < 0 || j < 0 || i >= far.nx || j >= far.nz ? COVER.sea : slice.cover[j * far.nx + i];
+  };
+  /**
+   * A grid made a mesh: a point for each of its heights (`lift` moving some down out of sight under a finer grid over them), a
+   * triangle pair for each square of four, its normals from the heights about each point, and its colour from how steep it is and
+   * what lies there; with a skirt hanging from its outer edges, so that no crack shows where it meets the grid under it.
+   */
+  const gridMesh = (g: Grid, lift: (x: number, z: number) => number, uv: (x: number, z: number) => [number, number], skirt: number, coloured: boolean) => {
+    const idx = new Int32Array(g.nx * g.nz).fill(-1), pos: number[] = [], nor: number[] = [], col: number[] = [], uvs: number[] = [], index: number[] = [];
+    const H = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? NaN : g.data[j * g.nx + i]);
+    const c = new Color();
+    for (let j = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++) {
+      const y = H(i, j);
+      if (Number.isNaN(y)) continue;
+      const x = g.x0 + i * g.cell, z = g.z0 + j * g.cell;
+      const l = H(i - 1, j), r = H(i + 1, j), u = H(i, j - 1), d = H(i, j + 1);
+      const gx = ((Number.isNaN(r) ? y : r) - (Number.isNaN(l) ? y : l)) / ((Number.isNaN(r) || Number.isNaN(l) ? 1 : 2) * g.cell);
+      const gz = ((Number.isNaN(d) ? y : d) - (Number.isNaN(u) ? y : u)) / ((Number.isNaN(d) || Number.isNaN(u) ? 1 : 2) * g.cell);
+      const nl = Math.hypot(gx, 1, gz);
+      idx[j * g.nx + i] = pos.length / 3;
+      pos.push(x, y + lift(x, z), z);
+      nor.push(-gx / nl, 1 / nl, -gz / nl);
+      const [a, b] = uv(x, z);
+      uvs.push(a, b);
+      if (coloured) {
+        // Snow, but where it is too steep to lie (bare rock) or on water (frozen, or the open sea).
+        const steep = Math.atan(Math.hypot(gx, gz)) * (180 / Math.PI), cv = coverAt(x, z);
+        if (cv === COVER.sea && y < 0.5) c.copy(sea);
+        else if (cv === COVER.lake) c.copy(ice);
+        else c.copy(snowWhite).lerp(rock, smooth01((steep - 36) / 12));
+        col.push(c.r, c.g, c.b);
+      }
+    }
+    const v = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? -1 : idx[j * g.nx + i]);
+    const whole = (i: number, j: number) => v(i, j) >= 0 && v(i + 1, j) >= 0 && v(i, j + 1) >= 0 && v(i + 1, j + 1) >= 0;
+    const hang = (a: number, b: number) => {
+      // (A strip down from the edge a–b, its normals as the edge's.)
+      const base = pos.length / 3;
+      for (const p of [a, b]) {
+        pos.push(pos[p * 3], pos[p * 3 + 1] - skirt, pos[p * 3 + 2]);
+        nor.push(nor[p * 3], nor[p * 3 + 1], nor[p * 3 + 2]);
+        uvs.push(uvs[p * 2], uvs[p * 2 + 1]);
+        if (coloured) col.push(col[p * 3], col[p * 3 + 1], col[p * 3 + 2]);
+      }
+      index.push(a, base, b, b, base, base + 1, a, b, base, b, base + 1, base);
+    };
+    for (let j = 0; j < g.nz - 1; j++) for (let i = 0; i < g.nx - 1; i++) {
+      if (!whole(i, j)) continue;
+      const a = v(i, j), b = v(i + 1, j), c2 = v(i, j + 1), d = v(i + 1, j + 1);
+      index.push(a, c2, b, b, c2, d);
+      if (skirt > 0) {
+        if (!whole(i, j - 1)) hang(a, b);
+        if (!whole(i, j + 1)) hang(c2, d);
+        if (!whole(i - 1, j)) hang(a, c2);
+        if (!whole(i + 1, j)) hang(b, d);
+      }
+    }
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+    geo.setAttribute('normal', new BufferAttribute(new Float32Array(nor), 3));
+    geo.setAttribute('uv', new BufferAttribute(new Float32Array(uvs), 2));
+    if (coloured) geo.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
+    geo.setIndex(index);
+    geo.computeBoundingSphere();
+    return geo;
+  };
+
+  // The run's snow at a metre, groomed: its corduroy laid along the run (each point's place against the line, found from the last's).
+  let hint = 0;
+  const pisteUv = (x: number, z: number): [number, number] => {
+    // (Found from the last point's place along the line; looked for along all of it if that seems to have lost the way.)
+    let f = frame(x, z, hint);
+    if (Math.abs(f.left) > slice.half + 2) f = frame(x, z);
+    hint = f.s;
+    return [f.left / 9, f.s / 9];
+  };
+  const pisteMap = snowMap.clone();
+  pisteMap.needsUpdate = true;
+  const piste = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, false), new MeshStandardMaterial({ color: 0xffffff, map: pisteMap, roughness: 0.92 }));
+  piste.receiveShadow = true;
+  group.add(piste);
+  // The land about it at four metres, sunk a little out of sight under the run's snow; and the country at sixteen, sunk out of sight
+  // under the land about the run. (Both drawn behind what lies over them where they meet, a little, so as not to flicker through it.)
+  const plainUv = (x: number, z: number): [number, number] => [x / 11, z / 11];
+  const underSnow = (x: number, z: number) => (Number.isNaN(gridAt(snow, x, z)) ? 0 : -1.2);
+  const nearBox = [near.x0, near.z0, near.x0 + (near.nx - 1) * near.cell, near.z0 + (near.nz - 1) * near.cell];
+  const underNear = (x: number, z: number) => (x > nearBox[0] + 24 && x < nearBox[2] - 24 && z > nearBox[1] + 24 && z < nearBox[3] - 24 ? -8 : 0);
+  const powder = (offset: number) => new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
+  const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true), powder(1));
+  about.receiveShadow = true;
+  const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 40, z / 40], 0, true), powder(2));
+  group.add(about, country);
+
+  // Its edges marked with poles every twenty-five metres, four metres in from where the run's snow ends.
+  const marks: Matrix4[] = [];
+  for (let s = 0; s <= length; s += 25) for (const side of [-1, 1]) {
+    const p = at(s, side * (slice.half - 4));
+    marks.push(new Matrix4().makeTranslation(p.x, height(p.x, p.z) + 0.75, p.z));
+  }
+  const poles = new InstancedMesh(POLE, POLE_PAINT, marks.length);
+  marks.forEach((m, i) => poles.setMatrixAt(i, m));
+  group.add(poles);
+
+  // Snowy firs where the world has woods: near the run, every four metres a chance of one, none on the run; further out, one to a
+  // square of sixteen metres here and there.
+  const nearFirs: Matrix4[] = [], farFirs: Matrix4[] = [];
+  const fir = (x: number, z: number, list: Matrix4[], tall: number) => {
+    const y = height(x, z);
+    if (y < 0.5) return;
+    list.push(new Matrix4().compose(new Vector3(x, y - 0.2, z), new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), rng.range(0, 6.3)), new Vector3(tall * rng.range(0.85, 1.15), tall, tall * rng.range(0.85, 1.15))));
+  };
+  for (let j = 0; j < near.nz; j++) for (let i = 0; i < near.nx; i++) {
+    const x = near.x0 + i * near.cell + rng.range(-1.6, 1.6), z = near.z0 + j * near.cell + rng.range(-1.6, 1.6);
+    if (coverAt(x, z) !== COVER.forest || !rng.chance(0.32)) continue;
+    const f = frame(x, z);
+    if (Math.abs(f.left) < slice.half + 2 && f.s > -20 && f.s < length + 20) continue;
+    fir(x, z, nearFirs, rng.range(6, 13));
+  }
+  for (let j = 0; j < far.nz; j++) for (let i = 0; i < far.nx; i++) {
+    const x = far.x0 + i * far.cell + rng.range(-6, 6), z = far.z0 + j * far.cell + rng.range(-6, 6);
+    if (underNear(x, z) < 0 || coverAt(x, z) !== COVER.forest || !rng.chance(0.75)) continue;
+    fir(x, z, farFirs, rng.range(7, 14));
+  }
+  const firPaint = new MeshStandardMaterial({ vertexColors: true, roughness: 0.9 });
+  const near3 = new InstancedMesh(snowyFir(3, 6, true), firPaint, nearFirs.length), far1 = new InstancedMesh(snowyFir(1, 5, false), firPaint, farFirs.length);
+  nearFirs.forEach((m, k) => near3.setMatrixAt(k, m));
+  farFirs.forEach((m, k) => far1.setMatrixAt(k, m));
+  near3.castShadow = true;
+  near3.computeBoundingSphere(); far1.computeBoundingSphere();
+  group.add(near3, far1);
+
+  // Where a kicker may stand: where the land falls away after its lip at least as steeply as a landing wants, and is not too steep
+  // or too tilted across where it is built.
+  const kickable = (s: number, left: number, kick: number) => {
+    if (s + kick + 40 > length - 30) return false;
+    const h = (u: number, l = left) => { const p = at(u, l); return height(p.x, p.z); };
+    const fallAfter = (h(s + kick + 4) - h(s + kick + 30)) / 26, fallOn = (h(s) - h(s + kick)) / kick, tilt = Math.abs(h(s + kick / 2, left - 3) - h(s + kick / 2, left + 3)) / 6;
+    return fallAfter > Math.tan((13 * Math.PI) / 180) && fallOn < Math.tan((30 * Math.PI) / 180) && fallOn > Math.tan((5 * Math.PI) / 180) && tilt < 0.2;
+  };
+
+  return {
+    name: `${slice.worldName}, below ${slice.peak}`, short: `below ${slice.peak}`,
+    about: `${(length / 1000).toFixed(2)} km from ${slice.run.heights[0].toFixed(0)} m to ${slice.run.heights[slice.run.heights.length - 1].toFixed(0)} m`,
+    length, half: slice.half, height, frame, at, kickable, group, keepAbout: () => {}, fog: [380, 5200],
+  };
+}
+
+/**
+ * A fir laden with snow: `tiers` cones one over another, dark green below each and white over, for a tree a metre high (scaled); open
+ * underneath, which is never seen; with a trunk under it, or (far off, where it would not be seen) none.
+ */
+function snowyFir(tiers: number, sides: number, trunked: boolean): BufferGeometry {
+  const parts: BufferGeometry[] = [], green = new Color(0.07, 0.15, 0.1), white = new Color(0.9, 0.93, 0.97), c = new Color();
+  for (let t = 0; t < tiers; t++) {
+    const r = 0.36 * (1 - t / (tiers + 0.6)), h = tiers === 1 ? 0.95 : 0.5, y0 = tiers === 1 ? 0.05 : 0.12 + t * 0.27;
+    const g = new ConeGeometry(r, h, sides, 1, true).translate(0, y0 + h / 2, 0).toNonIndexed();
+    const p = g.getAttribute('position'), col = new Float32Array(p.count * 3);
+    for (let k = 0; k < p.count; k++) {
+      const up = (p.getY(k) - y0) / h;
+      c.copy(green).lerp(white, smooth01((up - 0.25) / 0.5) * 0.85);
+      col.set([c.r, c.g, c.b], k * 3);
+    }
+    g.setAttribute('color', new BufferAttribute(col, 3));
+    g.deleteAttribute('uv');
+    parts.push(g);
+  }
+  if (trunked) {
+    const trunk = new CylinderGeometry(0.035, 0.05, 0.2, 5, 1, true).translate(0, 0.1, 0).toNonIndexed();
+    trunk.deleteAttribute('uv');
+    trunk.setAttribute('color', new BufferAttribute(new Float32Array(trunk.getAttribute('position').count * 3).map((_, k) => [0.2, 0.13, 0.08][k % 3]), 3));
+    parts.push(trunk);
+  }
+  return mergeGeometries(parts)!;
+}

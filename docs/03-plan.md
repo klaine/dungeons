@@ -954,6 +954,37 @@ The machine this is developed on now has a graphics card, and tablets were repor
     before, at the walk and the gallop, before and after; the profile measured at every height; the legs' reach through every gait
     and ski pose (at most 1.06 of a leg's length at the canter, against 1.04); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
 
+74. **A run down the world, in winter.** Asked: "now lets make this have a 100m wide nearland slice of our actual winter gameworld
+    starting on high slopes at suitable location, no buildings or locations". *Found* (`src/core/skiRun.ts`, `tools/skiRun.ts`):
+    the world's range is mostly walls; at 200 to 500 metres seven tenths or more of it is steeper than 36 degrees over sixteen
+    metres, its glens floored flat, its tops rounded but narrow. Lines let fall from the tops plunged 70 to 80 metres every forty;
+    lines that would not fall more steeply than could be skied went across the faces, and a slice about one tilted 60 degrees across
+    its breadth. So the land is first marked where a band a hundred metres broad can be skied (four fifths of the land within fifty
+    metres no steeper than 38 degrees, none of it water), and lines are let go only through that: a step at a time, looking forty
+    metres ahead in each way they could turn (no tighter than a curve of 110 metres), going the way that falls most steeply short of
+    too steep, keeps most inside the marked land and keeps the land most nearly level across it, away from places, villages and
+    roads. In `w2` that land starts at the range's foot; the run kept comes down from 319 metres below The Pale Crown across the
+    upland to the shore of a bay at 19, 1.37 kilometres, falling 300 metres, twelve degrees on the whole and thirty at most over forty
+    metres. Its slice (`src/core/skiSlice.ts`, `public/slopes/w2.json`, 1.3 MB): the world's near land at a metre made as the walk
+    page makes it (`makeSquare`, with no place, way or house in it), smoothed over a few metres and lifted thirty centimetres as snow,
+    fifty metres either side of the line, passing over its last six metres to the land about it at four metres (some 250 metres out),
+    which passes over its last sixty to the country at sixteen metres (three kilometres out, from the world's tiles and lattice,
+    mirrored past its edges); the sea at its surface and the lakes at theirs; and what lies on the country. *Done* (`lab/slope.ts`,
+    `lab/slopeLand.ts`): the page skis a land, of which the groomed plane is now one: everything that moves is worked out in the
+    world's terms, where the skier is east, south and up, pulled by its weight as much as the snow under it falls the way it goes,
+    rising as the snow rose over its last step and thrown off whatever falls away faster than its weight can follow (a kicker's lip,
+    a knoll taken fast), landing on the land as it lies, its blow how fast it comes into the snow there; its way and facing kept against
+    the run's own way as the run bends under it; the views kept above the snow behind and beside it; a body gone limp tumbling on it.
+    The run's line serves only for its edges, the views, the watched run (laid along it) and where kickers stand: four on `w2`'s run,
+    each where the land after its lip falls at least thirteen degrees over twenty-six metres. Drawn: the snow at a metre groomed, its
+    corduroy along the run, poles every 25 metres; the land and the country under snow, bare rock where steeper than some forty
+    degrees, the lakes frozen, the sea open; 5,400 snowy firs about the run and 21,200 further out where the world has woods; some
+    1.1 million triangles, made in under a second. *Slope* chooses it or the groomed slope (`?land=groomed`, `#groomed`). *Checked*
+    (headless, drawing in software): the page ready in five seconds; ridden straight from the top at 75 to 91 km/h down the upper half,
+    slower over a flatter stretch near 600 metres, braking to a stop at the foot after 110 seconds; at a kicker, straight air of 16
+    metres in a second, ski-jump flights of 21 to 25, backflips (held tall all the way, short and fallen), 360s, a 360 with a backflip
+    short and fallen; a horse and rider on four skis the same at a kicker on a flatter stretch; on the groomed slope the kicker trials
+    as before (straight air 14 metres in a second, a flight 19, a 720 21 in 1.4 seconds); switching between the two while riding.
 ## Risks
 
 | Risk | Mitigation |
