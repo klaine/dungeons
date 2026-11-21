@@ -635,6 +635,28 @@ The machine this is developed on now has a graphics card, and tablets were repor
     church at 0, 1, 2 and 4 (the first try at 4 grew moss over whole walls in patches like a soldier's coat, for its threshold stood
     under the noise's middle; it rises from the foot now, and only here and there higher).
 
+60. **A castle's wall edited by hand.** Asked: "Can we make the castle walls shape defining path be editable? So user can move the
+    nodes and remove or add points and decide for the points parameters about the corner or possible tower etc?" *Done,* in the
+    building lab: with a castle selected and *Extrude* (or *Edit the wall* on its panel), its wall's line is drawn over its walk with a
+    knob on every corner, a + on every length and a knob on the gate. A corner is dragged to move it or clicked to choose it; a + clicked
+    adds a corner at the middle of its length, or dragged adds one where it is let go; the gate is dragged along the wall; `Delete`
+    takes the chosen corner away. The chosen corner's panel has its tower (none, round, half round, square, or a turret: a small round
+    one corbelled out at the top, the builder's `bartizan`, new to castles and not dealt by the game), its size, how far it stands over
+    the walk and its roof; and the wall's height and thickness. The edits are made to a plan of the castle (`CastlePlan` in
+    `src/core/castle.ts`: corners each with its tower, the gate as a share of one length), which `castleOfPlan` makes a castle of again,
+    each tower facing out between its two lengths and the bailey (stair, ranges, well) laid out again about the new wall from the item's
+    own seed; `soundWall` refuses a wall that crosses itself, folds back on itself or has a length under two metres. A wall may be bent in
+    on itself: which side of a length is the bailey's is now found from which way round the wall runs (`inwardOf`), and the lean-to
+    buildings' from which side is further inside, where both were found as the side towards the middle of the corners, which a notched
+    wall may have outside it. *Checked:* four hundred castles laid out as the game deals them and built, before the change and after:
+    their records and every point and normal of their meshes the same, so no castle in the game is changed. `tools/buildingLab.ts 300`
+    now edits each castle's wall at random as well (corners dragged far, added and taken away, towers of every kind with their measures
+    past their ends, the gate moved, height and thickness pushed): all three hundred built; its other failures at three hundred (a
+    classical building with a point that is not a number, trees reaching a little below what the check allows) are there on the commit
+    before this one too. In a browser, a script drags a corner, clicks and drags a +, gives a turret from the panel, takes a corner away
+    with `Delete` (the castle stays), drags the gate, is refused a wall crossing itself, undoes, and bends the wall in on itself, with no
+    error on the page.
+
 ## Risks
 
 | Risk | Mitigation |
