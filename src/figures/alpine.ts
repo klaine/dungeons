@@ -421,7 +421,11 @@ export function makeDownhillRun(source: Object3D, base: AnimationClip, step = 1 
  * skis point (radians to the left of where it faces), how far it is into a tuck, into braking and into standing tall (each 0 to 1), and
  * each pole's flick to the snow.
  */
-export interface RideControls { s: number; ski: number; tuck: number; brake: number; tall: number; flickL: number; flickR: number }
+export interface RideControls {
+  s: number; ski: number; tuck: number; brake: number; tall: number; flickL: number; flickR: number;
+  /** How far down it has sunk to take a landing, or crouched on a ramp (0 to 1); and any turn of the whole body still to come out of. */
+  absorb?: number; spin?: number; flip?: number;
+}
 
 /**
  * A skier's pose from what it is doing: carving (`carvePose`), with as much of a tuck, of braking and of standing tall as it is into
@@ -456,6 +460,65 @@ export function riderPose(h0: number, c: RideControls): AlpinePose {
     a.neck -= rad(4) * tall;
     both(a, (_k, arm) => { arm.swing -= rad(16) * tall; arm.bend -= rad(14) * tall; });
   }
+  // Sunk into a landing: the hips down towards the boots and the trunk over the knees, the hands forward and out.
+  const absorb = c.absorb ?? 0;
+  if (absorb) {
+    a.hips -= 0.17 * absorb;
+    a.lean += rad(10) * absorb;
+    both(a, (_k, arm) => { arm.hang -= 14 * absorb; arm.swing += rad(10) * absorb; });
+  }
+  a.spin = c.spin ?? 0;
+  a.flip = c.flip ?? 0;
+  return a;
+}
+
+/**
+ * What a skier is doing in the air off a kicker, as `airPose` takes it: how much tighter it has drawn its tuck (0 to 1); how far it is
+ * into a ski jumper's flight (laid out over its skis, which are spread in a V, the arms back along its sides) rather than a tuck; how far
+ * it has opened up again to land (0 to 1); how far into the throw that starts a backflip (the arms and head thrown up and back); how
+ * close it holds its arms for a spin; its skis' turn from where it faces; and the whole body's turn about the upright and over backwards
+ * (radians, as `AlpinePose` has them).
+ */
+export interface AirControls { tuck: number; flight: number; open: number; throw: number; wrap: number; ski: number; spin: number; flip: number }
+
+/**
+ * A skier in the air, from the straight run's stance at hips `h0` high (asked: "riding them in tucked position causes ski jump
+ * animation (but here with poles of course), middle is regular kicker jump, tall standing is a backflip? if there is turning, it can
+ * mix in spin?"): the kicker's tuck, the knees drawn up and the arms forward and out, deeper the tighter it is drawn; or the ski
+ * jumper's flight, the legs long and the body laid forward over the skis' V, the poles trailing back from the hands; opened up to land
+ * into the straight run's stance; turned whole by the spin and the flip.
+ */
+export function airPose(h0: number, c: AirControls): AlpinePose {
+  const run = straightPose(h0);
+  // The kicker's tuck (as `Ski_Kicker`'s in the air).
+  const tucked = clonePose(run), knees = 0.28 + 0.16 * c.tuck;
+  tucked.hips -= knees * 0.25;
+  tucked.lean -= rad(8);
+  both(tucked, (_k, arm, f) => {
+    f.up += knees; f.z += knees * 0.15; f.pitch -= rad(8);
+    arm.hang -= 22; arm.swing += rad(16);
+    // (In close for a spin: the elbows bent, the fists in by the chest.)
+    arm.bend += rad(34) * c.wrap; arm.hang += 12 * c.wrap;
+  });
+  // The backflip's throw: the arms swung up and back, the chest up out of its lean, the head back.
+  if (c.throw) {
+    tucked.lean -= rad(24) * c.throw;
+    tucked.head -= rad(28) * c.throw;
+    both(tucked, (_k, arm) => { arm.swing += rad(60) * c.throw; arm.hang -= 28 * c.throw; });
+  }
+  // The flight: the legs nearly straight, the trunk in line with them and the whole laid forward, the skis held up level under it and
+  // spread at their tips; the arms back along the sides, the hands turned so that the poles trail back from them; the head up.
+  const flight = clonePose(run);
+  Object.assign(flight, { hips: h0 + 0.16, hipsZ: 0, pelvisPitch: rad(4), lean: rad(6), neck: rad(-8), head: rad(-24), flip: rad(40) });
+  both(flight, (k, arm, f) => {
+    const sign = k === 'l' ? 1 : -1;
+    Object.assign(arm, { swing: rad(-18), bend: rad(10), wrist: rad(-70), hang: 80, inward: 0 });
+    Object.assign(f, { x: 0.2 * sign, z: 0.04, up: 0, yaw: rad(11) * sign, pitch: rad(-40), edge: 0 });
+  });
+  const a = mix(mix(tucked, flight, c.flight), run, c.open);
+  both(a, (_k, _arm, f) => { f.yaw += c.ski; });
+  a.spin = c.spin;
+  a.flip += c.flip;
   return a;
 }
 
@@ -475,12 +538,20 @@ export class Rider {
    * Puts it in the pose of what it is doing. Gives back how far its legs were stretched. (Posed as it stands alone: the poser reckons
    * in the figure's own frame, which is the world's only while it stands in nothing, so it is taken out of what holds it meanwhile.)
    */
-  pose(c: RideControls): number {
+  pose(c: RideControls): number { return this.alone(() => poseAlpine(this.P, riderPose(this.h0, c))); }
+  /** In the air, as `airPose` has it. */
+  poseAir(c: AirControls): number { return this.alone(() => poseAlpine(this.P, airPose(this.h0, c))); }
+  /**
+   * Gone limp: its skeleton put through joints placed in the frame of what holds it (`Poser.poseJoints`), as a ragdoll has them
+   * (`ragdoll.ts`).
+   */
+  poseJoints(p: Record<string, Vector3>): void { this.alone(() => this.P.poseJoints(p)); }
+  private alone<T>(f: () => T): T {
     const holder = this.P.model.parent;
     holder?.remove(this.P.model);
     this.P.model.updateMatrixWorld(true);
-    const stretch = poseAlpine(this.P, riderPose(this.h0, c));
+    const out = f();
     holder?.add(this.P.model);
-    return stretch;
+    return out;
   }
 }

@@ -1,4 +1,4 @@
-import { AnimationClip, AnimationMixer, Bone, Object3D, Quaternion, QuaternionKeyframeTrack, Vector3, VectorKeyframeTrack } from 'three';
+import { AnimationClip, AnimationMixer, Bone, Matrix4, Object3D, Quaternion, QuaternionKeyframeTrack, Vector3, VectorKeyframeTrack } from 'three';
 import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
 
 /**
@@ -85,6 +85,8 @@ export class Poser {
   private readonly W0 = new Map<Bone, Quaternion>();
   private readonly basePos = new Map<Bone, Vector3>();
   private readonly baseLocal = new Map<Bone, Quaternion>();
+  /** Where each bone's joint is as the skeleton rests, by name. */
+  private readonly restAt = new Map<string, Vector3>();
   private readonly pelvisBone: Bone;
   private readonly root: Object3D;
   /** The chest's turn from the base pose, and its rotation in the figure's frame, as the trunk was last set. */
@@ -107,6 +109,7 @@ export class Poser {
     for (const b of this.bones) this.baseLocal.set(b, (finger.test(b.name) ? b.quaternion : restLocal.get(b)!).clone());
     for (const b of this.bones) { b.quaternion.copy(restLocal.get(b)!); b.position.copy(this.basePos.get(b)!); }
     this.model.updateMatrixWorld(true);
+    for (const b of this.bones) this.restAt.set(b.name, b.getWorldPosition(new Vector3()));
     const side = (k: Side): Leg => {
       const hip = this.at(`thigh_${k}`), knee = this.at(`calf_${k}`), ankle = this.at(`foot_${k}`), ball = this.at(`ball_${k}`), toe = this.at(`ball_leaf_${k}`);
       return {
@@ -227,6 +230,66 @@ export class Poser {
   angleLeg(k: Side, thighA: number, kneeA: number, dFoot: Vector3, dToe: Vector3, roll = 0): void {
     const shinA = thighA - kneeA, dT = new Vector3(0, -Math.cos(thighA), Math.sin(thighA)), dS = new Vector3(0, -Math.cos(shinA), Math.sin(shinA));
     this.aimLeg(k, dT, dS, dFoot, dToe, roll);
+  }
+
+  /** Where a bone's joint is as the skeleton rests. */
+  restOf(n: string): Vector3 {
+    const v = this.restAt.get(n);
+    if (!v) throw new Error(`a figure without ${n}`);
+    return v.clone();
+  }
+
+  /**
+   * The skeleton put through joints placed anywhere (a body gone limp, `ragdoll.ts`): `p` holds where the pelvis, the chest
+   * (`spine_03`), the head, and each side's shoulder, elbow, wrist, hip, knee, ankle and ball of the foot are to be, by the names of
+   * their bones, and `calf` is the knee. The pelvis and the chest are each turned as the frame of their joints is (the chest's from the
+   * head and the two shoulders; the pelvis's from the chest and the two hips), the spine between them shared out; the neck aimed at the
+   * head; each arm and leg aimed bone by bone at the next joint, turned no more than it must be from the bone above it; and each foot,
+   * held fast in its boot, turned as its ankle, ball and knee lie. Bones that are not aimed (the fingers, the hands, the toes) keep their
+   * turn from the bone above.
+   */
+  poseJoints(p: Record<string, Vector3>): void {
+    this.begin();
+    const r = (n: string) => this.restOf(n), q = (n: string) => p[n].clone();
+    const frame = (up: Vector3, side: Vector3) => {
+      const y = up.clone().normalize(), z = side.clone().cross(y).normalize(), x = y.clone().cross(z);
+      return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, z));
+    };
+    const turnOf = (up0: Vector3, side0: Vector3, up: Vector3, side: Vector3) => frame(up, side).multiply(frame(up0, side0).invert());
+    const dPelvis = turnOf(r('spine_03').sub(r('pelvis')), r('thigh_l').sub(r('thigh_r')), q('spine_03').sub(q('pelvis')), q('thigh_l').sub(q('thigh_r')));
+    const dChest = turnOf(r('Head').sub(r('spine_03')), r('upperarm_l').sub(r('upperarm_r')), q('Head').sub(q('spine_03')), q('upperarm_l').sub(q('upperarm_r')));
+    const spine: [Quaternion, Quaternion, Quaternion] = [dPelvis.clone().slerp(dChest, 1 / 3), dPelvis.clone().slerp(dChest, 2 / 3), dChest];
+    this.pelvis(p.pelvis, dPelvis);
+    this.trunk(dPelvis, spine, dChest, dChest);
+    // (The neck aimed at the head from where the chest has put it.)
+    const neck = this.bone('neck_01'), neckFrom = r('Head').sub(r('neck_01')).applyQuaternion(dChest).normalize();
+    const dNeck = new Quaternion().setFromUnitVectors(neckFrom, q('Head').sub(neck.getWorldPosition(new Vector3())).normalize()).multiply(dChest);
+    this.trunk(dPelvis, spine, dNeck, dNeck);
+    /** A bone aimed from its joint at the next one's place, turned from its parent's turn `dUp` as little as it must be. */
+    const aim = (n: string, next: string, dUp: Quaternion, wUp: Quaternion) => {
+      const b = this.bone(n), from = r(next).sub(r(n)).applyQuaternion(dUp).normalize();
+      const to = q(next).sub(b.getWorldPosition(new Vector3()));
+      const d = to.lengthSq() > 1e-10 ? new Quaternion().setFromUnitVectors(from, to.normalize()).multiply(dUp) : dUp.clone();
+      const w = d.clone().multiply(this.W0.get(b)!);
+      this.setWorld(b, w, wUp);
+      return { d, w };
+    };
+    const held = (n: string, d: Quaternion, wUp: Quaternion) => this.setWorld(this.bone(n), d.clone().multiply(this.W0.get(this.bone(n))!), wUp);
+    const wPelvis = dPelvis.clone().multiply(this.W0.get(this.pelvisBone)!);
+    for (const k of ['l', 'r'] as const) {
+      const clav = this.bone(`clavicle_${k}`), wClav = dChest.clone().multiply(this.W0.get(clav)!);
+      this.setWorld(clav, wClav, this.chestW);
+      const up = aim(`upperarm_${k}`, `lowerarm_${k}`, dChest, wClav), low = aim(`lowerarm_${k}`, `hand_${k}`, up.d, up.w);
+      held(`hand_${k}`, low.d, low.w);
+      const thigh = aim(`thigh_${k}`, `calf_${k}`, dPelvis, wPelvis), calf = aim(`calf_${k}`, `foot_${k}`, thigh.d, thigh.w);
+      const foot = this.bone(`foot_${k}`), at = foot.getWorldPosition(new Vector3());
+      const dFoot = turnOf(r(`ball_${k}`).sub(r(`foot_${k}`)), r(`calf_${k}`).sub(r(`foot_${k}`)), q(`ball_${k}`).sub(at), q(`calf_${k}`).sub(at));
+      // (The frame's first direction is the one kept exactly: here the foot's, ankle to ball.)
+      const wFoot = dFoot.clone().multiply(this.W0.get(foot)!);
+      this.setWorld(foot, wFoot, calf.w);
+      held(`ball_${k}`, dFoot, wFoot);
+    }
+    this.update();
   }
 
   /** Keeps every bone's turn and the pelvis's place as the frame at `time`. */

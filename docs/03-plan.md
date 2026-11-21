@@ -760,6 +760,36 @@ The machine this is developed on now has a graphics card, and tablets were repor
     follows, which way it looks along, the change between views); and from above it looks five metres behind the skier, not nine.
     Measured where the skier's hips fall in the picture, the page's frames stepped at sixty a second: from beside, -0.31 across riding
     tucked at speed before, the middle after; from above, 0.83 up the picture watching and 1.32 (out of it) riding before, 0.34 after.
+66. **Kickers on the ridden slope, the trick chosen by the stance, and a bad landing gone limp.** Asked: "can we add jumps/kickers to
+    the course? riding them in tucked position causes ski jump animation (but here with poles of course), middle is regular kicker
+    jump, tall standing is a backflip? if there is turning, it can mix in spin? landing badly activates ragdoll physics and player can
+    restart run". *Done:* ridden, the slope has a kicker every 130 metres, each at its own place across the piste: a ramp of seven
+    metres curving up to a lip a metre and a half high and some twenty degrees over the slope, a steep back behind it, its sides
+    sloping, the lip dyed blue and flagged; the snow's height and slope there are what the skier rides on (crouching more as the ramp
+    steepens, slowed by climbing it). It leaves the snow wherever the snow falls away faster than its weight can bring it down after
+    it, and is thrown as any body is, in the slope's own frame. What it does in the air is chosen as it leaves, from what it was
+    doing: tucked, a ski jumper's flight (laid forward over its skis, which are held level under it and spread at their tips, the
+    poles trailing back from hands held along its sides); between, a kicker's straight air, the knees drawn up and the arms forward
+    and out; standing tall, a backflip, the arms and head thrown back to start it; turning as well, a spin with any of these, 360
+    turning, 720 turning hard, the arms in close (`airPose`, `AirControls` in `src/figures/alpine.ts`). The turns go at a little over a
+    turn a second, quicker drawn tight (pointing up) and slower opened out (pointing down), easing in at the take-off and as they come
+    round, never past their end; the skier opens up to land in the last 0.4 seconds, which slows what is left of a turn. Landed within
+    55 degrees of a flip's end and 75 of a spin's, and not harder than 12.5 m/s into the snow, it takes the landing in its legs, comes
+    out of what was left of the turn in a quarter of a second, and the landing is named with how far and how long it was. Otherwise it
+    goes limp (`src/figures/ragdoll.ts`): its joints and its skis' tips and tails become points held at the lengths of its bones, the
+    trunk braced nearly stiff, the boots and skis stiff with the shins, elbows and knees free but never folded flat, going on from the
+    last two steps' positions so that it carries on turning as it was; it falls, tumbles and slides on the snow with friction until
+    it is still, its skeleton put through the points (`Poser.poseJoints`: pelvis and chest turned as the frames of their joints, the
+    spine shared out between, limbs aimed bone by bone and turned no more than they must be from the bone above, each foot by its
+    ankle, ball and knee). *Restart run* (or Enter) begins again at the top. *Checked:* in headless Chromium through the page's hooks,
+    from 30 metres before the first kicker: neutral at 57 km/h, straight air of 22 metres and 1.4 seconds; tucked at 68, a flight of
+    29 metres; tucked at 86, 43 metres; tall at 49, a backflip that falls short held tall all the way, comes round let go or tucked;
+    tall at 36 km/h and tucked in the air, a backflip of 11 metres; a little turn, a 360, which comes round even opened out; a hard
+    turn, a 720, which comes round tucked and falls short let go; tall and turning, a backflip 360. The fallen body first leapt
+    thirteen metres into the air: a ski's tip had gone half a metre into the snow at the landing, and pushed out in one step it
+    yanked the rest after it; the body is now lifted out of the snow as a whole before it starts, and slides some 25 metres and is
+    still within five seconds. Ridden in real time by the arrow keys: Down into a kicker, a backflip, short, limp; Enter, the top again;
+    Watch and Ride again with no fault. Pictures of each trick from beside and behind, and of the fall.
 
 ## Risks
 
