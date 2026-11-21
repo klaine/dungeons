@@ -1029,6 +1029,19 @@ The machine this is developed on now has a graphics card, and tablets were repor
     as vertical meters instead of distance": the corner says how far the skier has come down as height below the run's top, in the
     world's own heights (`Land.drop`; the slice's lowered land undone), out of the run's 623 (`Land.fall`), and the foot of the run
     the same; on the groomed slope, height come down alone.
+77. **The game's land materials, lighter, on the run.** Asked: "can we have some kind of optimized versions of the game side landscape
+    materials". *Done* (`makeSnowMaterial` and `makeFarMaterial`'s `light` in `src/render/siteMaterial.ts`; `lab/slopeLand.ts`,
+    `lab/slope.ts`; see `docs/04-look.md`, *Lighter winter materials*): the world's run is drawn with the game's snow, in a form
+    that works out only what shows under a full winter (four texture reads against twenty and more), groomed on the skiable path,
+    rock where snow does not lie; and the game's far land, without its rock faces' carved relief. The land is laid through the
+    game's own mesh builder, so that it carries what the materials read, lit by the sky as the game lights what it does not bake;
+    off the path each point faces as the world's own land does, where the slice brought it lower (lowered, the walls were gentle
+    slopes, snow lay on every one and the rock was gone). Laid as snow or rock a square at a time, as the game's rock material
+    wants, the near rock came out in squares four metres across, so the near land is all one material, which leaves the rock bare by
+    its own rule; and the far firs give way to the woods the far material paints. *Snow* chooses it (*Game*) or the plain look
+    (*Plain*). *Checked* (headless, drawing in software): the page ready in some eleven seconds (the textures painted at 512),
+    0.69 million triangles drawn against 0.73; a frame about twice the plain look's (1.5 to 1.8 seconds against 0.7 to 0.8, in
+    software; the far land's light form saved about a tenth); the switch between the looks and to the groomed slope and back.
 ## Risks
 
 | Risk | Mitigation |

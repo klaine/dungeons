@@ -10,10 +10,11 @@
  * lakes frozen, and snowy firs where the world has woods. Scene coordinates are the world's, less the run's top.
  */
 import {
-  BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial,
+  BufferAttribute, BufferGeometry, Color, ConeGeometry, CylinderGeometry, Group, InstancedMesh, type Material, Matrix4, Mesh, MeshStandardMaterial,
   PlaneGeometry, Quaternion, type Texture, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Rng } from '../src/core/rng';
 import { type Grid, gridAt, type SkiSlice } from '../src/core/skiSlice';
 
@@ -118,8 +119,16 @@ const POLE = new CylinderGeometry(0.035, 0.035, 1.5, 6), POLE_PAINT = new MeshSt
 /** What lies on the world's land (`COVER` in `src/core/world.ts`; the numbers it keeps, not the world's code, which the page does not need). */
 const COVER = { sea: 0, lake: 1, forest: 6 } as const;
 
-/** The land of a world's ski run (`SkiSlice`), its scene's origin at the run's top. */
-export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture): Land {
+/**
+ * The game's own materials for land, in their winter forms (asked: "can we have some kind of optimized versions of the game side
+ * landscape materials"): its ground drawn as only what shows of it under a full winter (`makeSnowMaterial`: snow, and the stones where
+ * none lies), and its far country (`makeFarMaterial`), which paints its own woods, rock bands and snow; and the sky's colour, for the
+ * light the land has from it.
+ */
+export interface GameLook { snow: Material; far: Material; sky: [number, number, number] }
+
+/** The land of a world's ski run (`SkiSlice`), its scene's origin at the run's top; drawn with the game's materials if they are given. */
+export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture, game?: GameLook): Land {
   const [ox, oz] = slice.run.points[0], step = slice.run.step;
   const line = slice.run.points.map(([x, z]) => [x - ox, z - oz] as [number, number]), n = line.length, length = (n - 1) * step;
   // Each stretch of the line: where it starts and which way it goes.
@@ -178,6 +187,8 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
   const steepAt = (x: number, z: number, e: number) => Math.atan(Math.hypot(height(x + e, z) - height(x - e, z), height(x, z + e) - height(x, z - e)) / (2 * e)) * (180 / Math.PI);
   /** A height of the slice as the world has it (undoing `squash` in `skiRun.ts`). */
   const sq = slice.run.squash, worldHeight = (h: number) => (!sq || h <= sq.above ? h : sq.above + (h - sq.above) / sq.keep);
+  /** How much steeper the world's own land is than the slice's at height `y` (where it was brought lower, by as much). */
+  const worldSlope = (y: number) => (!sq || y <= sq.above ? 1 : 1 / sq.keep);
   /** How steep the world's own land is where the slice's is `steep` degrees at height `y`. */
   const worldSteep = (steep: number, y: number) => (!sq || y <= sq.above ? steep : (Math.atan(Math.tan((steep * Math.PI) / 180) / sq.keep) * 180) / Math.PI);
 
@@ -273,25 +284,115 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     return [f.left / 9, f.s / 9];
   };
   const offPiste = () => { const [lo, hi] = edges(last.s), out = Math.max(lo - last.left, last.left - hi, -4 - last.s, last.s - length - 4); return smooth01((out + 1) / 6); };
-  const pisteMap = snowMap.clone();
-  pisteMap.needsUpdate = true;
-  const run = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, true, offPiste), [
-    new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: pisteMap, roughness: 0.92 }),
-    new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95 }),
-  ]);
-  run.receiveShadow = true;
-  group.add(run);
   // The land about it at four metres, sunk a little out of sight under the run's snow; and the country at sixteen, sunk out of sight
   // under the land about the run. (Both drawn behind what lies over them where they meet, a little, so as not to flicker through it.)
   const plainUv = (x: number, z: number): [number, number] => [x / 23, z / 23];
   const underSnow = (x: number, z: number) => (Number.isNaN(gridAt(snow, x, z)) ? 0 : -1.2);
   const nearBox = [near.x0, near.z0, near.x0 + (near.nx - 1) * near.cell, near.z0 + (near.nz - 1) * near.cell];
   const underNear = (x: number, z: number) => (x > nearBox[0] + 24 && x < nearBox[2] - 24 && z > nearBox[1] + 24 && z < nearBox[3] - 24 ? -8 : 0);
-  const powder = (offset: number) => new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
-  const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true), powder(1));
-  about.receiveShadow = true;
-  const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 61, z / 61], 0, true), powder(2));
-  group.add(about, country);
+  if (game) {
+    const meshes = gameMeshes(game);
+    for (const m of meshes) group.add(m);
+  } else {
+    const pisteMap = snowMap.clone();
+    pisteMap.needsUpdate = true;
+    const run = new Mesh(gridMesh(snow, () => 0, pisteUv, 1.5, true, offPiste), [
+      new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: pisteMap, roughness: 0.92 }),
+      new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95 }),
+    ]);
+    run.receiveShadow = true;
+    const powder = (offset: number) => new MeshStandardMaterial({ color: 0xffffff, vertexColors: true, map: powderMap, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset });
+    const about = new Mesh(gridMesh(near, underSnow, plainUv, 3, true), powder(1));
+    about.receiveShadow = true;
+    const country = new Mesh(gridMesh(far, underNear, (x, z) => [x / 61, z / 61], 0, true), powder(2));
+    group.add(run, about, country);
+  }
+
+  /**
+   * The land drawn with the game's materials: each grid's points as the game's meshes carry them (the colour and the four fields its
+   * materials read), a triangle pair to each square of four, all of it the winter ground (`makeSnowMaterial`), which leaves bare stone
+   * where the snow does not lie, with skirts as above; the country as the game's far sheet, carrying how high each point stands and
+   * how much of a hollow it is. And each point lit by the sky as the game lights what it does not bake. (Laid as snow or rock a square
+   * at a time, as the game's rock material wants, the rock near the run came out in squares four metres across.)
+   */
+  function gameMeshes(look: GameLook): Mesh[] {
+    // (Under the snow, where it does not lie, the mountain's stones, grey.)
+    const tint = new Color(0.72, 0.71, 0.7);
+    const gridBuilder = (g: Grid, lift: (x: number, z: number) => number, skirt: number, groomedHere: boolean) => {
+      const B = new MeshBuilder(), ids = new Int32Array(g.nx * g.nz).fill(-1);
+      const H = (i: number, j: number) => (i < 0 || j < 0 || i >= g.nx || j >= g.nz ? NaN : g.data[j * g.nx + i]);
+      // (Off the skiable path, each point faces as the world's own land does there: where the slice's land was brought lower, as steep
+      // as it was. The snow lies by how a point faces, and the light shades it so: lowered, the walls were gentle slopes, snow lay over
+      // every one, and the mountain's rock was gone.)
+      // (And over several metres, as snow lies on a slope and not on each knob of it: from the next points, the snow's edges ran along
+      // the grid's triangles.)
+      const s = g.cell < 2 ? 3 : 2;
+      const nrm = (i: number, j: number, onPath: boolean): [number, number, number] => {
+        const y = H(i, j), l = H(i - s, j), r = H(i + s, j), u = H(i, j - s), d = H(i, j + s);
+        let gx = ((Number.isNaN(r) ? y : r) - (Number.isNaN(l) ? y : l)) / ((Number.isNaN(r) || Number.isNaN(l) ? 1 : 2) * s * g.cell);
+        let gz = ((Number.isNaN(d) ? y : d) - (Number.isNaN(u) ? y : u)) / ((Number.isNaN(d) || Number.isNaN(u) ? 1 : 2) * s * g.cell);
+        if (!onPath) { const k = worldSlope(y); gx *= k; gz *= k; }
+        const nl = Math.hypot(gx, 1, gz);
+        return [-gx / nl, 1 / nl, -gz / nl];
+      };
+      // (Each point's place against the line, once: how groomed it is and which way the machines went.)
+      const groom = new Float32Array(g.nx * g.nz * 3);
+      for (let j = 0; j < g.nz; j++) for (let i = 0; i < g.nx; i++) {
+        if (Number.isNaN(H(i, j)) || !groomedHere) continue;
+        pisteUv(g.x0 + i * g.cell, g.z0 + j * g.cell);
+        groom.set([1 - offPiste(), last.dx, last.dz], (j * g.nx + i) * 3);
+      }
+      const vertex = (i: number, j: number, drop = 0): number => {
+        const k = j * g.nx + i;
+        if (!drop && ids[k] >= 0) return ids[k];
+        const x = g.x0 + i * g.cell, z = g.z0 + j * g.cell, y = H(i, j) + lift(x, z) - drop, [nx, ny, nz] = nrm(i, j, groom[k * 3] > 0.5);
+        const id = B.addVertex(x, y, z, nx, ny, nz, x * 2.3, z * 2.3, tint.r, tint.g, tint.b, groom[k * 3], groom[k * 3 + 1], groom[k * 3 + 2], 0);
+        if (!drop) ids[k] = id;
+        return id;
+      };
+      const whole = (i: number, j: number) => [H(i, j), H(i + 1, j), H(i, j + 1), H(i + 1, j + 1)].every((v) => !Number.isNaN(v));
+      for (let j = 0; j < g.nz - 1; j++) for (let i = 0; i < g.nx - 1; i++) {
+        if (!whole(i, j)) continue;
+        const a = vertex(i, j), b = vertex(i + 1, j), c = vertex(i, j + 1), d = vertex(i + 1, j + 1);
+        B.addTriangle(a, c, b); B.addTriangle(b, c, d);
+        if (skirt > 0) for (const [p, q, open] of [[[i, j], [i + 1, j], !whole(i, j - 1)], [[i, j + 1], [i + 1, j + 1], !whole(i, j + 1)], [[i, j], [i, j + 1], !whole(i - 1, j)], [[i + 1, j], [i + 1, j + 1], !whole(i + 1, j)]] as const) {
+          if (!open) continue;
+          const P = vertex(p[0], p[1]), Q = vertex(q[0], q[1]), P1 = vertex(p[0], p[1], skirt), Q1 = vertex(q[0], q[1], skirt);
+          B.addTriangle(P, P1, Q); B.addTriangle(Q, P1, Q1); B.addTriangle(P, Q, P1); B.addTriangle(Q, Q1, P1);
+        }
+      }
+      return B;
+    };
+    // The country: the game's far sheet. How high each point stands in its range (0 at its foot, 1 about where rock takes over, from the
+    // world's own heights) and how much of a hollow it is; water where the sea is (a lake is frozen, and snow lies on it).
+    const farB = new MeshBuilder(), fH = (i: number, j: number) => far.data[Math.max(0, Math.min(far.nz - 1, j)) * far.nx + Math.max(0, Math.min(far.nx - 1, i))];
+    const fid = new Int32Array(far.nx * far.nz);
+    for (let j = 0; j < far.nz; j++) for (let i = 0; i < far.nx; i++) {
+      const x = far.x0 + i * far.cell, z = far.z0 + j * far.cell, y = fH(i, j);
+      const k = worldSlope(y), gx = (k * (fH(i + 1, j) - fH(i - 1, j))) / (2 * far.cell), gz = (k * (fH(i, j + 1) - fH(i, j - 1))) / (2 * far.cell), nl = Math.hypot(gx, 1, gz);
+      const hollow = Math.min(1, Math.max(-1, (((fH(i + 1, j) + fH(i - 1, j) + fH(i, j + 1) + fH(i, j - 1)) / 4 - y) / far.cell) * 9));
+      const high = Math.min(1.3, Math.max(0, (worldHeight(y) - 60) / 600)), water = coverAt(x, z) === COVER.sea && y < 0.5 ? 1 : 0;
+      fid[j * far.nx + i] = farB.addVertex(x, y + underNear(x, z), z, -gx / nl, 1 / nl, -gz / nl, x * 0.012, z * 0.012, 0.3, 0.3, 0.31, water, 0, hollow, high);
+    }
+    for (let j = 0; j < far.nz - 1; j++) for (let i = 0; i < far.nx - 1; i++) {
+      const a = fid[j * far.nx + i], b = fid[j * far.nx + i + 1], c = fid[(j + 1) * far.nx + i], d = fid[(j + 1) * far.nx + i + 1];
+      farB.addTriangle(a, c, b); farB.addTriangle(b, c, d);
+    }
+    const snowRun = gridBuilder(snow, () => 0, 1.5, true), snowAbout = gridBuilder(near, underSnow, 3, false);
+    const lit = (builder: MeshBuilder, material: Material) => {
+      // (As the walk page lights the world's land, `meshOf`: the sky's light by the share of it each point sees, here all of it.)
+      const geometry = builder.build(), L = look.sky;
+      const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[], bk = geometry.getAttribute('aBake') as BufferAttribute;
+      for (let i = 0; i < builder.vertexCount; i++) {
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c], 0, (Math.PI / 2) * L[c] * 0.8, 0);
+        bk.setXY(i, 1, 0.6);
+      }
+      const mesh = new Mesh(geometry, material);
+      mesh.receiveShadow = true; mesh.matrixAutoUpdate = false;
+      return mesh;
+    };
+    return [lit(snowRun, look.snow), lit(snowAbout, look.snow), lit(farB, look.far)];
+  }
 
   // The path's edges marked with poles every twenty metres.
   const marks: Matrix4[] = [];
@@ -318,7 +419,8 @@ export function sliceLand(slice: SkiSlice, snowMap: Texture, powderMap: Texture)
     if (Math.abs(f.left) < slice.half + 2 && f.s > -20 && f.s < length + 20) continue;
     fir(x, z, nearFirs, rng.range(6, 13));
   }
-  for (let j = 0; j < far.nz; j++) for (let i = 0; i < far.nx; i++) {
+  // (Drawn with the game's materials, the country has its woods painted on it, as the game's far land does, and no firs stand there.)
+  for (let j = 0; j < far.nz && !game; j++) for (let i = 0; i < far.nx; i++) {
     const x = far.x0 + i * far.cell + rng.range(-6, 6), z = far.z0 + j * far.cell + rng.range(-6, 6);
     if (underNear(x, z) < 0 || coverAt(x, z) !== COVER.forest || !rng.chance(0.75)) continue;
     fir(x, z, farFirs, rng.range(7, 14));

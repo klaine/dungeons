@@ -51,7 +51,9 @@ import { type BodySpec, type Ground, HUMAN, humanSpec, JOINTS, Ragdoll } from '.
 import { Horse, horseAirPose, horseRidePose, type HorseSkis, saddlePose } from '../src/figures/horse';
 import { Rng } from '../src/core/rng';
 import { readSlice } from '../src/core/skiSlice';
-import { type Frame, groomedLand, type Land, sliceLand } from './slopeLand';
+import { type Frame, type GameLook, groomedLand, type Land, sliceLand } from './slopeLand';
+import { doneGenerating, generateTextureSet } from '../src/render/textures';
+import { farUniforms, makeFarMaterial, makeSnowMaterial, siteUniforms, snowUniforms } from '../src/render/siteMaterial';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const query = new URLSearchParams(location.search);
@@ -155,18 +157,38 @@ async function start() {
   // The land: a world's run, from its slice beside the page; or the groomed slope (`?land=groomed`, or when the slice cannot be had).
   // (Its slice is fetched from beside the page, or, in a page made whole, carried in it.)
   type LandKind = 'world' | 'groomed';
-  const world = query.get('world') ?? 'w2', lands = new Map<LandKind, Land>();
+  const world = query.get('world') ?? 'w2', lands = new Map<string, Land>();
+  // The world's run drawn with the game's own materials for land, in their lighter winter forms (`GameLook`; *Snow*, `?snow=plain`
+  // for the plain look the page had before). Their textures are painted when first wanted, at 512 (`?tex=` another size).
+  type SnowLook = 'game' | 'plain';
+  let snowLook: SnowLook = query.get('snow') === 'plain' ? 'plain' : 'game', gameLook: GameLook | null = null;
+  const gameLookOf = (): GameLook => {
+    if (gameLook) return gameLook;
+    const size = Number(query.get('tex')) || 512;
+    const turf = generateTextureSet('ground', size, 17), scree = generateTextureSet('scree', size, 23);
+    doneGenerating();
+    // (A whole winter: snow wherever the ground holds it, near and far; and the sky's light, which no bake brings here, as the game
+    // has it before its bake arrives.)
+    snowUniforms.uSnow.value = 1;
+    farUniforms.uFarSnow.value = 1;
+    const skyLight: [number, number, number] = [0.6, 0.68, 0.8];
+    siteUniforms.uFallback.value.set(...skyLight);
+    gameLook = { snow: makeSnowMaterial(turf, scree), far: makeFarMaterial({ light: query.get('relief') !== '1' }), sky: skyLight };
+    return gameLook;
+  };
+  let sliceText: string | null | undefined;
   const landOf = async (kind: LandKind): Promise<Land> => {
-    let made = lands.get(kind);
+    const key = kind === 'world' ? `world:${snowLook}` : kind;
+    let made = lands.get(key);
     if (made) return made;
     if (kind === 'world') {
       const carried = (window as unknown as { __slopeFiles?: Record<string, string> }).__slopeFiles?.[`${world}.json`];
       const base = (window as unknown as { __slopeBase?: string }).__slopeBase ?? new URL('../slopes/', location.href).href;
-      const got = carried ?? await fetch(`${base}${world}.json`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+      if (sliceText === undefined) sliceText = carried ?? await fetch(`${base}${world}.json`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
       // (Without its slice, the groomed slope.)
-      made = got ? sliceLand(readSlice(got), snowMap, powderMap) : await landOf('groomed');
+      made = sliceText ? sliceLand(readSlice(sliceText), snowMap, powderMap, snowLook === 'game' ? gameLookOf() : undefined) : await landOf('groomed');
     } else made = groomedLand(snowMap);
-    lands.set(kind, made);
+    lands.set(key, made);
     return made;
   };
   let landKind: LandKind = query.get('land') === 'groomed' || location.hash === '#groomed' ? 'groomed' : 'world';
@@ -823,8 +845,10 @@ async function start() {
   // begun again from its top.
   const landKinds: [string, LandKind, string][] = [['World run', 'world', `A run down the game's world, ${world}`], ['Groomed', 'groomed', 'A groomed slope at sixteen degrees, going on for ever']];
   const landButtons = landKinds.map(([label, k, title]) => button('lands', label, () => { void setLand(k); }, title));
-  const setLand = async (kind: LandKind) => {
-    if (kind === landKind) return;
+  const snowLooks: [string, SnowLook, string][] = [['Game', 'game', "The game's own snow, rock and far country, in lighter winter forms"], ['Plain', 'plain', 'Plain snow and rock: lighter still']];
+  const snowButtons = snowLooks.map(([label, k, title]) => button('snows', label, () => { if (k !== snowLook) { snowLook = k; if (landKind === 'world') void setLand('world', true); else reflect(); } }, title));
+  const setLand = async (kind: LandKind, again = false) => {
+    if (kind === landKind && !again) return;
     $('status').hidden = false;
     $('status').textContent = kind === 'world' ? `Laying the snow on the run in ${world}…` : 'Making the run…';
     await new Promise((r) => setTimeout(r, 30));
@@ -867,6 +891,8 @@ async function start() {
     $('skisets').hidden = who === 'person';
     $('name').textContent = ['Downhill run', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
     landButtons.forEach((b, i) => b.classList.toggle('on', landKinds[i][1] === landKind));
+    snowButtons.forEach((b, i) => b.classList.toggle('on', snowLooks[i][1] === snowLook));
+    $('snows').hidden = landKind !== 'world';
     $('of').textContent = land.fall === Infinity ? '' : ` of ${land.fall.toFixed(0)}`;
     document.body.classList.toggle('riding', mode === 'ride');
   };

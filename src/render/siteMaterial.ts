@@ -1152,6 +1152,76 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
 }
 
 /**
+ * The ground under a full winter, drawn as only what shows of it: for open country under snow, where the ground's own material
+ * (`makeGroundMaterial`) would work out turf, earth, shingle, leaves, paving and puddles at every point, twenty textures and more, to
+ * cover nearly all of it with snow (asked, of the downhill run: "can we have some kind of optimized versions of the game side
+ * landscape materials"). Here, by the same rule for where snow lies (`snowOn`, at `uSnow`) and the same snow: its colour, the drifts
+ * the wind has worked into it at three sizes as light and shade, and a grain catching the sun near the eye; under it, where the
+ * ground is too steep for snow to hold, the mountain's rock in beds, its grain from the scree's picture. Four reads of two textures.
+ *
+ * And snow that has been groomed, where the sheet says so: its first field how far groomed (0 to 1), its second and third the way the
+ * machines went (level, a unit long). Groomed snow is smooth, the drifts gone, in lanes the breadth of a machine each a shade apart,
+ * pressed into the fine ridges of corduroy along its way, which fade out where they are finer than a point of the picture.
+ */
+export function makeSnowMaterial(turf: TextureSet, scree: TextureSet): MeshStandardNodeMaterial {
+  const m = new MeshStandardNodeMaterial({ roughness: 0.7, metalness: 0, color: new Color(1, 1, 1) });
+  const f = fieldOf(), bk = bakeOf();
+  const P: N = positionWorld, at0: N = P.xz, far: N = length(positionView), blur: N = smoothstep(70, 260, far).mul(5);
+  const up: N = normalize(normalWorldGeometry).y;
+  // The same slow changes of tone the ground has, from its turf read very large: no repeat is seen in them.
+  const macro: N = (texture(turf.map, at0.div(41).add(0.37)) as N).a, mid: N = (texture(turf.map, at0.div(9.7).add(0.11)) as N).a;
+  // Where snow lies: the game's own rule (`snowOn`), but its ragged fringe read turned off the noise's lattice and at two sizes. (Read
+  // square to it, as `snowOn` reads it, the edge of the snow on a broad face stepped along the lattice's squares and their diagonals,
+  // which seen across a slope from a little way off were blocks.)
+  const turned: N = vec2(P.x.mul(0.8).sub(P.z.mul(0.6)), P.x.mul(0.6).add(P.z.mul(0.8)));
+  const fringe: N = farNoise(turned.mul(0.85)).mul(0.6).add(farNoise(turned.yx.mul(2.3).add(5.3)).mul(0.4));
+  const snowy: N = smoothstep(0, 0.12, mix(-1.15, 0.75, snowUniforms.uSnow as N).add(up.sub(0.8).mul(2.4)).add(farFbm(at0.mul(0.045).add(3.7)).sub(0.5).mul(1.5)).add(fringe.sub(0.5).mul(0.35))).mul(step(0.001, snowUniforms.uSnow as N)).toVar();
+  // Where it does not lie, the mountain's rock, as the far land draws it (`makeFarMaterial`): in beds some metres thick, each its own
+  // shade; its grain from the scree's picture read at two sizes, so that no repeat of it shows; tinted by the colour the sheet carries.
+  // (The scree's picture alone, at a stride, showed the same pebbles over and over across a face.)
+  const bedAt: N = P.y.add(macro.mul(34)).add(at0.x.mul(0.06)).div(7).toVar();
+  const bed: N = mix(farHash(vec2(floor(bedAt), 3)), 0.5, smoothstep(0.25, 0.8, fwidth(bedAt)));
+  const grit: N = mix((texture(scree.map, at0.mul(0.62)) as N).bias(blur).rgb, (texture(scree.map, at0.mul(0.13).add(0.31)) as N).bias(blur).rgb, 0.5);
+  const stones: N = vertexColor().rgb.mul(vec3(0.62, 0.6, 0.58)).mul(bed.mul(0.5).add(0.62)).mul(dot(grit, vec3(0.3, 0.5, 0.2)).mul(0.9).add(0.45)).mul(mid.mul(0.3).add(0.85)).toVar();
+  // Groomed: lanes some five metres broad across the way the machines went, each its own shade; and in each the corduroy, a ridge
+  // every six centimetres.
+  const groomed: N = clamp(f.x, 0, 1).toVar();
+  const way: N = vec2(f.y, f.z), across: N = vec2(way.y.negate(), way.x);
+  const lanePos: N = dot(at0, across).div(4.8), lane: N = farHash(vec2(floor(lanePos), 7)).toVar();
+  const ridgePos: N = dot(at0, across).div(0.06);
+  // (Let go of well before a ridge is as small as a point of the picture: nearer that, they beat against the points in broad stripes.)
+  const ridgeSeen: N = one(smoothstep(0.08, 0.22, fwidth(ridgePos))).toVar();
+  const ridges: N = sin(fract(ridgePos).mul(Math.PI * 2)).mul(ridgeSeen).toVar();
+  const snowColour: N = vec3(...SNOW).mul(mix(0.94, 1.04, macro)).mul(mix(1, lane.mul(0.05).add(0.975).add(ridges.mul(0.015)), groomed));
+  m.colorNode = vec4(mix(stones, snowColour, snowy), 1);
+  {
+    // Snow the wind has worked, as the ground's material draws it: low ripples across the way it blows, broader drifts, and near the
+    // eye ripples a hand apart; none on what is groomed, where instead the corduroy's ridges tilt the light across the lane.
+    const rip = (k: number, e: number): N => {
+      const q: N = vec2(at0.x.mul(0.8).add(at0.y.mul(0.35)), at0.y.mul(2.6).sub(at0.x.mul(0.5))).mul(k);
+      return vec2(farNoise(q.add(vec2(e, 0))).sub(farNoise(q.sub(vec2(e, 0)))), farNoise(q.add(vec2(0, e))).sub(farNoise(q.sub(vec2(0, e))))).div(e * 2);
+    };
+    // (Worked out only where they can be seen, within ninety metres: twelve samples of noise, the most of what this material does,
+    // and nothing of them shows further off.)
+    const drifted: N = Fn(() => {
+      const d: N = vec2(0, 0).toVar();
+      If(far.lessThan(90), () => {
+        d.assign(rip(0.9, 0.08).mul(0.16).add(rip(0.16, 0.05).mul(0.35)).add(rip(2.7, 0.03).mul(0.05).mul(one(smoothstep(6, 18, far)))).mul(one(smoothstep(20, 90, far))));
+      });
+      return d;
+    })().toVar();
+    const corduroy: N = across.mul(cos(fract(ridgePos).mul(Math.PI * 2)).mul(0.12).mul(ridgeSeen));
+    const tilt: N = mix(drifted, corduroy, groomed).mul(snowy).add(vec2(mid.sub(0.5).mul(0.15)).mul(one(snowy)));
+    m.normalNode = normalMap(vec3(tilt, 1).mul(0.5).add(0.5));
+  }
+  // (And here and there a grain catches the sun: a glint, near the eye, from a crystal turned just so; fewer on packed snow.)
+  const glint: N = step(mix(0.992, 0.997, groomed), fract(sin(dot(floor(P.mul(26)), vec3(12.9898, 78.233, 37.719))).mul(43758.5453))).mul(one(smoothstep(4, 14, far))).toVar();
+  m.roughnessNode = mix(float(0.95), mix(mix(0.66, 0.58, groomed), 0.08, glint), snowy);
+  lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(0.12, 0.55, snowy) });
+  return m;
+}
+
+/**
  * A material for small loose things: iron fittings, torch brands, keys. They are not part of the
  * light bake, and left to themselves they would be lit by the open sky wherever they are, indoors
  * included. Here they get a faint fixed ambient instead, and otherwise only the real lights.
@@ -1555,7 +1625,7 @@ const farCrowns: N = Fn(([p]: [N]) => {
  * the height where rock takes over) and how much of a hollow it is, in the fields other
  * materials use for moss and damp.
  */
-export function makeFarMaterial(): MeshStandardNodeMaterial {
+export function makeFarMaterial(o: { light?: boolean } = {}): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf();
   const uWood = farUniforms.uFarWood as N, uGrass = farUniforms.uFarGrass as N;
@@ -1632,7 +1702,9 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   // (Only on the heights: the low country seen far below through a break in the cloud is wood and pasture, and the rock drawn on it
   // there came out as ripples.)
   const rocky: N = sstep(0.86, 0.6, n0.y).mul(one(wood)).mul(smoothstep(0.3, 0.55, high)).toVar();
-  const relief = rockRelief(P, n0, farN, grain, rocky);
+  // (`light`: none of it, for a page that must draw quickly on what it has, a tablet's: the relief is worked out six times over at
+  // every point of a face, some fifty samples of noise, the most of all this material does.)
+  const relief = o.light ? { normal: farN, cavity: float(1) } : rockRelief(P, n0, farN, grain, rocky);
   const faceN: N = relief.normal;
   const cavity: N = relief.cavity;
   land = land.mul(cavity);
