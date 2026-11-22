@@ -1211,8 +1211,8 @@ The machine this is developed on now has a graphics card, and tablets were repor
     bytes, 5.5 MB in some four seconds, then by stage; gone after the second frame, the title rising), at 800 by 500 and 390 by 844;
     with a world whose slice is not there (the groomed slope, the textures not painted); opening on the groomed slope and then asking
     for the world's run at 300 kB a second (the screen over the picture, the slice counted, then painting, laying, the demo, and
-    gone); a clips file that cannot be had (the screen says so and stays); the figure lab's check, as the library's files are had
-    another way (all passed).
+    gone); a clips file that cannot be had (the screen says so and stays); the figure lab's and the crew's checks, as the library's
+    files are had another way (all passed).
 ## Risks
 
 | Risk | Mitigation |
