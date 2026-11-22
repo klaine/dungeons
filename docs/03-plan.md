@@ -1212,7 +1212,24 @@ The machine this is developed on now has a graphics card, and tablets were repor
     with a world whose slice is not there (the groomed slope, the textures not painted); opening on the groomed slope and then asking
     for the world's run at 300 kB a second (the screen over the picture, the slice counted, then painting, laying, the demo, and
     gone); a clips file that cannot be had (the screen says so and stays); the figure lab's and the crew's checks, as the library's
-    files are had another way (all passed).
+    files are had another way (all passed).84. **A second run.** Asked: "can we cheaply add a second found location as an option where to play?" Cheaply, yes: the search
+    for runs (`findSkiRun`) keeps every distinct run it finds, best first, and the page already read any slice by its name. Of the
+    thirty-two kept in `w2`, the second comes down beside the first (51 metres off it at the nearest); the third is 3.8 kilometres
+    west, below The Pale Crown: down a long spur out of the range into the wooded foothills above a bay, 1.43 kilometres from 554
+    metres to 19, 15.9 degrees on the whole, 264 metres of it on a crest. `tools/skiRun.ts` with `PICK=3` now writes it beside the
+    first, `public/slopes/w2-3.json` (1.3 MB, in some three and a half minutes, most of it the search), rather than over it. The page's
+    *Slope* offers the runs it is told of (`runs`: *Silent Warden*, *Pale Crown*) and the groomed slope; a run is fetched when it is
+    first chosen (the one opened on, at once with the figures), kept by name (`sliceTexts`), and the choice kept in the address
+    (`#w2-3`; `?world=` still opens on any slice). Flown on it, the demo run's eighth kicker (a layout backflip) was not made at any
+    of its six speeds: the seventh kicker had been moved 48 metres down to find land it could stand on, leaving the eighth 82 metres
+    after it, and the pilot went straight for seven tenths of a second after each kicker before turning again, which off a landing at
+    79 km/h took fifteen of the forty-five metres it had to come eight metres across in. It no longer waits where the next kicker is
+    already to be lined up on. *Checked* in headless Chromium: the demo run on both runs and the groomed slope for the person, the
+    horse and the horse and rider on two skis and on four, every trick landed at the first try (the first run's now 67.4 s, seven
+    tricks; the second's 102.7 s, eight; the groomed slope's as before, 106.9 s, twelve); ridden on the second run into its first
+    seven kickers at 14 and 18 m/s, at *Mild*, between and *Wild*, the person and the horse and rider, 84 tricks given and none
+    fallen, two short airs coming round without their style; and pictures along it.
+
 ## Risks
 
 | Risk | Mitigation |

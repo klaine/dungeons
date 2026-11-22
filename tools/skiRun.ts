@@ -1,10 +1,10 @@
 /**
  * Finds a ski run in a world (`src/core/skiRun.ts`) and writes its slice, the snow on the world's land about it, for the downhill
- * run's page (`lab/slope.html`) to ski: `public/slopes/<world>.json`. Reports what was found: where the run starts and ends, how far
+ * run's page (`lab/slope.html`) to ski: `public/slopes/<world>.json` (or, for another run than the first, `<world>-<n>.json`). Reports what was found: where the run starts and ends, how far
  * it falls, how steep it is, how long the search and the slice took, and how large the file is. With a folder, also draws the
  * search as shaded relief (every run kept in yellow, the one chosen in red, the places' and towns' keep-away rings in magenta).
  *
- *   npx tsx tools/skiRun.ts [world seed, w2] [folder for the picture]          (`PICK=2` before it to take the second run kept)
+ *   npx tsx tools/skiRun.ts [world seed, w2] [folder for the picture]          (`PICK=3` before it to take the third run kept, and so on)
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
@@ -23,12 +23,13 @@ for (const r of found.kept.slice(0, 5)) {
   const [a, b] = [r.points[0], r.points[r.points.length - 1]];
   console.log(`    from ${a.map((v) => v.toFixed(0))} at ${r.heights[0].toFixed(0)} m to ${b.map((v) => v.toFixed(0))} at ${r.heights[r.heights.length - 1].toFixed(0)} m: ${r.length} m long, falling ${r.drop.toFixed(0)} m, ${r.mean.toFixed(1)} degrees on the whole, ${r.steepest.toFixed(1)} at most over ${RUN.ahead} m`);
 }
-// (`PICK=2` before the command takes the second run kept instead, and so on.)
-const run = found.kept[Number(process.env.PICK ?? 1) - 1] ?? null;
+// (`PICK=3` before the command takes the third run kept instead, and so on, written beside the first: `w2-3.json`. The page offers
+// the runs it is told of, `RUNS` in `lab/slope.ts`.)
+const pick = Math.max(1, Math.round(Number(process.env.PICK ?? 1)) || 1), run = found.kept[pick - 1] ?? null;
 if (!run) { console.log('  no run found'); process.exit(1); }
 t = performance.now();
 const slice = sliceOfRun(w, run);
-const text = writeSlice(slice), out = `public/slopes/${seed}.json`;
+const text = writeSlice(slice), out = `public/slopes/${seed}${pick > 1 ? `-${pick}` : ''}.json`;
 mkdirSync('public/slopes', { recursive: true });
 writeFileSync(out, text);
 let inSlice = 0;
@@ -50,12 +51,12 @@ if (folder) {
     const i = Math.round((x - mx + half) / px), j = Math.round((z - mz + half) / px);
     for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) { const ii = i + a, jj = j + b; if (ii >= 0 && jj >= 0 && ii < W && jj < H) rgb.set(col, (jj * W + ii) * 3); }
   };
-  found.kept.slice(1).forEach((k) => k.points.forEach(([x, z]) => dot(x, z, [255, 200, 0])));
+  found.kept.filter((k) => k !== run).forEach((k) => k.points.forEach(([x, z]) => dot(x, z, [255, 200, 0])));
   run.points.forEach(([x, z]) => { dot(x, z, [230, 30, 30], 1); });
   for (const q of [...w.places.map((p) => ({ ...p, r: RUN.place })), ...w.towns.map((t) => ({ ...t, r: RUN.town }))]) for (let a = 0; a < 200; a++) dot(q.x + Math.cos(a / 32) * q.r, q.z + Math.sin(a / 32) * q.r, [255, 0, 255], 0);
   mkdirSync(folder, { recursive: true });
-  writeFileSync(`${folder}/${seed}-run.png`, png(W, H, rgb));
-  console.log(`  picture: ${folder}/${seed}-run.png`);
+  writeFileSync(`${folder}/${seed}-run${pick > 1 ? `-${pick}` : ''}.png`, png(W, H, rgb));
+  console.log(`  picture: ${folder}/${seed}-run${pick > 1 ? `-${pick}` : ''}.png`);
 }
 
 /** A PNG of RGB pixels. */

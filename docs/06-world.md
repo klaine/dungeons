@@ -681,7 +681,8 @@ leaves both the game and the walk working:
 Asked, of the downhill run's page (`lab/slope.html`): "a 100m wide nearland slice of our actual winter gameworld starting on high
 slopes at suitable location, no buildings or locations"; and, earlier, that skiing, by people and by horses, is heading for "the
 world game winter mountains and hills". A run is found in a world (`src/core/skiRun.ts`, `npx tsx tools/skiRun.ts w2 [folder]`) and
-its slice kept for the page (`src/core/skiSlice.ts`, `public/slopes/w2.json`): the world's near land at a metre as the walk page
+its slice kept for the page (`src/core/skiSlice.ts`, `public/slopes/w2.json`; a second run, the third the search keeps in `w2`, below
+The Pale Crown, in `w2-3.json`): the world's near land at a metre as the walk page
 makes it, under snow, fifty metres either side of the run's line, and the land and country about it coarser. What the search showed
 of the world's land: its range is walls, at 200 to 500 metres seven tenths or more of it steeper than 36 degrees over sixteen metres,
 its glens floored flat, its tops rounded but narrow; nowhere in the range does a band a hundred metres broad stay skiable for long, and
