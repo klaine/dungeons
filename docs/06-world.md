@@ -691,8 +691,9 @@ metres lower, the run found comes from beside the highest summit, at 832 metres,
 brought to half its height above 300 metres in the slice alone. A world whose mountains could be skied as they stand would want its
 range worn into broader shoulders and cirques, or less high. The page does not stream the world; it is a slice, made once, of the land
 as it is now, and is made again when the land changes. Its kickers stand where the land after them falls away enough to land on,
-and the page's demo run is flown over them by a pilot, landing a 720, a backflip, a backflip 360 and a ski jumper's flight off the
-four on `w2`'s run (`plan`, item 79): on this land, at a lined-up 61 km/h, each comes round at the first try.
+and the page's demo run is flown over them by a pilot, landing a 720, a backflip, a backflip 360, a ski jumper's flight, a cork 720
+and a mute grab off the six on `w2`'s run (`plan`, items 79 and 80): on this land, at a lined-up 61 km/h, each comes round at the
+first try but the backflip 360, which off its kicker at that speed has too little time in the air and is taken again faster.
 
 ## Where next: the land, and places that fit it
 

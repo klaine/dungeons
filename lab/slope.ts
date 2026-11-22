@@ -225,8 +225,9 @@ async function start() {
     let k: Kicker | null = null;
     const length = KICK.length + KICK.back;
     for (let shift = 0; shift <= (land.length === Infinity ? 0 : KICK.shift) && !k; shift += 6) {
-      // (Across the skiable path at its own place, a few metres in from either edge.)
-      const s = KICK.first + i * KICK.every + shift, [lo, hi] = land.edges(s), left = (lo + hi) / 2 + kickerLeft(i, Math.min(14, (hi - lo) / 2 - 6));
+      // (Across the skiable path at its own place, in from either edge further than the band where the skier is turned back towards
+      // the middle: one within it could not be lined up on.)
+      const s = KICK.first + i * KICK.every + shift, [lo, hi] = land.edges(s), left = (lo + hi) / 2 + kickerLeft(i, clamp((hi - lo) / 2 - Math.min(8, (hi - lo) / 4) - KICK.half - KICK.side - 1, 0, 14));
       if (land.kickable(s, left, length)) { const p = land.at(s, left); k = { i, s, left, ...p }; }
     }
     kickerAt.set(i, k);
@@ -494,7 +495,7 @@ async function start() {
    */
   const ride = {
     x: 0, y: 0, z: 0, vy: 0, down: 0, left: 0, way: 0, speed: 0, facing: 0, tuck: 0, tall: 0, brake: 0, brakeSide: 1, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0,
-    out: 0, absorb: 0, settle: { spin: 0, flip: 0, left: 0 }, skid: 0, held: 0, ended: false,
+    out: 0, absorb: 0, sink: 0, pop: 0, settle: { spin: 0, flip: 0, left: 0 }, skid: 0, held: 0, ended: false,
   };
   /** Where the skier is against the run, as its last step left it. */
   let here: Frame = land.frame(0, 0);
@@ -507,8 +508,19 @@ async function start() {
    * In the air: what it is doing there (`air`, straight air; `flip`, a backflip; `flight`, a ski jumper's; `hop`, too short a time
    * in the air for anything), the spin and the flip it is to make and how far into them it is, how long it has been in the air and how
    * long it was to be, how fast it goes and which way, where it left the snow, and how far its nose was up over the land as it did.
+   * And: how far the spin's axis is tipped (a cork); how fast it turns, as a share of the quickest (`rate`: paced to the time it has in
+   * the air, as a skier sets a spin off the lip to come round just before the landing); how tall it stood and how far into its pop it
+   * was as it left; how far into each style it is (`style`: a mute grab, a tail grab, a spread eagle, a flip laid out) and how long each
+   * has been held (`held`); and when its turns were made, if they have been.
    */
-  interface Air { kind: 'air' | 'flip' | 'flight' | 'hop'; spinTo: number; flipTo: number; spin: number; flip: number; t: number; T: number; v: Vector3; from: Vector3; nose: number; name: string }
+  type Style = 'mute' | 'tail' | 'spread' | 'layout';
+  interface Air {
+    kind: 'air' | 'flip' | 'flight' | 'hop'; spinTo: number; flipTo: number; spin: number; flip: number; t: number; T: number; v: Vector3; from: Vector3; nose: number; name: string;
+    cork: number; rate: { spin: number; flip: number }; set: number; pop0: number; style: Record<Style, number>; held: Record<Style, number>; done: number | null;
+  }
+  const STYLES: Style[] = ['mute', 'tail', 'spread', 'layout'];
+  /** How fast a spin and a flip go round at the quickest, untucked: turns a second. */
+  const SPIN_RATE = 1.7, FLIP_RATE = 1.3;
   let air: Air | null = null;
   /** Gone limp, every body of it (a horse and its rider each their own), and why. */
   let crash: { dolls: { body: Body; doll: Ragdoll }[]; why: string } | null = null;
@@ -544,15 +556,32 @@ async function start() {
     here = f; ride.down = f.s; ride.left = f.left;
   };
 
-  /** What a trick is called. */
-  const trickName = (a: Air) => {
-    const turns = Math.round(Math.abs(a.spinTo) / TURN), spin = turns ? `${turns * 360}` : '';
-    if (a.kind === 'hop') return 'Hop';
-    if (a.kind === 'flip') return spin ? `Backflip ${spin}` : 'Backflip';
-    if (a.kind === 'flight') return spin ? `Flight ${spin}` : 'Ski-jump flight';
+  /** The style a trick is known by: the one held longest, for a quarter of a second at least. */
+  const styleOf = (a: Air): Style | '' => { let best: Style | '' = '', most = 0.25; for (const k of STYLES) if (a.held[k] > most) { best = k; most = a.held[k]; } return best; };
+  /**
+   * What a trick is called: by what it did off the lip (a spin, a flip, a cork, a flight) and the style it was known by. A horse's
+   * grab is a whip and its spread eagle a capriole (on four short skis) or the splits (on a long pair); its rider's grab a superman,
+   * and its spread eagle a no-hander.
+   */
+  const nameOf = (kind: Air['kind'], turns: number, cork: boolean, style: Style | '') => {
+    const spin = turns ? `${turns * 360}` : '', horse_ = who !== 'person', rider_ = who === 'mounted';
+    const grab = horse_ ? (rider_ ? 'superman whip' : 'whip') : '', four = horse.skis === 'four';
+    if (kind === 'hop') return 'Hop';
+    if (kind === 'flight') return 'Ski-jump flight';
+    const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1), upper = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+    if (kind === 'flip') {
+      const base = spin ? `Backflip ${spin}` : 'Backflip';
+      if (style === 'layout') return `Layout ${lower(base)}`;
+      if (style === 'mute' || style === 'tail') return horse_ ? `${upper(grab)} ${lower(base)}` : `${style === 'mute' ? 'Mute' : 'Tail grab'} ${lower(base)}`;
+      return base;
+    }
+    const base = cork ? `Cork ${spin}` : spin;
+    if (style === 'mute' || style === 'tail') return horse_ ? (base ? `${base} ${grab}` : upper(grab)) : base ? `${base} ${style === 'mute' ? 'mute' : 'tail grab'}` : style === 'mute' ? 'Mute grab' : 'Tail grab';
+    if (style === 'spread' && !base) return horse_ ? `${four ? 'Capriole' : 'Splits'}${rider_ ? ' no-hander' : ''}` : 'Spread eagle';
     // (A horse's straight air is a show jumper's.)
-    return spin || (who === 'person' ? 'Straight air' : 'Show jump');
+    return base || (who === 'person' ? 'Straight air' : 'Show jump');
   };
+  const trickName = (a: Air) => nameOf(a.kind, Math.round(Math.abs(a.spinTo) / TURN), !!a.cork, styleOf(a));
   // What has just happened, said over the picture for a while: a landing, or a fall.
   let told = { text: '', small: '', bad: false, until: 0 };
   const tell = (text: string, small: string, bad: boolean, seconds: number) => { told = { text, small, bad, until: ride.time + seconds }; };
@@ -576,11 +605,20 @@ async function start() {
    * crest of a knoll taken fast), going at `v`, its nose `nose` up over the land: what it does in the air is what it was doing as it
    * left, if it is to be in the air long enough for anything.
    */
-  const takeOff = (v: Vector3, nose: number) => {
+  const takeOff = (v: Vector3, nose: number, pop: number) => {
     const from = new Vector3(ride.x, ride.y, ride.z), T = timeToSnow(from, v), long = T > 0.5;
-    const kind: Air['kind'] = !long ? 'hop' : ride.tuck > 0.55 ? 'flight' : ride.tall > 0.5 ? 'flip' : 'air';
     const turns = !long ? 0 : Math.abs(ask.x) > 0.72 ? 2 : Math.abs(ask.x) > 0.3 ? 1 : 0;
-    air = { kind, spinTo: -Math.sign(ask.x) * turns * TURN, flipTo: kind === 'flip' ? -TURN : 0, spin: 0, flip: 0, t: 0, T, v, from, nose, name: '' };
+    // (Tucked and turning, a cork: the spin laid over off its axis; tucked and straight, a ski jumper's flight.)
+    const tucked = ride.tuck > 0.55, kind: Air['kind'] = !long ? 'hop' : tucked && !turns ? 'flight' : ride.tall > 0.5 ? 'flip' : 'air';
+    const flips = kind === 'flip' ? 1 : 0;
+    // Paced to the time in the air: the turns set off the lip to be made a little before the snow, no slower than about half the
+    // quickest (a long air and a single turn) and no quicker than the quickest (a short one wants a tighter tuck to come round).
+    const avail = Math.max(0.3, T - 0.5), pace = (n: number, rate: number) => clamp(n / (rate * avail), 0.5, 1);
+    air = {
+      kind, spinTo: -Math.sign(ask.x) * turns * TURN, flipTo: -flips * TURN, spin: 0, flip: 0, t: 0, T, v, from, nose, name: '',
+      cork: tucked && turns && kind === 'air' ? deg(42) : 0, rate: { spin: pace(turns, SPIN_RATE), flip: pace(flips, FLIP_RATE) }, set: ride.tall, pop0: pop,
+      style: { mute: 0, tail: 0, spread: 0, layout: 0 }, held: { mute: 0, tail: 0, spread: 0, layout: 0 }, done: turns || flips ? null : 0,
+    };
     air.name = trickName(air);
   };
 
@@ -602,7 +640,8 @@ async function start() {
     ride.y = ground(ride.x, ride.z);
     ride.vy = risingHere();
     ride.out = bumpAt(ride.x, ride.z);
-    ride.absorb = clamp(0.35 + blow / 10, 0, 1);
+    ride.sink = clamp(0.35 + blow / 10, 0, 1);
+    ride.pop = 0;
     ride.settle = { spin: a.spin - a.spinTo, flip: a.flip - a.flipTo, left: 0.25 };
     if (a.kind !== 'hop') tell(a.name, `${far.toFixed(0)} m, ${a.t.toFixed(1)} s in the air`, false, 2.6);
   };
@@ -645,7 +684,7 @@ async function start() {
   };
   /** The skier back at the top, going a little. */
   const resetRide = () => {
-    Object.assign(ride, { way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, absorb: 0, skid: 0, ended: false, held: 0 });
+    Object.assign(ride, { way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, absorb: 0, sink: 0, pop: 0, skid: 0, ended: false, held: 0 });
     here = land.frame(0, 0);
     putAt(0, 0);
     ride.settle = { spin: 0, flip: 0, left: 0 };
@@ -673,24 +712,44 @@ async function start() {
     ride.x += a.v.x * dt; ride.y += a.v.y * dt; ride.z += a.v.z * dt;
     keepOn();
     ride.time += dt;
-    // Opening up to land, the last few tenths of a second before the snow; a tighter tuck turns it quicker, opening out slower.
-    const left = timeToSnow(new Vector3(ride.x, ride.y, ride.z), a.v), open = a.kind === 'hop' ? 0 : 1 - smooth(left / 0.4);
-    const quick = (1 + 0.45 * Math.max(0, ask.y) - 0.35 * Math.max(0, -ask.y)) * (1 - 0.5 * open);
+    // Opening up to land, the last few tenths of a second before the snow, or once its turns are made (a moment after, if it holds a
+    // grab); a tighter tuck turns it quicker, laid out or spread it turns slower.
+    const left = timeToSnow(new Vector3(ride.x, ride.y, ride.z), a.v);
+    const made = a.done === null || !(a.spinTo || a.flipTo) ? 0 : smooth((a.t - a.done - 0.12 - 0.2 * Math.max(a.style.mute, a.style.tail)) / 0.3);
+    const open = a.kind === 'hop' ? 0 : Math.max(1 - smooth(left / 0.4), made);
+    // The styles, from what is asked in the air (not at once off the lip, where the ask made the trick): up and to a side, a grab, to
+    // the left a mute, to the right a tail grab; down, in straight air a spread eagle and in a flip a flip laid out.
+    const grab = a.t > 0.12 && ask.y > 0.35 && Math.abs(ask.x) > 0.45, down = a.t > 0.12 && ask.y < -0.5;
+    const want_: Record<Style, number> = {
+      mute: grab && ask.x < 0 ? 1 : 0, tail: grab && ask.x > 0 ? 1 : 0,
+      spread: down && a.kind === 'air' && !a.spinTo ? 1 : 0, layout: down && a.kind === 'flip' ? 1 : 0,
+    };
+    for (const k of STYLES) {
+      a.style[k] += (want_[k] * (1 - open) - a.style[k]) * ease(dt, 7);
+      if (a.style[k] > 0.6) a.held[k] += dt;
+    }
+    const quick = (1 + 0.45 * Math.max(0, ask.y) - 0.1 * Math.max(a.style.layout, a.style.spread)) * (1 - 0.5 * open);
     const turned = (now: number, to: number, rate: number) => {
       const short = to - now;
       if (!short) return now;
       const most = rate * TURN * dt * quick * Math.min(1, 0.3 + Math.abs(short) / 1.0) * Math.min(1, (a.t + 0.08) / 0.25);
       return now + Math.sign(short) * Math.min(Math.abs(short), most);
     };
-    a.flip = turned(a.flip, a.flipTo, 1.0);
-    a.spin = turned(a.spin, a.spinTo, 1.35);
+    a.flip = turned(a.flip, a.flipTo, FLIP_RATE * a.rate.flip);
+    a.spin = turned(a.spin, a.spinTo, SPIN_RATE * a.rate.spin);
+    if (a.done === null && a.flip === a.flipTo && a.spin === a.spinTo) a.done = a.t;
+    a.name = trickName(a);
     const way = Math.atan2(a.v.dot(runLeft(here)), a.v.dot(runDir(here)));
     ride.way = way;
     ride.facing += (way - ride.facing) * ease(dt, 6);
     ride.flickL = ride.flickR = 0;
+    // (How far round the flip is, for the head to look back for the snow over its second half.)
+    const flipped = a.flipTo ? a.flip / a.flipTo : 0;
     posed = { air: true, c: {
       tuck: Math.max(0, ask.y), flight: a.kind === 'flight' ? smooth(a.t / 0.3) : 0, open,
-      throw: a.kind === 'flip' ? 1 - smooth(a.t / 0.35) : 0, wrap: a.spinTo ? smooth(a.t / 0.2) : 0, ski: ride.way - ride.facing, spin: a.spin, flip: a.flip,
+      throw: a.kind === 'flip' ? (1 - smooth(a.t / 0.35)) * (1 - a.style.layout) : 0, wrap: a.spinTo ? smooth(a.t / 0.2) : 0, ski: ride.way - ride.facing, spin: a.spin, flip: a.flip,
+      pop: a.pop0 * (1 - smooth(a.t / 0.26)), set: a.set, lead: (a.spinTo - a.spin) * smooth(a.t / 0.15), spot: smooth((flipped - 0.45) / 0.3),
+      cork: a.cork * (1 - open), layout: a.style.layout, spread: a.style.spread, mute: a.style.mute, tail: a.style.tail, reach: a.kind === 'hop' ? 0 : 1 - smooth(left / 0.2),
     } };
     if (!quiet) skier.air(posed.c as AirControls);
     // (Upright to the land under it, smoothed over some metres; its nose up as it left the lip, coming level over the flight.)
@@ -754,7 +813,7 @@ async function start() {
     if (g1 < thrown - 0.03) {
       ride.y = thrown;
       keepOn();
-      takeOff(go.clone().multiplyScalar(ride.speed * level).setY(ride.vy - G * dt), nose);
+      takeOff(go.clone().multiplyScalar(ride.speed * level).setY(ride.vy - G * dt), nose, ride.pop);
       return stepAir(0);
     }
     ride.vy = clamp((g1 - ride.y) / dt, -ride.speed, ride.speed);
@@ -772,14 +831,17 @@ async function start() {
     const bump = (left: number) => (left > 0 ? Math.sin((Math.PI * (FLICK - left)) / FLICK) : 0) * (1 - ride.tuck);
     ride.facing += (skier.facing * ride.way - ride.facing) * ease(dt, 2);
     const ski = ride.way + pivot + ((ride.brakeSide * 78 * Math.PI) / 180) * ride.brake;
-    // Sunk into a landing, coming up out of it; crouched going up a kicker's ramp, the more the steeper; and out of what is left of
-    // a turn of the whole body.
-    ride.absorb = Math.max(ride.out > 0.05 ? 0.5 * clamp(Math.sin(nose) / 0.34, 0, 1) : 0, ride.absorb - dt * 1.6);
+    // Crouched going up a kicker's ramp, the more the steeper, and springing up out of the crouch over its last metre or two to the lip
+    // (the pop); sunk into a landing, quickly, and coming up out of it more slowly; and out of what is left of a turn of the whole body.
+    ride.pop = ride.out > 0.02 && nose > 0.02 ? smooth((ride.out / KICK.height - 0.45) / 0.45) : 0;
+    const crouch = ride.out > 0.05 ? 0.5 * clamp(Math.sin(nose) / 0.34, 0, 1) * (1 - ride.pop) : 0;
+    ride.sink = Math.max(0, ride.sink - dt * 1.5);
+    ride.absorb += (Math.max(crouch, ride.sink) - ride.absorb) * ease(dt, 16);
     const settling = smooth(ride.settle.left / 0.25);
     ride.settle.left = Math.max(0, ride.settle.left - dt);
     posed = { air: false, c: {
       s: ride.lean, ski: ski - ride.facing, tuck: ride.tuck, brake: ride.brake, tall: ride.tall, flickL: bump(ride.flickL), flickR: bump(ride.flickR),
-      absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid,
+      absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid, pop: ride.pop,
     } };
     if (!quiet) skier.ride(posed.c as RideControls);
     // (Upright to the snow under it, smoothed over half a metre, as skis bridge what is smaller.)
@@ -811,22 +873,31 @@ async function start() {
    * and played back. Between the kickers it carves down the skiable path, a turn every two seconds or so, wider the faster it goes,
    * held towards the path's middle; from some seventy metres before each it lines up on the kicker, going at the speed it means to
    * take it at, and takes off in the stance that makes the trick asked of that kicker: neither tucked nor tall and turning hard, a 720;
-   * standing tall, a backflip; tall and turning, a backflip with a 360; tucked, a ski jumper's flight. In the air it tucks, which turns
-   * it quicker, so that it comes round in time; it opens up to land by itself. A kicker it does not land its trick off (short of it,
-   * or fallen) is flown again from the start of its approach, at another speed. After the last it carves on to the foot of the run
-   * (on the groomed slope, some way on, and brakes to a stop). Each skier, a person, a horse, a horse and its rider, is flown for
-   * itself (a horse's body faces round with its skis more than a person's); the same pilot and the same tricks.
+   * standing tall, a backflip; tall and turning, a backflip with a 360; tucked, a ski jumper's flight; tucked and turning hard, a cork
+   * 720. In the air it holds the style asked (asked then: "also add some cool trick to the remaining jumps/kickers"): a mute grab, a
+   * flip laid out, a 360 with a tail grab, a spread eagle (a horse's whip, capriole or splits, its rider's superman or no-hander, as
+   * `nameOf` has them); and it tucks, which turns it quicker, only if its turns would not otherwise come round in time. It opens up to
+   * land by itself. A kicker it does not land its trick off (short of it, fallen, or another trick) is flown again from the start of its
+   * approach, at another speed. After the last it carves on to the foot of the run (on the groomed slope, some way on, and brakes to a
+   * stop). Each skier, a person, a horse, a horse and its rider, is flown for itself; the same pilot and the same tricks.
    */
-  type Stance = 'spin' | 'flip' | 'flip spin' | 'tuck';
-  const DEMO_TRICKS: { name: string; stance: Stance; side: number }[] = [
-    { name: '720', stance: 'spin', side: 1 }, { name: 'Backflip', stance: 'flip', side: 0 },
-    { name: 'Backflip 360', stance: 'flip spin', side: -1 }, { name: 'Ski-jump flight', stance: 'tuck', side: 0 },
+  interface DemoTrick { kind: Air['kind']; turns: number; cork?: boolean; side?: number; style?: Style }
+  const DEMO_TRICKS: DemoTrick[] = [
+    { kind: 'air', turns: 2, side: 1 }, { kind: 'flip', turns: 0 }, { kind: 'flip', turns: 1, side: -1 }, { kind: 'flight', turns: 0 },
+    { kind: 'air', turns: 2, cork: true, side: 1 }, { kind: 'air', turns: 0, style: 'mute' }, { kind: 'flip', turns: 0, style: 'layout' },
+    { kind: 'air', turns: 1, side: -1, style: 'tail' }, { kind: 'air', turns: 0, style: 'spread' },
   ];
+  /** What a trick is, to tell one landed from another: what it did off the lip, how many turns, whether corked, and its style. */
+  const keyOf = (kind: Air['kind'], turns: number, cork: boolean, style: Style | '') => `${kind}|${turns}|${cork ? 1 : 0}|${style}`;
+  const trickKey = (t: DemoTrick) => keyOf(t.kind, t.turns, !!t.cork, t.style ?? '');
+  const demoName = (t?: DemoTrick) => (t ? nameOf(t.kind, t.turns, !!t.cork, t.style ?? '') : 'Carving');
   /** The speeds a kicker is taken at, the first first, the others if that one does not make its trick. */
   const DEMO_SPEEDS = [17, 20, 14, 23, 11, 26];
   interface DemoFrame { p: Vector3; q: Quaternion; air: boolean; c: RideControls | AirControls; now: Now }
   interface Demo { frames: DemoFrame[]; parts: { label: string; from: number; to: number }[]; length: number; landed: string[]; tries: number[]; fell: string | null; flown: string[] }
-  const demos = new Map<Land, Map<Who, Demo>>();
+  const demos = new Map<Land, Map<string, Demo>>();
+  /** Which demo run a skier has: a horse's for each set of skis, as its tricks differ on them. */
+  const demoKey = () => (who === 'person' ? who : `${who} ${horse.skis}`);
   /** The kickers that stand on the run, from the top, as many as `n`. */
   const standing = (n: number) => { const out: Kicker[] = []; for (let i = 0; i < 60 && out.length < n; i++) { const k = kickerOf(i); if (k && k.s < land.length) out.push(k); } return out; };
   /** Flies the demo run on the land as it is, for the skier as it is. */
@@ -838,12 +909,12 @@ async function start() {
     Object.assign(want, { x: 0, y: 0, brake: false, brakeKey: false });
     for (const key of Object.keys(want.keys) as (keyof typeof want.keys)[]) want.keys[key] = false;
     const frames: DemoFrame[] = [], labels: string[] = [], landed: string[] = [], tries: number[] = [], flown: string[] = [];
-    let k = 0, phase = 0, settle = 0, label = 'Off from the top', fell: string | null = null, stopAt = Infinity, last = '', step = 0;
+    let k = 0, phase = 0, settle = 0, label = 'Off from the top', fell: string | null = null, stopAt = Infinity, last = '', lastT = 0, step = 0, airFrom = 0;
     // (Where the approach to the kicker now ahead began, to fly it again from there.)
     let from: { k: number; step: number; ride: typeof ride; ask: typeof ask; here: Frame; frames: number; landed: number; phase: number } | null = null;
     /** Each kicker's flight, as it went: at what speed, off the lip how fast, and how it came down. */
     let off = '';
-    const note = (how: string) => { flown.push(`${DEMO_TRICKS[k]?.name ?? 'Carving'} at ${DEMO_SPEEDS[tries[k] ?? 0]}: ${off}${how}`); off = ''; };
+    const note = (how: string) => { flown.push(`${demoName(DEMO_TRICKS[k])} at ${DEMO_SPEEDS[tries[k] ?? 0]}: ${off}${how}`); off = ''; };
     const again = () => {
       if (!from || from.k !== k || tries[k] >= DEMO_SPEEDS.length - 1) return false;
       Object.assign(ride, structuredClone(from.ride));
@@ -868,19 +939,29 @@ async function start() {
       const toLip = kick ? KICK.length - ((ride.x - kick.x) * kick.dx + (ride.z - kick.z) * kick.dz) : Infinity;
       want.brake = false;
       if (air) {
-        // (Tucked in the air, whatever it left in: it turns quicker so, and comes round in time.)
-        want.x = 0; want.y = 1;
-        if (air.kind !== 'hop') label = air.name;
+        // In the air: the style asked, from a moment off the lip until a moment before the snow; tucked, if its turns would not
+        // otherwise come round in time (at the rate it set off the lip, before it opens up to land).
+        const a = air, left = a.T - a.t, style = from?.k === k ? trick?.style : undefined;
+        const toGo = Math.max(Math.abs(a.spinTo - a.spin) / (SPIN_RATE * TURN * a.rate.spin), Math.abs(a.flipTo - a.flip) / (FLIP_RATE * TURN * a.rate.flip));
+        const behind = toGo > left - 0.42, styling = !!style && a.t > 0.14 && left > 0.5;
+        want.x = 0; want.y = behind ? 1 : 0;
+        if (styling && (style === 'mute' || style === 'tail')) { want.x = style === 'mute' ? -0.8 : 0.8; want.y = 0.75; }
+        // (Laid out, or spread, unless the turns are well behind: a little slower round, which the pace off the lip leaves room for.)
+        if (styling && (style === 'spread' || style === 'layout') && toGo < left - 0.3) want.y = -1;
+        if (a.kind !== 'hop') label = a.name;
       } else if (kick && toLip < -1) {
         // Past a kicker: on to the next, if it made its trick; or the approach flown again.
-        note(last ? `landed the ${last}` : 'no trick');
-        if (last !== trick.name && again()) continue;
+        note(last ? `landed the ${last}` : `no trick, ${(((ride.x - kick.x) * kick.dz - (ride.z - kick.z) * kick.dx)).toFixed(1)} m off its middle at ${(ride.speed * 3.6).toFixed(0)} km/h`);
+        // (A flip or a spin flung round in too short a time in the air looks it: flown again, faster or slower, if it had less than a
+        // second, or nine tenths for a single spin.)
+        const short = lastT < (trick.kind === 'flip' || trick.turns > 1 ? 1 : trick.turns ? 0.9 : 0);
+        if ((last !== trickKey(trick) || short) && again()) continue;
         k++; settle = 0.7; from = null;
       } else if (settle > 0) {
         settle -= dt; want.x = 0; want.y = 0;
       } else if (kick && toLip < 75) {
         // Lining up on it, at the speed it is to be taken at; and at the lip, the stance that makes its trick.
-        if (!from || from.k !== k) { tries[k] ??= 0; last = ''; from = { k, step, ride: structuredClone(ride), ask: { ...ask }, here: { ...here }, frames: frames.length, landed: landed.length, phase }; }
+        if (!from || from.k !== k) { tries[k] ??= 0; last = ''; lastT = 0; from = { k, step, ride: structuredClone(ride), ask: { ...ask }, here: { ...here }, frames: frames.length, landed: landed.length, phase }; }
         const tLip = toLip / Math.max(ride.speed, 1), speed = DEMO_SPEEDS[tries[k]];
         // (Turned towards the kicker's middle, the nearer the more; its way and its offset against the kicker's own way.)
         const go = along(ride.way, here), kd = runDir(kick), kl = runLeft(kick), off = (ride.x - kick.x) * kl.x + (ride.z - kick.z) * kl.z;
@@ -888,13 +969,15 @@ async function start() {
         want.x = clamp((way - aim) * 3, -0.6, 0.6);
         want.y = ride.speed < speed - 1 ? 1 : ride.speed > speed + 1 ? -0.5 : 0.3;
         want.brake = ride.speed > speed + 4 && toLip > 25;
-        label = `Up to the kicker: ${trick.name}`;
-        if ((trick.stance === 'flip' || trick.stance === 'flip spin') && tLip < 0.75) want.y = -1;
-        if (trick.stance === 'spin' && tLip < 0.7) want.y = 0;
-        if (trick.stance === 'tuck' && tLip < 1.2) want.y = 1;
-        if ((trick.stance === 'tuck' || trick.stance === 'flip') && tLip < 0.4) want.x = 0;
-        if (trick.stance === 'spin' && tLip < 0.25) want.x = trick.side;
-        if (trick.stance === 'flip spin' && tLip < 0.3) want.x = 0.55 * trick.side;
+        label = `Up to the kicker: ${demoName(trick)}`;
+        // (Tucked from further out, which takes a while to sink into; tall for a flip; neither for the rest. Then turning, hard for
+        // two turns and half as hard for one, only in the last quarter of a second, or straight.)
+        const tucked = trick.kind === 'flight' || !!trick.cork;
+        if (tucked && tLip < 1.2) want.y = 1;
+        else if (trick.kind === 'flip' && tLip < 0.75) want.y = -1;
+        else if (tLip < 0.7) want.y = 0;
+        if (!trick.turns && tLip < 0.4) want.x = 0;
+        if (trick.turns && tLip < 0.27) want.x = (trick.side ?? 1) * (trick.turns === 2 ? 1 : trick.kind === 'flip' ? 0.55 : 0.5);
       } else {
         // Carving down between them.
         phase += (dt * Math.PI) / 1.9;
@@ -913,7 +996,10 @@ async function start() {
       quiet = !keep;
       const now = stepRide(dt);
       if (air && !wasAir && air.kind !== 'hop' && from?.k === k) off = `off at ${(ride.speed * 3.6).toFixed(0)} km/h, ${air.name}, ${air.T.toFixed(2)} s up; `;
-      if (wasAir && !air && !crash && wasAir.kind !== 'hop') { landed.push(wasAir.name); last = wasAir.name; }
+      // (The whole flight named as it landed, or fell: it is named as it goes, and a grab is not one until it has been held.)
+      if (air && !wasAir) airFrom = labels.length;
+      if (wasAir && !air && wasAir.kind !== 'hop') for (let i = airFrom; i < labels.length; i++) labels[i] = wasAir.name;
+      if (wasAir && !air && !crash && wasAir.kind !== 'hop') { landed.push(wasAir.name); last = keyOf(wasAir.kind, Math.round(Math.abs(wasAir.spinTo) / TURN), !!wasAir.cork, styleOf(wasAir)); lastT = wasAir.t; off += `${wasAir.name} in ${wasAir.t.toFixed(2)} s; `; }
       if (keep) { frames.push({ p: rider.position.clone(), q: rider.quaternion.clone(), air: posed.air, c: { ...posed.c }, now: { ...now } }); labels.push(label); }
       if (crash) { note(`fell, ${crash.why}`); if (again()) continue; fell = crash.why; break; }
       if ((ride.ended || stopAt < Infinity) && ride.speed < 0.3) break;
@@ -931,8 +1017,8 @@ async function start() {
   const demoFor = () => {
     let forLand = demos.get(land);
     if (!forLand) demos.set(land, (forLand = new Map()));
-    let d = forLand.get(who);
-    if (!d) forLand.set(who, (d = flyDemo()));
+    let d = forLand.get(demoKey());
+    if (!d) forLand.set(demoKey(), (d = flyDemo()));
     return d;
   };
   /** The numbers of two frames, so far from the first to the second. */
@@ -1028,7 +1114,7 @@ async function start() {
    * laid along the foot and its tracks on the snow.
    */
   const useDemo = async () => {
-    if (!demos.get(land)?.has(who)) {
+    if (!demos.get(land)?.has(demoKey())) {
       $('status').hidden = false;
       $('status').textContent = 'Flying the demo run…';
       await new Promise((r) => setTimeout(r, 30));
@@ -1079,7 +1165,7 @@ async function start() {
       ride.y = ground(ride.x, ride.z);
       ride.vy = risingHere();
       ride.out = bumpAt(ride.x, ride.z);
-      ride.absorb = ride.skid = 0;
+      ride.absorb = ride.skid = ride.sink = ride.pop = 0;
       ride.settle = { spin: 0, flip: 0, left: 0 };
     } else clearRideTracks();
     air = null; crash = null; joints = jointsBefore = null;
@@ -1375,6 +1461,7 @@ async function start() {
     } else sharp.render();
     requestAnimationFrame(frame);
   };
+  const __look = (off: Vector3) => { view = 'free'; controls.enabled = true; const at = focus(); camera.position.copy(at).add(off); controls.target.copy(at).addScaledVector(UP, 0.9); controls.update(); lastRider.copy(at); placed = true; };
   // (For a script that drives the page: where it is, and to put it anywhere; riding, what the pointer would ask.)
   (window as unknown as Record<string, unknown>).__slope = {
     seek: (to: number) => { t = to; clearSpray(); placed = false; }, pause: (p: boolean) => { playing = !p; reflect(); }, setView, setMode,
@@ -1390,7 +1477,7 @@ async function start() {
     land: () => ({ name: land.name, length: land.length, half: land.half, about: land.about }),
     setSkier: (w: Who, skis?: HorseSkis) => setSkier(w, skis), who: () => who,
     // (The view from so far east, up and south of the skier, looking at it: for pictures.)
-    lookFrom: (dx: number, dy: number, dz: number) => { view = 'free'; controls.enabled = true; const at = focus(); camera.position.copy(at).add(new Vector3(dx, dy, dz)); controls.target.copy(at).addScaledVector(UP, 0.9); controls.update(); lastRider.copy(at); placed = true; },
+    lookFrom: (dx: number, dy: number, dz: number) => __look(new Vector3(dx, dy, dz)),
     // (For a script measuring what each part of the picture costs: the present view drawn `frames` times, each waited for to be done,
     // with some things changed for the while; how long a frame took, in milliseconds, and what was drawn. `hide` names parts of the
     // land (`run`, `about`, `country`, `firs`, `far firs`, `poles`) or `skier`.)
@@ -1433,6 +1520,11 @@ async function start() {
     // (What was drawn in the last frame.)
     drawn: () => ({ triangles: renderer.info.render.triangles, calls: renderer.info.render.drawCalls }),
     setLand: (k: LandKind) => setLand(k),
+    // (The view from `d` metres to the left of the skier across the run, `up` over it and `back` up the run, carried along with it:
+    // for pictures of a trick side on.)
+    lookSide: (d: number, up: number, back = 0) => { const f = land.frame(rider.position.x, rider.position.z, ride.down); __look(runLeft(f).multiplyScalar(d).addScaledVector(UP, up).addScaledVector(runDir(f), -back)); },
+    // (The views' distance from the skier, as the *Distance* slider sets it.)
+    distance: (d: number) => setDistance(d),
     restart, time: () => t, ready: true,
     // (The demo run as flown for the skier now: how long, its parts, the tricks it landed, how many times each kicker was flown again.)
     demo: () => ({ length: demo.length, parts: demo.parts, landed: demo.landed, tries: demo.tries, fell: demo.fell, flown: demo.flown }),

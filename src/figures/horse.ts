@@ -5,6 +5,7 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { AirControls, AlpineArm, AlpineFoot, AlpinePose, RideControls } from './alpine';
 import type { BodySpec } from './ragdoll';
+import { bodyTurn } from './posing';
 import { bitRings, horseLooks, type Part } from './horseBody';
 
 /**
@@ -114,6 +115,8 @@ export interface HorsePose {
   neck: number; neckYaw: number; head: number; ears: number; tail: number; tailYaw: number;
   skis: Record<Side, HorseSki>; front: number; hind: number; spread: number;
   spin: number; flip: number; lift: number;
+  /** How far the spin's axis is tipped off the upright (a cork, `bodyTurn`); 0 unless given. */
+  cork?: number;
   /** Off its skis: where each hoof's sole is (in the horse's frame) and how far its toe is tipped down; given, the skis are not worn. */
   hooves?: Record<HorseLeg, Hoof>;
 }
@@ -141,7 +144,7 @@ export function mixHorse(a: HorsePose, b: HorsePose, w: number): HorsePose {
     return { x: m(p.x, q.x), z: m(p.z, q.z), up: m(p.up, q.up), yaw: m(p.yaw, q.yaw), pitch: m(p.pitch, q.pitch), edge: m(p.edge, q.edge) };
   };
   const out = { ...a } as HorsePose;
-  for (const k of Object.keys(a) as (keyof HorsePose)[]) if (typeof a[k] === 'number') (out as unknown as Record<string, number>)[k] = m(a[k] as number, b[k] as number);
+  for (const k of Object.keys(a) as (keyof HorsePose)[]) if (typeof a[k] === 'number') (out as unknown as Record<string, number>)[k] = m(a[k] as number, (b[k] as number | undefined) ?? (a[k] as number));
   out.skis = { l: ski('l'), r: ski('r') };
   if (a.hooves && b.hooves) {
     const hoof = (l: HorseLeg): Hoof => { const p = a.hooves![l], q = b.hooves![l]; return { x: m(p.x, q.x), y: m(p.y, q.y), z: m(p.z, q.z), pitch: m(p.pitch, q.pitch) }; };
@@ -279,7 +282,7 @@ export class Horse {
     wq.set('root', new Quaternion()); wp.set('root', new Vector3());
     // The whole, turned about the middle of the barrel and lifted (on skis, by their thickness more).
     const shod = a.hooves, under = shod ? 0 : SKI_T;
-    const R = mul(qy(a.spin), qx(a.flip)), pivot = new Vector3(a.bodyX, 1.22 + under + a.height, a.bodyZ);
+    const R = bodyTurn(a.spin, a.flip, a.cork ?? 0), pivot = new Vector3(a.bodyX, 1.22 + under + a.height, a.bodyZ);
     const place = (v: Vector3) => v.sub(pivot).applyQuaternion(R).add(pivot).setY(v.y + a.lift);
     const Rb = mul(R, qy(a.yaw), qz(a.roll), qx(a.pitch));
     // The body, turned about its spine.
@@ -529,20 +532,30 @@ export function horseRidePose(c: RideControls): HorsePose {
   a.pitch -= rad(6) * sit; a.height -= 0.24 * sit; a.bodyZ -= 0.06 * sit; a.arch += rad(6) * sit; a.neck -= rad(12) * sit; a.head += rad(10) * sit; a.tail += 0.3 * sit;
   a.ears += 0.3 * sit;
   // Sunk into a landing.
-  a.height -= 0.2 * absorb; a.neck += rad(10) * absorb;
+  a.height -= 0.2 * absorb; a.neck += rad(10) * absorb; a.head += rad(6) * absorb;
+  // Springing off a lip: the legs driven long, the head and neck up (and back, set for a backflip).
+  const pop = c.pop ?? 0;
+  if (pop) { a.height += (0.1 - a.height) * pop; a.neck += (rad(-10) - rad(18) * tall - a.neck) * pop; a.head += (rad(10) - a.head) * pop; a.ears *= 1 - pop; a.pitch += (rad(-4) - a.pitch) * pop; }
   a.spin = c.spin ?? 0;
   a.flip = c.flip ?? 0;
   return a;
 }
 
 /**
- * A skiing horse in the air (the controls a skier's are, `AirControls`): straight air, a show jumper's, its skis drawn up under it with
- * the legs folded, the neck arched down and the back rounded over them (the fore skis drawn higher still on four); a ski jumper's
- * flight as a horse can fly one, stretched out along its skis, which are spread at their tips, the neck reaching out ahead and the ears
- * back (on four skis, the fore pushed forward and the hind back, as a horse stretches over a ditch); the backflip's throw, its head flung up and back;
- * gathered in for a spin; opened up to land into its stance.
+ * A skiing horse in the air (the controls a skier's are, `AirControls`): sprung off the lip, its legs driven long under it and its head
+ * up, folding from that into the trick; straight air, a show jumper's, its skis drawn up under it with the legs folded, the neck
+ * arched down and the back rounded over them (the fore skis drawn higher still on four); a ski jumper's flight as a horse can fly one,
+ * stretched out along its skis, which are spread at their tips, the neck reaching out ahead and the ears back (on four skis, the fore
+ * pushed forward and the hind back, as a horse stretches over a ditch); the backflip's throw, its head flung up and back; laid out in a
+ * flip, stretched long; gathered in for a spin, its neck and head turned into it ahead of its body, round to the landing first; its
+ * head back for the snow in a flip. Its own tricks: for a grab, a whip, its skis flung out to one side under it and its body laid over
+ * the other way (`mute` to its left, `tail` to its right); for a spread eagle, on four short skis a capriole, as the white horses of
+ * Vienna leap, the fore legs folded under and the hind kicked out behind, and on a long pair the splits, its skis flung wide either
+ * side. Opened up to land into its stance, the legs let long to reach for the snow.
  */
 export function horseAirPose(c: AirControls, four: boolean): HorsePose {
+  const pop = c.pop ?? 0, lead = Math.max(-1, Math.min(1, c.lead ?? 0)), spot = c.spot ?? 0, layout = c.layout ?? 0, spread = c.spread ?? 0, reach = c.reach ?? 0;
+  const whip = (c.mute ?? 0) - (c.tail ?? 0), whipW = Math.abs(whip), side = Math.sign(whip);
   const stance = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
   const tucked = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 }), draw = 0.44 + 0.12 * c.tuck + 0.08 * c.wrap;
   tucked.height -= 0.02;
@@ -560,11 +573,55 @@ export function horseAirPose(c: AirControls, four: boolean): HorsePose {
     Object.assign(flight.skis[k], { yaw: rad(four ? 10 : 5) * sign, x: (four ? 0.06 : 0.03) * sign, up: 0, pitch: 0 });
   }
   if (four) flight.spread = 0.12;
-  const a = mixHorse(mixHorse(tucked, flight, c.flight), stance, c.open);
+  let a = mixHorse(tucked, flight, c.flight);
+  // Laid out in a flip: long from the nose to the tail, the back a little hollowed, the legs long under it.
+  if (layout) {
+    const out = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
+    Object.assign(out, { height: 0.04, neck: rad(-6), head: rad(-24), ears: 0.8, tail: 1, arch: rad(-10) });
+    for (const k of ['l', 'r'] as const) Object.assign(out.skis[k], { up: 0.06, pitch: 0 });
+    a = mixHorse(a, out, layout);
+  }
+  // A capriole on four skis: the fore legs folded up under the chest, the hind kicked out straight behind, the tail streaming, the head
+  // up. The splits on a pair: the skis flung wide either side, tipped onto their outer edges, the head up, the ears pricked.
+  if (spread) {
+    const wide = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
+    Object.assign(wide, { height: 0.02, neck: rad(-8), head: rad(-10), ears: 0, tail: 1, arch: rad(-4) });
+    if (four) {
+      // (The body carried forward over the skis, so that the fore ones come back up under the chest and the hind ones go out behind;
+      // the hind drawn up level with the belly, the legs kicked out long to them.)
+      Object.assign(wide, { front: 0.36, hind: 0.42, spread: 0.3, bodyZ: 0.34, pitch: rad(-6), arch: rad(-8) });
+      for (const k of ['l', 'r'] as const) Object.assign(wide.skis[k], { up: 0.16, pitch: rad(-4) });
+    } else for (const k of ['l', 'r'] as const) {
+      const sign = k === 'l' ? 1 : -1;
+      Object.assign(wide.skis[k], { x: 0.34 * sign, up: 0.22, yaw: rad(6) * sign, edge: rad(-34) * sign, pitch: 0 });
+    }
+    a = mixHorse(a, wide, spread);
+  }
+  // The whip: the skis flung out to one side under it, turned across, the body laid over the other way and the neck turned back
+  // against them, the tail flung out after them.
+  if (whipW) {
+    for (const k of ['l', 'r'] as const) { a.skis[k].x += 0.42 * side * whipW; a.skis[k].yaw += rad(36) * side * whipW; a.skis[k].edge -= rad(20) * side * whipW; a.skis[k].up += 0.1 * whipW; }
+    a.roll -= rad(24) * side * whipW; a.yaw -= rad(10) * side * whipW; a.neckYaw -= 0.5 * side * whipW; a.tailYaw += 0.6 * side * whipW; a.tail += 0.3 * whipW;
+  }
+  // The spring off the lip: the legs driven long under it, the head and neck up, the ears pricked.
+  if (pop) {
+    const sprung = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
+    Object.assign(sprung, { height: 0.1, neck: rad(-10) - rad(18) * (c.set ?? 0), head: rad(10), ears: 0, tail: 0.5, pitch: rad(-4), arch: rad(-4) });
+    a = mixHorse(a, sprung, pop);
+  }
+  // Opened up to land, the legs let long to reach for the snow.
+  const land = mixHorse(stance, stance, 0);
+  land.height += 0.08 * reach; land.neck -= rad(8) * reach; land.head += rad(6) * reach;
+  a = mixHorse(a, land, c.open);
+  // Round a spin, the neck and head turned ahead into it and the chest a little ahead of the hips; in a flip, the head back for the snow.
+  const held = 1 - c.open;
+  a.neckYaw += 0.7 * lead * held; a.twist += 0.25 * lead * held;
+  a.head -= rad(30) * spot * held; a.neck -= rad(14) * spot * held;
   for (const k of ['l', 'r'] as const) a.skis[k].yaw += c.ski;
   a.yaw += 0.95 * c.ski;
   a.spin = c.spin;
   a.flip += c.flip;
+  a.cork = c.cork ?? 0;
   return a;
 }
 
@@ -590,8 +647,8 @@ export function saddlePose(c: RideControls & Partial<AirControls> & { reins?: nu
   };
   const foot = (k: Side): AlpineFoot => { const sign = k === 'l' ? 1 : -1; return { x: 0.36 * sign, z: 0.06, up: 0, yaw: rad(14) * sign, pitch: rad(-10), edge: rad(-10) * sign }; };
   const a: AlpinePose = {
-    hips: 0.7, hipsX: 0, hipsZ: 0, pelvisYaw: 0, pelvisRoll: 0, pelvisPitch: rad(4), chestYaw: 0, chestRoll: rad(8) * s, lean: rad(10), neck: rad(4), head: 0,
-    arms: { l: arm('l'), r: arm('r') }, feet: { l: foot('l'), r: foot('r') }, spin: 0, flip: 0, lift: 0,
+    hips: 0.7, hipsX: 0, hipsZ: 0, pelvisYaw: 0, pelvisRoll: 0, pelvisPitch: rad(4), chestYaw: 0, chestRoll: rad(8) * s, lean: rad(10), neck: rad(4), head: 0, headYaw: 0,
+    arms: { l: arm('l'), r: arm('r') }, feet: { l: foot('l'), r: foot('r') }, spin: 0, flip: 0, cork: 0, lift: 0,
   };
   const both = (f: (k: Side, arm: AlpineArm, foot: AlpineFoot) => void) => { for (const k of ['l', 'r'] as const) f(k, a.arms[k], a.feet[k]); };
   // The jockey's crouch.
@@ -604,6 +661,29 @@ export function saddlePose(c: RideControls & Partial<AirControls> & { reins?: nu
   // In the air.
   if (th) { a.lean -= rad(20) * th; a.head -= rad(26) * th; both((_k, arm) => { arm.swing += rad(120) * th; arm.hang -= 30 * th; arm.bend -= rad(20) * th; }); }
   if (wr) both((_k, arm) => { arm.bend += rad(40) * wr; arm.hang += 14 * wr; });
+  // Its own tricks. Laid out in a flip: leant back along the horse's back, the arms out. A no-hander for a spread eagle: the arms flung
+  // out wide and up, the legs out from the horse's sides. A superman for a grab: up out of the saddle and stretched out flat behind it,
+  // the hands on the pommel, the legs long and together over the quarters.
+  const layout = c.layout ?? 0, spread = c.spread ?? 0, superman = Math.max(c.mute ?? 0, c.tail ?? 0), open = c.open ?? 0;
+  if (layout) { a.lean -= rad(30) * layout; a.head -= rad(10) * layout; both((_k, arm) => { arm.swing += rad(30) * layout; arm.hang -= 50 * layout; arm.bend -= rad(20) * layout; }); }
+  if (spread) {
+    a.lean -= rad(8) * spread; a.head -= rad(12) * spread;
+    both((k, arm, f) => { arm.swing += (rad(26) - arm.swing) * spread; arm.bend += (rad(8) - arm.bend) * spread; arm.hang += (-16 - arm.hang) * spread; arm.inward *= 1 - spread; f.x += 0.24 * (k === 'l' ? 1 : -1) * spread; f.up += 0.16 * spread; });
+  }
+  if (superman) {
+    a.hips += 0.24 * superman; a.hipsZ -= 0.3 * superman; a.pelvisPitch += rad(72) * superman; a.lean += rad(12) * superman; a.neck -= rad(22) * superman; a.head -= rad(36) * superman;
+    both((k, arm, f) => {
+      // (The hands on the pommel, the poles turned back along the forearms; the legs out straight behind, the boots together.)
+      arm.swing += (rad(70) - arm.swing) * superman; arm.bend += (rad(36) - arm.bend) * superman; arm.hang += (76 - arm.hang) * superman;
+      arm.inward += (rad(14) * (k === 'l' ? -1 : 1) - arm.inward) * superman; arm.wrist += (rad(80) - arm.wrist) * superman;
+      f.x += (0.09 * (k === 'l' ? 1 : -1) - f.x) * superman; f.z += (-1.0 - f.z) * superman; f.up += 0.84 * superman; f.pitch += rad(70) * superman; f.yaw *= 1 - superman; f.edge *= 1 - superman;
+    });
+  }
+  // Springing off a lip: up in the stirrups, leant on with the horse; looking round a spin, ahead of the horse; looking for the snow.
+  const pop = c.pop ?? 0, lead = Math.max(-1, Math.min(1, c.lead ?? 0)) * (1 - open), spot = (c.spot ?? 0) * (1 - open);
+  a.hips += 0.06 * pop; a.lean += rad(6) * pop;
+  a.chestYaw += 0.25 * lead; a.headYaw += 0.5 * lead;
+  a.head -= rad(24) * spot;
   a.hips -= 0.06 * absorb; a.lean += rad(8) * absorb;
   // Rising to the trot: up out of the saddle on one beat of the two, leant a little forward.
   a.hips += 0.09 * post; a.lean += rad(8) * post; a.pelvisPitch += rad(6) * post;

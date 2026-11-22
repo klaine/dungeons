@@ -1086,6 +1086,37 @@ The machine this is developed on now has a graphics card, and tablets were repor
     and rider, all four tricks land at the first speed, none flown again; taken at 43 to 81 km/h, 0.9 to 1.6 seconds in the air;
     pictures mid-trick from beside of the person and the horse and rider; *Ride* taken from the demo mid-flip and mid-carve rides on.
     `__slope.demo()` gives what it landed, how many times each kicker was flown again and how each flight went.
+80. **More tricks, and tricks that move as skiers do.** Asked: "also add some cool trick to the remaining jumps/kickers.. then work
+    on making all the trick animations more realistic and transitions to them as well!" Six kickers stand on the world's run (130,
+    260, 330, 608, 720, 850 metres; each now kept in from the piste's edges further than the band where the skier is turned back to
+    the middle, where the one at 720 could not be lined up on), so the demo had passed two without a trick, and the groomed slope's
+    go on for ever. *New tricks*: a cork (tucked and turning off the lip: the spin's axis tipped 42 degrees off the upright,
+    `bodyTurn` in `posing.ts`, so that the body goes round laid over on its side and back); grabs, asked in the air by pointing up
+    and to a side (a mute, the left hand across to the right ski in front of the boot; a tail grab, the right ski's tail drawn up
+    behind to the right hand; the hand put on the ski by an arm reaching for a point, `Poser.reachArm`, where the ski is carried by
+    the foot, `Rider.grab`); a spread eagle (pointing down in straight air) and a flip laid out (pointing down in a flip). A horse
+    does its own: for a grab a whip (its skis flung out to one side under it, its body laid over the other way), for a spread eagle
+    a capriole on four short skis (the body carried forward over its skis, the fore ones up under the chest and the hind kicked out
+    behind) and the splits on a long pair; its rider a superman for a grab (up out of the saddle, stretched out flat behind it, the
+    hands on the pommel) and a no-hander for a spread eagle. Each named for what it did (`nameOf`: a 360 tail grab, a mute backflip,
+    a 360 superman whip). The demo flies nine: those of item 79, then a cork 720, a mute grab, a layout backflip, a 360 tail grab
+    and a spread eagle, the first six on the world's run; a flight named as it landed, and taken again if a flip or a 720 had less
+    than a second in the air. *Movement*: looked at frame by frame (filmstrips at a tenth of a second, side on and from behind,
+    `__slope.lookSide`): the skier had ridden the ramp in its stance and was tucked, its arms flung up, in the tenth of a second
+    after the lip; its flip was round halfway through the flight and it hung tucked for half a second before opening at the snow;
+    its 720 went round as one rigid block. Now: up the ramp it sinks into a crouch and springs out of it over the last metre or two
+    to the lip (`pop` in `RideControls`: the legs driven long, the arms swung through, up and back for a backflip), and folds from
+    that into the trick over a quarter of a second (`pop` in `AirControls`); the turns are set off the lip to come round a little
+    before the snow (`rate`, paced to the time in the air: at most 1.7 turns a second for a spin and 1.3 for a flip, as slow as half
+    that with time to spare, a quarter again quicker tucked); the shoulders and head lead a spin by part of what is left of it and
+    come round to the landing first (`lead`), the head goes back to look for the snow over the second half of a flip (`spot`); once
+    round it opens up, and the legs reach for the snow the last fifth of a second (`reach`); it sinks into the landing in a few
+    hundredths of a second and comes up over two thirds of one. The horse and its rider the same (`horseAirPose`, `saddlePose`).
+    The pilot tucks only when its turns are behind; untucked, a backflip now comes round on the groomed slope, held tall it is laid
+    out, and a 720 still needs the tuck. *Checked* in headless Chromium: the demo lands all its tricks for the person, the horse on
+    a long pair and the horse and rider, on the world's run (68 seconds; the backflip 360 taken again faster) and the groomed slope
+    (78); each trick ridden by script for the person and the horse and rider; filmstrips of every new trick; `figures.cjs` and
+    `crew.cjs` pass (the old jump clips' head now follows the chest's turn). Not yet seen on a graphics card.
 ## Risks
 
 | Risk | Mitigation |

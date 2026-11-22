@@ -25,6 +25,16 @@ export const qx = (a: number): Quaternion => new Quaternion().setFromAxisAngle(X
 export const qy = (a: number): Quaternion => new Quaternion().setFromAxisAngle(Y, a);
 export const qz = (a: number): Quaternion => new Quaternion().setFromAxisAngle(Z, a);
 export const smooth = (t: number): number => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+/**
+ * A whole body's turn in the air: `spin` about an axis (to the left, positive), then `flip` over backwards about its left (forward,
+ * positive). The spin's axis is upright, unless `cork` tips it (radians): over towards the body's back and the outside of the spin, so
+ * that a cork goes round off its axis, laid over on its side and back halfway through each turn, as a corked spin does.
+ */
+export const bodyTurn = (spin: number, flip: number, cork = 0): Quaternion => {
+  if (!cork) return qy(spin).multiply(qx(flip));
+  const out = spin >= 0 ? -1 : 1, axis = new Vector3(0.75 * out * Math.sin(cork), Math.cos(cork), -0.66 * Math.sin(cork)).normalize();
+  return new Quaternion().setFromAxisAngle(axis, spin).multiply(qx(flip));
+};
 /** A cubic from (0, a) with slope `da` to (1, b) with slope `db`. */
 export const hermite = (t: number, a: number, da: number, b: number, db: number): number => {
   const t2 = t * t, t3 = t2 * t;
@@ -200,6 +210,35 @@ export class Poser {
 
   /** Where the hip joint is now. */
   hip(k: Side): Vector3 { return this.at(`thigh_${k}`); }
+
+  /**
+   * An arm reaching from the shoulder for `target` (a hand grabbing a ski): the elbow found so that the upper arm and the forearm meet,
+   * bent out towards `elbow` (a direction); the hand turned as the forearm is. Further than it reaches, it reaches as far as it can
+   * towards it. Gives back how far it was stretched, as a share of its length.
+   */
+  reachArm(k: Side, target: Vector3, elbow: Vector3): number {
+    const up = this.bone(`upperarm_${k}`), low = this.bone(`lowerarm_${k}`), hand = this.bone(`hand_${k}`);
+    const L1 = this.restOf(`lowerarm_${k}`).distanceTo(this.restOf(`upperarm_${k}`)), L2 = this.restOf(`hand_${k}`).distanceTo(this.restOf(`lowerarm_${k}`));
+    const shoulder = this.at(`upperarm_${k}`), d = target.clone().sub(shoulder), len = d.length(), reach = Math.min(len, (L1 + L2) * 0.995);
+    const u = d.clone().normalize(), w = elbow.clone().addScaledVector(u, -elbow.dot(u)).normalize();
+    const cosA = (L1 * L1 + reach * reach - L2 * L2) / (2 * L1 * reach), a = Math.acos(Math.min(1, Math.max(-1, cosA)));
+    const at = shoulder.clone().addScaledVector(u, Math.cos(a) * L1).addScaledVector(w, Math.sin(a) * L1), end = shoulder.clone().addScaledVector(u, reach);
+    // (Each aimed from where it lies now at where it is to point, so that it keeps its roll about its own length as the arm had it.)
+    const aimFrom = (b: Bone, from: Vector3, to: Vector3) => {
+      const wq = this.worldOf(b), now = this.restOf(this.childName(b.name)).sub(this.restOf(b.name)).applyQuaternion(this.W0.get(b)!.clone().invert()).applyQuaternion(wq).normalize();
+      return new Quaternion().setFromUnitVectors(now, to.clone().sub(from).normalize()).multiply(wq);
+    };
+    const wUp = aimFrom(up, shoulder, at);
+    this.setWorld(up, wUp, this.worldOf(up.parent!));
+    this.update();
+    const wLow = aimFrom(low, at, end);
+    this.setWorld(low, wLow, wUp);
+    const wHand = wLow.clone().multiply(this.W0.get(low)!.clone().invert()).multiply(this.W0.get(hand)!);
+    this.setWorld(hand, wHand, wLow);
+    this.update();
+    return len / (L1 + L2);
+  }
+  private childName(n: string): string { return n.startsWith('upperarm_') ? `lowerarm_${n.slice(-1)}` : `hand_${n.slice(-1)}`; }
 
   /** Where the ankle is when the ball of the foot is at `ball` and the heel is lifted by `lift` (radians) about it. */
   ankleFor(k: Side, ball: Vector3, lift: number): Vector3 { return ball.clone().add(this.legs[k].ankleFromBall.clone().applyQuaternion(qx(lift))); }
