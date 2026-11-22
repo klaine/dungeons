@@ -1229,6 +1229,28 @@ The machine this is developed on now has a graphics card, and tablets were repor
     tricks; the second's 102.7 s, eight; the groomed slope's as before, 106.9 s, twelve); ridden on the second run into its first
     seven kickers at 14 and 18 m/s, at *Mild*, between and *Wild*, the person and the horse and rider, 84 tricks given and none
     fallen, two short airs coming round without their style; and pictures along it.
+85. **A menu to be used.** Asked, with two pictures from a phone, upright and sideways: "The menu need big time rework to make it
+    usable and nice." The menus had been a band along the foot of some forty buttons in twelve groups, wrapped as the width allowed: on
+    a phone held sideways it rose over half the picture and over what was said at the top left; upright, the groups' names were left
+    out for want of room, so that two sliders said only "1.0×", and *Hide menus* lay over the name of the run. Now one button, *Menu*,
+    at the top right (or `H`), opens a panel: beside the picture where there is room (a computer, a phone held sideways), a sheet from
+    the foot on a phone held upright, lower than two thirds of the screen; closed by its cross, `H` or Escape, the keys' focus taken into
+    it and given back. In it, sections, every control named: *Play* (*Watch demo* or *Ride* as one bar; watching, *Pause*, the speed and
+    the timeline; riding, *Restart run*), *Slope* (a card for each run, with its length and what it goes down, and the groomed slope),
+    *Skier* and the horse's skis, *Camera* (the five views as one bar, *Distance*), *Picture* (*Snow*, *Resolution*, *Blur*); on a
+    computer, the keys under them. Choosing to ride closes it; riding is held while it is open (`menuOpen`), and watching goes on.
+    While it is open the picture slides aside (the camera's window shifted, `setViewOffset`, eased: `shiftView`), so that the skier
+    stands in the middle of what it leaves to be seen. What is said at the top left no longer names the game (the menu does), is kept
+    short of the button and of the panel, and the hint for riding is shorter, put away while the menu is open and on a screen too low
+    for it beside the stick. Looking at it upright showed something else: the cinematic view's shot tracking alongside the skier (from
+    nine metres aside, looking three and a half ahead of it) and the view from beside (looking four and a half ahead) put the skier 21
+    and 18 degrees off the middle, where a picture upright reaches 12 and 15; it was off the side of the picture. Every view but *Free*
+    is now turned back towards the skier until it is within two thirds of the way to the picture's edge (`keepInPicture`, on the
+    camera's own axes, and within the part the menu leaves when it is open), which on a screen held sideways is about as far as any of
+    them looked ahead. *Checked* in headless Chromium as an iPhone 13 upright and sideways and at 1280 by 760: closed, open, scrolled to
+    its foot, riding, and open while riding; by the keys, `H` opening it, Space still pausing, riding held six seconds with it open (6
+    metres down before and after) and going on once closed (to 29), Escape giving the focus back to the button; the skier's place in the
+    picture upright through the cinematic shots, the tracking shot now at 0.64 of the way to the edge where it had been at 1.88.
 
 ## Risks
 
