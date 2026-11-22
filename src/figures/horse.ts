@@ -546,6 +546,10 @@ export function horseRidePose(c: RideControls): HorsePose {
   const flex = c.flex ?? 0, back = c.back ?? 0;
   a.height -= 0.07 * flex; a.neck += rad(5) * flex;
   a.neckYaw += 0.7 * back; a.head -= rad(6) * back; a.ears += 0.3 * back;
+  // Pressed onto its skis' tips: its weight forward onto its fore legs, the neck down and out; onto their tails: sat back on its hocks.
+  const press = c.press ?? 0;
+  if (press > 0) { a.neck += rad(20) * press; a.head -= rad(8) * press; a.bodyZ += 0.08 * press; a.tail += 0.4 * press; }
+  else if (press < 0) { const q = -press; a.height -= 0.18 * q; a.bodyZ -= 0.08 * q; a.arch += rad(5) * q; a.neck -= rad(14) * q; a.head += rad(10) * q; a.tail += 0.3 * q; }
   // Springing off a lip: the legs driven long, the head and neck up (and back, set for a backflip).
   const pop = c.pop ?? 0;
   if (pop) { a.height += (0.1 - a.height) * pop; a.neck += (rad(-10) - rad(18) * tall - a.neck) * pop; a.head += (rad(10) - a.head) * pop; a.ears *= 1 - pop; a.pitch += (rad(-4) - a.pitch) * pop; }
@@ -710,6 +714,9 @@ export function saddlePose(c: RideControls & Partial<AirControls> & { reins?: nu
     a.arms.l.swing += rad(4) * L.handL * easy; a.arms.r.swing += rad(4) * L.handR * easy;
   }
   a.chestYaw += 0.35 * (c.back ?? 0); a.headYaw += 0.9 * (c.back ?? 0);
+  // (Pressed forward with the horse onto its skis' tips, or sat back with it onto their tails, the arms out.)
+  const pressed = c.press ?? 0;
+  if (pressed) { a.lean += rad(14) * pressed; both((_k, arm) => { arm.hang -= 22 * Math.abs(pressed); }); }
   // Springing off a lip: up in the stirrups, leant on with the horse; looking round a spin, ahead of the horse; looking for the snow.
   const pop = c.pop ?? 0, lead = Math.max(-1, Math.min(1, c.lead ?? 0)) * (1 - open), spot = (c.spot ?? 0) * (1 - open);
   a.hips += 0.06 * pop; a.lean += rad(6) * pop;

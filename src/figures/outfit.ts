@@ -16,6 +16,11 @@ import { clone as cloneRigged } from 'three/addons/utils/SkeletonUtils.js';
  * the shoulders. A short cloak hangs down the back from under the mantle, a belt with its buckle is drawn round the waist, a pouch hangs
  * at the right hip and a sword in its scabbard at the left: each made as a solid in the body's frame and given to the bones it hangs
  * from (the cloak to the spine, the belt, the pouch and the sword to the hips), so that it goes with them.
+ *
+ * Or the sword on its back (asked, of the skier: "the human skiier could have the sword on their back"; `sword: 'back'`): its
+ * scabbard slung across the back over the cloak, from the left hip up to the right shoulder, its hilt standing up behind that shoulder
+ * to be drawn over it, on a baldric across the chest from the right shoulder to the left hip; hung from the chest, so that it goes with
+ * the body as it bends and turns rather than swinging from the hips about the skis.
  */
 
 export interface Look {
@@ -41,7 +46,7 @@ const mottle = (c: Color, p: Vector3, by = 0.07) => {
 };
 
 /** Dresses a copy of `base` (a body on the figures' skeleton, as loaded) as an adventurer; gives back the copy. */
-export function dressAdventurer(base: Object3D, look: Look = RANGER): Object3D {
+export function dressAdventurer(base: Object3D, look: Look = RANGER, o: { sword?: 'hip' | 'back' } = {}): Object3D {
   const model = cloneRigged(base);
   model.updateMatrixWorld(true);
   let body: SkinnedMesh | null = null;
@@ -229,20 +234,64 @@ export function dressAdventurer(base: Object3D, look: Look = RANGER): Object3D {
   const pouchAt = ring[Math.round(ring.length * 0.68)].clone().add(new Vector3(0, -0.07, 0));
   solids.push(rigged(new BoxGeometry(0.11, 0.12, 0.05).translate(pouchAt.x - 0.01, pouchAt.y, pouchAt.z), look.leather, toHips));
   solids.push(rigged(new BoxGeometry(0.115, 0.04, 0.056).translate(pouchAt.x - 0.01, pouchAt.y + 0.045, pouchAt.z), new Color(look.leather).multiplyScalar(0.8).getHex(), toHips));
-  // A sword in its scabbard at the left hip, hanging back from the belt; its hilt forward and up.
-  {
-    const top = ring[Math.round(ring.length * 0.26)].clone().add(new Vector3(0.03, -0.03, 0)), down = new Vector3(0, -Math.cos(0.55), -Math.sin(0.55));
+  /**
+   * A sword in its scabbard, the scabbard's mouth at `top` and running on along `down`, its hilt standing out the other way; its flat
+   * turned to face `face` (by default the body's side); each point moved by the bones `weights` gives.
+   */
+  const sheathe = (top: Vector3, down: Vector3, weights: (p: Vector3) => [string, number][], face?: Vector3) => {
+    const along = new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), down.clone().negate());
+    // (Turned about its own length so that its broad side lies flat against what it hangs on.)
+    if (face) { const wide = new Vector3(1, 0, 0).applyQuaternion(along), want = face.clone().cross(down).normalize(); along.premultiply(new Quaternion().setFromUnitVectors(wide, want)); }
     const place = (geo: BufferGeometry, from: number, to: number) => {
       const mid = top.clone().addScaledVector(down, (from + to) / 2);
-      return geo.applyQuaternion(new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), down.clone().negate())).translate(mid.x, mid.y, mid.z);
+      return geo.applyQuaternion(along).translate(mid.x, mid.y, mid.z);
     };
-    solids.push(rigged(place(new BoxGeometry(0.055, 0.86, 0.022), 0.02, 0.88), look.boots, toHips));
-    metal.push(rigged(place(new BoxGeometry(0.06, 0.07, 0.026), 0.84, 0.91), look.metal, toHips));
-    metal.push(rigged(place(new BoxGeometry(0.06, 0.04, 0.026), 0.0, 0.04), look.metal, toHips));
-    metal.push(rigged(place(new BoxGeometry(0.2, 0.022, 0.024), -0.03, -0.008), look.metal, toHips));
-    solids.push(rigged(place(new CylinderGeometry(0.014, 0.016, 0.13, 8), -0.17, -0.035), look.grip, toHips));
+    solids.push(rigged(place(new BoxGeometry(0.055, 0.86, 0.022), 0.02, 0.88), look.boots, weights));
+    metal.push(rigged(place(new BoxGeometry(0.06, 0.07, 0.026), 0.84, 0.91), look.metal, weights));
+    metal.push(rigged(place(new BoxGeometry(0.06, 0.04, 0.026), 0.0, 0.04), look.metal, weights));
+    metal.push(rigged(place(new BoxGeometry(0.2, 0.022, 0.024), -0.03, -0.008), look.metal, weights));
+    solids.push(rigged(place(new CylinderGeometry(0.014, 0.016, 0.13, 8), -0.17, -0.035), look.grip, weights));
     const pommel = top.clone().addScaledVector(down, -0.19);
-    metal.push(rigged(new SphereGeometry(0.022, 10, 8).translate(pommel.x, pommel.y, pommel.z), look.metal, toHips));
+    metal.push(rigged(new SphereGeometry(0.022, 10, 8).translate(pommel.x, pommel.y, pommel.z), look.metal, weights));
+  };
+  /** How far out the trunk's skin stands at (x, y), behind it (`back`) or in front: the furthest point of it near there. */
+  const trunkAt = (x: number, y: number, back: boolean) => {
+    let z = back ? 0 : -1;
+    at.forEach((p, i) => { if (Math.abs(p.x - x) < 0.045 && Math.abs(p.y - y) < 0.045 && is(bone[i], 'spine_', 'pelvis', 'clavicle_') && (back ? p.z < z : p.z > z)) z = p.z; });
+    return z;
+  };
+  /** The chest and the spine below it, shared out by height: what a thing hung on the trunk above the belt moves with. */
+  const toChest = (p: Vector3): [string, number][] => {
+    const v = Math.min(1, Math.max(0, (chest + 0.1 - p.y) / (chest + 0.1 - beltY)));
+    return v < 0.5 ? [['spine_03', 1 - v * 2], ['spine_02', v * 2]] : [['spine_02', (1 - v) * 2], ['spine_01', (v - 0.5) * 2]];
+  };
+  if (o.sword === 'back') {
+    // Across the back over the cloak, from behind the left hip up to behind the right shoulder; the hilt standing up over it.
+    const low = new Vector3(pelvis.x + 0.15, beltY - 0.06, 0), high = new Vector3(pelvis.x - 0.13, chest + 0.2, 0);
+    for (const q of [low, high]) q.z = trunkAt(q.x, Math.min(q.y, chest + 0.06), true) - 0.125;
+    const down = low.clone().sub(high).normalize(), top = high.clone().addScaledVector(down, 0.02);
+    sheathe(top, down, (p) => toChest(new Vector3(p.x, Math.max(p.y, beltY), p.z)), new Vector3(0, 0, -1));
+    // The baldric: across the chest from the right shoulder to the left hip, and across the back under the scabbard.
+    const strap: BufferGeometry[] = [];
+    const band = (from: Vector3, to: Vector3, back: boolean) => {
+      const pts: Vector3[] = [];
+      for (let i = 0; i <= 10; i++) { const q = from.clone().lerp(to, i / 10); q.z = trunkAt(q.x, q.y, back) + (back ? -1 : 1) * (THICK.tunic + 0.014); pts.push(q); }
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i], mid = a.clone().add(b).multiplyScalar(0.5), dir = b.clone().sub(a);
+        const box = new BoxGeometry(0.05, 0.012, dir.length() + 0.006);
+        const q = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), dir.normalize());
+        // (Lying flat on the body: its breadth across the way the band goes, in the plane of the chest.)
+        const wide = new Vector3(1, 0, 0).applyQuaternion(q), want = new Vector3(0, 0, back ? -1 : 1).cross(dir).normalize();
+        q.premultiply(new Quaternion().setFromUnitVectors(wide, want));
+        strap.push(box.applyQuaternion(q).translate(mid.x, mid.y, mid.z).toNonIndexed());
+      }
+    };
+    band(new Vector3(pelvis.x - 0.12, chest + 0.13, 0), new Vector3(pelvis.x + 0.15, beltY + 0.02, 0), false);
+    band(new Vector3(pelvis.x - 0.12, chest + 0.13, 0), new Vector3(pelvis.x + 0.15, beltY + 0.02, 0), true);
+    solids.push(rigged(mergeGeometries(strap), look.leather, toChest));
+  } else {
+    // A sword in its scabbard at the left hip, hanging back from the belt; its hilt forward and up.
+    sheathe(ring[Math.round(ring.length * 0.26)].clone().add(new Vector3(0.03, -0.03, 0)), new Vector3(0, -Math.cos(0.55), -Math.sin(0.55)), toHips);
   }
   // A short cloak down the back from under the mantle to below the belt, standing off the back more the lower it hangs; moved by the
   // spine above and the hips below.

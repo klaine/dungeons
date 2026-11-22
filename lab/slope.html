@@ -91,6 +91,9 @@
     /* (Out of the way while a landing or a fall is told over the picture: on a phone the two would lie over each other.) */
     body.riding.telling #where .hint { display: none; }
     #brake { min-width: 80px; font-weight: 600; }
+    #turn180 { min-width: 56px; font-weight: 600; }
+    /* (Riding with the menus hidden, braking, the 180 and starting again stay to hand at the lower right.) */
+    .floating { position: fixed; right: var(--gutter-r); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 2; display: flex; gap: 8px; }
     #restart { font-weight: 600; }
 
     /* What has just happened: a landing named, or a fall, over the upper middle of the picture. */
@@ -121,7 +124,7 @@
     <div class="name" id="name">Downhill run</div>
     <div class="part" id="part">Long, wide turns</div>
     <div class="numbers"><span><b id="speed">0</b> km/h</span><span><b id="down">0</b><span id="of"></span> m vertical</span><span id="clock">0.0 s</span></div>
-    <div class="hint">Point up the picture to tuck, down it to stand tall, to either side to turn: carved, or skidded out at the ring's edge. Hold Brake, or Shift, to stop. The arrow keys steer too; held on, they skid.
+    <div class="hint">Point up the picture to tuck, down it to stand tall, to either side to turn: carved, or skidded out at the ring's edge. Hold Brake, or Shift, to stop; 180, or X, turns you round on the snow to switch and back (a pop, a nose butter, a smooth 180, a tail butter, in turn). The arrow keys steer too; held on, they skid.
       Off a kicker: tucked, you fly as a ski jumper; between, straight air; standing tall, a backflip; turning a little, a 180 with it; turning hard, a spin for as long as you hold it, stopping at the next half turn when you let go (an odd one lands you switch); tucked and turning, a cork. In the air, point up to turn quicker; up and to a side to grab (left a mute, right the tail); down to spread eagle, or lay out a flip.</div>
   </div>
   <button id="bare" type="button" title="Hide the menus and the text (H)">Hide menus</button>
@@ -136,7 +139,7 @@
       <div class="group" id="skiers"><span class="label">Skier</span></div>
       <div class="group" id="skisets" hidden><span class="label">Skis</span></div>
       <div class="group"><button id="play" type="button">Pause</button></div>
-      <div class="group" id="brakes" hidden><button id="brake" type="button" title="Hold to brake (Shift)">Brake</button></div>
+      <div class="group" id="brakes" hidden><button id="brake" type="button" title="Hold to brake (Shift)">Brake</button><button id="turn180" type="button" title="A 180 on the snow, to switch and back: a pop, a nose butter, a smooth 180 or a tail butter, each in turn (X)">180</button></div>
       <div class="group" id="restarts" hidden><button id="restart" type="button" title="Start the run again from the top (Enter)">Restart run</button></div>
       <div class="group" id="rates"><span class="label">Speed</span></div>
       <div class="group" id="views"><span class="label">View</span></div>

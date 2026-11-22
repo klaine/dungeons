@@ -226,8 +226,12 @@ async function start() {
     const length = KICK.length + KICK.back;
     for (let shift = 0; shift <= (land.length === Infinity ? 0 : KICK.shift) && !k; shift += 6) {
       // (Across the skiable path at its own place, in from either edge further than the band where the skier is turned back towards
-      // the middle: one within it could not be lined up on.)
-      const s = KICK.first + i * KICK.every + shift, [lo, hi] = land.edges(s), left = (lo + hi) / 2 + kickerLeft(i, clamp((hi - lo) / 2 - Math.min(8, (hi - lo) / 4) - KICK.half - KICK.side - 1, 0, 14));
+      // the middle, there and all along the sixty metres before it where it is lined up on: one within it, there or where the path is
+      // narrower on the way to it, could not be lined up on.)
+      const s = KICK.first + i * KICK.every + shift, [lo, hi] = land.edges(s);
+      let room = 14;
+      for (let u = s - 60; u <= s; u += 6) { const [a, b] = land.edges(u), mid = (lo + hi) / 2; room = Math.min(room, Math.min(mid - a, b - mid) - Math.min(8, (b - a) / 4) - KICK.half - KICK.side - 1); }
+      const left = (lo + hi) / 2 + kickerLeft(i, clamp(room, 0, 14));
       if (land.kickable(s, left, length)) { const p = land.at(s, left); k = { i, s, left, ...p }; }
     }
     kickerAt.set(i, k);
@@ -325,7 +329,7 @@ async function start() {
   const idle = library.clips.find((c) => c.name === 'Idle_Loop')!;
   // (The skier, and a horse's rider, an adventurer: a ranger's clothes on a base body, `src/figures/outfit.ts`; `?body=mannequin`
   // for the plain mannequin, or any other body's name.)
-  const source = await library.source(query.get('body') ?? 'adventurer');
+  const source = await library.source(query.get('body') ?? 'adventurer', { sword: 'back' });
   const live = new Rider(source, idle), model = live.model;
   const shade = (m: Object3D) => m.traverse((o) => { if ((o as Mesh).isMesh) { o.castShadow = true; o.receiveShadow = true; if ((o as SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; } });
   shade(model);
@@ -500,6 +504,8 @@ async function start() {
     switch: false,
     /** How far its knees give to the snow's shape under it (`RideControls.flex`), and how far it looks back over its shoulder (switch). */
     flex: 0, back: 0,
+    /** A 180 on the snow it is in the middle of, if it is: which, how far into it (seconds), and which way round (to the left, 1). */
+    turn180: null as { kind: Ground180; t: number; dir: number } | null,
   };
   /** An angle brought within half a turn either way of nothing. */
   const wrapAngle = (a: number) => a - TURN * Math.round(a / TURN);
@@ -604,6 +610,44 @@ async function start() {
   // What has just happened, said over the picture for a while: a landing, or a fall.
   let told = { text: '', small: '', bad: false, until: 0 };
   const tell = (text: string, small: string, bad: boolean, seconds: number) => { told = { text, small, bad, until: ride.time + seconds }; };
+
+  /**
+   * A 180 on the snow, to switch and back again (asked: "add a single control to 180 to switch (and back), this could alternate between
+   * pops, smooth and cool nose butters and some other cool "land tricks""): one control, *180* or `X`, and each time the next of four:
+   * a pop 180, crouched and sprung up off the tails, turned in the air and landed; a nose butter, pressed up onto its skis' tips, the
+   * tails lifted off the snow, pivoted round on the tips; a smooth 180, the skis slid round flat on the snow, scraping it; and a tail
+   * butter, sat back onto the tails, the tips up, pivoted round on the tails. Each turns it half round, to switch or back from it; it
+   * turns which way it is steering, or each way in turn.
+   */
+  const GROUND_180 = ['pop', 'nose', 'smooth', 'tail'] as const;
+  type Ground180 = (typeof GROUND_180)[number];
+  const G180: Record<Ground180, { T: number; name: string }> = {
+    pop: { T: 0.62, name: 'Pop 180' }, nose: { T: 1.05, name: 'Nose butter 180' }, smooth: { T: 0.85, name: 'Smooth 180' }, tail: { T: 1.05, name: 'Tail butter 180' },
+  };
+  let next180 = 0;
+  /** Begins the next ground 180, if it can be done now: on the snow and going, not on a kicker, not braking, not in one already. */
+  const start180 = (dir?: number) => {
+    if (air || crash || ride.turn180 || ride.speed < 3 || ride.brake > 0.3 || ride.out > 0.02) return false;
+    const kind = GROUND_180[next180++ % GROUND_180.length];
+    ride.turn180 = { kind, t: 0, dir: dir ?? (Math.abs(ask.x) > 0.2 ? -Math.sign(ask.x) : next180 % 2 ? 1 : -1) };
+    tell(G180[kind].name, ride.switch ? 'back round from switch' : 'round to switch', false, 1.8);
+    return true;
+  };
+  /**
+   * A ground 180 at `p` (0 to 1) of the way through: how far round it is (0 to 1), how far pressed onto the tips (positive) or the
+   * tails, how high it is sprung off the snow, how far its skis are tipped nose up (radians), how far it sinks at the knees, how far
+   * its skis scrape the snow side on, and how much speed that costs it (metres a second, each second, side on).
+   */
+  const shape180 = (kind: Ground180, p: number) => {
+    const bell = (a: number, b: number, c: number, d: number) => smooth((p - a) / (b - a)) * (1 - smooth((p - c) / (d - c)));
+    if (kind === 'pop') {
+      const q = clamp((p - 0.2) / 0.62, 0, 1);
+      return { rot: smooth((p - 0.24) / 0.5), press: 0, lift: 0.34 * 4 * q * (1 - q), pitch: deg(9) * Math.sin(Math.PI * q), sink: 0.55 * bell(0, 0.12, 0.16, 0.24) + 0.3 * bell(0.2, 0.32, 0.68, 0.8) + 0.45 * bell(0.78, 0.85, 0.9, 1), scrape: 0, slow: 0 };
+    }
+    if (kind === 'smooth') return { rot: smooth((p - 0.04) / 0.86), press: 0, lift: 0, pitch: 0, sink: 0.35 * bell(0, 0.2, 0.8, 1), scrape: 1, slow: 3 };
+    const press = bell(0, 0.18, 0.82, 1) * (kind === 'nose' ? 1 : -1);
+    return { rot: smooth((p - 0.15) / 0.7), press, lift: 0, pitch: (kind === 'nose' ? -deg(17) : deg(15)) * Math.abs(press), sink: 0.15 * Math.abs(press), scrape: 0.5, slow: 2 };
+  };
 
   /** The rider's wishes eased in: across and up, the tuck and standing tall, braking. */
   const easeAsk = (dt: number) => {
@@ -712,7 +756,7 @@ async function start() {
   };
   /** The skier back at the top, going a little. */
   const resetRide = () => {
-    Object.assign(ride, { way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, absorb: 0, sink: 0, pop: 0, skid: 0, ended: false, held: 0, switch: false, flex: 0, back: 0 });
+    Object.assign(ride, { way: 0, speed: 7, facing: 0, tuck: 0, tall: 0, brake: 0, lean: 0, leanSide: 0, flickL: 0, flickR: 0, time: 0, out: 0, absorb: 0, sink: 0, pop: 0, skid: 0, ended: false, held: 0, switch: false, flex: 0, back: 0, turn180: null });
     here = land.frame(0, 0);
     putAt(0, 0);
     ride.settle = { spin: 0, flip: 0, left: 0 };
@@ -720,6 +764,7 @@ async function start() {
     air = null; crash = null; joints = jointsBefore = null;
     seat();
     told = { text: '', small: '', bad: false, until: 0 };
+    next180 = 0;
   };
   /** The run again from the top, going a little. */
   const restart = () => {
@@ -839,7 +884,16 @@ async function start() {
     const into = G / Math.hypot(1, gx, gz), e = 0.3;
     const nose = Math.atan((bumpAt(ride.x, ride.z) - bumpAt(ride.x - go.x * e, ride.z - go.z * e)) / e);
     const drag = 0.0065 + (0.0037 - 0.0065) * ride.tuck + (0.012 - 0.0065) * ride.tall;
-    const pull = -G * rise * level - 0.04 * into - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - 6 * Math.abs(Math.sin(pivot));
+    // (A ground 180 under way: what it is doing at this point of it; it ends, half round, switch or back.)
+    let g180: ReturnType<typeof shape180> | null = null;
+    if (ride.turn180) {
+      const tr = ride.turn180;
+      tr.t += dt;
+      if (tr.t >= G180[tr.kind].T) { ride.facing += tr.dir * Math.PI; ride.switch = !ride.switch; ride.turn180 = null; }
+      else g180 = shape180(tr.kind, tr.t / G180[tr.kind].T);
+    }
+    const sideOn = g180 ? Math.abs(Math.sin(Math.PI * g180.rot)) : 0;
+    const pull = -G * rise * level - 0.04 * into - drag * ride.speed ** 2 - 0.05 * Math.abs(turning) * ride.speed - 7 * ride.brake - 6 * Math.abs(Math.sin(pivot)) - (g180 ? g180.slow * sideOn : 0);
     ride.speed = Math.max(0, ride.speed + pull * dt);
     ride.x += go.x * ride.speed * level * dt; ride.z += go.z * ride.speed * level * dt;
     ride.time += dt;
@@ -876,7 +930,7 @@ async function start() {
     ride.pop = ride.out > 0.02 && nose > 0.02 ? smooth((ride.out / KICK.height - 0.45) / 0.45) : 0;
     const crouch = ride.out > 0.05 ? 0.5 * clamp(Math.sin(nose) / 0.34, 0, 1) * (1 - ride.pop) : 0;
     ride.sink = Math.max(0, ride.sink - dt * 1.5);
-    ride.absorb += (Math.max(crouch, ride.sink) - ride.absorb) * ease(dt, 16);
+    ride.absorb += (Math.max(crouch, ride.sink, g180?.sink ?? 0) - ride.absorb) * ease(dt, 16);
     const settling = smooth(ride.settle.left / 0.25);
     ride.settle.left = Math.max(0, ride.settle.left - dt);
     // Its knees giving to the snow's shape: sunk into a hollow and let long over a crest, as much as the snow under it, taken at its
@@ -889,20 +943,31 @@ async function start() {
     posed = { air: false, c: {
       s: ride.lean * mirror, ski: wrapAngle(ski + switched() - ride.facing), tuck: ride.tuck, brake: ride.brake, tall: ride.tall,
       flickL: bump(ride.switch ? ride.flickR : ride.flickL), flickR: bump(ride.switch ? ride.flickL : ride.flickR),
-      absorb: ride.absorb, spin: ride.settle.spin * settling, flip: ride.settle.flip * settling, skid: ride.skid, pop: ride.pop,
-      life: ride.time, flex: ride.flex, back: ride.back,
+      absorb: ride.absorb, spin: ride.settle.spin * settling + (ride.turn180 && g180 ? ride.turn180.dir * Math.PI * g180.rot : 0), flip: ride.settle.flip * settling,
+      skid: Math.max(ride.skid, g180 ? 0.8 * g180.scrape * sideOn : 0), pop: ride.pop, life: ride.time, flex: ride.flex, back: ride.back, press: g180?.press ?? 0,
     } };
     if (!quiet) skier.ride(posed.c as RideControls);
-    // (Upright to the snow under it, smoothed over half a metre, as skis bridge what is smaller.)
-    standAt(new Vector3(ride.x, ride.y, ride.z), normalAt(ride.x, ride.z, 0.5), ride.facing, here);
+    // (Upright to the snow under it, smoothed over half a metre, as skis bridge what is smaller. In a ground 180: sprung up off it in a
+    // pop; tipped onto the tips or the tails in a butter, the pressed ends kept on the snow and the body carried round about them.)
+    const stand = new Vector3(ride.x, ride.y, ride.z);
+    if (ride.turn180 && g180) {
+      stand.addScaledVector(UP, g180.lift);
+      if (g180.press) {
+        const reach = g180.press > 0 ? (who === 'person' ? 0.85 : 1.1) : -(who === 'person' ? 0.78 : 1.0), arm = along(ride.facing, here).multiplyScalar(reach);
+        const round = arm.clone().applyAxisAngle(UP, ride.turn180.dir * Math.PI * g180.rot), fade = 1 - smooth((ride.turn180.t / G180[ride.turn180.kind].T - 0.65) / 0.35);
+        stand.add(arm.sub(round).multiplyScalar(fade)).addScaledVector(UP, Math.abs(reach) * Math.sin(Math.abs(g180.pitch)));
+      }
+    }
+    standAt(stand, normalAt(ride.x, ride.z, 0.5), ride.facing, here, g180?.pitch ?? 0);
     if (!quiet) keepJoints(dt);
     // At the foot of a world's run: brought to a stop there.
     if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${land.fall.toFixed(0)} m vertical in ${ride.time.toFixed(0)} s · Restart run, or Enter`, false, 1e9); }
-    return { down: ride.down, left: ride.left, speed: ride.speed, way: ride.way, ski, skid: Math.abs(Math.sin(ski - ride.way)), tuck: ride.tuck, brake: ride.brake };
+    return { down: ride.down, left: ride.left, speed: ride.speed, way: ride.way, ski, skid: Math.max(Math.abs(Math.sin(ski - ride.way)), g180 ? g180.scrape * sideOn : 0), tuck: ride.tuck, brake: ride.brake };
   };
   /** What the ridden skier is doing, in words. */
   const doingNow = () => { const d = doing_(); return ride.switch && !air && !crash ? `${d}, switch` : d; };
   const doing_ = () => {
+    if (ride.turn180) return `${G180[ride.turn180.kind].name}…`;
     if (crash) return stillFor() > 0.5 ? 'Down in the snow' : 'Tumbling';
     if (air) return air.kind === 'hop' ? 'In the air' : `${air.name}…`;
     if (ride.brake > 0.5) return who === 'person' ? 'Braking' : 'Sliding stop';
@@ -967,6 +1032,8 @@ async function start() {
     for (const key of Object.keys(want.keys) as (keyof typeof want.keys)[]) want.keys[key] = false;
     const frames: DemoFrame[] = [], labels: string[] = [], landed: string[] = [], tries: number[] = [], flown: string[] = [];
     let k = 0, phase = 0, settle = 0, label = 'Off from the top', fell: string | null = null, stopAt = Infinity, last = '', lastT = 0, step = 0, airFrom = 0;
+    // (Ground 180s done since the last kicker, and how long since the last of them.)
+    let gap180 = 0, since180 = 1e9;
     // (Where the approach to the kicker now ahead began, to fly it again from there.)
     let from: { k: number; step: number; ride: typeof ride; ask: typeof ask; here: Frame; frames: number; landed: number; phase: number } | null = null;
     /** Each kicker's flight, as it went: at what speed, off the lip how fast, and how it came down. */
@@ -1015,7 +1082,7 @@ async function start() {
         // second, or nine tenths for a single spin.)
         const short = lastT < (trick.kind === 'flip' || trick.halves > 2 ? 1 : trick.halves ? 0.9 : 0);
         if ((last !== trickKey(trick) || short) && again()) continue;
-        k++; settle = 0.7; from = null;
+        k++; settle = 0.7; from = null; gap180 = 0;
       } else if (settle > 0) {
         settle -= dt; want.x = 0; want.y = 0;
       } else if (kick && toLip < 75) {
@@ -1042,16 +1109,28 @@ async function start() {
         phase += (dt * Math.PI) / 1.9;
         const [lo, hi] = land.edges(ride.down), mid = (lo + hi) / 2, half = Math.max(6, (hi - lo) / 2);
         const amp = clamp(0.3 + (ride.speed - 15) * 0.06, 0.2, 0.8);
-        want.x = steer(amp * Math.sin(phase) + clamp((mid - ride.left) / half, -1, 1) * 0.3);
+        want.x = steer(amp * Math.sin(phase) + clamp((mid - ride.left) / half, -1, 1) * 0.3) * (ride.turn180 ? 0.4 : 1);
         want.y = ride.speed < 12 ? 0.8 : ride.speed > 21 ? -0.4 : 0;
         label = k < kicked.length ? 'Carving' : 'On to the foot';
-        // (On a slope that goes on for ever, brought to a stop some way past the last kicker.)
+        // (On a slope that goes on for ever, carried on some way past the last kicker for its 180s on the snow, then brought to a stop.)
         if (k >= kicked.length && land.length === Infinity) {
-          if (stopAt === Infinity) stopAt = ride.down + 40;
+          if (stopAt === Infinity) stopAt = ride.down + 290;
+          if (gap180 >= 4 && !ride.turn180 && since180 > 1.4) stopAt = Math.min(stopAt, ride.down);
           if (ride.down > stopAt) { want.brake = true; label = 'Stopping'; }
         }
+        // Ground 180s where there is room for them: where the next kicker's approach (or the run's end) is far enough off for two, and
+        // only two, between kickers, so that it comes to the kicker in the stance it left the last one in; up to four on the way to the
+        // foot. (Each as long as it takes, and a moment after it.)
+        const room = kick ? toLip - 75 : (land.length === Infinity ? stopAt : land.length - 40) - ride.down;
+        const need = (n: number) => Math.max(ride.speed, 8) * (G180[GROUND_180[(next180 + n) % GROUND_180.length]].T + 0.9);
+        if (!ride.turn180 && since180 > 1 && ride.speed > 8 && ride.down > 20) {
+          const back = gap180 % 2 === 1, more = kick ? gap180 < 2 : gap180 < 4;
+          if ((back && room > need(0)) || (!back && more && room > need(0) + need(1) + 5)) { if (start180()) { gap180++; since180 = 0; } }
+        }
+        if (ride.turn180) label = G180[ride.turn180.kind].name;
       }
       const keep = step % 4 === 0, wasAir = air;
+      since180 = ride.turn180 ? 0 : since180 + dt;
       quiet = !keep;
       const now = stepRide(dt);
       if (air && !wasAir && air.kind !== 'hop' && from?.k === k) off = `off at ${(ride.speed * 3.6).toFixed(0)} km/h, ${air.name}, ${air.T.toFixed(2)} s up; `;
@@ -1152,6 +1231,7 @@ async function start() {
   const viewButtons = views.map(([label, v, key]) => button('views', label, () => setView(v), `${label} (${key})`));
   const brakeButton = $('brake'), restartButton = $('restart');
   restartButton.onclick = () => restart();
+  $('turn180').onclick = () => { start180(); };
   const line = $('line'), head = line.querySelector('.head') as HTMLElement;
   // The demo run's parts along the timeline, and its seconds ticked off under them, five at a time.
   let bands: HTMLElement[] = [], shownPart = '';
@@ -1184,6 +1264,18 @@ async function start() {
     layWatchTracks();
     showWatchTracks(mode === 'watch' ? t : null);
   };
+  // (Riding with the menus hidden, *Brake*, *180* and *Restart run* are taken out of the foot, which is hidden, and kept at the lower
+  // right; put back when the menus are shown or riding stops.)
+  const handy = ['brakes', 'restarts'].map((id) => { const el = $(id); return { el, home: el.parentElement!, after: el.nextElementSibling }; });
+  const placeHandy = () => {
+    const out = document.body.classList.contains('bare') && mode === 'ride';
+    for (const h of handy) {
+      if (out && h.el.parentElement !== document.body) { document.body.appendChild(h.el); h.el.classList.add('floating'); }
+      else if (!out && h.el.parentElement === document.body) { h.home.insertBefore(h.el, h.after); h.el.classList.remove('floating'); }
+    }
+    // (Each at its own place in the corner, the one over the other.)
+    $('restarts').style.bottom = out ? 'calc(64px + env(safe-area-inset-bottom, 0px))' : '';
+  };
   const reflect = () => {
     $('play').textContent = playing ? 'Pause' : 'Play';
     modeButtons.forEach((b, i) => b.classList.toggle('on', modes[i][1] === mode));
@@ -1201,6 +1293,7 @@ async function start() {
     $('snows').hidden = landKind !== 'world';
     $('of').textContent = land.fall === Infinity ? '' : ` of ${land.fall.toFixed(0)}`;
     document.body.classList.toggle('riding', mode === 'ride');
+    placeHandy();
   };
   $('play').onclick = () => { playing = !playing; reflect(); };
   // (Free: the view turned about the skier by hand, and carried along with it; only watching, as riding the pointer steers.)
@@ -1290,6 +1383,7 @@ async function start() {
     if (e.target instanceof HTMLButtonElement && e.key === ' ') return;
     if (mode === 'ride' && ARROWS[e.key]) { want.keys[ARROWS[e.key]] = true; e.preventDefault(); return; }
     if (mode === 'ride' && e.key === 'Shift') { want.brakeKey = true; return; }
+    if (mode === 'ride' && e.key.toLowerCase() === 'x' && !(e.target instanceof HTMLInputElement)) { start180(); e.preventDefault(); return; }
     if (mode === 'ride' && e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) { restart(); e.preventDefault(); return; }
     const k = e.key.toLowerCase(), v = views.find((x) => x[2].toLowerCase() === k);
     if (e.target instanceof HTMLInputElement) return;
@@ -1553,7 +1647,7 @@ async function start() {
   const keep = (k: string, v: string) => { try { localStorage.setItem(`slope.${k}`, v); } catch { /* (not kept) */ } };
   const kept = (k: string) => { try { return localStorage.getItem(`slope.${k}`); } catch { return null; } };
   const bareButton = $('bare'), distanceInput = $<HTMLInputElement>('distance');
-  const setBare = (on: boolean) => { document.body.classList.toggle('bare', on); bareButton.textContent = on ? 'Show menus' : 'Hide menus'; bareButton.title = on ? 'Show the menus and the text (H)' : 'Hide the menus and the text (H)'; keep('menus', on ? 'hidden' : 'shown'); };
+  const setBare = (on: boolean) => { document.body.classList.toggle('bare', on); bareButton.textContent = on ? 'Show menus' : 'Hide menus'; bareButton.title = on ? 'Show the menus and the text (H)' : 'Hide the menus and the text (H)'; keep('menus', on ? 'hidden' : 'shown'); placeHandy(); };
   bareButton.onclick = () => setBare(!document.body.classList.contains('bare'));
   const setDistance = (d: number) => { distance = clamp(d, 0.5, 3); distanceInput.value = String(distance); $('distanceOut').textContent = `${distance.toFixed(1)}×`; keep('distance', String(distance)); };
   distanceInput.addEventListener('input', () => setDistance(Number(distanceInput.value)));

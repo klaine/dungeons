@@ -1145,6 +1145,26 @@ The machine this is developed on now has a graphics card, and tablets were repor
     rider on both slopes; half turns, held spins and switch landings ridden by script; contact sheets of the cinematic view on the
     world's run and the groomed slope, and riding; filmstrips of riding switch and the switch 540, the crossed skis, a horse's 720;
     `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
+82. **A sword on the back, and 180s on the snow.** Asked: "the human skiier could have the sword on their back / add a single
+    control to 180 to switch (and back), this could alternate between pops, smooth and cool nose butters and some other cool "land
+    tricks"". *The sword*: `dressAdventurer` takes `sword: 'back'` (and the library makes that body once more, `source(id, { sword })`):
+    the scabbard slung across the back over the cloak, from behind the left hip up to behind the right shoulder (twelve and a half
+    centimetres off the back's skin, measured there), its hilt standing up behind the shoulder, on a baldric across the chest and the
+    back, all hung from the chest and the spine below it; the skier and a horse's rider wear it so, the figures elsewhere at the hip.
+    *Ground 180s*: one control (*180* by *Brake*, `X`) does the next of four in turn, each half a turn to switch or back
+    (`start180`, `shape180`): a pop 180 (crouched, sprung thirty-four centimetres up, turned in the air, landed low; 0.62 seconds); a
+    nose butter (pressed up onto the tips, the skis tipped 17 degrees nose down with the tails off the snow, the body carried round
+    about the tips; 1.05 seconds); a smooth 180 (slid round flat, the skis scraping side on and throwing snow; 0.85 seconds); a tail
+    butter (sat back onto the tails, the tips 15 degrees up, round about the tails; 1.05 seconds). Each costs some speed while side on
+    (two or three metres a second, each second) and turns the way it is steered, or each way in turn. Riding with the menus hidden,
+    *Brake*, *180* and *Restart run* stay to hand at the lower right (with all the menus hidden, a touch screen had none). The demo
+    pilot does them where there is room for a pair, or on the way to the foot, so that it meets each kicker in the stance it left the
+    last one in: two before the world run's foot, four on a run-out past the groomed slope's last kicker. Kickers are now kept in from
+    the edges along the sixty metres of their approach as well as where they stand; on the world's run that let a seventh stand, at
+    484 metres, and the demo flies the mute grab off the seventh. *Checked* in headless Chromium: every trick of the demo lands for the
+    person, the horse on both sets of skis and the horse and rider on both slopes, with the ground 180s; the control by key and by
+    button while riding, each 180 toggling switch; filmstrips of the four, and of the horse and rider's nose butter and pop; pictures
+    of the sword on the back; `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
 ## Risks
 
 | Risk | Mitigation |

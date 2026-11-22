@@ -104,16 +104,17 @@ export class FigureLibrary {
 
   /**
    * A body of the kind `id` as it is made, dressed if it is dressed: to be copied, or to make clips and live poses on (`Rider`), not to
-   * show. Each kind is fetched and dressed once.
+   * show. Each kind is fetched and dressed once; an adventurer with its sword on its back (`sword: 'back'`, as the skier wears it)
+   * once more.
    */
-  source(id: string): Promise<Object3D> {
-    const kind = BODIES.find((b) => b.id === id) ?? BODIES[0];
-    let made = this.made.get(kind.id);
+  source(id: string, o: { sword?: 'hip' | 'back' } = {}): Promise<Object3D> {
+    const kind = BODIES.find((b) => b.id === id) ?? BODIES[0], key = o.sword === 'back' && kind.dress === 'adventurer' ? `${kind.id} sword on back` : kind.id;
+    let made = this.made.get(key);
     if (!made) {
       let file = this.sources.get(kind.file === 'clips.glb' ? 'mannequin' : kind.file);
       if (!file) { file = loadFile(this.loader, this.base, kind.file); this.sources.set(kind.file, file); }
-      made = file.then((gltf) => (kind.dress === 'adventurer' ? dressAdventurer(gltf.scene) : gltf.scene));
-      this.made.set(kind.id, made);
+      made = file.then((gltf) => (kind.dress === 'adventurer' ? dressAdventurer(gltf.scene, undefined, o) : gltf.scene));
+      this.made.set(key, made);
     }
     return made;
   }

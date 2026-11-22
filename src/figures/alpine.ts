@@ -450,6 +450,12 @@ export interface RideControls {
    * its left shoulder riding switch (0 to 1).
    */
   life?: number; flex?: number; back?: number;
+  /**
+   * Pressed onto the tips of its skis (positive, a nose butter: its weight forward over them, the tails up) or onto their tails
+   * (negative, a tail butter: sat back, the tips up), 0 to 1 either way (asked: "add a single control to 180 to switch (and back), this
+   * could alternate between pops, smooth and cool nose butters and some other cool "land tricks"").
+   */
+  press?: number;
 }
 
 /**
@@ -531,6 +537,17 @@ export function riderPose(h0: number, c: RideControls): AlpinePose {
   const flex = c.flex ?? 0, back = c.back ?? 0;
   if (flex) { a.hips -= 0.07 * flex; a.lean += rad(4) * flex; both(a, (_k, arm) => { arm.hang -= 6 * Math.max(0, flex); }); }
   if (back) { a.chestYaw += 0.42 * back; a.pelvisYaw += 0.12 * back; a.headYaw += 0.95 * back; a.head -= rad(4) * back; }
+  // Pressed onto the tips: up over them, the trunk forward, the arms out ahead for balance, the head up to look ahead. Onto the tails:
+  // sat back and low over them, the trunk up, the arms out to the sides.
+  const press = c.press ?? 0;
+  if (press > 0) {
+    a.hipsZ += 0.08 * press; a.lean += rad(16) * press; a.pelvisPitch += rad(10) * press; a.head -= rad(14) * press;
+    both(a, (_k, arm, f) => { arm.swing += rad(26) * press; arm.hang -= 26 * press; arm.bend -= rad(14) * press; f.pitch += 0; });
+  } else if (press < 0) {
+    const q = -press;
+    a.hips -= 0.1 * q; a.hipsZ -= 0.12 * q; a.lean -= rad(14) * q; a.pelvisPitch -= rad(12) * q; a.head -= rad(6) * q;
+    both(a, (_k, arm) => { arm.hang -= 34 * q; arm.swing += rad(6) * q; });
+  }
   // The pop: up out of the crouch, the legs driven long, the arms swung through (up and back for a backflip).
   const pop = c.pop ?? 0;
   if (pop) popUp(a, h0, pop, tall);

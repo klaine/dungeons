@@ -692,9 +692,8 @@ brought to half its height above 300 metres in the slice alone. A world whose mo
 range worn into broader shoulders and cirques, or less high. The page does not stream the world; it is a slice, made once, of the land
 as it is now, and is made again when the land changes. Its kickers stand where the land after them falls away enough to land on,
 and the page's demo run is flown over them by a pilot, landing a 720, a backflip, a backflip 360, a ski jumper's flight, a cork 540
-(to switch) and a switch 540 off the six on `w2`'s run (`plan`, items 79 to 81): on this land, at a lined-up 61 km/h, each comes round at the
-first try but the backflip and the switch 540, which off their kickers at that speed have too little time in the air and are taken
-again faster.
+(to switch), a switch 540 and a mute grab off the seven on `w2`'s run (`plan`, items 79 to 82): on this land, at a lined-up 61 km/h, each comes round at the
+first try but the backflip 360, which off its kicker at that speed has too little time in the air and is taken again faster.
 
 ## Where next: the land, and places that fit it
 
