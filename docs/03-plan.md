@@ -1117,6 +1117,34 @@ The machine this is developed on now has a graphics card, and tablets were repor
     a long pair and the horse and rider, on the world's run (68 seconds; the backflip 360 taken again faster) and the groomed slope
     (78); each trick ridden by script for the person and the horse and rider; filmstrips of every new trick; `figures.cjs` and
     `crew.cjs` pass (the old jump clips' head now follows the chest's turn). Not yet seen on a graphics card.
+81. **Switch, half turns, life, and a cinematic camera.** Asked: "you can make it also possible to ride switch or land switch
+    (180/540/900...).. horse could spread its legs on spinning tricks while in air etc / rotating flips with human skiier could cross
+    the skis etc / also there should be some "life" movement going on even straight lining without turns and so on / then - add a
+    cinematic camera mode - adjust besides camera so that it eases so that there is more visibility to the side the rider is heading
+    to (now the rider is in the sharp center of framing) / then make the cinematic camera and hide menus enabled as default". *Spins
+    by half turns*: a little turn at the lip is a 180; a hard one (past six tenths of the pointer's range) is held: the spin goes
+    another half turn each time it comes within some two hundred degrees of where it is to stop, for as long as the turn is held hard
+    and not drawn up into a tuck or a grab (a cork's tuck off the lip is let be for a quarter of a second), and let go it stops at the
+    next half turn ahead, paced then to come round before the snow (`holding`, `rate.spin`; at most 1.9 turns a second). *Switch*: an
+    odd number of half turns toggles `ride.switch`; the body's facing is carried round by the spin it made and kept half a turn about
+    from the way it goes, the lean and the flicks mirrored in its own frame, the head turned back over the shoulder (`back`), and a
+    trick taken switch so named. Going round a flip and a spin together the skier crosses its skis (`cross`); a horse flings its legs
+    wide in a spin, the skis apart and on their outer edges (`fling` in `horseAirPose`). *Life* (`lifeAt` in `alpine.ts`: slow waves
+    of their own for breathing, looking about, shifting weight and the hands; for the horse its neck, head, ears and tail): and the
+    knees giving to the snow's shape at speed (`flex`, from the snow's bend along the way it goes by the speed squared, and a little
+    chatter). The demo flies twelve on the groomed slope (101 seconds) and six on the world's run (66), now a cork 540 and a switch 540
+    for the fifth and sixth. *Cinematic view* (`shotsOf`, `rideShots`, `placeCinema`): watching, the run cut into shots once, so that it
+    is the same each time and on the timeline: around each jump a camera set down by its kicker (beside the flight, the commonest;
+    going round the skier in the air; past the landing and to the side; beside and behind the lip; the low ones lost the skier behind
+    the convex snow of the world's run until raised), from a second and a half before the lip to a second after the landing; between
+    them chase, alongside, ahead drawing in, drone and passing shots of three and a half to six seconds; cameras set down raised until
+    nothing of the land stands between them and the skier, and zooming to keep it framed; riding, chase shots at changing heights and
+    distances, and beside the flight of a jump. *Beside*: looking ahead of the skier along its eased way by 4.5 metres times the
+    distance. The page opens in the cinematic view with the menus hidden (kept under a new name, so menus shown before are hidden
+    once). *Checked* in headless Chromium: the demo lands every trick for the person, the horse on both sets of skis and the horse and
+    rider on both slopes; half turns, held spins and switch landings ridden by script; contact sheets of the cinematic view on the
+    world's run and the groomed slope, and riding; filmstrips of riding switch and the switch 540, the crossed skis, a horse's 720;
+    `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
 ## Risks
 
 | Risk | Mitigation |

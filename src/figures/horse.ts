@@ -3,7 +3,7 @@ import {
   Quaternion, Skeleton, SkinnedMesh, SphereGeometry, Vector3,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { AirControls, AlpineArm, AlpineFoot, AlpinePose, RideControls } from './alpine';
+import { type AirControls, type AlpineArm, type AlpineFoot, type AlpinePose, lifeAt, type RideControls } from './alpine';
 import type { BodySpec } from './ragdoll';
 import { bodyTurn } from './posing';
 import { bitRings, horseLooks, type Part } from './horseBody';
@@ -533,6 +533,19 @@ export function horseRidePose(c: RideControls): HorsePose {
   a.ears += 0.3 * sit;
   // Sunk into a landing.
   a.height -= 0.2 * absorb; a.neck += rad(10) * absorb; a.head += rad(6) * absorb;
+  // Its life: breathing in the neck and the head's carriage, looking about, the ears turning to what it hears, the tail swishing; its
+  // legs giving to the snow's shape; going switch, its neck turned to look back over its shoulder the way it goes.
+  if (c.life !== undefined) {
+    const L = lifeAt(c.life), t = c.life, easy = 1 - tuck;
+    a.neck += rad(2.5) * L.breath * easy; a.head += rad(3) * Math.sin(2 * Math.PI * 0.6 * t) * easy;
+    a.neckYaw += 0.2 * L.look * easy;
+    a.ears += (0.25 + 0.25 * Math.sin(2 * Math.PI * 0.23 * t + 1) ** 3) * easy * (1 - Math.min(1, a.ears));
+    a.tailYaw += (0.22 * Math.sin(2 * Math.PI * 0.45 * t) + 0.1 * Math.sin(2 * Math.PI * 1.3 * t + 2)) * (1 - 0.6 * tuck);
+    a.bodyX += 0.015 * L.shift * easy; a.roll += rad(1.5) * L.shift * easy;
+  }
+  const flex = c.flex ?? 0, back = c.back ?? 0;
+  a.height -= 0.07 * flex; a.neck += rad(5) * flex;
+  a.neckYaw += 0.7 * back; a.head -= rad(6) * back; a.ears += 0.3 * back;
   // Springing off a lip: the legs driven long, the head and neck up (and back, set for a backflip).
   const pop = c.pop ?? 0;
   if (pop) { a.height += (0.1 - a.height) * pop; a.neck += (rad(-10) - rad(18) * tall - a.neck) * pop; a.head += (rad(10) - a.head) * pop; a.ears *= 1 - pop; a.pitch += (rad(-4) - a.pitch) * pop; }
@@ -547,7 +560,7 @@ export function horseRidePose(c: RideControls): HorsePose {
  * arched down and the back rounded over them (the fore skis drawn higher still on four); a ski jumper's flight as a horse can fly one,
  * stretched out along its skis, which are spread at their tips, the neck reaching out ahead and the ears back (on four skis, the fore
  * pushed forward and the hind back, as a horse stretches over a ditch); the backflip's throw, its head flung up and back; laid out in a
- * flip, stretched long; gathered in for a spin, its neck and head turned into it ahead of its body, round to the landing first; its
+ * flip, stretched long; round a spin, its legs flung out wide, its neck and head turned into it ahead of its body, round to the landing first; its
  * head back for the snow in a flip. Its own tricks: for a grab, a whip, its skis flung out to one side under it and its body laid over
  * the other way (`mute` to its left, `tail` to its right); for a spread eagle, on four short skis a capriole, as the white horses of
  * Vienna leap, the fore legs folded under and the hind kicked out behind, and on a long pair the splits, its skis flung wide either
@@ -557,7 +570,7 @@ export function horseAirPose(c: AirControls, four: boolean): HorsePose {
   const pop = c.pop ?? 0, lead = Math.max(-1, Math.min(1, c.lead ?? 0)), spot = c.spot ?? 0, layout = c.layout ?? 0, spread = c.spread ?? 0, reach = c.reach ?? 0;
   const whip = (c.mute ?? 0) - (c.tail ?? 0), whipW = Math.abs(whip), side = Math.sign(whip);
   const stance = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 });
-  const tucked = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 }), draw = 0.44 + 0.12 * c.tuck + 0.08 * c.wrap;
+  const tucked = horseRidePose({ s: 0, ski: 0, tuck: 0, brake: 0, tall: 0, flickL: 0, flickR: 0 }), draw = 0.44 + 0.12 * c.tuck - 0.16 * c.wrap;
   tucked.height -= 0.02;
   for (const k of ['l', 'r'] as const) { tucked.skis[k].up += draw; tucked.skis[k].pitch -= rad(6); }
   if (four) { tucked.front += 0.14; tucked.hind -= 0.04; }
@@ -596,6 +609,17 @@ export function horseAirPose(c: AirControls, four: boolean): HorsePose {
       Object.assign(wide.skis[k], { x: 0.34 * sign, up: 0.22, yaw: rad(6) * sign, edge: rad(-34) * sign, pitch: 0 });
     }
     a = mixHorse(a, wide, spread);
+  }
+  // Round a spin, its legs flung out wide from under it (as a body thrown round spreads), the skis apart and on their outer edges;
+  // on four short skis the fore and the hind apart along it too.
+  if (c.wrap) {
+    const fling = c.wrap * (1 - c.open) * (1 - spread);
+    for (const k of ['l', 'r'] as const) {
+      const sign = k === 'l' ? 1 : -1;
+      a.skis[k].x += 0.24 * sign * fling; a.skis[k].edge -= rad(22) * sign * fling; a.skis[k].up += 0.06 * fling; a.skis[k].yaw += rad(5) * sign * fling;
+    }
+    if (four) { a.spread += 0.18 * fling; a.front -= 0.08 * fling; }
+    a.tail += 0.3 * fling; a.ears += 0.4 * fling;
   }
   // The whip: the skis flung out to one side under it, turned across, the body laid over the other way and the neck turned back
   // against them, the tail flung out after them.
@@ -679,6 +703,13 @@ export function saddlePose(c: RideControls & Partial<AirControls> & { reins?: nu
       f.x += (0.09 * (k === 'l' ? 1 : -1) - f.x) * superman; f.z += (-1.0 - f.z) * superman; f.up += 0.84 * superman; f.pitch += rad(70) * superman; f.yaw *= 1 - superman; f.edge *= 1 - superman;
     });
   }
+  // Its life, as a skier's: breathing, looking about, its hands never still; going switch, looking back over its shoulder.
+  if (c.life !== undefined && c.open === undefined) {
+    const L = lifeAt(c.life + 7), easy = 1 - Math.max(tuck, fl);
+    a.lean += rad(1.5) * L.breath; a.headYaw += 0.5 * L.look * easy; a.chestYaw += 0.1 * L.look * easy;
+    a.arms.l.swing += rad(4) * L.handL * easy; a.arms.r.swing += rad(4) * L.handR * easy;
+  }
+  a.chestYaw += 0.35 * (c.back ?? 0); a.headYaw += 0.9 * (c.back ?? 0);
   // Springing off a lip: up in the stirrups, leant on with the horse; looking round a spin, ahead of the horse; looking for the snow.
   const pop = c.pop ?? 0, lead = Math.max(-1, Math.min(1, c.lead ?? 0)) * (1 - open), spot = (c.spot ?? 0) * (1 - open);
   a.hips += 0.06 * pop; a.lean += rad(6) * pop;

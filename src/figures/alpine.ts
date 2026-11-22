@@ -443,6 +443,27 @@ export interface RideControls {
    * up, as a skier springs off a lip; up and back over the head, the more it stands tall (setting a backflip).
    */
   pop?: number;
+  /**
+   * Its life, as it goes (asked: "there should be some "life" movement going on even straight lining without turns"): `life`, a time
+   * in seconds that its small movements run by (breathing, looking about, shifting its weight, its hands); `flex`, how far its knees
+   * give to the snow's shape under it (1 sunk into a hollow taken fast, -1 let long over a crest); `back`, how far it looks back over
+   * its left shoulder riding switch (0 to 1).
+   */
+  life?: number; flex?: number; back?: number;
+}
+
+/**
+ * A body's small movements by the time `t` (seconds), each a few slow waves of their own so that nothing repeats soon: breathing
+ * (-1 to 1), looking about (radians to the left), shifting its weight (-1 to 1, to the left), its hands (each -1 to 1).
+ */
+export function lifeAt(t: number): { breath: number; look: number; shift: number; handL: number; handR: number } {
+  const w = (f: number, p: number) => Math.sin(2 * Math.PI * f * t + p);
+  return {
+    breath: w(0.27, 0),
+    look: 0.3 * w(0.071, 0.6) + 0.16 * w(0.19, 2.1) + 0.06 * w(0.53, 4),
+    shift: 0.7 * w(0.11, 1.3) + 0.3 * w(0.29, 0.2),
+    handL: 0.6 * w(0.37, 0.4) + 0.4 * w(0.83, 1.9), handR: 0.6 * w(0.41, 3.1) + 0.4 * w(0.77, 5.2),
+  };
 }
 
 /**
@@ -493,6 +514,23 @@ export function riderPose(h0: number, c: RideControls): AlpinePose {
     a.head -= rad(8) * absorb;
     both(a, (_k, arm) => { arm.hang -= 16 * absorb; arm.swing += rad(14) * absorb; });
   }
+  // Its life: breathing in the chest and shoulders, looking about (more running straight and easy, and into a turn), its weight
+  // shifting from foot to foot, its hands never quite still; its knees giving to the snow's shape; riding switch, looking back over
+  // its shoulder, the chest opened round with the head.
+  if (c.life !== undefined) {
+    const L = lifeAt(c.life), easy = (1 - tuck) * (1 - brake), straight = 1 - Math.min(1, Math.abs(s));
+    a.lean += rad(1.4) * L.breath;
+    a.headYaw += (0.55 * L.look * straight + 0.3 * s) * easy;
+    a.chestYaw += 0.12 * L.look * straight * easy;
+    a.head += rad(4) * Math.sin(L.look * 3) * easy;
+    a.hipsX += 0.022 * L.shift * easy; a.pelvisRoll += rad(2.5) * L.shift * easy;
+    a.feet.l.up += 0.012 * Math.max(0, -L.shift) * easy; a.feet.r.up += 0.012 * Math.max(0, L.shift) * easy;
+    a.arms.l.swing += rad(4) * L.handL * easy; a.arms.r.swing += rad(4) * L.handR * easy;
+    a.arms.l.hang += 3 * L.breath; a.arms.r.hang += 3 * L.breath;
+  }
+  const flex = c.flex ?? 0, back = c.back ?? 0;
+  if (flex) { a.hips -= 0.07 * flex; a.lean += rad(4) * flex; both(a, (_k, arm) => { arm.hang -= 6 * Math.max(0, flex); }); }
+  if (back) { a.chestYaw += 0.42 * back; a.pelvisYaw += 0.12 * back; a.headYaw += 0.95 * back; a.head -= rad(4) * back; }
   // The pop: up out of the crouch, the legs driven long, the arms swung through (up and back for a backflip).
   const pop = c.pop ?? 0;
   if (pop) popUp(a, h0, pop, tall);
@@ -531,11 +569,13 @@ function popUp(a: AlpinePose, h0: number, pop: number, tall: number): void {
  * - `layout`: a flip laid out straight, the arms out to the sides (0 to 1); `spread`, a spread eagle, the legs and arms flung wide;
  *   `mute`, the left hand reaching across to the right ski in front of the boot, the knees drawn up; `tail`, the right hand reaching
  *   back for the tail of the right ski, drawn up behind;
- * - `reach`: the legs let long to reach for the snow, the last moment before it (0 to 1).
+ * - `reach`: the legs let long to reach for the snow, the last moment before it (0 to 1);
+ * - `cross`: the skis crossed, their tips over one another ahead and the tails apart, the knees bent out (an iron cross, as a skier
+ *   crosses them going round a flip and a spin together).
  */
 export interface AirControls {
   tuck: number; flight: number; open: number; throw: number; wrap: number; ski: number; spin: number; flip: number;
-  pop?: number; set?: number; lead?: number; spot?: number; cork?: number; layout?: number; spread?: number; mute?: number; tail?: number; reach?: number;
+  pop?: number; set?: number; lead?: number; spot?: number; cork?: number; layout?: number; spread?: number; mute?: number; tail?: number; reach?: number; cross?: number;
 }
 
 /**
@@ -551,7 +591,7 @@ export interface AirControls {
  */
 export function airPose(h0: number, c: AirControls): AlpinePose {
   const run = straightPose(h0), pop = c.pop ?? 0, lead = c.lead ?? 0, spot = c.spot ?? 0, layout = c.layout ?? 0, spread = c.spread ?? 0;
-  const mute = c.mute ?? 0, tail = c.tail ?? 0, reach = c.reach ?? 0;
+  const mute = c.mute ?? 0, tail = c.tail ?? 0, reach = c.reach ?? 0, cross = c.cross ?? 0;
   // The kicker's tuck (as `Ski_Kicker`'s in the air): the knees drawn up, the trunk over them, the arms forward and out.
   const tucked = clonePose(run), knees = 0.28 + 0.16 * c.tuck;
   tucked.hips -= knees * 0.25;
@@ -614,6 +654,11 @@ export function airPose(h0: number, c: AirControls): AlpinePose {
     a.feet.r.up += 0.3 * tail; a.feet.r.z -= 0.36 * tail; a.feet.r.pitch += rad(18) * tail; a.feet.l.up += 0.1 * tail;
     a.arms.l.hang -= 32 * tail; a.arms.l.swing += rad(20) * tail;
   }
+  // Crossed: each ski turned in across the other, the feet drawn in under the body and lifted a little, the knees out.
+  if (cross) both(a, (k, _arm, f) => {
+    const sign = k === 'l' ? 1 : -1;
+    f.yaw -= rad(30) * sign * cross; f.x -= 0.06 * sign * cross; f.up += 0.06 * cross; f.edge += rad(18) * sign * cross;
+  });
   // The spring off the lip, folding into the trick as it fades.
   if (pop) {
     const sprung = clonePose(run);
