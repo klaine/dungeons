@@ -65,7 +65,7 @@
     #line .band.now span { color: var(--ink); }
     #line .head { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--brass); pointer-events: none; }
     #line .ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; pointer-events: none;
-      background-image: repeating-linear-gradient(to right, var(--band-strong) 0 1px, transparent 1px calc(100% / 44)); }
+      background-image: repeating-linear-gradient(to right, var(--band-strong) 0 1px, transparent 1px calc(100% / var(--ticks, 9))); }
     @media (max-width: 640px) { #line .band span { display: none; } #where .part { font-size: 17px; } .group .label { display: none; }
       /* (On a phone, the hint goes once it has been ridden a while: it covers too much of the picture.) */
       body.riding.hinted #where .hint { display: none; } }
@@ -120,7 +120,7 @@
   <div id="where" aria-live="polite">
     <div class="name" id="name">Downhill run</div>
     <div class="part" id="part">Long, wide turns</div>
-    <div class="numbers"><span><b id="speed">0</b> km/h</span><span><b id="down">0</b><span id="of"></span> m vertical</span><span id="clock">0.0 s of 44</span></div>
+    <div class="numbers"><span><b id="speed">0</b> km/h</span><span><b id="down">0</b><span id="of"></span> m vertical</span><span id="clock">0.0 s</span></div>
     <div class="hint">Point up the picture to tuck, down it to stand tall, to either side to turn: carved, or skidded out at the ring's edge. Hold Brake, or Shift, to stop. The arrow keys steer too; held on, they skid.
       Off a kicker: tucked, you fly as a ski jumper; between, straight air; standing tall, a backflip; turning, a spin with it. In the air, point up to turn quicker.</div>
   </div>
@@ -144,7 +144,7 @@
       <div class="group" id="resolutions"><span class="label">Resolution</span></div>
       <div class="group"><span class="label">Blur</span><input id="blur" type="range" min="0" max="2" step="0.05" value="1" aria-label="How much the far background and what moves are blurred"><span id="blurOut">1.0×</span></div>
     </div>
-    <div id="line" tabindex="0" role="slider" aria-label="Where in the run" aria-valuemin="0" aria-valuemax="44" aria-valuenow="0"><div class="ticks"></div><div class="head"></div></div>
+    <div id="line" tabindex="0" role="slider" aria-label="Where in the run" aria-valuemin="0" aria-valuemax="60" aria-valuenow="0"><div class="ticks"></div><div class="head"></div></div>
   </div>
   <div id="status">Making the run…</div>
   <script type="module" src="./slope.ts"></script>

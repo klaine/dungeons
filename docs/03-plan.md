@@ -1065,6 +1065,27 @@ The machine this is developed on now has a graphics card, and tablets were repor
     costing more than they save or seen: fewer shadows (a tenth), coarser far land (its material, not its triangles, is the cost).
     Pictures from behind, beside, above the crest and near: nothing seen changed. Not yet timed on a graphics card, a laptop or a
     tablet.
+79. **A demo run that lands its tricks.** Asked: "make the demo run be such that it hits tricks in the jumps: - 720 - backflip -
+    backflip 360 - tucked jump; both with human and horse skiers". The run watched was the made run of item 64 and the ones after it
+    (`makeDownhillRun`: forty-four seconds of turns, a tuck and a stop, drawn as a clip and laid along the run's line, with no
+    kickers); it is now the ride itself, flown by a pilot in place of the pointer (`flyDemo` in `lab/slope.ts`) and kept a thirtieth
+    of a second at a time: where the skier is and how it is turned, whether it is in the air, the handful of numbers it was posed by,
+    and where it is against the run; played back by blending two frames, the pose's numbers with them, and its tracks laid from the
+    frames. The pilot carves down between the kickers, a turn every two seconds or so, wider the faster, held towards the path's
+    middle; from 75 metres before a kicker's lip it lines up on the kicker in the kicker's own frame (against the run, where the run
+    bends by a kicker set across it, the skier seemed past the lip while still on its ramp, and no trick was flown), at the speed it
+    means to take it at (17 metres a second, braking if more than four over it far out); and from three quarters of a second before
+    the lip it takes the stance of the trick asked of that kicker: for the 720 neither tucked nor tall and, in the last quarter
+    second, turning hard; for the backflip standing tall and straight; for the backflip 360 tall and turning half as hard; for the
+    flight tucked from 1.2 seconds out and straight. In the air it tucks, which turns it quicker. A kicker it does not land its trick
+    off, short, fallen or another trick, is flown again from where its approach began, at the next of 20, 14, 23, 11 and 26 metres a
+    second. Then on to the foot (the world's run) or a stop forty metres past the fourth kicker (the groomed slope). The kickers now
+    stand when watching too. Flown for each skier when first watched (a second or two in a cloud container; the flight is the same
+    for every skier, as nothing in it hangs on the body, but each is posed for itself) and kept for that land and skier. *Checked*
+    in headless Chromium: on the world's run (67 seconds) and the groomed slope (38), for the person, the horse alone and the horse
+    and rider, all four tricks land at the first speed, none flown again; taken at 43 to 81 km/h, 0.9 to 1.6 seconds in the air;
+    pictures mid-trick from beside of the person and the horse and rider; *Ride* taken from the demo mid-flip and mid-carve rides on.
+    `__slope.demo()` gives what it landed, how many times each kicker was flown again and how each flight went.
 ## Risks
 
 | Risk | Mitigation |
