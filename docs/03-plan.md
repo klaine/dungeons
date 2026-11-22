@@ -1192,7 +1192,9 @@ The machine this is developed on now has a graphics card, and tablets were repor
     of it, and a run from the top. The page is called *Horse Mountain*. *Checked* in headless Chromium: the opening at 800 by 500 and
     390 by 760, and *Send it myself!*; the stick dragged by mouse (held left it turned, up it tucked, let go it sprang back); the stance
     button twice, switch and back, its name changing; the count from five at the world run's foot and the new run; the demo run as
-    before for every skier.
+    before for every skier. Then asked: "the opening title should be "Grand Horse Mountain" with the Grand Horse on first line and
+    Mountain on second row": GRAND HORSE on the first line, sized to stay one line across a phone, *Mountain* under it; the page and
+    the choice named so too.
 ## Risks
 
 | Risk | Mitigation |

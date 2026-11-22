@@ -1405,7 +1405,7 @@ async function start() {
     whoButtons.forEach((b, i) => b.classList.toggle('on', whos[i][1] === who));
     skiButtons.forEach((b, i) => b.classList.toggle('on', skiSets[i][1] === horse.skis));
     $('skisets').hidden = who === 'person';
-    $('name').textContent = ['Horse Mountain', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
+    $('name').textContent = ['Grand Horse Mountain', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
     landButtons.forEach((b, i) => b.classList.toggle('on', landKinds[i][1] === landKind));
     snowButtons.forEach((b, i) => b.classList.toggle('on', snowLooks[i][1] === snowLook));
     $('snows').hidden = landKind !== 'world';
@@ -1818,7 +1818,8 @@ async function start() {
   $('status').hidden = true;
 
   // The opening (asked: "Game opening shows a brief grand title: HORSE / Mountain; the demo runs on the background and after the title a
-  // dialog show decision: "Watch demo run" / "Send it myself!" (which switches to player controlled run)"): the title over the demo run
+  // dialog show decision: "Watch demo run" / "Send it myself!" (which switches to player controlled run)"; the title then made "Grand
+  // Horse Mountain", GRAND HORSE over Mountain): the title over the demo run
   // as it plays, for some three seconds; then the choice. Watching, the demo goes on; sending it, a run from the top, the rider's own.
   // (`?nointro` for neither.)
   const intro = $('intro'), choose = $('choose');
