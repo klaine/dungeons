@@ -1251,6 +1251,30 @@ The machine this is developed on now has a graphics card, and tablets were repor
     its foot, riding, and open while riding; by the keys, `H` opening it, Space still pausing, riding held six seconds with it open (6
     metres down before and after) and going on once closed (to 29), Escape giving the focus back to the button; the skier's place in the
     picture upright through the cinematic shots, the tracking shot now at 0.64 of the way to the edge where it had been at 1.88.
+86. **A brighter look for little.** Asked: "now find ways to improve visual impression without making the game much heavier." Looked at
+    first, across both runs and the groomed slope at 1280 by 720: the sky one flat blue; the snow white and grey all over, its shade
+    grey, so that slopes read flat; a bay horse seen against the sun a black shape; the picture with no grade; the groomed slope's
+    trees plain cones. What was done, each for next to nothing a frame:
+    - *A sky* (`scene.backgroundNode`, `skyAt` in `lab/slope.ts`): deep blue overhead, paling as the fifth power to a haze at the
+      horizon; a warm glow about the sun and its disc; high thin cloud, a 256-square picture of soft blots read once over a plane above,
+      drawn out along the horizon. Drawn behind everything, only where it is seen.
+    - *A haze that matches it* (`scene.fogNode`): the scene's fog as it was in distance, but its colour the horizon's in that direction,
+      warmer towards the sun, so that a far range fades into the sky behind it; worked out at the corners of what is drawn.
+    - *A clear day's light*: the sun warmer and stronger (0xffecd8 at 2.7, from 0xfff4e6 at 2.3); the sky's light on the game's snow
+      bluer (0.5, 0.65, 0.95 for 0.6, 0.68, 0.8); the sky's light on the figures bluer from above and warm from the snow below.
+    - *The skier's edges lit* (`rimLight`, `rimAll`): the figures' materials made as the renderer's own kind, with a light of their own
+      on their edges (as the fourth power, nearly, of how far the surface turns from the eye), the more the more the eye looks towards
+      the sun and the edge leans to it, in the colour of what it falls on (lit one pale gold, a bay's chest went beige and the red skis
+      orange; kept a little of it, a tenth, when the sun is not behind); made again for the horse's skis when they are changed.
+    - *A grade* (`grade`), in the pass that smooths the edges: a gentle S of the tones (a fifth of the way to `smoothstep`), colour a
+      tenth richer, the corners a fifth darker.
+    - *The groomed slope's firs* the world's runs' snowy firs in three tiers, turned each its own way by where it stands.
+    *Measured* in headless Chromium drawing in software at 1280 by 720, sixteen frames, the old build against the new at the same three
+    views, twice each: the first run 973 against 999 milliseconds (3 per cent), the second 1438 against 1486 (3), the groomed slope 393
+    against 443 (13; half of that picture is sky, which had been the cleared screen and is now drawn); one draw more, 2,000 triangles
+    more (the sky) and 8,000 on the groomed slope (the firs). The sky's cloud read twice at two sizes cost no more than read once: what
+    it costs is the drawing of the sky itself. On a graphics card each of these is a few sums at each point. *Checked*: every demo run
+    still lands every trick for every skier on two skis and on four.
 
 ## Risks
 
