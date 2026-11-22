@@ -1194,7 +1194,8 @@ The machine this is developed on now has a graphics card, and tablets were repor
     button twice, switch and back, its name changing; the count from five at the world run's foot and the new run; the demo run as
     before for every skier. Then asked: "the opening title should be "Grand Horse Mountain" with the Grand Horse on first line and
     Mountain on second row": GRAND HORSE on the first line, sized to stay one line across a phone, *Mountain* under it; the page and
-    the choice named so too.
+    the choice named so too. And: "also make the horse & rider the default mode": the page opens on the horse and its rider
+    (`?skier=person` for the person).
 ## Risks
 
 | Risk | Mitigation |

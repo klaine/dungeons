@@ -403,7 +403,9 @@ async function start() {
       skis: () => horse.skiMiddles(), bodies: () => [horseBody, jockeyBody],
     },
   };
-  let who: Who = (['horse', 'mounted'] as Who[]).find((w) => w === query.get('skier')) ?? 'person', skier = skiers[who];
+  // (The horse and its rider unless another is asked for (asked: "also make the horse & rider the default mode"): `?skier=person` or
+  // `?skier=horse`.)
+  let who: Who = (['person', 'horse', 'mounted'] as Who[]).find((w) => w === query.get('skier')) ?? 'mounted', skier = skiers[who];
   /** The rider back in its saddle, if there is one. */
   const seat = () => { if (who === 'mounted') horse.saddle.add(jockey.model); else jockey.model.removeFromParent(); horse.setTack(who === 'mounted'); };
   /** The reins from the bit to the rider's hands, as they are now; none once the rider is thrown. */
