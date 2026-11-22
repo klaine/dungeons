@@ -1275,6 +1275,31 @@ The machine this is developed on now has a graphics card, and tablets were repor
     more (the sky) and 8,000 on the groomed slope (the firs). The sky's cloud read twice at two sizes cost no more than read once: what
     it costs is the drawing of the sky itself. On a graphics card each of these is a few sums at each point. *Checked*: every demo run
     still lands every trick for every skier on two skis and on four.
+87. **Snow that sparkles.** Asked: "maybe the flying snow from skidded turns and braking could be improved to something nicer with a
+    bit of snow sparkle? also close by groomed / snow surface?"
+    - *The spray* (`stepSpray` in `lab/slope.ts`): it had been 260 white chips, twenty-sided solids, thrown up while the skis slid. Now two
+      kinds, each a quad turned to the eye, drawn in two draws. Up to 220 puffs of powder, each a picture of soft blots, thrown out,
+      slowed by the air (to a third of their speed in a second), settling at a third of a stone's fall, swelling from a quarter of a
+      metre to about a metre and thinning as they go, in some three quarters of a second. And up to 640 grains of ice, three to five
+      centimetres, falling at four fifths of a stone's fall, each lit by a flash when its tumble turns its face to the sun (the tenth
+      power of a wave of its own, nine times as bright as the snow at its peak, added to the picture) and lying a moment where it lands.
+      Thrown while the skis slide sideways (twelve puffs and thirty-two grains a second for each metre a second of speed); a few grains
+      off a turn carved hard; and a burst, fourteen puffs and sixty grains, where a jump lands, the air below the skier as the demo run
+      kept it or as riding has it. So many a second at any pace of frames, the share of one left over carried by chance.
+    - *The snow glinting* (`snowGlints`, `glinting`, and `BakedLighting`'s `glint`, in `src/render/siteMaterial.ts`): the game's snow had
+      glints, cells of four centimetres made smooth, but lying flat they could flash only at the mirror of the sun, which the eye on the
+      slope, the sun and the eye both low, was almost never at; none were seen. Tilted twenty degrees at most, only snow seen against
+      the sun could have flashed. Now in a share of the cells (nine twentieths on loose snow, seven twenty-fifths on packed) a round spot,
+      a grain whose face is turned its own way, up to seventy degrees off the snow's; and the sun's light as it reaches the surface, so
+      in shadow none, flashed from it where its face sends the sun to the eye within some three degrees (the four hundredth power),
+      added to what the surface throws back. Only the flash takes the grain's face: the snow's shading is the surface's, so that the
+      grains turned from the sun do not speckle it dark. None past twenty-five metres. The same for the plain look's snow and the
+      groomed slope's (`glintingSnow` in `lab/slopeLand.ts`, their standard lighting with the flash added).
+    *Measured* in software at 1280 by 720, sixteen frames, the build before against this one, twice: at the three usual views, with no
+    spray, 961 against 974, 1390 against 1430 and 418 against 427 milliseconds (one to three per cent, the glints); in the groomed slope's
+    stop at its foot, the spray at its thickest, 387 against 416 (seven). 3,500 triangles fewer (quads for solids), one draw more.
+    *Checked*: pictures at a nose butter, a pop 180, a landing and the groomed slope's stop; riding, held by the menu, without errors; the
+    demo runs on the second run for the horse and rider and the person, every trick landed at the first try.
 
 ## Risks
 
