@@ -546,7 +546,9 @@ async function start() {
   /** The skier's bodies' joints as the last two steps left them, and how long the last step was: what a body gone limp goes on from. */
   let joints: Record<string, Vector3>[] | null = null, jointsBefore: Record<string, Vector3>[] | null = null, jointsDt = 1 / 120;
   /** What the rider asks: across (-1 to 1, to the right positive) and up (1 the deepest tuck, -1 standing tallest); and braking. */
-  const ask = { x: 0, y: 0 }, want = { x: 0, y: 0, keys: { up: false, down: false, left: false, right: false }, brake: false, brakeKey: false };
+  const ask = { x: 0, y: 0 }, want = { x: 0, y: 0, keys: { up: false, down: false, left: false, right: false }, brake: false, brakeKey: false, auto: false };
+  /** Where the rider's thumb holds the stick: across (-1 to 1, to the right positive) and up (1 tucked, -1 standing straight). */
+  const stick = { x: 0, y: 0 };
   const FLICK = 0.3;
   /** Where across the range a turn begins to skid (it skids wholly at its end), and how far the skis are pivoted across the way then. */
   const SKID_FROM = 0.72, SKID_TURN = deg(38);
@@ -651,7 +653,8 @@ async function start() {
 
   /** The rider's wishes eased in: across and up, the tuck and standing tall, braking. */
   const easeAsk = (dt: number) => {
-    const keys = want.keys, keyed = keys.up || keys.down || keys.left || keys.right;
+    // (Not while a trick is being made: it asks what it must, whatever the keys say.)
+    const keys = want.keys, keyed = !want.auto && (keys.up || keys.down || keys.left || keys.right);
     // (An arrow key carves at first; held on, it pushes the turn out to the end of the range, into a skid, as the pointer does at
     // the edge of the ring.)
     ride.held = keys.left !== keys.right ? ride.held + dt : 0;
@@ -736,7 +739,7 @@ async function start() {
     // (Out of the saddle: its own body now, in the world.)
     if (who === 'mounted') rider.add(jockey.model);
     for (const { body, doll } of crash.dolls) body.poseJoints(doll.joints());
-    tell(`Crashed: ${why}`, 'Restart run with the button, or Enter', true, 1e9);
+    tell(`Crashed: ${why}`, 'A new run in a moment, or Enter', true, 1e9);
     reflect();
   };
 
@@ -766,9 +769,16 @@ async function start() {
     told = { text: '', small: '', bad: false, until: 0 };
     next180 = 0;
   };
+  /**
+   * A run over, riding (asked: "When player controlled run reaches end or the player falls show a 5 second countdown after which a new
+   * run starts"): how many seconds are left before the next starts from the top, once it has fallen and lain still or come to a stop at
+   * the foot of the world's run; none while it goes.
+   */
+  let again: number | null = null;
   /** The run again from the top, going a little. */
   const restart = () => {
     resetRide();
+    again = null;
     clearRideTracks();
     clearSpray();
     placed = false;
@@ -961,13 +971,14 @@ async function start() {
     standAt(stand, normalAt(ride.x, ride.z, 0.5), ride.facing, here, g180?.pitch ?? 0);
     if (!quiet) keepJoints(dt);
     // At the foot of a world's run: brought to a stop there.
-    if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${land.fall.toFixed(0)} m vertical in ${ride.time.toFixed(0)} s · Restart run, or Enter`, false, 1e9); }
+    if (!ride.ended && ride.down > land.length - 30) { ride.ended = true; tell('The foot of the run', `${land.fall.toFixed(0)} m vertical in ${ride.time.toFixed(0)} s · a new run in a moment`, false, 1e9); }
     return { down: ride.down, left: ride.left, speed: ride.speed, way: ride.way, ski, skid: Math.max(Math.abs(Math.sin(ski - ride.way)), g180 ? g180.scrape * sideOn : 0), tuck: ride.tuck, brake: ride.brake };
   };
   /** What the ridden skier is doing, in words. */
   const doingNow = () => { const d = doing_(); return ride.switch && !air && !crash ? `${d}, switch` : d; };
   const doing_ = () => {
     if (ride.turn180) return `${G180[ride.turn180.kind].name}…`;
+    if (rideTrick && !rideTrick.air && !air && !crash) return `Up to the kicker: ${demoName(rideTrick.trick)}`;
     if (crash) return stillFor() > 0.5 ? 'Down in the snow' : 'Tumbling';
     if (air) return air.kind === 'hop' ? 'In the air' : `${air.name}…`;
     if (ride.brake > 0.5) return who === 'person' ? 'Braking' : 'Sliding stop';
@@ -1009,6 +1020,36 @@ async function start() {
     { kind: 'air', halves: 2, side: -1, style: 'tail' }, { kind: 'air', halves: 0, style: 'spread' },
     { kind: 'air', halves: 5, side: 1 }, { kind: 'air', halves: 1, side: -1, switch: true },
   ];
+  /**
+   * Coming up to a kicker's lip `tLip` seconds off, with `trick` to make off it: the stance asked (each `null` where it is free). Tucked
+   * from further out, which takes a while to sink into; tall for a flip; neither for the rest. Then turning, hard for a spin to be held
+   * and a little for a 180, only in the last quarter of a second, or straight.
+   */
+  const askAtLip = (trick: DemoTrick, tLip: number): { x: number | null; y: number | null } => {
+    let x: number | null = null, y: number | null = null;
+    const tucked = trick.kind === 'flight' || !!trick.cork;
+    if (tucked && tLip < 1.2) y = 1;
+    else if (trick.kind === 'flip' && tLip < 0.75) y = -1;
+    else if (tLip < 0.7) y = 0;
+    if (!trick.halves && tLip < 0.4) x = 0;
+    if (trick.halves && tLip < 0.27) x = (trick.side ?? 1) * (trick.halves > 1 ? 0.9 : 0.45);
+    return { x, y };
+  };
+  /**
+   * In the air with `trick` to make (none, off a knoll): what is asked. The spin held its way until it is to stop at as many half turns
+   * as the trick asks, then let go; the style asked, from a moment off the lip until a moment before the snow; tucked, if its turns would
+   * not otherwise come round in time (at the rate it set off the lip, before it opens up to land); laid out, or spread, unless the turns
+   * are well behind (a little slower round, which the pace off the lip leaves room for).
+   */
+  const askInAir = (trick: DemoTrick | undefined, a: Air) => {
+    const left = a.T - a.t, style = trick?.style, spinning = !!trick && a.holding && halvesOf(a) < trick.halves;
+    const toGo = Math.max(Math.abs(a.spinTo - a.spin) / (SPIN_RATE * TURN), Math.abs(a.flipTo - a.flip) / (FLIP_RATE * TURN * a.rate.flip));
+    const behind = toGo > left - 0.42, styling = !!style && a.t > 0.14 && left > 0.5 && !spinning;
+    let x = spinning ? (trick?.side ?? 1) * 0.9 : 0, y = behind && !spinning ? 1 : 0;
+    if (styling && (style === 'mute' || style === 'tail')) { x = style === 'mute' ? -0.8 : 0.8; y = 0.75; }
+    if (styling && (style === 'spread' || style === 'layout') && toGo < left - 0.3) y = -1;
+    return { x, y };
+  };
   /** What a trick is, to tell one landed from another: what it did off the lip, how many half turns, whether corked, its style, switch. */
   const keyOf = (kind: Air['kind'], halves: number, cork: boolean, style: Style | '', sw: boolean) => `${kind}|${halves}|${cork ? 1 : 0}|${style}|${sw ? 'switch' : ''}`;
   const trickKey = (t: DemoTrick) => keyOf(t.kind, t.halves, !!t.cork, t.style ?? '', !!t.switch);
@@ -1065,15 +1106,8 @@ async function start() {
       if (air) {
         // In the air: the style asked, from a moment off the lip until a moment before the snow; tucked, if its turns would not
         // otherwise come round in time (at the rate it set off the lip, before it opens up to land).
-        const a = air, left = a.T - a.t, mine = from?.k === k, style = mine ? trick?.style : undefined;
-        // (The spin held its way until it is to stop at as many half turns as the trick asks; then let go.)
-        const spinning = mine && a.holding && halvesOf(a) < (trick?.halves ?? 0);
-        const toGo = Math.max(Math.abs(a.spinTo - a.spin) / (SPIN_RATE * TURN), Math.abs(a.flipTo - a.flip) / (FLIP_RATE * TURN * a.rate.flip));
-        const behind = toGo > left - 0.42, styling = !!style && a.t > 0.14 && left > 0.5 && !spinning;
-        want.x = spinning ? (trick?.side ?? 1) * 0.9 : 0; want.y = behind && !spinning ? 1 : 0;
-        if (styling && (style === 'mute' || style === 'tail')) { want.x = style === 'mute' ? -0.8 : 0.8; want.y = 0.75; }
-        // (Laid out, or spread, unless the turns are well behind: a little slower round, which the pace off the lip leaves room for.)
-        if (styling && (style === 'spread' || style === 'layout') && toGo < left - 0.3) want.y = -1;
+        const a = air, o = askInAir(from?.k === k ? trick : undefined, a);
+        want.x = o.x; want.y = o.y;
         if (a.kind !== 'hop') label = a.name;
       } else if (kick && toLip < -1) {
         // Past a kicker: on to the next, if it made its trick; or the approach flown again.
@@ -1096,14 +1130,9 @@ async function start() {
         want.y = ride.speed < speed - 1 ? 1 : ride.speed > speed + 1 ? -0.5 : 0.3;
         want.brake = ride.speed > speed + 4 && toLip > 25;
         label = `Up to the kicker: ${demoName(trick)}`;
-        // (Tucked from further out, which takes a while to sink into; tall for a flip; neither for the rest. Then turning, hard for
-        // two turns and half as hard for one, only in the last quarter of a second, or straight.)
-        const tucked = trick.kind === 'flight' || !!trick.cork;
-        if (tucked && tLip < 1.2) want.y = 1;
-        else if (trick.kind === 'flip' && tLip < 0.75) want.y = -1;
-        else if (tLip < 0.7) want.y = 0;
-        if (!trick.halves && tLip < 0.4) want.x = 0;
-        if (trick.halves && tLip < 0.27) want.x = (trick.side ?? 1) * (trick.halves > 1 ? 0.9 : 0.45);
+        const o = askAtLip(trick, tLip);
+        if (o.x !== null) want.x = o.x;
+        if (o.y !== null) want.y = o.y;
       } else {
         // Carving down between them.
         phase += (dt * Math.PI) / 1.9;
@@ -1187,6 +1216,98 @@ async function start() {
     kicks = was;
     for (const m of watchTracks) { m.geometry.getAttribute('position').needsUpdate = true; m.geometry.getAttribute('color').needsUpdate = true; }
   };
+  // ---------------------------------------------------------------- riding: the tricks done for the rider
+  /**
+   * Riding, the rider steers and the tricks are done for it (asked: "lets simplify controls so that bottom left has thumb control for
+   * steering and tucked/straight on one control (doesnt control the tricks), then on bottom right there is a slider that goes from Mild
+   * -> Wild and then a trick that could probably land is chosen randomly at the jump spots based on that slider"): coming up on a kicker,
+   * lined up on it, a trick is chosen among those that should come round in the time the kicker will give it in the air at the speed it
+   * is going (each wants so long), the likelier the nearer its wildness to the slider's; then it is made as the demo run's pilot makes
+   * it, the stance at the lip and what is asked in the air, whatever the stick says.
+   */
+  const TRICK_POOL: { t: DemoTrick; wild: number; need: number }[] = [
+    { t: { kind: 'air', halves: 0, style: 'mute' }, wild: 0.02, need: 0.85 }, { t: { kind: 'air', halves: 0, style: 'spread' }, wild: 0.06, need: 0.85 },
+    { t: { kind: 'flight', halves: 0 }, wild: 0.1, need: 0.7 }, { t: { kind: 'air', halves: 0, style: 'tail' }, wild: 0.14, need: 0.85 },
+    { t: { kind: 'air', halves: 1 }, wild: 0.2, need: 0.75 }, { t: { kind: 'air', halves: 2 }, wild: 0.3, need: 0.95 },
+    { t: { kind: 'air', halves: 1, style: 'mute' }, wild: 0.34, need: 0.95 }, { t: { kind: 'flip', halves: 0 }, wild: 0.42, need: 1.0 },
+    { t: { kind: 'air', halves: 2, style: 'tail' }, wild: 0.46, need: 1.1 }, { t: { kind: 'air', halves: 3 }, wild: 0.52, need: 1.05 },
+    { t: { kind: 'flip', halves: 0, style: 'layout' }, wild: 0.56, need: 1.1 }, { t: { kind: 'air', halves: 4 }, wild: 0.62, need: 1.2 },
+    { t: { kind: 'air', halves: 3, cork: true }, wild: 0.67, need: 1.15 }, { t: { kind: 'flip', halves: 2 }, wild: 0.72, need: 1.22 },
+    { t: { kind: 'air', halves: 4, cork: true }, wild: 0.8, need: 1.3 }, { t: { kind: 'air', halves: 5 }, wild: 0.88, need: 1.48 },
+    { t: { kind: 'flip', halves: 4 }, wild: 0.94, need: 1.48 }, { t: { kind: 'air', halves: 6 }, wild: 1, need: 1.65 },
+  ];
+  /** How steeply a kicker's lip throws a skier up off the land under it. */
+  const LIP_LIFT = Math.atan((KICK.power * KICK.height) / KICK.length);
+  /** How long a kicker keeps a skier going at `speed` off its lip in the air, as near as can be told before it gets there. */
+  const airtimeOff = (k: Kicker, speed: number) => {
+    const L = KICK.length, lx = k.x + k.dx * L, lz = k.z + k.dz * L, h = (u: number) => land.height(k.x + k.dx * u, k.z + k.dz * u);
+    const a = Math.atan((h(L + 1) - h(L - 1)) / 2) + LIP_LIFT;
+    return timeToSnow(new Vector3(lx, land.height(lx, lz) + KICK.height + 0.02, lz), new Vector3(k.dx * Math.cos(a), Math.sin(a), k.dz * Math.cos(a)).multiplyScalar(speed));
+  };
+  /**
+   * How long the skier will be in the air off what is ahead of it, going on straight at it as it goes: found by riding on to the lip
+   * unseen and putting everything back as it was. (Reckoned from its speed and the lip alone, it was right at some sixty kilometres an
+   * hour and a third too long at eighty, where the ramp and the air take more of the speed; and a 900 was chosen that could not come
+   * round.) Nothing, if it would not leave the snow in the next three seconds.
+   */
+  const probeAirtime = () => {
+    const saved = { ride: structuredClone(ride), ask: { ...ask }, here: { ...here }, posed, want: { ...want, keys: { ...want.keys } }, told: { ...told }, quiet, joints, jointsBefore };
+    quiet = true; want.auto = true; want.x = 0; want.y = 0;
+    for (let i = 0; i < 360 && !air && !crash; i++) stepRide(1 / 120);
+    const T = air ? air.T : 0, fell = !!crash;
+    Object.assign(ride, saved.ride); Object.assign(ask, saved.ask); here = saved.here; posed = saved.posed; Object.assign(want, saved.want);
+    told = saved.told; quiet = saved.quiet; joints = saved.joints; jointsBefore = saved.jointsBefore; air = null; crash = null;
+    if (fell) seat();
+    return T;
+  };
+  const wildInput = $<HTMLInputElement>('wild');
+  /** The trick to make off kicker `k`, its lip `tLip` seconds off: one that should come round, by how wild the slider says. */
+  const pickTrick = (k: Kicker, tLip: number): DemoTrick => {
+    const T = (probeAirtime() || airtimeOff(k, ride.speed)) * 0.95, w = Number(wildInput.value);
+    // (A tuck takes a while to sink into, and standing tall for a flip a little less: neither is chosen too late to be stood in.)
+    // (A spin of two turns and more turns hard on the ramp's last metres, which costs it some speed and so some of its time in the air.)
+    const can = TRICK_POOL.filter((p) => p.need + (p.t.halves >= 4 ? 0.06 : 0) <= T && (!(p.t.kind === 'flight' || p.t.cork) || tLip > 1.25) && (p.t.kind !== 'flip' || tLip > 0.8));
+    if (!can.length) return { kind: 'air', halves: 0 };
+    const weights = can.map((p) => Math.exp(-(((p.wild - w) / 0.16) ** 2)) + 0.002);
+    let r = Math.random() * weights.reduce((a, b) => a + b, 0);
+    const i = Math.max(0, weights.findIndex((x) => (r -= x) <= 0));
+    return { ...can[i].t, side: Math.random() < 0.5 ? 1 : -1 };
+  };
+  /** The trick being made riding, if one is: off which kicker, what, and the time in the air it is made in once off the lip. */
+  let rideTrick: { k: Kicker; trick: DemoTrick; air: Air | null } | null = null;
+  /** The kicker the skier is coming up on, lined up on it and going its way, within a second and a half: and how far its lip is. */
+  const kickerAhead = () => {
+    const go = along(ride.way, here);
+    for (const k of kicks) {
+      const toLip = KICK.length - ((ride.x - k.x) * k.dx + (ride.z - k.z) * k.dz), off = (ride.x - k.x) * k.dz - (ride.z - k.z) * k.dx;
+      const heading = Math.atan2(go.x * k.dz - go.z * k.dx, go.x * k.dx + go.z * k.dz);
+      if (toLip > 0 && toLip < Math.max(12, ride.speed * 1.6) && Math.abs(off) < KICK.half + 0.4 && Math.abs(heading) < 0.6) return { k, toLip };
+    }
+    return null;
+  };
+  /** Riding, a step: what the stick asks, unless a trick is being made, which asks what it must. */
+  const askRide = () => {
+    want.auto = false; want.x = stick.x; want.y = stick.y;
+    if (crash) { rideTrick = null; return; }
+    if (air) {
+      if (rideTrick && !rideTrick.air) rideTrick.air = air;
+      if (rideTrick && rideTrick.air === air) { const o = askInAir(rideTrick.trick, air); want.x = o.x; want.y = o.y; want.auto = true; }
+      return;
+    }
+    if (rideTrick?.air) rideTrick = null;
+    if (rideTrick) {
+      const k = rideTrick.k, toLip = KICK.length - ((ride.x - k.x) * k.dx + (ride.z - k.z) * k.dz);
+      // (Gone by it, not off it: steered off its line.)
+      if (toLip < -0.5) { rideTrick = null; return; }
+      const o = askAtLip(rideTrick.trick, toLip / Math.max(ride.speed, 1));
+      if (o.x !== null) { want.x = o.x; want.auto = true; }
+      if (o.y !== null) { want.y = o.y; want.auto = true; }
+      return;
+    }
+    const ahead = kickerAhead();
+    if (ahead) rideTrick = { k: ahead.k, trick: pickTrick(ahead.k, ahead.toLip / Math.max(ride.speed, 1)), air: null };
+  };
+
   const showWatchTracks = (t: number | null) => watchTracks.forEach((m, k) => m.geometry.setDrawRange(0, t === null || k >= watchSkis ? 0 : Math.max(0, Math.floor(t / (2 * STEP))) * 6));
 
   // ---------------------------------------------------------------- what is shown, and how it is moved about in
@@ -1229,9 +1350,15 @@ async function start() {
   const skiButtons = skiSets.map(([label, k, title]) => button('skisets', label, () => setSkier(who, k), title));
   const rateButtons = rates.map(([label, r]) => button('rates', label, () => { rate = r; reflect(); }));
   const viewButtons = views.map(([label, v, key]) => button('views', label, () => setView(v), `${label} (${key})`));
-  const brakeButton = $('brake'), restartButton = $('restart');
+  const restartButton = $('restart');
   restartButton.onclick = () => restart();
-  $('turn180').onclick = () => { start180(); };
+  // The stance: turned round on the snow to switch, or back to regular, by the next of the ground 180s; named for where it goes.
+  const stanceButton = $('stance');
+  stanceButton.onclick = () => { start180(); };
+  let stanceShown = '';
+  const showStance = () => { const say = ride.switch ? 'To regular' : 'To switch'; if (say !== stanceShown) { stanceShown = say; stanceButton.textContent = say; } };
+  // How wild the tricks are, kept in this browser for next time.
+  wildInput.addEventListener('input', () => keep('wild', wildInput.value));
   const line = $('line'), head = line.querySelector('.head') as HTMLElement;
   // The demo run's parts along the timeline, and its seconds ticked off under them, five at a time.
   let bands: HTMLElement[] = [], shownPart = '';
@@ -1264,30 +1391,21 @@ async function start() {
     layWatchTracks();
     showWatchTracks(mode === 'watch' ? t : null);
   };
-  // (Riding with the menus hidden, *Brake*, *180* and *Restart run* are taken out of the foot, which is hidden, and kept at the lower
-  // right; put back when the menus are shown or riding stops.)
-  const handy = ['brakes', 'restarts'].map((id) => { const el = $(id); return { el, home: el.parentElement!, after: el.nextElementSibling }; });
-  const placeHandy = () => {
-    const out = document.body.classList.contains('bare') && mode === 'ride';
-    for (const h of handy) {
-      if (out && h.el.parentElement !== document.body) { document.body.appendChild(h.el); h.el.classList.add('floating'); }
-      else if (!out && h.el.parentElement === document.body) { h.home.insertBefore(h.el, h.after); h.el.classList.remove('floating'); }
-    }
-    // (Each at its own place in the corner, the one over the other.)
-    $('restarts').style.bottom = out ? 'calc(64px + env(safe-area-inset-bottom, 0px))' : '';
-  };
+  // (The stick and the trick controls lifted over the foot while the menus are shown.)
+  const placeHandy = () => { const foot = $('foot'); document.body.style.setProperty('--lift', document.body.classList.contains('bare') ? '0px' : `${foot.offsetHeight}px`); };
+  addEventListener('resize', () => placeHandy());
   const reflect = () => {
     $('play').textContent = playing ? 'Pause' : 'Play';
     modeButtons.forEach((b, i) => b.classList.toggle('on', modes[i][1] === mode));
     rateButtons.forEach((b, i) => b.classList.toggle('on', rates[i][1] === rate));
     viewButtons.forEach((b, i) => { b.classList.toggle('on', views[i][1] === view); b.hidden = mode === 'ride' && views[i][1] === 'free'; });
     $('rates').hidden = line.hidden = mode === 'ride';
-    $('brakes').hidden = $('pad').hidden = $('restarts').hidden = mode === 'watch';
+    $('stick').hidden = $('tricky').hidden = $('restarts').hidden = mode === 'watch';
     restartButton.classList.toggle('on', !!crash);
     whoButtons.forEach((b, i) => b.classList.toggle('on', whos[i][1] === who));
     skiButtons.forEach((b, i) => b.classList.toggle('on', skiSets[i][1] === horse.skis));
     $('skisets').hidden = who === 'person';
-    $('name').textContent = ['Downhill run', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
+    $('name').textContent = ['Horse Mountain', land.short, { person: '', horse: 'horse', mounted: 'horse and rider' }[who], mode === 'ride' ? 'riding' : ''].filter(Boolean).join(' · ');
     landButtons.forEach((b, i) => b.classList.toggle('on', landKinds[i][1] === landKind));
     snowButtons.forEach((b, i) => b.classList.toggle('on', snowLooks[i][1] === snowLook));
     $('snows').hidden = landKind !== 'world';
@@ -1299,7 +1417,10 @@ async function start() {
   // (Free: the view turned about the skier by hand, and carried along with it; only watching, as riding the pointer steers.)
   const setView = (v: View) => { view = mode === 'ride' && v === 'free' ? 'behind' : v; controls.enabled = view === 'free'; camera.up.set(0, 1, 0); placed = false; reflect(); };
   const setMode = (m: Mode) => {
+    // (Any mode chosen otherwise answers the opening's question.)
+    $('choose').hidden = true; $('intro').hidden = true;
     if (m === mode) return;
+    again = null;
     if (m === 'ride') {
       // Ridden from where the demo run had got to, going as it went (or, if it was in the air there, from where it comes down).
       let i = clamp(Math.round(t / STEP), 0, demo.frames.length - 1);
@@ -1356,28 +1477,27 @@ async function start() {
   line.addEventListener('pointerup', () => { scrubbing = false; });
   line.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { t = clamp(t + (e.key === 'ArrowRight' ? 1 : -1), 0, demo.length - 0.01); clearSpray(); e.preventDefault(); } });
 
-  // Riding by the pointer: where it is against the middle of the picture, as far as the ring drawn there; by mouse wherever it is over
-  // the picture, by touch where a finger is held. Let go of, the skier eases back to its plain stance, going straight.
-  const pad = $('pad'), dot = pad.querySelector('.dot') as HTMLElement;
-  const ringOf = () => { const r = Math.min(innerWidth, innerHeight) * 0.3; return { cx: innerWidth / 2, cy: innerHeight * 0.48, r }; };
-  const point = (e: PointerEvent) => {
-    if (mode !== 'ride') return;
-    const { cx, cy, r } = ringOf();
-    let x = (e.clientX - cx) / r, y = (cy - e.clientY) / r;
+  // Riding by the stick at the lower left, under the thumb: where it is held against its middle, as far as its rim; to either side
+  // turning, carved, and out past seven tenths of the way skidded; up tucked, down standing straight. Let go of, it springs back to its
+  // middle, and the skier eases back to its plain stance, going straight. (By mouse too, dragged.)
+  const stickEl = $('stick'), knob = stickEl.querySelector('.knob') as HTMLElement;
+  let stickHeld: number | null = null;
+  const holdStick = (e: PointerEvent) => {
+    const r = stickEl.getBoundingClientRect(), half = r.width / 2;
+    let x = (e.clientX - (r.left + half)) / (half * 0.82), y = ((r.top + half) - e.clientY) / (half * 0.82);
     const d = Math.hypot(x, y);
     if (d > 1) { x /= d; y /= d; }
-    want.x = x; want.y = y;
+    stick.x = x; stick.y = y;
   };
-  const letGo = () => { want.x = 0; want.y = 0; };
-  canvas.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse' || e.buttons) point(e); });
-  canvas.addEventListener('pointerdown', (e) => { point(e); if (mode === 'ride') canvas.setPointerCapture(e.pointerId); });
-  canvas.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') letGo(); });
-  canvas.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') letGo(); });
-  canvas.addEventListener('pointercancel', letGo);
-  brakeButton.addEventListener('pointerdown', (e) => { want.brake = true; brakeButton.setPointerCapture(e.pointerId); brakeButton.classList.add('on'); });
-  const brakeOff = () => { want.brake = false; brakeButton.classList.remove('on'); };
-  brakeButton.addEventListener('pointerup', brakeOff);
-  brakeButton.addEventListener('pointercancel', brakeOff);
+  const letGo = () => { stick.x = 0; stick.y = 0; stickHeld = null; };
+  stickEl.addEventListener('pointerdown', (e) => { stickHeld = e.pointerId; stickEl.setPointerCapture(e.pointerId); holdStick(e); e.preventDefault(); });
+  stickEl.addEventListener('pointermove', (e) => { if (stickHeld === e.pointerId) holdStick(e); });
+  stickEl.addEventListener('pointerup', letGo);
+  stickEl.addEventListener('pointercancel', letGo);
+  const showStick = () => {
+    const half = stickEl.offsetWidth / 2 || 66, x = stickHeld !== null ? stick.x : ask.x, y = stickHeld !== null ? stick.y : 0;
+    knob.style.transform = `translate(${(x * half * 0.82).toFixed(1)}px, ${(-y * half * 0.82).toFixed(1)}px)`;
+  };
   const ARROWS: Record<string, keyof typeof want.keys> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLButtonElement && e.key === ' ') return;
@@ -1391,12 +1511,6 @@ async function start() {
   });
   window.addEventListener('keyup', (e) => { if (ARROWS[e.key]) want.keys[ARROWS[e.key]] = false; if (e.key === 'Shift') want.brakeKey = false; });
   window.addEventListener('blur', () => { for (const k of Object.keys(want.keys) as (keyof typeof want.keys)[]) want.keys[k] = false; want.brakeKey = false; letGo(); });
-  const showPad = () => {
-    const { cx, cy, r } = ringOf();
-    pad.style.setProperty('--r', `${r}px`); pad.style.left = `${cx}px`; pad.style.top = `${cy}px`;
-    dot.style.transform = `translate(${(ask.x * r).toFixed(1)}px, ${(-ask.y * r).toFixed(1)}px)`;
-    pad.classList.toggle('active', Math.hypot(want.x, want.y) > 0.05 || Object.values(want.keys).some(Boolean));
-  };
 
   // The view, following the skier. It keeps pace with the skier exactly down the slope, and eases only what the view does about it: how
   // far across the slope it follows (so that the turns swing the skier across the picture rather than swinging the view), which way it
@@ -1698,9 +1812,30 @@ async function start() {
   // (The cinematic view unless another is asked for, `?view=behind`, `beside` or `above`.)
   setView(views.find(([, v]) => v === query.get('view'))?.[1] ?? 'cinema');
   showKickers(true);
+  wildInput.value = kept('wild') ?? '0.5';
   await useDemo();
   reflect();
   $('status').hidden = true;
+
+  // The opening (asked: "Game opening shows a brief grand title: HORSE / Mountain; the demo runs on the background and after the title a
+  // dialog show decision: "Watch demo run" / "Send it myself!" (which switches to player controlled run)"): the title over the demo run
+  // as it plays, for some three seconds; then the choice. Watching, the demo goes on; sending it, a run from the top, the rider's own.
+  // (`?nointro` for neither.)
+  const intro = $('intro'), choose = $('choose');
+  const chosen = () => { choose.hidden = true; intro.hidden = true; introFrames = -1; };
+  $('watchDemo').onclick = () => chosen();
+  $('sendIt').onclick = () => { chosen(); setMode('ride'); restart(); };
+  choose.addEventListener('keydown', (e) => { if (e.key === 'Escape') chosen(); });
+  // (Timed from the third frame drawn, not from the page being ready, and held for twenty frames at the least: the first frames, which
+  // make the shaders, can take seconds, and the title went by before anything was seen.)
+  let introFrames = query.has('nointro') ? -1 : 0, introAt = 0;
+  const stepIntro = (now: number) => {
+    if (introFrames < 0) return;
+    if (introFrames < 3) { if (++introFrames === 3) { intro.hidden = false; introAt = now; } return; }
+    const shown = (now - introAt) / 1000, drawn = ++introFrames - 3;
+    if (shown > 2.7 && drawn > 20 && !intro.classList.contains('gone')) intro.classList.add('gone');
+    if (shown > 3.8 && drawn > 26) { introFrames = -1; if (!intro.hidden) { intro.hidden = true; if (mode === 'watch') { choose.hidden = false; $('sendIt').focus(); } } }
+  };
 
   let then = performance.now(), benching = false;
   const fixedDt = Number(query.get('dt')) || 0;
@@ -1708,6 +1843,7 @@ async function start() {
     if (benching) { requestAnimationFrame(frame); return; }
     // (`?dt=` steps every frame by so many seconds whatever time has passed: for pictures, made by a browser too slow to keep pace.)
     const now = performance.now(), dt = fixedDt || Math.min(0.1, (now - then) / 1000);
+    stepIntro(now);
     adapt(now - then);
     then = now;
     let at: Now;
@@ -1730,7 +1866,7 @@ async function start() {
       const steps = playing ? Math.ceil(dt / (1 / 120)) : 0;
       const p = focus(), f = land.frame(p.x, p.z, ride.down);
       at = { down: f.s, left: f.left, speed: crash ? 0 : ride.speed, way: ride.way, ski: ride.way, skid: 0, tuck: ride.tuck, brake: ride.brake };
-      for (let i = 0; i < steps; i++) at = stepRide(dt / steps);
+      for (let i = 0; i < steps; i++) { askRide(); at = stepRide(dt / steps); }
       const onSnow = !air && !crash;
       if (playing && onSnow) layRide(at);
       stepSpray(playing ? dt : 0, playing && onSnow ? at : null);
@@ -1738,7 +1874,18 @@ async function start() {
       if (doing !== shownPart) { shownPart = doing; $('part').textContent = doing; }
       $('clock').textContent = `${ride.time.toFixed(0)} s riding`;
       document.body.classList.toggle('hinted', ride.time > 12);
-      showPad();
+      showStick();
+      showStance();
+      // (A run over: fallen and lain still, or stopped at the foot of the run, and a new one counted down.)
+      if (playing) {
+        if (again === null && ((crash && stillFor() > 0.6) || (ride.ended && ride.speed < 0.5))) again = 5;
+        if (again !== null) { again -= dt; if (again <= 0) restart(); }
+      }
+    }
+    {
+      const showing = mode === 'ride' && again !== null, box = $('countdown');
+      if (box.hidden === showing) box.hidden = !showing;
+      if (showing) { const n = String(Math.max(1, Math.ceil(again!))); if (box.lastElementChild!.textContent !== n) box.lastElementChild!.textContent = n; }
     }
     land.keepAbout(rider.position.x, rider.position.z);
     land.lod?.(camera.position.x, camera.position.z);
@@ -1761,10 +1908,14 @@ async function start() {
   // (For a script that drives the page: where it is, and to put it anywhere; riding, what the pointer would ask.)
   (window as unknown as Record<string, unknown>).__slope = {
     seek: (to: number) => { t = to; clearSpray(); placed = false; }, pause: (p: boolean) => { playing = !p; reflect(); }, setView, setMode,
-    steer: (x: number, y: number) => { want.x = x; want.y = y; }, brake: (on: boolean) => { want.brake = on; }, ride: () => ({ ...ride }),
+    steer: (x: number, y: number) => { stick.x = x; stick.y = y; }, brake: (on: boolean) => { want.brakeKey = on; }, ride: () => ({ ...ride }),
+    // (Riding: how wild the tricks are, and the trick being made, if one is.)
+    wild: (w: number) => { wildInput.value = String(w); }, trick: () => (rideTrick ? demoName(rideTrick.trick) : null),
+    // (How long the `i`th kicker that stands is reckoned to keep a skier going at `speed` in the air.)
+    airtime: (i: number, speed: number) => { const all = Array.from({ length: 60 }, (_, n) => kickerOf(n)).filter((k): k is Kicker => !!k && k.s < land.length); return airtimeOff(all[i] ?? all[0], speed); },
     // (Where the skier's hips are in the picture: -1 to 1 across and up it, 0 its middle.)
     onScreen: () => { const p = focus().addScaledVector(UP, 0.9).project(camera); return [+p.x.toFixed(2), +p.y.toFixed(2)]; },
-    step: (seconds: number) => { let at: Now | null = null; for (let i = 0; i < Math.round(seconds * 120); i++) at = stepRide(1 / 120); if (at && !air && !crash) layRide(at); placed = false; return { ...ride }; },
+    step: (seconds: number) => { let at: Now | null = null; for (let i = 0; i < Math.round(seconds * 120); i++) { askRide(); at = stepRide(1 / 120); } if (at && !air && !crash) layRide(at); placed = false; return { ...ride }; },
     // (Riding: what is happening in the air or on the ground, the kickers, and to put the skier anywhere going anyhow.)
     state: () => ({ air: air && { ...air }, crash: crash && { why: crash.why, still: stillFor(), at: fallenAt().toArray(), bodies: crash.dolls.map((d) => d.doll.middle().toArray()) }, told: { ...told } }),
     // (The `i`th kicker that stands, counting from the top; and where the skier is put, by how far down the run and across it.)

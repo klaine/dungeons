@@ -1165,6 +1165,34 @@ The machine this is developed on now has a graphics card, and tablets were repor
     person, the horse on both sets of skis and the horse and rider on both slopes, with the ground 180s; the control by key and by
     button while riding, each 180 toggling switch; filmstrips of the four, and of the horse and rider's nose butter and pop; pictures
     of the sword on the back; `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
+83. **Horse Mountain: an opening, simpler controls, tricks given, runs again.** Asked: "lets simplify controls so that bottom left has
+    thumb control for steering and tucked/straight on one control (doesnt control the tricks), then on bottom right there is a slider
+    that goes from Mild -> Wild and then a trick that could probably land is chosen randomly at the jump spots based on that slider.
+    below that we have the switch stance button, instead of 180 the label is "To switch" / "To regular" based on the current stance. /
+    Game opening shows a brief grand title: HORSE / Mountain / the demo runs on the background and after the title a dialog show
+    decision: "Watch demo run" / "Send it myself!" (which switches to player controlled run) / When player controlled run reaches end
+    or the player falls show a 5 second countdown after which a new run starts". *Controls*: the ring in the middle of the picture,
+    which the pointer anywhere steered by, and *Brake* and *180* are gone; a stick at the lower left (132 points across, its rim at
+    eight tenths of that; its sides shaded past seven tenths, where a turn skids), and at the lower right the *Mild*–*Wild* slider
+    (kept in the browser) over the stance button, named for where it goes; all three stay with the menus hidden and are lifted over
+    the foot when they are shown. The arrow keys, Shift to brake, `X` and Enter stay. *Tricks given*: lined up on a kicker (within
+    the breadth of its top and going within 35 degrees of its way) a second and a half or twelve metres from its lip, a trick is
+    chosen from eighteen, each with how wild it is (0 to 1) and how long in the air it wants: those that want no more than 0.95 of the
+    time in the air found by riding on to the lip unseen (`probeAirtime`: the ride stepped on quietly from a copy of its state, and
+    everything put back; the reckoning from the speed and the lip alone, `airtimeOff`, was right at 60 km/h and a third too long at 80,
+    and a 900 was chosen that could not come round), and not a tuck or a flip too late to be stood into, weighted by how near each is
+    to the slider's setting (a bell 0.16 wide); then made by the pilot's own `askAtLip` and `askInAir`, the stick set aside. Ridden by
+    script into the seven kickers of each slope at 14 and 18 m/s, at *Mild*, between and *Wild*, the person and the horse and rider,
+    the script steering onto each as a rider would: 167 of 168 landed (a 720, for the horse and rider at speed on the world's run,
+    after which spins of two turns and more want a little more time). *Opening*: the title (HORSE in Cinzel over a brass rule,
+    *Mountain* in Cormorant Garamond italic under it, from Google Fonts, the browser's serif else) rising over the demo run for
+    some three seconds, timed from the third frame drawn and held twenty frames at the least (in the headless browser the first
+    frames took seconds and the title went by unseen); then the choice; any other way of choosing a mode answers it. *Again*: fallen
+    and lain still for six tenths of a second, or stopped at the foot of the world's run, *New run in* 5, 4, 3, 2, 1 under what is told
+    of it, and a run from the top. The page is called *Horse Mountain*. *Checked* in headless Chromium: the opening at 800 by 500 and
+    390 by 760, and *Send it myself!*; the stick dragged by mouse (held left it turned, up it tucked, let go it sprang back); the stance
+    button twice, switch and back, its name changing; the count from five at the world run's foot and the new run; the demo run as
+    before for every skier.
 ## Risks
 
 | Risk | Mitigation |
