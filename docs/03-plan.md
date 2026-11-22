@@ -1197,7 +1197,22 @@ The machine this is developed on now has a graphics card, and tablets were repor
     the choice named so too. And: "also make the horse & rider the default mode": the page opens on the horse and its rider
     (`?skier=person` for the person). And: "make behind view default for player controlled runs": each mode keeps its own view
     (`viewFor`), watching the cinematic view and riding from behind to begin with, each the one it was last left in after that
-    (`?rideView=` another for riding).
+    (`?rideView=` another for riding). And: "also add some kind of loading progress indicator that is shown when entering the page and it still loads": the
+    status line on a dark ground the page had while it loaded became a screen of its own, there from the first paint (in the page
+    itself, before the program, its bar sweeping until the program begins): the name, a brass bar, what is being done, and how much of
+    the files has come (`loading`). The three files (the slice, `clips.glb`, the body) are now all asked for as the program begins,
+    rather than each when the one before had been used, and counted as they come in (`fetchCounted`, handed to the figure library as
+    `FigureLibrary.load`'s `fetch`, through `figureBytes`, which a page may call early; the library parses what it is given rather
+    than loading by address); two fifths of the bar. The rest is the stages, each a share about as long as it took opening the world's
+    run in the headless browser, drawn without a graphics card (start 0.1 s, painting the textures 5 to 8, laying the snow 0.7,
+    making the clips 0.6, dressing and the horse 0.7, the demo run 0.9 to 1.5, the first frames 3.5 to 5.7), the textures' and the
+    shaders' shares taken somewhat smaller than that, a graphics card doing them sooner. *Checked* in headless Chromium against the
+    split repository's build, served plainly and with the network held to 1.5 MB a second (the bar from nothing, rising with the
+    bytes, 5.5 MB in some four seconds, then by stage; gone after the second frame, the title rising), at 800 by 500 and 390 by 844;
+    with a world whose slice is not there (the groomed slope, the textures not painted); opening on the groomed slope and then asking
+    for the world's run at 300 kB a second (the screen over the picture, the slice counted, then painting, laying, the demo, and
+    gone); a clips file that cannot be had (the screen says so and stays); the figure lab's check, as the library's files are had
+    another way (all passed).
 ## Risks
 
 | Risk | Mitigation |
