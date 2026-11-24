@@ -537,3 +537,18 @@ export function planTimber(b: Building): BuildingPlan {
   }
   return plan;
 }
+
+/**
+ * A village church's own measures, as a village under a castle deals them (`generate.ts`) and the building lab deals one: its nave's
+ * length `W`, breadth `D` and walls `H`; how far `before` it its churchyard reaches; and its tower (its breadth and the height of its
+ * walls), its spire (a pyramid, a needle or a saddle roof) and its choir, square or with an apse. Which end the tower stands at is the
+ * caller's: the village's from the road, the lab's from its seed. (Drawn from `cq` in the order the village always drew them, so that
+ * no village is changed by their being drawn here.)
+ */
+export function dealChapel(cq: Rng): { W: number; D: number; H: number; before: number; chapel: Omit<NonNullable<Building['chapel']>, 'end'> } {
+  const round = (x: number) => Math.round(x * 10) / 10;
+  const W = round(cq.range(11, 14.5)), D = round(cq.range(6.6, 7.8)), H = round(cq.range(6.2, 7.4)), T = round(cq.range(4.2, 5));
+  const spire = cq.pick(['pyramid', 'pyramid', 'needle', 'saddle'] as const), before = cq.range(5, 7);
+  const chapel = { tower: T, height: round(H + cq.range(7, 10.5)), spire, spireHeight: round(spire === 'needle' ? cq.range(9, 13) : spire === 'pyramid' ? cq.range(5, 7.5) : cq.range(2.6, 3.4)), choir: round(cq.range(3.6, 5)), apse: cq.chance(0.6) };
+  return { W, D, H, before, chapel };
+}

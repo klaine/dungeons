@@ -7,13 +7,16 @@
 // from a site document, as a valley builds it; only where it stands, which way it is turned and how
 // it is scaled are the lab's. The document is always made at the origin facing `w`, and the lab
 // places what is built.
-import { classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
+import { classicalVariations, CLOSE, dealChapel, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
 import { brickCountry, brickEaves, dealBrickHouse, dealChurch, planBrick } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
 import { Vector3 } from 'three';
-import { BrickWork, Building, CanalWork, ClassicalDress, Stone, Town } from '../src/core/site';
+import { BrickWork, Building, CanalWork, ClassicalDress, Place, Site, Stone, Town } from '../src/core/site';
 import { canalEaves, dealCanalHouse, planCanal } from '../src/core/canal';
 import { buildBuilding } from '../src/render/buildings';
+import { buildCastle } from '../src/render/castle';
+import { Castle, CastleTower, layOutCastle } from '../src/core/castle';
+import { placeHouse } from '../src/render/housePlacing';
 import { anyAngle } from '../src/render/geom/anyAngle';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { stoneStyles } from '../src/render/geom/styles';
@@ -21,7 +24,7 @@ import { buildShack } from '../src/render/shack';
 import { CardSet } from '../src/render/scene';
 import { boulderOne, crownOf, growOne, Season, TREE_DEALT, TREE_RANGES, TreeKind, TREES, TreeWork } from './nature';
 
-export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'canal' | 'church' | 'shack' | 'tree' | 'boulder';
+export type Kind = 'timber' | 'classical' | 'wooden' | 'gabled' | 'eaves' | 'store' | 'canal' | 'church' | 'chapel' | 'shed' | 'shack' | 'castle' | 'tree' | 'boulder';
 /** A shack's own measures, beyond its breadth, depth and colour: its roof, whether the roof is one slope, and how high it stands on posts. */
 export interface ShackWork { roof: 'boards' | 'tin' | 'turf'; lean: boolean; stilts: number }
 /**
@@ -30,7 +33,9 @@ export interface ShackWork { roof: 'boards' | 'tin' | 'turf'; lean: boolean; sti
  */
 // (A tree and a boulder are not buildings either: each is carried as a breadth and a depth the size of its crown or itself, for picking it
 // out and keeping others off it, and `tree` or `boulder`.)
-export type Shape = Omit<Building, 'x' | 'z' | 'faces' | 'plan' | 'backDoor' | 'sunk' | 'wheel' | 'turn' | 'y'> & { shack?: ShackWork; tree?: TreeWork; boulder?: { size: number } };
+// (Nor is a castle: it is carried as the castle record of the site document, laid out about the middle, and the breadth and depth of
+// its walls' bounds, and `castle`.)
+export type Shape = Omit<Building, 'x' | 'z' | 'faces' | 'plan' | 'backDoor' | 'sunk' | 'wheel' | 'turn' | 'y'> & { shack?: ShackWork; tree?: TreeWork; boulder?: { size: number }; castle?: Castle };
 type Colour = [number, number, number];
 
 /** One building set out in the lab. */
@@ -48,6 +53,11 @@ export interface Item {
   scale: [number, number, number];
   /** Of a timber house: it is an inn, and hangs out a sign. */
   inn?: boolean;
+  /**
+   * How worn it is, where its kind weathers: 0 new, 1 as the game builds it (render come away, brick flaked, stone chipped, timber
+   * faded, paint peeling, roofs mossed), up to 4, derelict (`makeSiteMaterial`'s `wear`). Not given, as the rest.
+   */
+  wear?: number;
   shape: Shape;
 }
 
@@ -60,11 +70,16 @@ export const KINDS: Record<Kind, { name: string; note: string }> = {
   eaves: { name: 'Eaves house', note: 'Brick, broader and later, its eaves to the street and a small gable over its middle.' },
   store: { name: 'Warehouse', note: 'Brick, many low storeys, a column of loading doors under a hoist.' },
   church: { name: 'Church', note: 'Brick Gothic: a buttressed hall church, a tower or two with a spire, and a choir.' },
+  chapel: { name: 'Village church', note: 'A small church of coursed stone, as a village under a castle has: a nave, a tower at one end with a pyramid, a needle spire or a saddle roof, and a choir at the other, square or with an apse.' },
+  shed: { name: 'Shed', note: 'A shed of boards in the back of a plot, for wood, tools, a goat or a cart: one room under a lean roof.' },
+  castle: { name: 'Castle', note: 'A curtain wall of coursed rubble about a bailey, with towers round, half round or square, a gate, ranges of lean-to buildings against its inner face, a stair to the wall-walk and a well. (Its keep and the house it guards are built stone by stone with the place, and are not here.)' },
   canal: { name: 'Canal house', note: 'Amsterdam: narrow, tall and deep, its front leaning out over the quay, a stoop to its door, and over the eaves a spout, stepped, neck or bell gable, or a cornice.' },
   tree: { name: 'Tree', note: 'Grown as the valley grows its trees: an oak, an ash, an old oak, a spruce, a pine, a pine of the coast, or a bush.' },
   boulder: { name: 'Boulder', note: 'A boulder of the country’s stone, carved as the valley’s are, bedded and broken as its rock is.' },
 };
-export const KIND_ORDER: Kind[] = ['classical', 'wooden', 'timber', 'gabled', 'eaves', 'store', 'canal', 'church', 'shack'];
+export const KIND_ORDER: Kind[] = ['classical', 'wooden', 'timber', 'gabled', 'eaves', 'store', 'canal', 'church', 'chapel', 'shed', 'shack', 'castle'];
+/** The kinds that weather, and so can be made more or less worn: those laid in as the game lays a house (see `buildItem`), and the castle. */
+export const weathers = (kind: Kind): boolean => !isNature(kind) && kind !== 'shack';
 /** What grows and what lies about, set out one by one as buildings are; and every kind the lab knows. */
 export const NATURE_ORDER: Kind[] = ['tree', 'boulder'];
 export const ALL_KINDS: Kind[] = [...KIND_ORDER, ...NATURE_ORDER];
@@ -88,6 +103,8 @@ const OWN = {
   timber: ['jetty', 'gable', 'door', 'burnt'],
   brick: ['brickwork'],
   shack: ['shack'],
+  chapel: ['chapel'],
+  castle: ['castle'],
   canal: ['canalwork'],
   tree: ['tree'],
   boulder: ['boulder'],
@@ -114,6 +131,13 @@ export const RANGES = {
   classical: { bays: [3, 25], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 16], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], towerSize: [4, 6.4], towerExtra: [1, 3], plinth: [0.5, 2.5] },
   wooden: { w: [9, 24], d: [7, 12], storeys: [1, 2], height: [2.7, 3.8], basement: [0.4, 2], dormers: [0, 5], wingWidth: [5, 10], wingLength: [5, 14] },
   shack: { w: [2.6, 6], d: [3, 6.5], stilts: [0, 2.5] },
+  // (The village church's as the village deals it, and somewhat past: its nave, its tower's breadth and how far it rises over the nave,
+  // its spire, its choir.)
+  chapel: { w: [8, 18], d: [5.5, 9], height: [5, 8.5], tower: [3.6, 5.6], over: [5, 13], spire: [2, 15], choir: [3, 6.5] },
+  shed: { w: [1.8, 4.5], d: [1.6, 3.6], height: [2, 3] },
+  // (A castle's wall, from the ground to the walk and through; its towers, by their radius or half breadth and how far they stand over
+  // the walk; a turret, small, corbelled out at the top.)
+  castle: { height: [6, 16], thick: [1.6, 3.4], r: [2.2, 6], over: [1, 14], turretR: [0.7, 1.8], turretOver: [1, 5] },
   boulder: { size: [0.3, 8] },
   canal: { bays: [1, 7], pitch: [1.6, 2.5], margin: 1.1, d: [7, 22], storeys: [2, 7], height: [2.3, 4.8], stoop: [0, 1.6], lean: [0, 0.035], roof: [35, 62] },
   gabled: { w: [5.5, 11], d: [8, 18], storeys: [1, 5], height: [2.4, 5.2], bays: [1, 5], pitch: [40, 66] },
@@ -229,6 +253,47 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     const g = s.wings?.[0];
     keep(s, 'wooden');
     if (g) s.wings = [{ side: g.side < 0 ? -1 : 1, width: r2(clamp(g.width, R.wingWidth[0], Math.min(R.wingWidth[1], s.w - 4))), length: r2(clamp(g.length, R.wingLength[0], R.wingLength[1])) }];
+    return s;
+  }
+  if (kind === 'chapel') {
+    const R = RANGES.chapel, c = s.chapel ?? { end: 1, tower: 4.6, height: 15, spire: 'pyramid', spireHeight: 6, choir: 4.2, apse: true };
+    s.style = 'chapel';
+    s.w = r2(clamp(s.w, R.w[0], R.w[1])); s.d = r2(clamp(s.d, R.d[0], R.d[1]));
+    const H = r2(clamp(s.heights?.[0] ?? 6.8, R.height[0], R.height[1]));
+    s.storeys = 1; s.heights = [H]; s.bays = 1;
+    keep(s, 'chapel');
+    const spire = (['pyramid', 'needle', 'saddle'] as const).includes(c.spire) ? c.spire : 'pyramid';
+    s.chapel = {
+      end: c.end < 0 ? -1 : 1, tower: r2(clamp(c.tower, R.tower[0], Math.min(R.tower[1], s.d - 0.6))), height: r2(H + clamp(c.height - H, R.over[0], R.over[1])),
+      spire, spireHeight: r2(clamp(c.spireHeight, spire === 'saddle' ? 2 : R.spire[0], spire === 'saddle' ? 4 : R.spire[1])), choir: r2(clamp(c.choir, R.choir[0], R.choir[1])), apse: !!c.apse,
+    };
+    return s;
+  }
+  if (kind === 'shed') {
+    const R = RANGES.shed;
+    s.style = 'shed';
+    s.w = r2(clamp(s.w, R.w[0], R.w[1])); s.d = r2(clamp(s.d, R.d[0], R.d[1]));
+    s.storeys = 1; s.heights = [r2(clamp(s.heights?.[0] ?? 2.4, R.height[0], R.height[1]))]; s.bays = 1;
+    keep(s);
+    return s;
+  }
+  if (kind === 'castle') {
+    // (Its measures are its record's, as dealt: only the breadth and depth of its walls' bounds follow from it, for picking it out and
+    // keeping others off it.)
+    s.style = 'timber';
+    if (s.castle) {
+      const R = RANGES.castle, c = s.castle;
+      c.height = r2(clamp(c.height, R.height[0], R.height[1])); c.thick = r2(clamp(c.thick, R.thick[0], R.thick[1]));
+      for (const t of c.towers) {
+        const turret = t.kind === 'turret', rr = turret ? R.turretR : R.r, over = turret ? R.turretOver : R.over;
+        t.r = r2(clamp(t.r, rr[0], rr[1])); t.over = r2(clamp(t.over, over[0], over[1]));
+      }
+      const xs = s.castle.wall.map((p) => p[0]), zs = s.castle.wall.map((p) => p[1]);
+      // (Its front, the gate's side, looks towards +z: its breadth runs along x, its depth along z.)
+      s.w = r2(Math.max(...xs) - Math.min(...xs) + 2 * s.castle.thick + 4); s.d = r2(Math.max(...zs) - Math.min(...zs) + 2 * s.castle.thick + 4);
+    }
+    s.storeys = 1; s.heights = [s.castle?.height ?? 10]; s.bays = 1;
+    keep(s, 'castle');
     return s;
   }
   if (kind === 'shack') {
@@ -426,6 +491,15 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
     if (rng.fork('corner').chance(0.25)) s.wings = [{ side: s.endDoor === 1 ? -1 : 1, width: round(Math.min(8, w - 5)), length: round(rng.range(8, 11)) }];
     return normalise(kind, s);
   }
+  if (kind === 'chapel') {
+    // As the village deals its church: by the village's own dealer (`dealChapel`), so that a change there is seen here.
+    const { W, D, H, chapel } = dealChapel(rng.fork('church'));
+    return normalise(kind, { style: 'chapel', w: W, d: D, storeys: 1, heights: [H], bays: 1, colour: [0.9, 0.88, 0.82], chapel: { end: rng.chance(0.5) ? 1 : -1, ...chapel } });
+  }
+  if (kind === 'shed') {
+    return normalise(kind, { style: 'shed', w: round(rng.range(2.4, 3.4)), d: round(rng.range(2, 2.8)), storeys: 1, heights: [round(rng.range(2.2, 2.6))], bays: 1, colour: rng.pick([[0.42, 0.33, 0.24], [0.36, 0.28, 0.2], [0.5, 0.4, 0.3], [0.32, 0.3, 0.28]] as Colour[]) });
+  }
+  if (kind === 'castle') return normalise(kind, { style: 'timber', w: 40, d: 40, storeys: 1, heights: [10], bays: 1, colour: [0.6, 0.58, 0.55], castle: dealCastle(rng) });
   if (kind === 'shack') {
     const onPosts = rng.chance(0.25);
     return normalise(kind, { style: 'timber', w: round(rng.range(3.2, 5.2)), d: round(rng.range(3.6, 5.6)), storeys: 1, heights: [2.3], bays: 1, colour: rng.pick(SHACK_BOARDS), shack: { roof: rng.pick(['boards', 'boards', 'tin', 'tin', 'turf'] as const), lean: rng.chance(0.45), stilts: onPosts ? round(rng.range(1.2, 1.9)) : 0 } });
@@ -433,6 +507,37 @@ export function deal(kind: Kind, seed: string, stone: Stone = 'greystone'): Shap
   const country = brickCountry(stone);
   if (kind === 'church') return normalise(kind, dealChurch(rng, 70, country)!);
   return normalise(kind, dealBrickHouse(rng, 15, kind, country));
+}
+
+/**
+ * A castle as a valley lays one out (`layOutCastle`), on open ground: about a house and a forecourt of the common size at the middle,
+ * which is not built here, its gate to the front (towards +z); then moved so that the middle of its walls' bounds is at the middle.
+ * (The keep it lays out is left: it is built with the place, stone by stone, as a valley's lone tower is.)
+ */
+function dealCastle(rng: Rng): Castle {
+  const house = { x0: -9, x1: 9, z0: -8 }, meadow = { x0: -11, x1: 11, z0: 2, z1: 12 } as Place;
+  const c = layOutCastle({ towers: [] } as unknown as Site, meadow, house, 0, rng.fork('castle'), () => 1000);
+  return centredCastle(c).c;
+}
+
+/** The middle of the bounds of a castle's wall, to a centimetre. */
+export function castleMiddle(c: Castle): [number, number] {
+  const xs = c.wall.map((p) => p[0]), zs = c.wall.map((p) => p[1]);
+  return [Math.round(((Math.min(...xs) + Math.max(...xs)) / 2) * 100) / 100, Math.round(((Math.min(...zs) + Math.max(...zs)) / 2) * 100) / 100];
+}
+
+/** A castle's record moved so that the middle of its wall's bounds is at the middle (`by`, how far it was moved), everything in it to a centimetre. */
+export function centredCastle(c: Castle): { c: Castle; by: [number, number] } {
+  const [mx, mz] = castleMiddle(c);
+  const at = ([x, z]: [number, number]): [number, number] => [Math.round((x - mx) * 100) / 100, Math.round((z - mz) * 100) / 100];
+  return {
+    by: [-mx, -mz],
+    c: {
+      ...c, wall: c.wall.map(at), gate: { ...c.gate, x: at([c.gate.x, c.gate.z])[0], z: at([c.gate.x, c.gate.z])[1] },
+      towers: c.towers.map((t) => { const [x, z] = at([t.x, t.z]); return { ...t, x, z }; }),
+      ranges: c.ranges?.map((r) => ({ ...r, a: at(r.a), b: at(r.b) })), stair: c.stair && { ...c.stair, a: at(c.stair.a), b: at(c.stair.b) }, well: c.well && at(c.well),
+    },
+  };
 }
 
 /**
@@ -525,9 +630,20 @@ export function buildItem(item: Item, stone: Stone, mesh: (material: string) => 
   if (item.kind === 'boulder') { boulderOne(stone, item.shape.boulder!.size, new Rng(item.seed).fork('boulder'), mesh); return {}; }
   // (A shack's posts go down to the ground, which here is level and nowhere near the sea.)
   if (item.kind === 'shack') { buildShack(shackOf(item), new Rng(item.seed).fork('build'), anyAngle(mesh).solid, () => 0, Infinity); return {}; }
+  // (A castle on level ground, its bailey at the ground's height: built as a valley builds its own, facing west as every item is.)
+  if (item.kind === 'castle') { buildCastle({ c: turnedWest(item.shape.castle!), mesh, ground: () => 0, floor: 0, stone: stoneColour(stone) }); return {}; }
   const b = documentOf(item);
   if (near?.length) b.near = near;
-  buildBuilding(b, 0, mesh, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  // Laid into the lab's meshes as the game lays a house into its place (`placeHouse`): its rooms marked as indoors, out of the sky's
+  // light, and each point of its outer walls and timber carrying the height of the ground at its foot, which is what the materials
+  // weather it by: damp risen in the foot of a wall, render come away, rain splash, timber faded and paint peeling. (Built straight into
+  // the lab's meshes, nothing was marked, and its buildings stood as new and lit within as if roofless, whatever the materials were.)
+  // Built facing west at the middle, as the lab builds every building, and standing on the square: on its own ground the lift lower.
+  const local = new Map<string, MeshBuilder>();
+  const into = (m: string) => { let x = local.get(m); if (!x) local.set(m, (x = new MeshBuilder())); return x; };
+  buildBuilding(b, 0, into, new Rng(item.seed).fork('build'), stoneColour(stone), item.kind === 'timber' && !!item.inn);
+  const ground = -liftOf(item);
+  placeHouse(b, 0, local, mesh, { facing: Math.PI, foot: () => ground });
   return {};
 }
 
@@ -613,6 +729,26 @@ export function nearOf(item: Item, others: Item[]): Building['near'] {
   return out.length ? out : undefined;
 }
 
+/** A tower as one is first set at a corner of a castle by hand, of each kind. */
+export const TOWER_DEALT: Record<CastleTower['kind'], Pick<CastleTower, 'kind' | 'r' | 'over' | 'roof'>> = {
+  round: { kind: 'round', r: 3.8, over: 6.5, roof: 'cone' },
+  half: { kind: 'half', r: 3.8, over: 5, roof: 'cone' },
+  square: { kind: 'square', r: 3.4, over: 5, roof: 'battlement' },
+  turret: { kind: 'turret', r: 1.2, over: 3, roof: 'cone' },
+};
+
+/**
+ * A castle's record turned as every item is built (its front, its gate's side, towards -x, `faces: 'w'`): what faced +z faces -x.
+ * (The lab turns the whole a quarter turn back as it stands it on the square.)
+ */
+function turnedWest(c: Castle): Castle {
+  const p = ([x, z]: [number, number]): [number, number] => [-z, x], q = Math.PI / 2;
+  return {
+    ...c, wall: c.wall.map(p), gate: { ...c.gate, x: -c.gate.z, z: c.gate.x, out: c.gate.out + q }, towers: c.towers.map((t) => ({ ...t, x: -t.z, z: t.x, out: t.out + q })),
+    ranges: c.ranges?.map((r) => ({ ...r, a: p(r.a), b: p(r.b) })), stair: c.stair && { ...c.stair, a: p(c.stair.a), b: p(c.stair.b) }, well: c.well && p(c.well),
+  };
+}
+
 /** The height of the top of a building's walls, where its roof begins, above the ground before its door. */
 export function eavesOf(item: Item): number {
   const b = item.shape as Building;
@@ -620,6 +756,8 @@ export function eavesOf(item: Item): number {
   if (item.kind === 'classical') return floorOf(b, b.storeys);
   if (item.kind === 'wooden') return (b.basement ?? 1.1) + b.heights.reduce((sum, h) => sum + h, 0);
   if (item.kind === 'shack') return item.shape.shack!.stilts + 2.3;
+  if (item.kind === 'chapel' || item.kind === 'shed') return b.heights[0];
+  if (item.kind === 'castle') return item.shape.castle!.height;
   if (item.kind === 'tree') return item.shape.tree!.height;
   if (item.kind === 'canal') return canalEaves(b);
   if (item.kind === 'boulder') return item.shape.boulder!.size * 0.7;

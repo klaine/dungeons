@@ -984,9 +984,38 @@ leaves both the game and the walk working:
    is underfoot (a way's earth, a room's stone, grass, the sea), the sea along the shore as near as it is, the places' sheep and goats
    (`onBleat`), and their games' doors, locks, keys, levers and the end; started at the first click or key, `N` to mute. Started and
    running in the browser; still never heard, as the game's is not.
+
+   *The cathedral, merged in* (24 November 2026, from the default branch: a harbour town's house a cathedral, what is built made in
+   one place, `builtMaterials.ts`, for the game and the building lab; the figures, the downhill run and the horse). The walk page's
+   places now take what is built from that same code, painted from the same seeds and at the same sizes (the castle's stone at twice
+   the breadth), so Halhaven's cathedral stands in the world in its ashlar, its light baked in 90 seconds. Checked on the merged
+   code: `tools/places.ts w0` (Strath Norith, the body to the house's door in 186 seconds; its edge within 4 centimetres of the
+   world's on the whole and 0.67 metres at worst, the same as on this branch before the merge), `w0 coast 1` and `w0 mountain 1` as
+   before, `tools/body.ts w0`, `tools/route.ts w0`, `tools/town.ts 3`; `npm run check`: valleys 200 of 200, islands 50 of 50,
+   mountain tops failing `peak-check-48` and `49` as before, towns failing `town-check-18`, `22` and `24` (a building in the street,
+   two in the water), which fail alike on the default branch alone, where its cathedral changed the towns' layouts.
 5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
    (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
 6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.
+
+## A ski run in winter
+
+Asked, of the downhill run's page (`lab/slope.html`): "a 100m wide nearland slice of our actual winter gameworld starting on high
+slopes at suitable location, no buildings or locations"; and, earlier, that skiing, by people and by horses, is heading for "the
+world game winter mountains and hills". A run is found in a world (`src/core/skiRun.ts`, `npx tsx tools/skiRun.ts w2 [folder]`) and
+its slice kept for the page (`src/core/skiSlice.ts`, `public/slopes/w2.json`): the world's near land at a metre as the walk page
+makes it, under snow, fifty metres either side of the run's line, and the land and country about it coarser. What the search showed
+of the world's land: its range is walls, at 200 to 500 metres seven tenths or more of it steeper than 36 degrees over sixteen metres,
+its glens floored flat, its tops rounded but narrow; nowhere in the range does a band a hundred metres broad stay skiable for long, and
+the first run found in `w2` started at the range's foot, at 319 metres, and crossed the upland to the sea (`plan`, item 74). Asked
+then for a skiable path of twenty metres within the hundred drawn, down a crest if it could, and allowed to bring the land above 300
+metres lower, the run found comes from beside the highest summit, at 832 metres, down a spur's crest into a glen (item 75), on land
+brought to half its height above 300 metres in the slice alone. A world whose mountains could be skied as they stand would want its
+range worn into broader shoulders and cirques, or less high. The page does not stream the world; it is a slice, made once, of the land
+as it is now, and is made again when the land changes. Its kickers stand where the land after them falls away enough to land on,
+and the page's demo run is flown over them by a pilot, landing a 720, a backflip, a backflip 360, a ski jumper's flight, a cork 540
+(to switch), a switch 540 and a mute grab off the seven on `w2`'s run (`plan`, items 79 to 82): on this land, at a lined-up 61 km/h, each comes round at the
+first try but the backflip 360, which off its kicker at that speed has too little time in the air and is taken again faster.
 
 ## Where next: the land, and places that fit it
 

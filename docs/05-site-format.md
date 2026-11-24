@@ -109,6 +109,8 @@ A place is a rectangle of open floor. Walls lie outside it.
 | `fallen` | Present and `true` if the roof has come down. Such a place has `roof: "sky"`. |
 | `shaft` | In a cave: a hole in the roof open to the sky, as `x`, `z` and radius `r` at its foot. It widens upwards. Such a chamber has `light: "day"`. |
 | `level` | Which storey the place is on. Absent or 0 for the ground storey; 1 for a room over a ground-storey room; -1 for a cellar under one. A place on another storey has the same `x0`, `x1`, `z0`, `z1` as the place it is over or under, and is joined to it by a `stair`. Its `floor` says how high it lies. The maps show the ground storey; rooms on other storeys are listed in the key as over or under the room they belong to. |
+| `pointed` | Of a vaulted place: its vault is pointed, two arcs of a circle 1.5 times its half span struck from points on the springing line the far side of its middle, meeting along the crown, which stands 1.414 times its half span over the springing (`POINTED_RISE`). Absent, half round. |
+| `spans` | Of a vaulted place: how many vaults side by side carry its ceiling, each running its length and its own half-round (or pointed) vault, carried between them on rows of columns under beams of stone, columns every three metres or so (a crypt's three, a hidden chamber's two). Absent, one. |
 
 ### Ways
 
@@ -127,12 +129,15 @@ A way is an opening through the wall between two places.
 | `at` | Where the centre of the opening is along the wall: an x coordinate for north and south walls, a z coordinate for east and west. |
 | `halfWidth` | Half the width of the opening. |
 | `to` | For a stair only: where along the wall its head is, as `at` is where its foot is. |
+| `round` | For a stair: present and `true` if it climbs round the walls of the lower place, as a tower's stair does, instead of straight up one. It starts at `at` along `side` and climbs along that wall the way of the sun seen from above (along `n` towards greater x, then `e` towards greater z, `s` towards lesser x, `w` towards lesser z), each step 0.17 high and 0.25 deep, turning at each corner onto the next wall by a square landing as broad as the flight (`2 * halfWidth`); its last leg comes up through a well in the floor above, and `to` is where along that leg's wall it ends. Its steps are stones set in the wall with nothing under them, a rail on the open side. `roundStair` in `src/core/site.ts` gives its legs and landings, `stairPath` the points to walk it by. |
+| `spring` | Of an arch or a door: how high over the higher of its two floors its arch springs, where that is not a doorway's (2.0) or an arch's (1.9): a church's arcades and the great arches of its crossing. |
+| `pointed` | Of an arch or a door: its head is pointed, two arcs each as broad as the opening, meeting at its head, which stands 1.73 times its half width over the springing. |
 | `door` | Present if a leaf hangs in the opening. |
 | `natural` | Present and `true` for a cleft between two chambers of a cave. It is not built: no arch, no door, no steps. Its floor climbs from one chamber's level to the other's, which may be two metres or more apart: the climb is made on the side of the higher chamber, cut down into that chamber's floor, and is level with the lower chamber where it reaches it. |
 
 To find the opening on the plan, take the wall of `a` named by `side`. For `n` the wall runs from `z0 - wallThickness` to `z0` of place `a`; for `s`, from `z1` to `z1 + wallThickness`; `w` and `e` likewise in x. Along the wall, the opening runs from `at - halfWidth` to `at + halfWidth`.
 
-The height of an opening is not in the document.
+The height of an opening is not in the document, unless it says `spring`.
 
 A `door` has:
 
@@ -325,7 +330,7 @@ The plain shape of the land follows from these by rule (`landAt` in `src/core/is
 
 ### Towns
 
-A site may be a harbour town on a coast instead of a valley. Then it has `town` and no `valley`; `stands` is always `free` (the house stands on a terrace at the head of the town's square), `grounds` is the box that can be walked (the town's own land, less a margin), and the track runs from the door down the stair, across the square and along the waterfront to the head of the mole, where the player arrives.
+A site may be a harbour town on a coast instead of a valley. Then it has `town` and no `valley`; `stands` is always `free` (the house, a cathedral (see *Cathedrals*), stands on a terrace at the head of the town's square), `grounds` is the box that can be walked (the town's own land, less a margin), and the track runs from the door down the stair, across the square and along the waterfront to the head of the mole, where the player arrives.
 
 ```json
 "town": {
@@ -399,6 +404,34 @@ All have north up. `<seed>-plan.png` is a clean plan with numbered rooms and a k
 ## The building lab's file
 
 The building lab (`lab/buildings.html`; see the README) saves what is set out on its square as `buildings.json`: `lab` (`"dungeons building lab"`), `version` (1), the `stone` and `hour` it was seen in, and `items`, one to a building. Each item is the lab's own record, `kind` (`classical`, `wooden`, `timber`, `gabled`, `eaves`, `store`, `canal`, `church`, `shack`, `tree` or `boulder`), `seed` (what the builder's own choices are made from), `x` and `z` (where the middle of its main block stands, in metres), `turn` (which way its front looks, in degrees: 0 towards +z, turning anticlockwise seen from above), `scale` (stretched along its breadth, its height and its depth, apart from its measures) and `inn` (a timber house's sign); its `shape`, the measures the lab lets be changed; and `building`, a `Building` of the site document as the game builds it, at the origin facing `w`, with its rooms planned. A building of the game can stand only facing `e` or `w`; one turned otherwise in the lab is built as the document says and turned as a whole. Opening a file reads `shape`, or `building` where there is no `shape`, and brings each measure within what its kind can be. A tree or a boulder is no building: its `shape` has `tree` (`kind`, one of `oak`, `ash`, `old oak`, `spruce`, `pine`, `coast pine`, `bush`; `height` and `girth` of its trunk at the foot in metres; `wide`, how far its boughs reach, a share for an oak or an ash and metres for a spruce or a pine; `leaf`, which of the season's four greens) or `boulder` (`size`, metres across), and no `building`. The file also has `season` (`spring`, `summer` or `autumn`) and `paint`, what was laid with the brushes: `ground`, dabs `[x, z, radius, what, stroke]` where `what` is the number of `flags`, `setts`, `gravel`, `turf`, `earth`, `mud`, `track`, `path` in that order and `stroke` which stroke it was part of (a track or a path follows its stroke's dabs), the last dab over a point being what it is; `plants`, dabs `[x, y, z, radius, what, 0, seed]`, `what` the number of `grass`, `flowers`, `ferns`, `reeds`, `wood`, `oak`, `ash`, `spruce`, `pine`, `bush`, and everything grown in a dab following from its `seed`; and `rock`, balls `[x, y, z, radius, sign]`, 1 raised and -1 dug, which run together and are carved as one mass (`lab/nature.ts`).
+
+### Cathedrals
+
+The house of a harbour town (`?place=town`) is a cathedral, and has `cathedral`. Its places are a house's: rectangles, with ways between, on storeys. The church's own are on the ground storey; the towers' rooms are storeys 1 to 3 over their feet, with the same outline; the crypt, the stairs down to it, the dungeon and the chamber under the shrine are on storey -1. On storey -1 a room may lie under part of a place, and not have its outline: the dungeon's passage and cells lie under a transept, and are reached from the crypt's stair by a door, not from the transept by a stair. The goal is the shrine; `secret` is the chamber under it, behind a secret door in the crypt's end wall.
+
+```json
+"cathedral": {
+  "parts": [{ "place": 0, "part": "narthex" }, { "place": 1, "part": "tower" }, { "place": 3, "part": "nave" }, ...],
+  "towers": [{ "foot": 1, "roof": 31, "spire": "copper", "spireHeight": 41.3 }, ...],
+  "lantern": { "top": 55.2, "spire": "stone", "spireHeight": 30.1 },
+  "roof": "copper", "pitch": 1.45, "flyers": true, "rose": true,
+  "measure": { "near": 21.6, "ridge": 47.78, "least": 36.2 }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `parts` | What each place of the church proper is: `narthex` (the nave's first bay between two west towers), `tower` (a tower's foot; under a single tower, the porch), `chapel` (beside a single tower), `nave`, `aisle`, `crossing`, `transept` (an arm), `choir`, `choir aisle`, `shrine`. Its outside is built from these. The cloister's rooms and those under the church are ordinary rooms by their names. |
+| `towers` | The towers that are climbed: `foot` the place at its foot, `roof` the place on its top (open to the sky, a walk behind the parapet), the rooms between joined by stairs (a flight up the outer wall from the foot, a stair `round` the walls to the belfry, a steep flight to the top). `spire`: `stone`, `lead`, `copper` or `none`; its point `spireHeight` over the top's floor. |
+| `lantern` | A tower over the crossing that is not climbed: its parapet's top `top` over the crossing's floor, its spire's kind and height over that. |
+| `fleche` | Where there is no `lantern`: a slender spire on the ridge over the crossing, so high over the ridge. |
+| `roof` | What the roofs are covered with: `lead`, `copper` or `tile`. |
+| `pitch` | The rise of the roofs of the nave, transepts and choir over their half breadth. The aisles' lean-tos rise one in two. |
+| `flyers` | Flying buttresses over the aisles at every bay. |
+| `rose` | Round windows in the west front and the transepts' ends. |
+| `measure` | How it was made as high as it is: `near`, the tallest building within 170 metres of the forecourt, from its ground to its ridge (`buildingHeight` in `src/core/town.ts`); `ridge`, the nave's ridge over the church's floor, dealt between 1.5 and 3 times `near`; `least`, the least a nave with aisles and a clerestory over them can be, which the ridge is when three times `near` is less. |
+
+Each place stands as high as its `floor`, `wall` and vault and a fill of 0.7 over it (`toplineOf` in `src/core/cathedral.ts`): that is where its outside walls end and its roof begins. The rest of what its outside is follows by rule (`src/render/cathedral.ts`): see document 4, *The cathedral*.
 
 ## Versions
 

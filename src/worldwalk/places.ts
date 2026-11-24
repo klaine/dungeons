@@ -19,8 +19,9 @@ import { Flocks } from '../render/creatures';
 import { Fireflies } from '../render/fireflies';
 import { gatherTorches, Torch } from '../render/torch';
 import type { SeaDesc } from '../render/scene';
-import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, makeWindowMaterial, setLamps, windowUniforms } from '../render/siteMaterial';
+import { makePaneMaterial, makePropMaterial, makeRockMaterial, makeSiteMaterial, makeStainedMaterial, setLamps, windowUniforms } from '../render/siteMaterial';
 import { generateTextureSet } from '../render/textures';
+import { BUILT_SURFACES, builtSurfaceSize, makeBuiltMaterials, makeWindowFor, type BuiltSurface } from '../render/builtMaterials';
 import { Water } from '../render/water';
 import { SunPicture } from '../render/sunShadow';
 import placesWorker from '../worldmap/placesWorker?worker&url';
@@ -55,7 +56,7 @@ const MOST = 2, YIELD = 300;
 /** The kinds of place built into the world. (A mountain top's sea of cloud under it is not drawn: in a world it would lie over all of it.) */
 const KINDS: WorldPlace['kind'][] = ['valley', 'coast', 'island', 'mountain'];
 /** How light each kind of surface is on the whole, for the bake (as the game has it). */
-const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, castle: 0.58, stone: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
+const MEAN_ALBEDO: Record<string, number> = { brick: 0.3, castle: 0.58, stone: 0.6, ashlar: 0.6, floor: 0.6, slate: 0.6, wood: 0.25, rock: 0.6, rockSheet: 0.6, scree: 0.45, bark: 0.3, barkAsh: 0.35, barkPine: 0.35, barkFir: 0.3, turf: 0.12, leaf: 0.1, redBrick: 0.3, buffBrick: 0.45 };
 
 /** How bright the lamps and lit windows are at an hour, as the game has it (none by day). */
 export const lampsAt = (hour: Hour) => (hour === 'night' ? 0.5 : hour === 'dusk' ? 0.55 : hour === 'sunset' ? 0.4 : 0);
@@ -259,19 +260,21 @@ export class WorldPlaces {
     const frame = () => new Promise<void>((r) => setTimeout(r, 16)), size = this.o.texSize;
     this.painting = (async () => {
       const set: Record<string, ReturnType<typeof generateTextureSet>> = {};
-      for (const [name, seed, half] of [['moss', 9, true], ['stone', 3], ['wood', 5], ['rock', 13], ['scree', 23], ['plaster', 41], ['thatch', 47], ['tile', 43], ['redBrick', 73], ['buffBrick', 79], ['brick', 83], ['castle', 89], ['talus', 71], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number, boolean?][]) {
-        set[name] = generateTextureSet(name, half ? size / 2 : size, seed);
+      // (What is built is painted from the seeds and at the sizes the game and the building lab paint it: `builtMaterials.ts`.)
+      for (const name of Object.keys(BUILT_SURFACES) as BuiltSurface[]) {
+        set[name] = generateTextureSet(name, builtSurfaceSize(name, size), BUILT_SURFACES[name].seed);
+        await frame();
+      }
+      for (const [name, seed] of [['rock', 13], ['scree', 23], ['talus', 71], ['bark', 29], ['barkAsh', 59], ['barkPine', 61], ['barkFir', 67]] as [Parameters<typeof generateTextureSet>[0], number][]) {
+        set[name] = generateTextureSet(name, size, seed);
         await frame();
       }
       const moss = set.moss, hour = this.o.hour;
       const lamps = lampsAt(hour);
       windowUniforms.uLit.value = lamps;
-      // (As the game makes them, `src/app/main.ts`; to be one set for both when the world and the place share one renderer, step 3.)
+      // (As the game makes them, `src/app/main.ts`: what is built by the same code, the rest as it makes them.)
       const m: Record<string, Material> = {
-        stone: makeSiteMaterial(set.stone, moss, { normalScale: 1.0, bevel: 0.02, chips: true, weather: true }),
-        floor: makeSiteMaterial(set.stone, moss, { normalScale: 1.2 }),
-        slate: makeSiteMaterial(set.stone, moss, { normalScale: 0.7, roughness: 0.8 }),
-        wood: makeSiteMaterial(set.wood, moss, { normalScale: 1.0, bevel: 0.012, chips: true, timber: true, weather: true }),
+        ...makeBuiltMaterials({ stone: set.stone, wood: set.wood, moss, plaster: set.plaster, tile: set.tile, thatch: set.thatch, redBrick: set.redBrick, buffBrick: set.buffBrick, brick: set.brick, castle: set.castle, ashlar: set.ashlar }, { weathered: true }),
         rock: makeRockMaterial(set.rock, moss),
         rockSheet: makeRockMaterial(set.rock, moss, { relief: true }),
         scree: makeSiteMaterial(set.scree, moss, { normalScale: 1.6, matt: true, fades: 'near' }),
@@ -283,23 +286,11 @@ export class WorldPlaces {
         barkFir: makeSiteMaterial(set.barkFir, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
         turf: this.o.turf,
         leaf: makeSiteMaterial(moss, moss, { normalScale: 2.4 }),
-        plaster: makeSiteMaterial(set.plaster, moss, { normalScale: 0.8, render: true, weather: true }),
-        tile: makeSiteMaterial(set.tile, moss, { normalScale: 1.3, mossScale: 3, roof: true }),
-        redBrick: makeSiteMaterial(set.redBrick, moss, { normalScale: 1.1, mossScale: 2.2, bond: 'wendish', weather: true }),
-        buffBrick: makeSiteMaterial(set.buffBrick, moss, { normalScale: 1.1, mossScale: 2.2, bond: 'wendish', weather: true }),
-        // (The brown brick of a town's classical buildings, in running bond.)
-        brick: makeSiteMaterial(set.brick, moss, { normalScale: 1.1, mossScale: 3, bond: 'running', weather: true }),
-        // (The coursed stone of a castle's walls and towers, which every valley now has.)
-        castle: makeSiteMaterial(set.castle, moss, { normalScale: 1.2, mossScale: 2.4, weather: true }),
-        metal: makeSiteMaterial(set.plaster, moss, { normalScale: 0.25, roughness: 0.5 }),
-        copper: makeSiteMaterial(set.plaster, moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
-        glass: makeSiteMaterial(set.plaster, moss, { normalScale: 0.12, roughness: 0.1 }),
         pane: makePaneMaterial(),
-        thatch: makeSiteMaterial(set.thatch, moss, { normalScale: 1.6, mossScale: 2 }),
         lamp: makePropMaterial({ color: new Color(0.95, 0.9, 0.75), roughness: 0.15, metalness: 0, emissive: new Color(1, 0.82, 0.5), emissiveIntensity: 0.4 }),
         stained: makeStainedMaterial(),
       };
-      m.window = lamps ? makeWindowMaterial() : makeSiteMaterial(set.plaster, moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+      m.window = makeWindowFor(lamps, { plaster: set.plaster, moss });
       m.paneLit = lamps ? makePaneMaterial(true) : m.pane;
       this.materials = m;
     })();

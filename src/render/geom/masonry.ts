@@ -39,6 +39,14 @@ export interface MasonryStyle {
   mortar: RGB;
   /** Texture repeats per metre. */
   uvScale: number;
+  /**
+   * Not laid block by block at all: the patch is one plain surface, cut on a lattice `maxSeg` fine (fine enough to carry baked light,
+   * and to follow a curve or the edge of an opening), its picture laid on it by the metre, so that the courses and joints are the
+   * picture's (the `ashlar` recipe in `textures.ts`), as the buildings of the towns are drawn. The way to build what is large.
+   */
+  flat?: boolean;
+  /** What a patch in this style is made of, whatever it was asked to be made of: a flat style's picture is a material of its own. */
+  material?: string;
 }
 
 export interface PatchOptions {
@@ -130,7 +138,53 @@ function axisCoords(a: number, b: number, joint: number, bevel: number, maxSeg: 
   return out;
 }
 
+/** A patch laid as one plain surface: see `flat`. */
+function layFlat(mesh: MeshBuilder, surface: Surface, opts: PatchOptions): number {
+  const { u0, u1, v0, v1, style: s, rng } = opts;
+  if (u1 - u0 < 1e-4 || v1 - v0 < 1e-4) return 0;
+  const lines = (a: number, b: number) => { const n = Math.max(1, Math.ceil((b - a) / s.maxSeg - 1e-6)); return Array.from({ length: n + 1 }, (_, k) => a + ((b - a) * k) / n); };
+  const cu = lines(u0, u1), cv = lines(v0, v1), nu = cu.length, nv = cv.length, raise = opts.raise ?? 0;
+  const lum = 1 + (rng.next() - 0.5) * s.tintVar * 0.6;
+  const holed = opts.hole ? new Uint8Array(nu * nv) : null, before = new Float32Array(nu * nv * 2), after = new Float32Array(nu * nv * 2);
+  const uv: [number, number] = [0, 0], base = mesh.vertexCount;
+  for (let j = 0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const k = j * nu + i;
+      uv[0] = cu[i]; uv[1] = cv[j];
+      if (holed && opts.hole!(uv[0], uv[1])) holed[k] = 1;
+      before[k * 2] = uv[0]; before[k * 2 + 1] = uv[1];
+      if (opts.clampUV) opts.clampUV(uv);
+      after[k * 2] = uv[0]; after[k * 2 + 1] = uv[1];
+      surface(uv[0], uv[1], P, N);
+      // (Its rim tucked behind the surface, where it is asked to be, to close the gap at a raised patch's edge.)
+      const rim = opts.skirt !== undefined && (uv[0] - u0 < 1e-5 || u1 - uv[0] < 1e-5 || uv[1] - v0 < 1e-5 || v1 - uv[1] < 1e-5);
+      P.addScaledVector(N, rim ? -opts.skirt! : raise);
+      fieldOut[0] = 0; fieldOut[1] = 0; fieldOut[2] = 0;
+      const tone = (opts.field ? opts.field(P, N, fieldOut) : 1) * lum;
+      mesh.addVertex(P.x, P.y, P.z, N.x, N.y, N.z, uv[0] * s.uvScale, uv[1] * s.uvScale, s.tint[0] * tone, s.tint[1] * tone, s.tint[2] * tone, fieldOut[0], fieldOut[1], fieldOut[2], 0);
+    }
+  }
+  // Winding to agree with the surface's normal.
+  surface((u0 + u1) / 2, (v0 + v1) / 2, P, N);
+  surface((u0 + u1) / 2 + 0.01, (v0 + v1) / 2, A, C);
+  surface((u0 + u1) / 2, (v0 + v1) / 2 + 0.01, B, C);
+  A.sub(P); B.sub(P);
+  const flip = C.crossVectors(A, B).dot(N) < 0;
+  for (let j = 0; j < nv - 1; j++) {
+    for (let i = 0; i < nu - 1; i++) {
+      if (opts.keep && !opts.keep(cu[i], cv[j], cu[i + 1], cv[j + 1])) continue;
+      const a = base + j * nu + i, b = a + 1, c = a + nu, d = c + 1;
+      const skip1 = holed !== null && acrossHole(holed, before, after, a - base, b - base, c - base);
+      const skip2 = holed !== null && acrossHole(holed, before, after, b - base, d - base, c - base);
+      if (flip) { if (!skip1) mesh.addTriangle(a, c, b); if (!skip2) mesh.addTriangle(b, c, d); }
+      else { if (!skip1) mesh.addTriangle(a, b, c); if (!skip2) mesh.addTriangle(b, d, c); }
+    }
+  }
+  return 1;
+}
+
 export function layMasonry(mesh: MeshBuilder, surface: Surface, opts: PatchOptions): number {
+  if (opts.style.flat) return layFlat(mesh, surface, opts);
   const { u0, u1, v0, v1, style: s, rng } = opts;
   const open = opts.open ?? {};
   const raise = opts.raise ?? 0;

@@ -10,5 +10,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "examples", "lab/materials.ts", "lab/specimens.ts", "lab/buildings.ts", "lab/buildingKinds.ts"]
+  "include": ["src", "examples", "lab/materials.ts", "lab/specimens.ts", "lab/buildings.ts", "lab/buildingKinds.ts", "lab/figures.ts", "lab/slope.ts"]
 }

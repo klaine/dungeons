@@ -93,9 +93,9 @@ docs/
 - **Caves.** About one site in three has a natural cave the builders broke into and walled off, with a door set in a patch of masonry. Most run on beyond the first chamber: two to five chambers of rock, sometimes forking, joined by clefts whose floors slope from one level to the next. The whole cave is carved as one body of air in one body of rock, from a single density function, so there are no joins. The first chamber is as dark as it was found. Beyond it light comes and goes: one chamber may have a hole in its roof where the hill fell in, open to the sky, with ferns at its foot and the sun on its wall; others have growths on the rock that glow, whose light is baked in. Dark and lit chambers alternate, so there is always light ahead. A cave goes down: each chamber beyond the first lies a man's height or more below the one it is reached from, and the cleft between them is a climb, its floor cut down into the floor of the higher chamber so that there is no ledge at either end. Keys are hidden at the far end.
 - **The mission.** Each site is given something to overcome. The sanctum is locked and wants a gold key, which is hidden somewhere that takes finding, by preference a dead end and sometimes a dark one. About half the time that room is itself locked with an iron lock, with the iron key elsewhere. About a third of the time one way out of the entrance hall cannot be passed at first, and becomes a shortcut once the player has gone round. It is either a door barred on its far side, or a portcullis whose lever stands just beyond it: the player can see through the bars into the room they cannot yet enter. The lever is the first thing in the game that changes somewhere else when used. Other doorways are hung with doors standing open or shut, or left as plain arches.
 - **The valley.** The player arrives at the far end of a valley some hundred and twenty metres across and eighty long, on a worn track that wanders up through woods to a meadow and the door of the house, which is built into the escarpment at the valley's head. All of it can be walked: the ground and the trunks of trees are solid, boulders lie about, and cliffs too high to climb shut the valley in on three sides, with wooded hills and three ranges of mountains beyond them, one behind another to three kilometres, each paler in the haze than the one in front. The meadow before the door and the scarp beside it are carved and baked with the house; the rest of the rim is carved from the same lattice of heights, and the floor of the valley is a sheet laid over the same height function, so all of them meet. What grows is drawn as cards: grass in tufts, thick in the meadow and thin by the track, with flowers in drifts; bushes by rocks; trees with crowns of several hundred leaf cards shaded as one rounded body; firs in drooping tiers on the higher ground; and here and there a stand in blossom. Getting on for three hundred thousand cards in all, moving in the wind. The hill above the house is its roof: mounded turf with rough grass and heather, a coping on the front wall and a stone kerb round each court and roofless room. A roaming test drives the player at the rim and the cliffs from thirty-six directions, jumping, and confirms they neither get out nor fall through.
-- **A castle's valley** (20 November 2026, asked for). Every valley is now a castle with a small village below it, and from where the player arrives at its foot up to its head: forest, then fields and a pasture with sheep, then the village, then the castle. The valley is wider (out to where the land has risen seven metres over its stream, not four) and longer (some two hundred metres from the house front). The house always stands free, as the castle's hall and keep, inside a curtain wall round a bailey, with the gate in the front wall between two towers, where the track goes out, and none, one or two towers more at the back corners; its first great room is a chapel and it always has a dungeon under it. The old tower standing alone in the valley is gone (its builder raises the castle's towers), and so are the village's keep on a promontory, the delve, the house built into the ridge, the town, hamlet and manor (`?settle=` still asks for any of them), the terraces, the grottoes and the falls, each of which raised a face of rock on the valley's side. Then the castle was set on a hill with its wall along the brow, towers of several kinds and a tall keep at the back, the road climbing to its gate and the village grown along that road; built of plain solids in a coursed stone of its own, as the house's walls now are too. Then the house was given a castle's look (a parapet and merlons over its outer walls, bartizans at its corners, a taller keep) and the village a square with a well, lanes, houses of several sizes and plots behind them. Then the castle was moved onto the land's own high ground beside the valley, at the brow over its head where the land has a seat for it, with the village up the slope under it along the road down to the stream, and the valley reckoned from there (asked on 20 November 2026). Then the castle was made larger (walls ten to twelve and a half metres, a broader bailey, taller towers and a keep of eight or nine storeys) and its village kept twenty metres off its wall, and a valley's build was brought back from 109 seconds to 58. Then the village's houses were set into the slope, each at the height of the road before its door with the land coming to its walls, and the castle's hill wooded, with trees in the village's gardens, by its square and beside its houses. Then its houses on the hillside were given half basements, with a back door onto a yard at their first storey, and cellars open behind where the land falls away. Then the village grew: twice the houses, a street across the road, a small church of stone in a walled churchyard, and sheds in the yards. Still to come: low retaining walls where a house's ground stands over the road, stairs up to the wall-walk, a chapel that shows as one from outside, the dungeon furnished as one; and then the island's house as such a castle, in place of the far landmark castle it has now.
-- **The island.** With `?place=island` the same house stands instead on the high ground of an island in the sea: sea cliffs and stacks all round, a cove with a beach and a jetty where the player arrives, a hamlet of fishermen's cottages and their boats, a lighthouse that can be climbed, often a castle on a headland and a cave in the cove's cliff, and the mainland across the water. See item 20 below.
-- **The town.** With `?place=town` the same house stands on a terrace at the head of the market square of a harbour town, on a coast between the sea and the mountains: a harbour with a quay, two moles and a light, where the player arrives; streets of classical buildings by the square and the waterfront, timber-framed and wooden houses beyond, shacks on the fringes and red storehouses along the shore; fields, woods, and an outlook on the headland. See item 37 below.
+- **A castle's valley** (20 November 2026, asked for). Every valley is now a castle with a small village below it, and from where the player arrives at its foot up to its head: forest, then fields and a pasture with sheep, then the village, then the castle. The valley is wider (out to where the land has risen seven metres over its stream, not four) and longer (some two hundred metres from the house front). The house always stands free, as the castle's hall and keep, inside a curtain wall round a bailey, with the gate in the front wall between two towers, where the track goes out, and none, one or two towers more at the back corners; its first great room is a chapel and it always has a dungeon under it. The old tower standing alone in the valley is gone (its builder raises the castle's towers), and so are the village's keep on a promontory, the delve, the house built into the ridge, the town, hamlet and manor (`?settle=` still asks for any of them), the terraces, the grottoes and the falls, each of which raised a face of rock on the valley's side. Then the castle was set on a hill with its wall along the brow, towers of several kinds and a tall keep at the back, the road climbing to its gate and the village grown along that road; built of plain solids in a coursed stone of its own, as the house's walls now are too. Then the house was given a castle's look (a parapet and merlons over its outer walls, bartizans at its corners, a taller keep) and the village a square with a well, lanes, houses of several sizes and plots behind them. Then the castle was moved onto the land's own high ground beside the valley, at the brow over its head where the land has a seat for it, with the village up the slope under it along the road down to the stream, and the valley reckoned from there (asked on 20 November 2026). Then the castle was made larger (walls ten to twelve and a half metres, a broader bailey, taller towers and a keep of eight or nine storeys) and its village kept twenty metres off its wall, and a valley's build was brought back from 109 seconds to 58. Then the village's houses were set into the slope, each at the height of the road before its door with the land coming to its walls, and the castle's hill wooded, with trees in the village's gardens, by its square and beside its houses. Then its houses on the hillside were given half basements, with a back door onto a yard at their first storey, and cellars open behind where the land falls away. Then the village grew: twice the houses, a street across the road, a small church of stone in a walled churchyard, and sheds in the yards. Then the castle (valley's and island's alike) was made less artificial: stone of courses and stones of many sizes and tones, hammer-dressed, weathered with moss, damp, splash and streaks, put-log holes, a bailey of trodden earth with lean-to ranges, a well and a stair up to the wall-walk, and a bell-cote on its chapel. Then its walls were made not to repeat: a picture of four metres, laid in patches read from different places in it and joined round the stones, with patches of tone over it and fewer put-log holes; and then the castle bent, its walls bellying and leaning a little, the line of its merlons running up and down. Still to come: low retaining walls where a house's ground stands over the road, the dungeon furnished as one. The island's house is now such a castle too, in place of the castle on a headland it had (20 November 2026).
+- **The island.** With `?place=island` the same house stands instead on the high ground of an island in the sea: sea cliffs and stacks all round, a cove with a beach and a jetty where the player arrives, a hamlet of fishermen's cottages and their boats, a lighthouse that can be climbed, a cave in the cove's cliff, and the mainland across the water. Since 20 November 2026 the house is a castle's, within its curtain wall, towers, gate and keep, as a valley's is, and the castle that often stood on a headland is gone. See item 20 below.
+- **The town.** With `?place=town` a cathedral stands on a terrace at the head of the market square of a harbour town (item 53: a nave between aisles, transepts, a choir and a shrine, west towers that are climbed to their bells and the walk round their spires, a crypt and a dungeon under it, a cloister beside it, made between one and a half and three times as high as the buildings about the square), on a coast between the sea and the mountains: a harbour with a quay, two moles and a light, where the player arrives; streets of classical buildings by the square and the waterfront, timber-framed and wooden houses beyond, shacks on the fringes and red storehouses along the shore; fields, woods, and an outlook on the headland. See item 37 below.
 - **The mountain top.** With `?place=mountain` the same house is a hospice in a saddle on a mountain top that stands out of a sea of cloud, summer or winter. See item 21 below.
 - **A secret.** About three sites in five have a chamber that no door leads to. One stretch of wall is really a door faced in stone: its courses do not quite line up with the wall's, and a thin arched outline shows if you look. It holds at two paces and gives when all but leaned on. Inside is a relic. Nothing the mission needs is ever put behind it, the map leaves the chamber off until it is found, and the end of a run says whether you found it.
 - **Storeys.** About half the houses have a room over a room, or a cellar under one, or both: a solar, loft or muniment room above, a cellar, undercroft, crypt or cold store below. Each has the outline of the room it belongs to and is reached from it by a stone stair of eighteen steps that runs up one long wall and comes through a railed well in the floor above. Nothing else opens off such a room, so it is a place to go to and come back from; the mission knows about them and hides keys there. The hill over the house is as much higher as the rooms under it need. The plan in play shows the storey the player is on; exported maps show the ground storey, with stairs drawn and what is kept on other storeys marked at them.
@@ -120,6 +120,7 @@ docs/
 - **Example viewer.** `examples/viewer/` reads an exported model and document without using any of the tool's code: it cuts the building open at a chosen height, names the rooms, and draws the solver's route through them.
 - **Gallery.** `gallery.html` generates places a dozen at a time and shows each as a plan with its description, loop count and route length. It can be asked for places with a court, a cave, a portcullis, a hidden chamber or a fallen roof, or for small or large ones. A dozen take about a fifth of a second, because only the document is generated; choosing one opens it in the explorer.
 - **Building lab.** `lab/buildings.html` is a square apart from the game where any kind of building the game builds can be added, moved, turned, scaled and reshaped by its measures or by dragging arrows on its faces, built by the game's own builders and drawn with its materials; what is set out can be undone, is kept in the browser and can be saved as site documents. See item 25 below and the README.
+- **Figure lab.** `lab/figures.html` is a stage apart from the game where figures are steered from behind or sent about by pointing: they walk, run, sprint, creep, jump, climb ledges, sit, lie down and get up, and play any of 85 clips. They are also in the building lab, added as buildings are and given orders from a palette, finding their way through doors and up stairs. They are not yet in the game or the world. See items 55 and 56 below and the README.
 - **Range.** `npm run range` generates 2,000 sites and charts what came out: loops against route length, how often each feature appears, plan shapes, and rooms and unlit rooms per site. Each seed has a size to aim for, so houses run from five rooms to eleven.
 - **Map.** A plan of the site is drawn from the same document and shown as a minimap. Out of doors it takes in the whole valley, with the track, the pond and the stones; indoors it shows the house alone. It fills in as the player explores: places entered are drawn in full, places seen through an open doorway are sketched, the rest is left off. Shut doors and keys seen but not taken are marked.
 - **Light and dark.** Each place is lit by day, by torches, or deliberately left dark; the player carries a small light for the dark ones. The plan map shades unlit rooms.
@@ -420,7 +421,783 @@ The machine this is developed on now has a graphics card, and tablets were repor
     graphics card. What stands about the house comes cut into tiles of 64 metres, cut in the worker (`tilePacked`), as the game cuts it,
     so that what is out of view is not drawn; the page puts in some six milliseconds' worth of them a frame.
 
-53. **Every kind of place in the world, drawn as the game draws** (the rest of step 2, and step 3 of item 51; asked: "ok continue with
+53. **The town's house a cathedral.** Asked: "adapt the coastal town \"house\": make it a \"cathedral\" kind of monumental building
+    complex to explore, can have towers / spires, crypt, dungeon etc. Style it properly how it will look outwards"; then, while it was
+    being built, "it should always be a higher building than the nearby town buildings by at least factor of 1.5x but can vary up to
+    3x"; and, once it was standing and turned out ten million triangles laid stone by stone, "the house doesn't need to be built out of
+    individual stones... you can use principles found in building generators and adapt or create new one". *Done* (`src/core/cathedral.ts`,
+    `src/render/cathedral.ts`; see [document 4](04-look.md), *The cathedral*, and [document 5](05-site-format.md), *Cathedrals*):
+    - *The plan*, of places as any house is, so that doors, keys, the solver, the maps and the bake all know it: the west front to the
+      square, two towers either side of a narthex that is the nave's first bay (seven in ten) or one great tower whose foot is the
+      porch, with chapels either side; a nave of four to six bays between aisles, open to them through pointed arcades springing as high
+      as the aisles' walls allow; the crossing with the transepts' arms either side; a choir of two or three bays with its own aisles;
+      and the shrine beyond, a few steps up, locked, which is the goal. On one side of the nave (in most) the cloister: its garth with
+      the walk round it, a refectory and a library by the front; off the transepts the chapter house and the sacristy. Under the choir
+      the crypt, a low hall of three vaults on two rows of columns with tombs in its side aisles, reached by stairs down from both of the
+      choir's aisles (a loop); beside it, under a transept, the dungeon, a passage with three to five cells off it; under the shrine a
+      chamber that only a secret door in the crypt's end wall leads to. The towers are climbed: from the room at the foot by a flight up
+      the outer wall to the tower's stair, which climbs round its walls (a new kind of stair, `round`) to the belfry, where the bells
+      hang in an oak frame, and a steep flight from there up through the top, a walk behind the parapet round the spire.
+    - *How high.* Once the town is laid out round the church's ground, the tallest building within 170 metres of the forecourt is
+      measured to its ridge (`buildingHeight` in `town.ts`, reckoned generously), and the nave's ridge is made between one and a half and
+      three times that, dealt (`measure` in the document); the nave, crossing, transepts and choir rise to that, the aisles to about half
+      the nave's walls, with room left for a clerestory over their roofs. Where the least a nave with aisles and a clerestory can be is
+      more than three times the town (a town of low houses), it is that least. The towers' tops stand at the ridge or up to a fifth over
+      it (a single tower a quarter), and their spires over that.
+    - *Its outside*, built by `buildCathedral`: walls traced from the outline of its places in bands of height, so that the clerestory
+      rises clear of the aisles' lean-to roofs and the towers out of everything; tall pointed windows of two to four lights with tracery,
+      coloured glass within, dark glass without; round windows where it has them, in the west front and the transepts' ends; buttresses
+      at every bay with pinnacles, and flying buttresses over the aisles; parapets along the eaves; steep roofs of lead, copper or dark
+      tiles with standing seams, gables of stone, coped, with a cross on each; the towers buttressed at the corners, stages of blind
+      lancets up their faces, louvred belfry openings, a parapet with corner pinnacles and a spire of stone (crocketed, banded, with
+      lucarnes at its foot), lead or copper, or none; over the crossing a tower with its own spire or none, or a slender flèche on the
+      ridge; and the west portal, orders of stone stepping in to the doors with a figure in the tympanum and a gable over it, blind
+      portals on the towers' fronts, and over it a gallery of figures under canopies.
+    - *Not stone by stone.* Laid as every house is, block by block, the first cathedral was ten and a half million triangles, ten times
+      a house; trying larger blocks and leaner joints brought it to eight. Now its walls, vaults, arches, floors and timber are each one
+      plain surface, cut on a lattice fine enough to carry the baked light and to follow the edges of its openings (`MasonryStyle.flat`
+      in `masonry.ts`), and the courses and joints are in the picture laid on it by the metre, a new recipe, `ashlar` (`textures.ts`): six
+      courses of 0.4 metres to a picture 2.4 metres square, each cut into three or four blocks at joints of its own, every block its own
+      tone, its face dressed, its arrises worn and chipped, joints of lime. The same rooms, built by the same code, with the same styles
+      made flat: the cathedral is now some 460,000 triangles, a third of an old house's, and meshes with its town in about 25 seconds.
+    - *Found and mended on the way:* the first number a freshly forked stream gives is much alike for seeds alike (`a`, `b`, …), so
+      that a choice made on it came out the same for nearly every seed (every roof copper); the cathedral's streams pass over their
+      first few. The town's garden kept out of the house by a distance that is never less than nothing (`outsideRect`), and so never
+      kept out of it: the old house's ground happened to refuse it, the cathedral's did not, and box hedges and flower beds grew in the
+      nave. Doors that spring higher than a man's door have leaves as high.
+    - *Checked:* `npm run typecheck`, `npm run build`; `npx tsx tools/sites.ts 48 town` (six towns, none failing; it now checks the
+      cathedral too: its ridge between 1.5 and 3 times the houses about the square, no two rooms of a storey overlapping, every flight
+      within its room and no steeper than a tread of 0.17, every stair round the walls climbing exactly to the floor over it and ending
+      on a leg of a dozen steps or more; the six came out at 1.5 to 3.0 times); `npx tsx tools/sites.ts 40 valley` (unchanged, none
+      failing); `npx tsx tools/town.ts 2` (both sound, whole towns of 4.8 and 5.5 million triangles, built in 21 and 24 seconds);
+      `PLACE=town node tools/browser/play.cjs a e` (a twin-towered and a single-towered cathedral: every doorway and every stair walked
+      both ways with the player's body, the stairs round the towers' walls to the belfries 50 and 70 metres up among them, and both
+      played to the end, down into the crypt and the dungeon for the keys and up to the shrine); photographed in headless Chromium
+      (software drawing, the light not baked) from the square, the air, the sides and the harbour, and inside the nave, the crossing,
+      the crypt, a tower's stair and a cell. The walk test first stopped on every stair round a tower's walls: its corner landings
+      had been railed on the sides the flights come onto them by; only a post stands at a landing's inner corner now. And the pictures
+      showed the clerestory open to the sky over its windows (the band tracing left a place out of a band whose top, rounded to the
+      centimetre, stood a hair over the place's own) and no buttresses along an aisle whose foot the cloister hid; both mended.
+    - *Not yet:* the light baked and frames timed on a graphics card; the cathedral built into the world on the walk page (towns are not
+      yet); people, an organ, a pulpit and a font; a portal on the transepts' ends; the towers of a single-tower front are broad and
+      plain over their lower stages; the crypt's stairs are straight flights under timber ceilings.
+
+54. **The cathedral as a place of adventure.** Asked: "ok check that it is refined and fantastic place of adventure". Judged against
+    document 1: its loops, verticality and postcard held; four things did not. *Done:*
+    - *Light.* The glass of its windows was laid with its stone, baked and casting shadow, so the bake took every window for wall and
+      the sun never came in: the nave would have been lit by two torches. The glass (dark without, coloured within) is now built with
+      the scenery (`wild`), not baked, not walked into and casting no shadow, so the day comes in at the windows and the sun falls
+      through them across the floor.
+    - *A plot that goes somewhere.* The house's mission put both keys in the dungeon every time, and the towers, the greatest thing in
+      it, were never needed. A cathedral now has its own (`core/cathedral.ts`): the shrine is locked, and of its gold key and the iron
+      key that opens the way to it, one lies at the top of a tower, on the walk round the spire, and one in a cell of the dungeon. Either
+      the iron key is up the tower and the gold behind an iron door into the dungeon, or (between two towers) the gold is up a tower
+      whose doors are locked with iron and the iron key down in the dungeon: some seventy metres up and twenty down before the shrine, 19
+      moves where the shortest way is 5. A shortcut too: the door from the narthex into the other tower is a portcullis, its lever in
+      the tower's foot, seen through the bars and reached round by the aisle; under a single tower the door from the transept into the
+      cloister is barred on the transept's side.
+    - *Dead ends that earn their keep.* Things to find, as the valley's are: on the walk round each tower's spire, in a belfry, before
+      the crypt's end wall (where the hidden chamber lies behind it), and in the dungeon's cell that holds no key. A single tower's
+      chapels each have an altar chest.
+    - *What draws the eye in the great spaces.* A corona of twelve candles hung high on a long chain in the nave, the choir and under
+      the crossing; a rood, a great cross on a beam across the choir's arch, seen from the west door down the length of the nave;
+      candlesticks in the shrine, the crypt, the chapels, the sacristy and the library. (A ring's chain had been cut off short of a
+      pointed vault's crown.) The rood is painted and gilt: of plain oak against the dark vault it could not be seen from the door.
+    - *A key on a tower's top* lies on a block of stone in the corner of the walk farthest from where the stair comes up: a chest
+      against the parapet filled the walk between it and the spire, and could be reached only by its end, a metre from the key. The
+      game's own playthrough (`playthrough` in `main.ts`) now goes round by a room's corners to what is kept in it, a lever, or the foot
+      of a stair, as a player goes round the spire, where it had walked only straight.
+    - *Found by the way, in the town:* the heaps of cargo along the quay lay three metres from its edge, and reached about 1.8 metres
+      either side of that; the way in from the harbour light runs down the middle of the apron, ten to thirteen metres broad, so on the
+      narrowest a heap's back came within a hand of it and the walker stuck there (seed `g`). A heap now keeps a metre clear of the
+      way, set nearer the quay's edge where it must, or is left out. Past the heaps the walker still stopped three metres short of
+      the square: one stretch of the way along the quay is 130 metres between its points, and the playthrough gave every point the
+      same time, which at a walk is a little under that. It now has time in proportion to the distance.
+    - *Checked:* `npm run typecheck`, `npm run build`; `npx tsx tools/sites.ts 48 town` (six towns, none failing; it now checks too that
+      the way to the shrine climbs a tower and goes down into the dungeon); `npx tsx tools/town.ts 1` (sound); the light baked in
+      headless Chromium (software drawing, eight rays, half an hour) and photographed: the sun comes in at the windows in shafts across
+      the piers and the floor, the glass glows, the corona hangs in the nave and the rood over it; the belfry dim with its bells and
+      light through the louvres; the walk round the spire with the sea below; the crypt torchlit and dark. `PLACE=town node
+      tools/browser/play.cjs a c e g k` against a build served by `npx vite preview`: every doorway walked, and all five won with
+      both keys, three with the iron key up a tower and two (`g`, `k`) with the gold up a tower whose doors the iron key from the
+      dungeon opens, in 19 to 27 moves.
+
+55. **Figures to steer and to send about.** Asked first whether a rigged humanoid under CC0 could be found "with common animations for
+    humanlike activities (walking, running, sitting, crawling, falling, climbing, sleeping, etc.) or would it be easier for you to
+    generate such?"; then that it would be "for a character or characters that the player can control / command and to experiment on
+    different things in our world", seen "third person / non-first person", and "first ... in the lab context instead of building always
+    full world based environments". *Found, not made:* Quaternius's Universal Animation Library (version 3, 2026) and his Universal
+    Animation Library 2, with his Universal Base Characters, all CC0 and on one skeleton of 65 bones. Their free versions have 85 clips
+    (the paid ones some 250, with eight-way walking, crawling and more), two mannequins and two of the six base characters. A body and
+    its rig could be made in code, as everything else here is, and walking could be; but sitting down, lying down and getting up, made by
+    hand, would be stiff where these are animated. `tools/figures.ts` makes `public/figures/` from the downloaded packs, which are not
+    kept: every clip on one skeleton, tracks that stay at rest dropped and keys that add nothing thinned (16 MB to 3, no bone moved by
+    more than 0.6 millimetres), the characters' textures brought to 1024 pixels; some 7 MB in all. *Done:* `src/figures/`. A figure is
+    carried by the game's own body (`Player`, which now takes `steer`, a speed and a heading, in place of keys, and needs no camera or
+    page); its model plays idle, walk, run and sprint (or crouched idle and walk) blended by how fast the body really goes, each gait kept
+    at the same point of its stride and played at the rate that makes its feet keep pace with the ground, at 1.3, 4.6 and 7 metres a
+    second (0.9 crouched); jumps, falls and lands (hard from over a metre and a third); sits down on a seat, lies down on a bedroll to
+    sleep, and gets up; climbs a ledge of 0.75 to 1.3 metres, by itself when sent somewhere one is in the way; and plays any clip, those
+    that carry their root along (rolls, dashes, sword strokes) moving the body so that walls stop them. Other bodies take the mannequin's
+    clips with the height of their hips scaled. `lab/figures.html` (`npm run figures`, published with the tool) has a stage of a stair,
+    ramps of fifteen and thirty-five degrees, ledges of 0.6, 1.0, 1.25 and 1.6 metres, a platform to drop from, a bench and bedrolls; the
+    chosen figure is steered from behind with the view following it, or figures are sent about by pointing; every clip can be played.
+    *Checked* (`tools/browser/figures.cjs`, headless Chromium drawing WebGL 2 in software, the figures stepped at sixty a second): the
+    three paces and creeping at their speeds; seated in 4.2 seconds, asleep in 4.6, both up again; the ledges of 1.0 and 1.25 climbed and
+    stood on at their height, the one of 1.6 not; sent onto a ledge, it climbed it; up the stair and the ramp; a hard landing off the
+    platform; the roll went 5.07 metres (its clip 4.99) and the sword combination 2.38 (2.35). Pictures of each were looked at.
+    `tools/body.ts w0` and `tools/houses.ts 10` as before the change to `Player`. *Not yet:* swimming (its clips are here, water is not);
+    ladders and crawling (not in the free clips); feet set on sloping ground (they stand level on a slope); a way found round things
+    when sent (a figure goes straight, and gives up when stopped); figures in one another's way; hair on the base characters; the figures
+    in the game and in the world; and no frame was timed on a graphics card.
+
+56. **Figures in the building lab, given orders.** Asked: "create me an artifact where the view is from upwards angle and the player can
+    select the character and give it command (point & click style) from a palette of actions", then "can we merge this with the main lab
+    with buildings and plants etc.", "so the user can add a character to the environment, like they can add a building. but if they
+    choose the character, then they can issue actions", and "could they climb boulders or stairs if commanded to move to indoors location
+    or on top of rock formation?". *Done:* the building lab adds figures as it adds buildings (`lab/figureCrew.ts`); clicking one chooses
+    it, the view turns to look down on it from some sixty degrees and follows it, and a palette of orders comes up: ways of going (walk,
+    run, sneak), resting (sit on whatever is at a seat's height, sleep where clicked), work at a place (use, chop, plant, water, reap,
+    mend, open, lift, push), talking to another figure (which turns and talks back), fighting (a figure punched is hit, one struck at
+    with a sword blocks), and clips done at once; an order that wants a place waits for a click there, and a right click walks. The
+    figures find their way (`src/figures/nav.ts`) over everything solid the lab has built (`src/figures/solids.ts`: each building, tree and
+    stone a tree of bounds in its own frame, so that moving one makes nothing again; the painted rock and plants; the paving): a grid of
+    floors of 35 centimetres in layers, every surface facing the sky with 1.7 metres over it, so that storeys, stairs and landings are
+    floors of their own, joined where a figure could step (0.55), climb (0.75 to 1.3, with room on top) or drop (3.2), and where a slab
+    between two cells meets nothing solid up to a figure's height (rays at two heights went between a stair's balusters); floors too
+    narrow to stand on (a handrail's top) left out; searched by A*, leaning on the distance left, then pulled straight over open floor;
+    most places asked for are gone to straight, without a search. A figure follows its way point by point, climbs a ledge or hops onto a
+    low one when stopped at it, and goes as near as it can where it cannot get. What figures there are is kept in the browser. The lab as
+    one page (`tools/buildingLabPage.mjs`) carries the figures in it, or writes them as text beside it for a host that serves text but not
+    models; published so as the building lab's artifact. *Checked* (`tools/browser/crew.cjs`, headless Chromium in software, figures
+    stepped thirty times a second): round the classical building to behind it, the way found in some 400 milliseconds over 13,000 cells
+    in software; in at its door and up its stair of two flights and a landing to the first floor in 22 seconds, on to the second in 12,
+    and down and out again; onto rock painted 1.6 metres high (its rounded side climbed at the second try); onto the bench before a
+    timber house, sitting; talking, and a punch; all passed. A boulder 2.5 metres high is not climbed, nor rock that is a cliff of three
+    metres: they go as near as they can. Making every building solid took 184 milliseconds in all for the lab's ten. *Not yet:* ladders;
+    ways between figures (they walk through one another); a search in the background for long ways round, which can take half a second
+    on a slow machine; what is in the hands (an axe for chopping, a sword); and the orders' clips are the free libraries', so some
+    (talking, mending) are the same whatever is clicked.
+
+57. **The building lab's buildings weathered as the game's.** Asked: "Do we have the updated materials for buildings in this lab now as
+    well?" They had not been: the game's stone, timber, plaster, tiles and brick had been weathered on 19 November (chipped arrises, rain
+    streaks, render come away, brick flaked and its mortar raked, timber faded and paint peeling), by options `main.ts` gives
+    `makeSiteMaterial`, and the lab made its materials without them; and most of the weathering is drawn only on a wall that says how
+    high the ground at its foot is, which `placeHouse` marks as it lays a house into its place, and the lab built straight into its
+    meshes. *Done:* the lab makes its buildings' materials as `main.ts` does (and slate), and lays each building in through `placeHouse`
+    (`buildItem` in `lab/buildingKinds.ts`), which also marks its rooms indoors, lit as the game lights them, dimly through the windows;
+    *weathered* under Scene, or `?chips=0`, shows them new. The cathedral's ashlar, the castle's rubble and stained glass are not in it:
+    nothing the lab builds is made of them. *Checked:* in headless Chromium the lab's brick street and timber house, weathered and new:
+    6 and 5 per cent of the picture differs between them (0.1 and 0.7 before the walls were marked); a look inside the classical
+    building; `tools/buildingLab.ts 60` as before (its one failure, a canal house with a point that is not a number when its measures
+    are pushed past their ends, is there without this change too); `tools/browser/crew.cjs` (below).
+
+58. **How worn each building is; every kind of building in the lab.** Asked: "check if it is possible to add a slider parameter for the
+    worn down level for building types that support it and that we have all \"non-house\" building types available in the lab editor".
+    *Wear:* how worn what is built is had been one number for everything (`renderUniforms.uChips`, which `?chips=0` turns off), and every
+    point of a mesh's fields already says something (moss, damp, soot, the ground at a wall's foot), so no building could say its own.
+    `makeSiteMaterial` now takes `wear`, a uniform of the material's own in its place (the game passes none, and is as it was); the lab
+    gives a building whose *Worn* has been moved its own materials, made once, and the slider moves their uniform, building nothing again:
+    0 new, 1 as the game, 2 twice as worn (the roofs' weathering held at its fullest past 1). For every kind but trees, boulders and
+    shacks, which do not weather. *Kinds:* the lab had every style `buildBuilding` makes but the two the castle's village brought, the
+    village church (`chapel`) and the shed, and not the castle; all three are added, dealt as `generate.ts` and `layOutCastle` deal them,
+    the church with its measures on the panel; the castle on open ground about a house and forecourt that are not built, its keep left
+    out (it is a valley's tower, built stone by stone with the place); their coursed stone painted when one is first set out. Not in the
+    lab, and how they would come: the cathedral, which is a town's house, rooms, crypt and all, built with its site (a town site would
+    have to be generated for it); the fishermen's cottages and the lighthouse (`coast.ts`), the town's storehouses (`town.ts`) and the
+    mountain's hospice, each built within its place's builder, which would have to give them out as builders of their own. *Checked:*
+    `tools/buildingLab.ts 60` builds the three sixty times each with their measures pushed past their ends (the canal house's one
+    failure as before); pictures of the church, the castle, and a timber house at *Worn* 0 and 2.
+
+59. **From new to derelict; the lab bound to the game.** Asked: "to be able to go from \"cgi pristine new\" to derelict", and "are these
+    linked now so that if while developing the game, i decide to adjust how the buildings are, it will reflect in the lab editor as
+    well?" *Derelict:* *Worn* now runs from 0 to 4. At 0 nothing is weathered; 1 is the game's own; past it, in `makeSiteMaterial`, a
+    second measure (`past`, 0 at 1 and 1 at 4) carries each kind of wear on where it had stopped: the render comes away over most of a
+    wall, the joints of brick are raked deep and salt comes out of them, stone chips further in from its arrises, timber goes grey and
+    rots from the foot up, paint is all but gone, roofs darken and lose tiles, cracks and rain streaks deepen, and a grime and a creep of
+    moss rise from the ground at the walls' feet. Nothing at 1 or below draws differently for it, and the game, which never goes past 1,
+    is drawn as it was. Holes in roofs, broken panes, ivy and fallen walls are not done: they are shapes, not pictures, and would be the
+    builders' to make. *Linked:* the lab had made its own materials, with the game's options copied in, and its own seeds for the
+    surfaces; a change in one would not have reached the other. Now both make them in one place, `src/render/builtMaterials.ts`
+    (`BUILT_SURFACES`, `makeBuiltMaterials`, `makeWindowFor`); the village church's measures are dealt by one function (`dealChapel` in
+    `building.ts`) for the village and the lab, drawn in the order the village always drew them (checked: five thousand seeds dealt the
+    same before and after); and the lab's buildings were already built by the game's builders (`buildBuilding`, the brick and canal
+    builders, `buildCastle`, `layOutCastle`, `placeHouse`). What is still the lab's own: its light within (a simpler copy of the game's),
+    the shed's dealing, and the ranges of each kind's measures on its panel (`lab/buildingKinds.ts`), so that a new style of building, or
+    a new measure, has to be added to the lab as well. *Mended on the way:* a canal house with a narrow front of two bays, a stepped gable
+    and no loft window had its oval window laid at minus infinity, for want of an opening in the middle to lay it over (the failure
+    `tools/buildingLab.ts` had reported since before item 57): it has no oval now. And a village church's walls, of the castle's
+    coursed stone, had never weathered, in the game or the lab: `placeHouse` marked only plaster, stone and brick with the height of
+    the ground at their foot. It marks the coursed stone too now, so that the church takes rain streaks and damp as the castle above it
+    does. *Checked:* `tools/buildingLab.ts 60`, all built;
+    `tools/houses.ts 30`; `tools/browser/houses.cjs` in a harbour town (the game, with its materials made the shared way, built it and
+    its canal houses were walked to the top); `tools/browser/crew.cjs`; pictures of the brick street, a timber house and the village
+    church at 0, 1, 2 and 4 (the first try at 4 grew moss over whole walls in patches like a soldier's coat, for its threshold stood
+    under the noise's middle; it rises from the foot now, and only here and there higher).
+
+60. **A castle's wall edited by hand.** Asked: "Can we make the castle walls shape defining path be editable? So user can move the
+    nodes and remove or add points and decide for the points parameters about the corner or possible tower etc?" *Done,* in the
+    building lab: with a castle selected and *Extrude* (or *Edit the wall* on its panel), its wall's line is drawn over its walk with a
+    knob on every corner, a + on every length and a knob on the gate. A corner is dragged to move it or clicked to choose it; a + clicked
+    adds a corner at the middle of its length, or dragged adds one where it is let go; the gate is dragged along the wall; `Delete`
+    takes the chosen corner away. The chosen corner's panel has its tower (none, round, half round, square, or a turret: a small round
+    one corbelled out at the top, the builder's `bartizan`, new to castles and not dealt by the game), its size, how far it stands over
+    the walk and its roof; and the wall's height and thickness. The edits are made to a plan of the castle (`CastlePlan` in
+    `src/core/castle.ts`: corners each with its tower, the gate as a share of one length), which `castleOfPlan` makes a castle of again,
+    each tower facing out between its two lengths and the bailey (stair, ranges, well) laid out again about the new wall from the item's
+    own seed; `soundWall` refuses a wall that crosses itself, folds back on itself or has a length under two metres. A wall may be bent in
+    on itself: which side of a length is the bailey's is now found from which way round the wall runs (`inwardOf`), and the lean-to
+    buildings' from which side is further inside, where both were found as the side towards the middle of the corners, which a notched
+    wall may have outside it. *Checked:* four hundred castles laid out as the game deals them and built, before the change and after:
+    their records and every point and normal of their meshes the same, so no castle in the game is changed. `tools/buildingLab.ts 300`
+    now edits each castle's wall at random as well (corners dragged far, added and taken away, towers of every kind with their measures
+    past their ends, the gate moved, height and thickness pushed): all three hundred built; its other failures at three hundred (a
+    classical building with a point that is not a number, trees reaching a little below what the check allows) are there on the commit
+    before this one too. In a browser, a script drags a corner, clicks and drags a +, gives a turret from the panel, takes a corner away
+    with `Delete` (the castle stays), drags the gate, is refused a wall crossing itself, undoes, and bends the wall in on itself, with no
+    error on the page.
+
+61. **A better run.** Asked: "the running animation looks super silly, make a better one". The run was the packs' jog (`Jog_Fwd_Loop`)
+    and the sprint theirs: the only running clips in either pack. Filmed from the side, a frame at every twelfth of its cycle, the jog
+    was keyed as a cartoon is: the hips sunk a fifth of a metre below standing and bobbing a quarter of a metre a step, the hands
+    swinging half a metre ahead, the knees deep, and a stride of five metres a cycle, so that at the run's pace (4.6 metres a second)
+    it went at some 110 steps a minute, a slow lope; a runner at that speed takes some 170. The sprint was the same, crouched. *Done:*
+    both are made in code on the figures' own skeleton as the clips are loaded (`src/figures/gait.ts`, `makeRun`), from how people run:
+    178 steps a minute for the run and 190 for the sprint; the foot that bears the body stays where it came down, the leg over it
+    solved for every instant so that it reaches from the hip without the foot sliding, the heel lifting as the body passes over it;
+    the hips lowest a little after the foot lands and thrown between steps as a body is, up and down (some nine centimetres in all),
+    as high as the legs allow; the free leg folding at once, the heel up under the seat, the thigh driving forward with the knee still
+    bent, and the shin reaching out only in the last fifth of the swing, through keyed curves that cannot overshoot; the pelvis turning
+    with the legs and the chest against it, the arms swinging against the legs with the elbows near a right angle, a slight lean, the
+    head level. It is built from the skeleton's rest pose, which is the same on either side, with the arms let down to hang and the
+    idle's loosely curled fingers (the idle itself stands on one leg with a foot turned out, and made the two legs unlike). Each foot
+    lands when the walk's does, so that walk, run and sprint blend in step; the stride the figure keeps its feet in step with is what
+    the made feet cover (3.10 and 4.42 metres a cycle). The packs' jog and sprint are still among the clips that can be played.
+    *Checked:* the clips as played, measured without a browser: no foot slides while it bears the body, the free foot stays 3.5 and
+    7.9 centimetres clear of the ground at least, the knee folds to 100 and 118 degrees; filmed from the side and from ahead at a walk,
+    at three metres a second (walk and run blended), at the run, between run and sprint, and at the sprint, and the base woman at the
+    run; `tools/browser/figures.cjs` (the paces, sitting, lying, climbing, dropping, the clips that carry a figure) and
+    `tools/browser/crew.cjs` pass.
+
+62. **Skiing.** Asked: "after improved run, create also animations that resemble: nordic/cross country skiing, downhill skiing, ski
+    jump, and show then me similar grids as well to see". *Done:* three clips made in code on the figures' skeleton as the run is
+    (`src/figures/skiing.ts`), with what made the run (setting the pelvis, the trunk, the arms and reaching legs, each by how it is to
+    lie in the figure's frame) drawn out into `src/figures/posing.ts` for all four (the run made through it comes out the same to the
+    last bit). `Ski_Classic_Loop`, the diagonal stride: the kick with the ski still on the snow and the heel lifting from it, the leg
+    carried up behind with the ski's tail off the snow and its tip kept on it, brought forward low to glide; the pole planted ahead as
+    the other leg kicks, pushed past the hip and let go behind; the trunk thirty degrees forward, the hips dropping before each kick.
+    `Ski_Downhill_Loop`, carved turns left and right: skis parallel, edged and turned across the slope, swung out from under a body
+    leaning into the turn, the chest kept down the hill and tilted back over the outside ski, sat low with the shins forward and the
+    hips back, rising between turns, the inside pole flicked to the snow as each turn begins. `Ski_Jump`, once through in six
+    seconds: the in-run crouch with the arms back, the take-off, the flight laid forward over the skis spread in a V with their tips
+    up, a telemark landing with the arms out, and the outrun. While one plays, the figure carries skis, and poles for the first two
+    (`src/figures/gear.ts`): laid out as the skeleton stands at rest and hung on its bones by the inverse of where each stood, so that
+    they fit every body; on the toes where the binding holds only those (cross-country, jumping), under the whole foot for downhill.
+    They come off when it does anything else. All three are played in place: in the figure lab from its clips (*Skiing*), in the
+    building lab from the orders palette (*Ski*). *Checked:* the clips as played, without a browser: no
+    foot under the snow, the legs within their reach, the free foot clear of the snow in the stride's swing and the jump's flight;
+    filmed in the figure lab at twelve (fourteen for the jump) times each, from the side and from ahead or a quarter, and on the base
+    woman; the gear on and off as the clips start and stop; `tools/browser/figures.cjs` and `tools/browser/crew.cjs` pass. Not done:
+    a figure that moves with them (travelling, the jump's arc along a hill), and skating, double poling or a tuck.
+
+63. **Jumps that go with the downhill turns.** Asked: "add animations for few different kind of downhill skiing jumps that you see
+    could be chained together with the downhill skiing (off a cliff, off a man made jump/kicker, ..?)". *Done* (`src/figures/alpine.ts`):
+    a skier's pose is now a handful of numbers (hips, pelvis, chest, head, each arm, each foot and its ski, and the whole body turned
+    about the upright or over and lifted), which can be blended and turned as a whole; the turns are made of them, the same to the last
+    bit as before. Five jumps: `Ski_Pop`, a hop off a roller, half a second in the air; `Ski_Kicker`, straight air off a built jump,
+    tucked, 1.3 seconds; `Ski_Kicker_360`, a full spin about the upright, wound up the other way on the ramp; `Ski_Backflip`, thrown
+    back, tucked, opened to land; `Ski_Cliff_Drop`, rolled off an edge, laid forward over the skis with the arms reaching ahead and the
+    eyes on the landing, taken low. Each begins and ends in the turns' pose where one turn gives way to the next, so that it goes between
+    turns: asked for while the figure is turning, a jump waits for the end of the turn (`Figure.play`), the turns go on after it
+    (`AFTER`), and `Figure.chain` plays a run of them with a turn between each (*Run with jumps* in both labs). The air is a thrown body's
+    (up and down in the time it is off the snow). All are in place but the cliff drop, which carries the figure forward three metres a
+    second: on level ground it is a small hop, but played near an edge the body goes over and falls under its own weight, the clip held
+    in its hang until the body meets the ground, then on into the landing (`DROPS`). *Checked:* the clips as played, without a browser:
+    no foot or ski under the snow on it, the legs within reach, the skis' ends clear of the snow in the air (a cliff drop's tails had
+    gone a centimetre in, and were levelled sooner); filmed from the side and a quarter; the cliff drop filmed going over the figure
+    lab's platform, 1.5 metres, and landing below; a chained run logged, each jump beginning at the end of a turn, a turn between each,
+    the turns after; a kicker asked for in the middle of a turn waiting for its end; `tools/browser/figures.cjs` and `crew.cjs` pass.
+
+64. **A downhill run, shown on a slope.** Asked: "can the downhill animation be used to visualize long wide turns tightening to short
+    turns and opening up to straight lining and to tuck it and then braking speed down and continuing downhill again? can you create me
+    a separate artifact showing this". *Done:* yes. The turns' pose was split so that it takes what the skier is doing rather than
+    where in a loop it is (`carvePose`; the loop made through it the same to the last bit), and `makeDownhillRun` drives it for 44
+    seconds from a timetable (`RUN_KEYS`): how long a pair of turns takes (4.4 seconds down to 1.3), how far the skis swing across the
+    slope (42 degrees down to 20, then none), how fast (5 to 19 metres a second), when it tucks and when it brakes. The turns' rhythm is a
+    phase run at their pace, so that they tighten without a jump; the lean into each is what speed and the turning ask
+    (`atan(speed × turning / g)`); the pole is flicked as each turn begins while there are turns; the tuck crouches with the forearms
+    level, the fists ahead of the chin and the poles back under the arms; braking throws the skis 78 degrees across the slope on their
+    uphill edges with the upper body still down it, the feet pushed ahead and the body low and back, sliding on down the slope while it
+    slows from 19 to under 3. It also gives where the skier is on the slope at every frame, its skis' heading and how far they slide
+    sideways. `lab/slope.html` shows it: a slope of sixteen degrees with firs and piste poles, the skier going down it, its skis' tracks
+    laid in the snow (thin and dark where carved, a broad pale band where it skids, snow thrown up as it brakes), views from behind,
+    beside, above and free, a timeline of its parts to drag along, and slower speeds; `tools/buildingLabPage.mjs` now makes any lab page
+    one page (`--page`, `--only`). *Checked:* the run's course without a browser: 431 metres, the wide turns some five metres either side,
+    the short ones under one, no foot in the snow, the legs within reach; the page in headless Chromium and the page built for an
+    artifact served as one, with pictures of each part from the views that show it (the tracks from above: wide, tightening, short);
+    the tuck's poles first pointed ahead out of the fists, and were turned back under the arms.
+
+65. **The run ridden: turning and tucking together, by the pointer.** Asked: "can the turning and tucking combine? lets add touch/mouse
+    control to the slope lab page for user to control the skier. push forward means more tucked position, closer to screen bottom end
+    more relaxed position, sideways controls turns". *Done:* yes, they combine: the skier's pose takes how far it is into a tuck, into
+    standing tall, into braking and how far it leans into a turn as amounts, mixed freely (`riderPose` in `src/figures/alpine.ts`, which
+    the made run now uses too, the same to the last bit), and a `Rider` poses its own copy of the mannequin from them live, frame by
+    frame. On `lab/slope.html`, *Ride* (or `R`) hands it over from wherever the run had got to: where the pointer is against the middle
+    of the picture, within a ring drawn there, asks for a tuck (up), standing tall (down) and a turn (aside), eased; by mouse wherever it
+    is, by touch where a finger is held, and by the arrow keys; *Brake* (held) or Shift throws the skis across. The skier goes as the
+    slope and its stance let it: its weight down the slope as much as its skis point down it, the snow's friction, the air's drag (some
+    65 km/h in its plain stance, 87 tucked, 51 standing tall, on sixteen degrees), a little lost to turning, much to braking; it turns
+    quicker the faster it goes (some twenty metres across at speed, pushed all the way) and wider tucked, and leans into each turn as
+    speed and turning ask, flicking the inside pole as each begins. The slope and its woods are moved along under it so that it goes on,
+    the skier is kept between the piste poles, and its tracks are laid as it goes. *Checked:* in headless Chromium, through the page's
+    own hooks: the speeds above, a tucked turn to the right and then the left leaning each way, braking from 56 km/h to 14 in 2.5 seconds;
+    the mouse moved up and to the left of the middle asking a tuck while leaning left; pictures from behind, beside and above. The posing
+    had reckoned in the world's frame, which was the figure's own only while it stood in nothing, and the ridden skier at first was posed
+    hundreds of metres from where it stood: it is now taken out of what holds it while it is posed. Then reported: "the beside and above
+    views lag behind the skier / the skier is ahead of the frame". The view had been eased whole towards where it should be, twice
+    over (the point it followed, then the eye), and an eased follower trails a moving thing by its speed over the easing's rate: some
+    twelve metres at speed. It now keeps pace with the skier exactly and eases only its offset from it (how far across the slope it
+    follows, which way it looks along, the change between views); and from above it looks five metres behind the skier, not nine.
+    Measured where the skier's hips fall in the picture, the page's frames stepped at sixty a second: from beside, -0.31 across riding
+    tucked at speed before, the middle after; from above, 0.83 up the picture watching and 1.32 (out of it) riding before, 0.34 after.
+66. **Kickers on the ridden slope, the trick chosen by the stance, and a bad landing gone limp.** Asked: "can we add jumps/kickers to
+    the course? riding them in tucked position causes ski jump animation (but here with poles of course), middle is regular kicker
+    jump, tall standing is a backflip? if there is turning, it can mix in spin? landing badly activates ragdoll physics and player can
+    restart run". *Done:* ridden, the slope has a kicker every 130 metres, each at its own place across the piste: a ramp of seven
+    metres curving up to a lip a metre and a half high and some twenty degrees over the slope, a steep back behind it, its sides
+    sloping, the lip dyed blue and flagged; the snow's height and slope there are what the skier rides on (crouching more as the ramp
+    steepens, slowed by climbing it). It leaves the snow wherever the snow falls away faster than its weight can bring it down after
+    it, and is thrown as any body is, in the slope's own frame. What it does in the air is chosen as it leaves, from what it was
+    doing: tucked, a ski jumper's flight (laid forward over its skis, which are held level under it and spread at their tips, the
+    poles trailing back from hands held along its sides); between, a kicker's straight air, the knees drawn up and the arms forward
+    and out; standing tall, a backflip, the arms and head thrown back to start it; turning as well, a spin with any of these, 360
+    turning, 720 turning hard, the arms in close (`airPose`, `AirControls` in `src/figures/alpine.ts`). The turns go at a little over a
+    turn a second, quicker drawn tight (pointing up) and slower opened out (pointing down), easing in at the take-off and as they come
+    round, never past their end; the skier opens up to land in the last 0.4 seconds, which slows what is left of a turn. Landed within
+    55 degrees of a flip's end and 75 of a spin's, and not harder than 12.5 m/s into the snow, it takes the landing in its legs, comes
+    out of what was left of the turn in a quarter of a second, and the landing is named with how far and how long it was. Otherwise it
+    goes limp (`src/figures/ragdoll.ts`): its joints and its skis' tips and tails become points held at the lengths of its bones, the
+    trunk braced nearly stiff, the boots and skis stiff with the shins, elbows and knees free but never folded flat, going on from the
+    last two steps' positions so that it carries on turning as it was; it falls, tumbles and slides on the snow with friction until
+    it is still, its skeleton put through the points (`Poser.poseJoints`: pelvis and chest turned as the frames of their joints, the
+    spine shared out between, limbs aimed bone by bone and turned no more than they must be from the bone above, each foot by its
+    ankle, ball and knee). *Restart run* (or Enter) begins again at the top. *Checked:* in headless Chromium through the page's hooks,
+    from 30 metres before the first kicker: neutral at 57 km/h, straight air of 22 metres and 1.4 seconds; tucked at 68, a flight of
+    29 metres; tucked at 86, 43 metres; tall at 49, a backflip that falls short held tall all the way, comes round let go or tucked;
+    tall at 36 km/h and tucked in the air, a backflip of 11 metres; a little turn, a 360, which comes round even opened out; a hard
+    turn, a 720, which comes round tucked and falls short let go; tall and turning, a backflip 360. The fallen body first leapt
+    thirteen metres into the air: a ski's tip had gone half a metre into the snow at the landing, and pushed out in one step it
+    yanked the rest after it; the body is now lifted out of the snow as a whole before it starts, and slides some 25 metres and is
+    still within five seconds. Ridden in real time by the arrow keys: Down into a kicker, a backflip, short, limp; Enter, the top again;
+    Watch and Ride again with no fault. Pictures of each trick from beside and behind, and of the fall.
+67. **Skidded turns at the ends of the range.** Asked: "also extreme control range ends with right and/or left turns should make the
+    turns skidded instead of carved". *Done:* on the ridden slope, a turn asked for past 0.72 of the way to either side of the ring is
+    skidded, wholly so at its end (eased in over a fifth of a second): the skis pivoted across the way the skier goes, into the turn,
+    by up to 38 degrees, so that their tails slide out; the turn comes round up to 1.6 times as quick as a carve at the same speed,
+    leant less (four tenths) and on flatter edges; the sideways slide scrubs speed (6 m/s² times the sine of the pivot); its track is
+    the broad pale band of a skid and snow is thrown out the way the skis slide, to the outside of the turn. The skier sits a little
+    lower and back, its feet pushed ahead to drive the tails round and its arms out (`skid` in `RideControls`, `riderPose`). The ring
+    shades its sides past 0.72 and marks them *Skid*; an arrow key asks 0.62 of the range at once and, held on past a third of a
+    second, pushes out to its end within another second. *Checked:* in headless Chromium through the page's hooks, from 54 km/h
+    heading across to the left and turned to the right through sixty degrees: at 0.5 of the range, carved, 1.9 seconds and 27 metres,
+    coming out at 56; at 0.72, carved, 1.4 seconds and 20 metres, at 55; at 0.85, half skidded, 1.0 seconds and 14 metres, at 51; at
+    the end, skidded, 0.8 seconds and 11 metres, at 48. Six full skids of 1.1 seconds each, each coming round past a hundred degrees,
+    brought it to a stop, as skidding is meant to. An arrow held: no skid for the first 0.8 seconds by the page's clock, wholly
+    skidded by 1.8. The watched run is the same to the last bit. Pictures from above and behind of carved and skidded turns.
+68. **A skiing horse, with a rider or without, on two long skis or four short.** Asked: "a rigged horse model; fantasy/imaginary way
+    for the horse have skis, two bindings per ski - left and right ski (or as an option for horse skiing: four short skis!); same
+    skiing actions, tricks and animations adapted for this skiing horse; with a rider on back or just the horse skiing option", and,
+    for later: "all this is heading towards making this possible in the world game winter mountains and hills. no need to do that
+    now". *Done:* Quaternius's free animal pack (CC0) has a rigged horse, but its files are kept on Google Drive, which this machine
+    cannot reach, and itch.io turned the requests away; so the horse is made in code (`src/figures/horse.ts`), as the figures'
+    mannequin is, a wooden horse in its gold with violet joints and a violet crest and tail tuft: a skeleton of hips, spine, chest,
+    two bones of neck, head, ears, three of tail and each leg's upper and middle bones, cannon, pastern and hoof, every bone resting
+    unturned, and a mesh of rounded solids skinned to it, the barrel and the neck bending smoothly between their bones; 1.55 metres at
+    the withers. Its skis: a long ski under each side, 2.75 metres, the fore and hind hooves bound 1.1 metres apart on it; or a short
+    ski of a metre under each hoof. It is posed by a handful of numbers (`HorsePose`): the body over its skis, turned, leant and
+    pitched about its middle, the back arched, the neck raised or lowered and turned, the head flexed, the ears laid back, the tail
+    raised; each ski placed, turned, pitched and edged; the whole spun, flipped and lifted. Its legs are found from the skis up: the
+    hoof bound, the pastern and the cannon standing on it as the binding holds them (the knee coming forward and the hock back as the
+    leg is gathered), the upper bones reaching from shoulder or hip to the top of the cannon with the elbow bending back and the
+    stifle forward. `horseRidePose` takes what a skier's pose takes: carving leant in over skis swung out, lower in the turn, its head
+    turned into it, a nod where a skier flicks a pole; the tuck low, the neck stretched out level ahead as a racehorse's, the ears
+    back, the tail streaming; standing tall, the head up and drawn in; braking, a reining horse's sliding stop, sat down on its hocks;
+    a skid some of that; sunk into a landing. `horseAirPose`: straight air a show jumper's (named so), the skis drawn up under it, the
+    neck arched down; a flight stretched out along its skis, not laid forward over them as a ski jumper is (a horse is level already,
+    and laid forward it dived), its skis spread at their tips and, on four, the fore pushed forward and the hind back; the backflip's
+    throw, the head flung up; gathered in for a spin. Every pose was measured for how far each leg had to stretch to its ski, and the
+    carve, the stop and the flight eased until none goes past 0.95 of its length (the fore legs stand at 0.84 at rest). A rider sits
+    astride in the saddle, a frame that moves with the spine (`saddlePose`, another mannequin with poles of 2.3 metres to reach the
+    snow): leant into the turn and flicking its poles, a jockey's crouch in the tuck, laid along the neck in a flight, arms flung up
+    for a backflip. A body gone limp is now any body's points and links (`BodySpec` in `ragdoll.ts`): the horse's barrel braced stiff,
+    its neck, tail and legs in their bones, each ski stiff with the hooves bound to it; with a rider, two bodies, the rider thrown on
+    from the horse a little faster and higher. On `lab/slope.html`, *Skier* chooses a person, a horse or a horse and rider, and *Skis*
+    two long or four short; the page holds a skier as a thing to be posed for the ride, the air and the watched run (a horse posed
+    live from the run, whose samples now keep the lean and the pole flicks), with as many tracks as it has skis; trick names and
+    *Sliding stop* fit the horse. `lab/slope.ts` was not in the typecheck's list, and now is. *Checked:* without a browser, every
+    pose's leg reach on both kinds of skis; in headless Chromium, the horse alone and with its rider in the watched run's turns, tuck
+    and stop, from beside and behind; off the first kicker, a show jump, a flight, a backflip and a 360, with and without the rider;
+    the run of kicker trials as the person's, with a horse and rider on four skis, every landing and fall the same as the person's
+    (the physics is the same), the two bodies settling apart within eleven seconds; the person's trials and skids after the change,
+    the same to the number; the page's own buttons at desktop and phone size with no fault. Not done: the horse in the world's winter
+    mountains, as said, for later; a horse that walks, trots or gallops off its skis.
+69. **The horse on its own hooves: standing, walking, trotting, cantering, galloping.** Asked: "ok continue with crucial missing
+    things like horse regular movement and then push to default". *Done:* `src/figures/steed.ts`, the skiing horse of `horse.ts`
+    off its skis, its pose now taking where each hoof stands (`HorsePose.hooves`: its sole's place and how far its toe is tipped), the
+    skis then not worn; on the ground the fetlock gives so that the cannon lies along the leg's line from the hoof to the shoulder or
+    the hip, and folded in a stride the hoof's tip sets it. Each gait by how a horse's legs go in it, the order the hooves come down in
+    and how much of a stride each is down: the walk's four beats, left hind, left fore, right hind, right fore, each down 62 per cent of
+    the stride; the trot's two, the diagonal pairs together, 40; the canter's three on the right lead, 27, then all in the air; the
+    gallop's four, 22. A hoof down stays where it came down while the body goes on over it (its stretch on the ground no longer than
+    0.95, which these legs can sweep); in the air it is lifted and brought forward, its toe tipped down as the leg folds, a fore hoof
+    carried high (folded nearly square, its cannon lies forward from the hoof, and carried any lower the shoulder could not reach the
+    knee). The stride quickens a little with speed within a gait; the gait follows the speed, changing up at 2.6, 5 and 9 m/s and down
+    at 2.2, 4.4 and 8.2, faded across in a third of a second. The body rises and falls with each beat, rocks fore and aft in the canter
+    and the gallop, leans into turns; the head nods; the neck stretches out lower, the ears go back and the tail streams the faster it
+    goes. Standing, it breathes, swishes its tail now and then, moves its head and ears and rests a hind leg on its toe. It gains speed
+    at 2.6 m/s² and loses it at 4.5, turns quickly at a walk and widely at a gallop, slows almost to a stop to come round, and coming in
+    to where it was sent slows through the gaits. Each hoof stands where the ground is under it and the body is carried at their middle,
+    pitched as the ground under its fore and hind hooves lies; the ground ahead is looked at every 0.2 metres as far as a stride or the
+    place it is going (closer than a stair's treads, so that no two steps read as one high one), and a rise of more than 0.4 from one
+    look to the next, a drop of more than 0.6 or a slope steeper than 32 degrees stops it; it turns where it stands, and gives up a
+    place it was sent to when the way straight there stays shut. A rider (`saddlePose`'s reins and rising) holds the reins, sits the
+    walk and the canter, rises to the trot on one beat of two, crouches out of the saddle at the gallop. In the figure lab it is
+    steered as a figure is, `Shift` gathering it from a trot into a canter and a gallop; sent by pointing at a walk, a canter or a
+    gallop; `E` puts up or takes down a rider; *Figures* adds a horse or a horse and rider. *Checked:* every gait's legs over a
+    stride, at first up to a third past their length (the stride swept too far, the cannon stood upright on a flat hoof, the folded
+    fore hoof was carried too low), now no more than 7 per cent for a moment, a hoof a few centimetres short; filmed from the side
+    through every gait, with its rider; `tools/browser/figures.cjs`, which now checks the horse too: each gait at its speed, its legs'
+    reach, up the ramp at a canter, down it, up the stair, and stopped before the ledge of 1.6. That last first failed: the ground
+    ahead was looked for from just over the horse's own level, and from inside the block of the ledge the look found the floor under
+    it, so the horse walked half into the stone; it is now looked for from well over its head. The stair first stopped it too: looked
+    at every 0.3, the treads' own depth, two steps could fall between two looks and read as one step of 0.34. Not done: a way found
+    round what is in its way (it walks straight); the figures are not in its way at all (it walks through them, and they through
+    it); a horse in the world.
+70. **A horse that looks a horse, and an adventurer to ride it and ski.** Asked: "now improve the skins/visuals for the horse and
+    rider/skier: horse, a realistic horse; human skier/rider: a medieval fantasy adventurer type". *Done:* the horse's look is made
+    anew on the same skeleton (`src/figures/horseBody.ts`), so that everything it did it still does: surfaces lofted through a
+    horse's cross-sections, each section's breadth and its depth above and below its middle given along the body (the trunk from the
+    point of the buttock over the croup and the barrel, deep at the girth and tucked up at the flank, to the breast; the neck from
+    inside the chest past the withers to the poll, crested; the head broad at the cheeks and the forehead, its jaw deep, narrowing down
+    the face to a muzzle; each leg from inside the shoulder or the haunch over the forearm or the gaskin, the knee or the hock, the
+    cannon with its tendons behind, the fetlock, the pastern and the hoof), every point shared between the bones either side of where
+    it lies, blended across the joints; ears as leaves; glossy dark eyes set in the head's sides; dark nostrils; the mane, the tail
+    and the hair of the tail as strands laid from the crest and the dock and given to the neck's and the tail's bones. Its coat a bay's:
+    red brown, darker along the back and the crest, black from the knees and the hocks down, black mane and tail, a dark muzzle, a
+    soft white star. Ridden, it wears a mediaeval saddle with a high pommel and cantle on a blue cloth bordered in gold, a girth,
+    stirrups, and a bridle with its bit; the reins are drawn each frame from the bit's rings to the rider's hands (`setReins`). First
+    looks: the shoulders and thighs of the legs' lofts stood out of the trunk in creases (now kept inside it), the ears were spikes,
+    the muzzle was too thin, the eyes sat on the head like beads, a forelock of flat strands lay on the forehead like a patch (taken
+    off), the mane fell on the side no view sees. The adventurer (`src/figures/outfit.ts`): a ranger's clothes on any body on the
+    figures' skeleton, made from the body itself, each garment a copy of the body's skin where it covers (by the bone that moves each
+    point most, and by where it is), lifted off along its normal by the garment's thickness, so that it bends bone for bone as the
+    body does: a quilted green gambeson skirted over the hips, grey wool hose, tall boots with turned cuffs, gloves, leather bracers, a
+    russet hood open at the face and pointed behind, and a mantle over the shoulders, longer behind. The base bodies are made for
+    heroes, every muscle in their skin, and cloth copied off them showed pecs: each garment is smoothed after it is lifted, its edge
+    left where it was lifted to (smoothed too, it drew in and opened gaps between garments); the body is no longer drawn where its
+    clothes cover it, which it showed through where the smoothing drew a garment inside its swells; cloth is drawn from both sides.
+    A short cloak hangs down the back, a belt is laid round the waist as broad as the body is there every way round, with its buckle,
+    a pouch at the right hip and a sword in its scabbard at the left: each made as a solid in the body's frame and given to the bones
+    it hangs from. The face's opening in the hood is sized by the head's own height (the woman's hood first closed over her eyes).
+    `BODIES` has *Adventurer* and *Adventurer, woman* (the base man and woman dressed), dressed once when first asked for (`source`
+    in `library.ts`); the slope's skier and the horse's rider on the slope and in the figure lab are adventurers. *Checked:* pictures
+    of the adventurer from four sides standing and walking, of both faces under their hoods, of the horse from the side, three
+    quarters, before, behind and at its head, through its four gaits, ridden and skiing; the kicker trials as before, with the person
+    and with the horse and rider (the same landings and falls); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+71. **The horse's quarters and the joins of its legs.** Asked: "improve horse skeleton and skin further - the butt and how legs
+    attach to horse body look weird". Looked at from the side, behind, below and in its gaits: the quarters ended in a ball over thin
+    legs with nothing behind them (no hamstring, the thigh a tube from the hip to the stifle), the forearms came straight out from
+    under the chest, the trunk was a sausage; where a lofted leg met the lofted trunk the two surfaces only crossed. *Done:* the
+    skeleton has a shoulder blade over each foreleg (`f_sc`, under the chest from beneath the withers to the point of the shoulder),
+    which swings with the leg a third as far as the leg reaches from where it rests, carrying the point of the shoulder (and so the
+    fore legs' reach: the worst stretch over a stride is now 1.04 of their length, from 1.07). The body is one solid
+    (`src/figures/horseSculpt.ts`), carved as rock is, by marching cubes every two centimetres over a function that says how far
+    outside it any point is: the smooth union of rounded masses (ellipsoids, by Quilez's near distance), each named for what it is on a
+    horse: the barrel, the ribcage, the breast, the withers, the loin, the croup and the points of the buttocks; each quarter and thigh
+    from the croup over the stifle and down the hamstring into the gaskin and the hock; each shoulder, upper arm, point of the elbow and
+    forearm; the neck as many masses along a smooth line with a crest along its top. Masses meet blended over a few centimetres. Each
+    point of the surface takes the bones of the masses it lies on, the nearer a mass the larger its share; a mass spanning a joint
+    shares its bones along it (the thigh the hips above, the femur, the tibia below; the upper arm the shoulder blade, giving way to
+    the upper arm only near the elbow, since moved with the arm it had dragged the skin under the chest back in a sag at the gallop).
+    The head and the legs from the knees and hocks down stay lofted, overlapping the solid; the mane's roots and the tack are laid on
+    the solid's surface, felt for along rays from inside it. First looks and what was done about them: too stout (the blends add
+    volume where masses meet; the masses trimmed and blended over less), the neck beaded (few masses; now many, overlapping), the
+    stifle and hock knobbly, a pot belly at the girth and the breast hanging below the chest (raised), the mane grey (thin strands seen
+    edge on catch the sky's sheen however matt: hair is now drawn without any). Made once and shared by every horse: 0.36 seconds for
+    the first, 27,000 points and 52,000 triangles in all, its points no longer unshared before merging (they had been, 158,000).
+    *Checked:* pictures from the side, three quarters behind, behind, below, three quarters before, at the gallop and the trot, before
+    and after; ridden, and on the slope skiing, braking and fallen; leg reach through every gait and ski pose; the kicker trials with a
+    horse and rider on four skis, the same landings and falls; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+72. **The quarters, again.** Reported: "the butt is still too outward extending lump". Measured rather than judged from pictures:
+    how far back the body reaches at each height and how wide its quarters are. The rear's line was right in shape, the points of the
+    buttocks 5 centimetres behind the root of the tail, but it reached 0.89 metres back, a quarter of a metre behind the hind legs,
+    where a horse's point of the buttock stands about over the point of the hock; and the quarters were widest low (half-widths of
+    0.29 to 0.30 at 0.85 to 1 metre up, against 0.26 at the hips) and wide down to the hock: seen from behind a pear, seen from behind
+    and aside a ball hanging over the legs. *Done:* the buttocks smaller and forward, the croup shorter; the one mass of the thigh
+    split into a broad haunch high and a narrower lower thigh that slims into the gaskin; small points of the hips, so the quarters
+    are widest there; a slimmer hamstring and gaskin; and in the skeleton the stifle brought in from 0.24 to 0.21 out from the
+    middle and the hock from 0.17 to 0.16, so that the leg hangs under the quarter rather than bowing out of it. The rear now reaches
+    0.815 back (the point of the hock, 0.75), falling nearly straight from 1.4 metres to the hamstring; the quarters are 0.25 to 0.26
+    wide from the hips to the stifle and narrow to 0.21 at the hock. *Checked:* pictures from the side, behind and behind aside, before
+    and after; the legs' reach through every gait and ski pose; `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+73. **The forelegs further forward.** Asked: "the front legs should probably join the torse a bit more forward?" They had come out
+    from under the girth: the front of the forearm stood 0.50 metres ahead of the horse's middle, and the breast reached a quarter of
+    a metre and more before it, where a horse's points of the shoulder are the front of its body at that height and its forearms
+    come down just behind them. *Done:* the fore leg moved forward in the skeleton, the point of the shoulder from 0.62 to 0.73 (the
+    shoulder blade so laid back about 46 degrees, as a horse's is), the elbow from 0.40 to 0.53, the knee from 0.44 to 0.59 and the
+    hoof from 0.53 to 0.66, the forearm still straight down; the breast a little smaller and further back. The front of the forearm now
+    stands at 0.63 to 0.64, the breast 0.10 to 0.15 before it, and the points of the shoulder are flush with the breast. The hooves'
+    places at rest are now named (`FORE_AT`, `HIND_AT` in `horse.ts`): a long ski's middle is between its two bindings, not under the
+    horse's middle, and it is 2.88 metres long, so as to reach as far before the fore hoof and behind the hind as it did; the fore
+    hooves' strides centred a little less far forward of their rest, and the flight off a kicker a little lower and its four skis less
+    spread, so that no leg reaches further than it did. *Checked:* pictures from the side, close by the shoulder, three quarters
+    before, at the walk and the gallop, before and after; the profile measured at every height; the legs' reach through every gait
+    and ski pose (at most 1.06 of a leg's length at the canter, against 1.04); `tools/browser/figures.cjs` and `crew.cjs`, all passed.
+
+74. **A run down the world, in winter.** Asked: "now lets make this have a 100m wide nearland slice of our actual winter gameworld
+    starting on high slopes at suitable location, no buildings or locations". *Found* (`src/core/skiRun.ts`, `tools/skiRun.ts`):
+    the world's range is mostly walls; at 200 to 500 metres seven tenths or more of it is steeper than 36 degrees over sixteen
+    metres, its glens floored flat, its tops rounded but narrow. Lines let fall from the tops plunged 70 to 80 metres every forty;
+    lines that would not fall more steeply than could be skied went across the faces, and a slice about one tilted 60 degrees across
+    its breadth. So the land is first marked where a band a hundred metres broad can be skied (four fifths of the land within fifty
+    metres no steeper than 38 degrees, none of it water), and lines are let go only through that: a step at a time, looking forty
+    metres ahead in each way they could turn (no tighter than a curve of 110 metres), going the way that falls most steeply short of
+    too steep, keeps most inside the marked land and keeps the land most nearly level across it, away from places, villages and
+    roads. In `w2` that land starts at the range's foot; the run kept comes down from 319 metres below The Pale Crown across the
+    upland to the shore of a bay at 19, 1.37 kilometres, falling 300 metres, twelve degrees on the whole and thirty at most over forty
+    metres. Its slice (`src/core/skiSlice.ts`, `public/slopes/w2.json`, 1.3 MB): the world's near land at a metre made as the walk
+    page makes it (`makeSquare`, with no place, way or house in it), smoothed over a few metres and lifted thirty centimetres as snow,
+    fifty metres either side of the line, passing over its last six metres to the land about it at four metres (some 250 metres out),
+    which passes over its last sixty to the country at sixteen metres (three kilometres out, from the world's tiles and lattice,
+    mirrored past its edges); the sea at its surface and the lakes at theirs; and what lies on the country. *Done* (`lab/slope.ts`,
+    `lab/slopeLand.ts`): the page skis a land, of which the groomed plane is now one: everything that moves is worked out in the
+    world's terms, where the skier is east, south and up, pulled by its weight as much as the snow under it falls the way it goes,
+    rising as the snow rose over its last step and thrown off whatever falls away faster than its weight can follow (a kicker's lip,
+    a knoll taken fast), landing on the land as it lies, its blow how fast it comes into the snow there; its way and facing kept against
+    the run's own way as the run bends under it; the views kept above the snow behind and beside it; a body gone limp tumbling on it.
+    The run's line serves only for its edges, the views, the watched run (laid along it) and where kickers stand: four on `w2`'s run,
+    each where the land after its lip falls at least thirteen degrees over twenty-six metres. Drawn: the snow at a metre groomed, its
+    corduroy along the run, poles every 25 metres; the land and the country under snow, bare rock where steeper than some forty
+    degrees, the lakes frozen, the sea open; 5,400 snowy firs about the run and 21,200 further out where the world has woods; some
+    1.1 million triangles, made in under a second. *Slope* chooses it or the groomed slope (`?land=groomed`, `#groomed`). *Checked*
+    (headless, drawing in software): the page ready in five seconds; ridden straight from the top at 75 to 91 km/h down the upper half,
+    slower over a flatter stretch near 600 metres, braking to a stop at the foot after 110 seconds; at a kicker, straight air of 16
+    metres in a second, ski-jump flights of 21 to 25, backflips (held tall all the way, short and fallen), 360s, a 360 with a backflip
+    short and fallen; a horse and rider on four skis the same at a kicker on a flatter stretch; on the groomed slope the kicker trials
+    as before (straight air 14 metres in a second, a flight 19, a 720 21 in 1.4 seconds); switching between the two while riding.
+75. **Down a crest from the summit.** Asked: "you can scale down a bit the part above 300m elevation if it helps? also riding down
+    along a mountain ridge/crest could be cool! it doesnt need to be 100m skiable, part of it has only visual purpose lets se 20m
+    minimum is plenty wide skiable path, 100m wide "nearland" as accurate near terrain is for visual purposes". *Done*
+    (`src/core/skiRun.ts`, `lab/slopeLand.ts`, `lab/slope.ts`): the land is marked where a path twenty metres broad can be skied
+    (three quarters of the land within eight metres no steeper than 36 degrees over sixteen), and lines are let go through it,
+    preferring ways along a crest (the land forty metres either side lower) and keeping the land across the path, ten metres either
+    way, within 22 degrees of level; come to a corner where nothing within the tightest curve goes on (a spur's end turning into a
+    glen), a line may turn up to an eighth of the way round. The slice's land above 300 metres is brought to half its height over
+    that (`RUN.squash`): with it at two thirds, the runs still started at the range's foot, under 470 metres; at a half, one starts
+    at 832 metres in the world's terms, beside `w2`'s highest summit, The Silent Warden (846), and comes down the crest of a spur
+    into the glen above Weneford at 209: 1.02 kilometres, falling 360 metres of the slice's land, nineteen degrees on the whole and
+    thirty at most over forty metres, about a third of it along a crest. The run kept is the one that starts highest (worth twice
+    its drop), then falls furthest, the longest and most along a crest. The slice keeps its path's edges (`piste`): out from the
+    line as far as the snow is skiable, each edge kept to the narrowest it comes within sixteen metres and smoothed over thirty-two,
+    never nearer than ten metres: 24 metres broad at the narrowest of the crest, some eighty where the land allows. The page keeps
+    the skier on the path, turning it back near the edges (the nearer, the narrower the path), the kickers on it, the watched run in
+    it (drawn in where the path is narrower than the run was made); the path is groomed and white, beyond it loose snow, and rock
+    where the world's own land (not the slice's, lowered) is steeper than some forty degrees, faded in over a few metres from the
+    path's edge; poles along its edges every twenty metres. A lower sun and less of the sky's light on the world's land, so that its
+    slopes shade; the snow's pictures drawn to repeat without seams. *Mended on the way:* a skier kept in from a narrowing edge onto
+    higher snow had seemed to rise as fast as it was moved, and was thrown a hundred metres up; rising is now judged where it went,
+    before it is kept on the path, and never faster than it goes. *Checked* (headless, drawing in software): ridden from the top
+    straight and holding turns and tucks either way, to the foot in 60 to 79 seconds at up to 97 km/h, never thrown; at its kickers
+    (130, 602, 720 and 850 metres down), straight air of 11 to 19 metres, flights of 22 to 24, backflips coming round when tucked in
+    the air and falling short held tall; the groomed slope as before; about 0.73 million triangles drawn.
+76. **A clear picture, a further view, and blur.** Asked: "add a hide menus and the text window button; and make the from side view to
+    be from like a bit further back (there could be a control slider for this?) can we cheaply make background a bit blurry and add
+    some motion blur?" *Done* (`lab/slope.ts`, `lab/slope.html`): *Hide menus* (and `H`) hides the corner's text, the menus and the
+    steering ring, leaving only itself, faint, to bring them back. *Beside* is now from 14 metres to the side and 4 behind, 2.2 up
+    (it was 11 to the side and level); *Distance* takes every view from half as far to three times. *Blur*: the scene drawn once
+    with each point's motion across the picture since the last frame (`velocity`, as the game's own smoothing has it); each point
+    smeared along it over eight samples, scaled to a sixtieth of a second's shutter whatever the frame's length and never more than a
+    twenty-fifth of the picture; and the far background mixed with a picture blurred at half the size, from 2.2 times the skier's
+    distance and wholly by nine times; *Blur*, asked for next ("add control slider for the blur intensity"), a slider from none (the
+    plain picture drawn, no pass of its own) to twice as much, of both. Nothing about as far as the skier is smeared: its skinned
+    body's motion came out wrong as the whole figure moved across the picture (its last pose laid where it now stands), and it
+    dissolved in the side view. A smear leaving out what lies much nearer than the point smeared, so that the skier would not streak
+    over the snow behind it, read nothing from the depths at other points and drew the near snow black, and is not done. The three
+    choices are kept in the browser. *Checked* (headless, drawing in software, each frame stepped by a sixtieth of a second with
+    `?dt=`): behind and beside at 77 km/h, the blur on and off, the menus hidden, the view at 2.2 times; the far slopes softened, the
+    skier sharp. Not yet seen at a real frame rate: published for trying on a laptop and a tablet. Then asked: "Show the progress
+    as vertical meters instead of distance": the corner says how far the skier has come down as height below the run's top, in the
+    world's own heights (`Land.drop`; the slice's lowered land undone), out of the run's 623 (`Land.fall`), and the foot of the run
+    the same; on the groomed slope, height come down alone.
+77. **The game's land materials, lighter, on the run.** Asked: "can we have some kind of optimized versions of the game side landscape
+    materials". *Done* (`makeSnowMaterial` and `makeFarMaterial`'s `light` in `src/render/siteMaterial.ts`; `lab/slopeLand.ts`,
+    `lab/slope.ts`; see `docs/04-look.md`, *Lighter winter materials*): the world's run is drawn with the game's snow, in a form
+    that works out only what shows under a full winter (four texture reads against twenty and more), groomed on the skiable path,
+    rock where snow does not lie; and the game's far land, without its rock faces' carved relief. The land is laid through the
+    game's own mesh builder, so that it carries what the materials read, lit by the sky as the game lights what it does not bake;
+    off the path each point faces as the world's own land does, where the slice brought it lower (lowered, the walls were gentle
+    slopes, snow lay on every one and the rock was gone). Laid as snow or rock a square at a time, as the game's rock material
+    wants, the near rock came out in squares four metres across, so the near land is all one material, which leaves the rock bare by
+    its own rule; and the far firs give way to the woods the far material paints. *Snow* chooses it (*Game*) or the plain look
+    (*Plain*). *Checked* (headless, drawing in software): the page ready in some eleven seconds (the textures painted at 512),
+    0.69 million triangles drawn against 0.73; a frame about twice the plain look's (1.5 to 1.8 seconds against 0.7 to 0.8, in
+    software; the far land's light form saved about a tenth); the switch between the looks and to the groomed slope and back.
+78. **Faster frames on the run.** Asked: "Ok find how to best optimize the performance still with reasonable visual tradeoffs".
+    *Measured* first (`__slope.bench` in `lab/slope.ts`: the present view drawn a few frames, each in a frame of the browser's own
+    and waited for, with parts of the land hidden or settings changed; headless, drawing in software at 1000 by 620, which weighs
+    every point of the picture heavily and four-times-over smoothing most of all, so the shares below are a guide, not a graphics
+    card's). As published, from behind the skier looking down the run, 2.12 seconds a frame, from beside 1.13. Hiding a part saved
+    more than it could cost alone: the land about the run lay whole under the run's snow, sunk out of sight, and the country under
+    both, and each point there was worked out two and three times over. The scene drawn four times over at each point (MSAA) was
+    more than half; half the fineness each way halved what was left; the blur pass a tenth; shadows, firs and the skier next to
+    nothing. *Done:* (1) a hole in each coarser grid where a finer lies over it, a square left out where all its corners are under
+    the finer (2.12 to 1.59 seconds, nothing seen changed); (2) the scene drawn once to a point and its edges smoothed after (FXAA),
+    with the blur and without it, the canvas's own four-times-over not asked for (`?msaa=1` for it) (to 0.84 and 0.66); (3) the run's
+    snow at a metre in tiles of 64 metres, each made at a metre and at four, those within 120 metres of the eye drawn at a metre
+    (`lod` on the land; 676,000 triangles to 497,000; from behind a frame cost the same in software, where the cost is the points
+    of the picture, but a graphics card shades a triangle smaller than a point several times over); (4) the winter snow lighter
+    still: its ripples' slopes worked out exactly (three samples of noise for twelve), its swells from a texture it reads already,
+    and the motion blur's eight samples only where something moves across the picture (to 0.78 and 0.62: about 2.7 and 1.8 times
+    faster than published); (5) *Resolution*: *Auto* draws at fewer points while frames keep coming slower than sixty a second (or
+    the screen's rate), three slow frames in a row and half a second of them, down a step of 15% at a time to half; back up 10% after
+    four seconds with room to spare; each step held a while; *Full*, *¾*, *½* fix it. In the headless browser *Auto* went 72%, 61%,
+    50% and stayed there. The plain look (*Snow*) costs some two thirds of the game's (0.55 seconds from behind). Not done, as
+    costing more than they save or seen: fewer shadows (a tenth), coarser far land (its material, not its triangles, is the cost).
+    Pictures from behind, beside, above the crest and near: nothing seen changed. Not yet timed on a graphics card, a laptop or a
+    tablet.
+79. **A demo run that lands its tricks.** Asked: "make the demo run be such that it hits tricks in the jumps: - 720 - backflip -
+    backflip 360 - tucked jump; both with human and horse skiers". The run watched was the made run of item 64 and the ones after it
+    (`makeDownhillRun`: forty-four seconds of turns, a tuck and a stop, drawn as a clip and laid along the run's line, with no
+    kickers); it is now the ride itself, flown by a pilot in place of the pointer (`flyDemo` in `lab/slope.ts`) and kept a thirtieth
+    of a second at a time: where the skier is and how it is turned, whether it is in the air, the handful of numbers it was posed by,
+    and where it is against the run; played back by blending two frames, the pose's numbers with them, and its tracks laid from the
+    frames. The pilot carves down between the kickers, a turn every two seconds or so, wider the faster, held towards the path's
+    middle; from 75 metres before a kicker's lip it lines up on the kicker in the kicker's own frame (against the run, where the run
+    bends by a kicker set across it, the skier seemed past the lip while still on its ramp, and no trick was flown), at the speed it
+    means to take it at (17 metres a second, braking if more than four over it far out); and from three quarters of a second before
+    the lip it takes the stance of the trick asked of that kicker: for the 720 neither tucked nor tall and, in the last quarter
+    second, turning hard; for the backflip standing tall and straight; for the backflip 360 tall and turning half as hard; for the
+    flight tucked from 1.2 seconds out and straight. In the air it tucks, which turns it quicker. A kicker it does not land its trick
+    off, short, fallen or another trick, is flown again from where its approach began, at the next of 20, 14, 23, 11 and 26 metres a
+    second. Then on to the foot (the world's run) or a stop forty metres past the fourth kicker (the groomed slope). The kickers now
+    stand when watching too. Flown for each skier when first watched (a second or two in a cloud container; the flight is the same
+    for every skier, as nothing in it hangs on the body, but each is posed for itself) and kept for that land and skier. *Checked*
+    in headless Chromium: on the world's run (67 seconds) and the groomed slope (38), for the person, the horse alone and the horse
+    and rider, all four tricks land at the first speed, none flown again; taken at 43 to 81 km/h, 0.9 to 1.6 seconds in the air;
+    pictures mid-trick from beside of the person and the horse and rider; *Ride* taken from the demo mid-flip and mid-carve rides on.
+    `__slope.demo()` gives what it landed, how many times each kicker was flown again and how each flight went.
+80. **More tricks, and tricks that move as skiers do.** Asked: "also add some cool trick to the remaining jumps/kickers.. then work
+    on making all the trick animations more realistic and transitions to them as well!" Six kickers stand on the world's run (130,
+    260, 330, 608, 720, 850 metres; each now kept in from the piste's edges further than the band where the skier is turned back to
+    the middle, where the one at 720 could not be lined up on), so the demo had passed two without a trick, and the groomed slope's
+    go on for ever. *New tricks*: a cork (tucked and turning off the lip: the spin's axis tipped 42 degrees off the upright,
+    `bodyTurn` in `posing.ts`, so that the body goes round laid over on its side and back); grabs, asked in the air by pointing up
+    and to a side (a mute, the left hand across to the right ski in front of the boot; a tail grab, the right ski's tail drawn up
+    behind to the right hand; the hand put on the ski by an arm reaching for a point, `Poser.reachArm`, where the ski is carried by
+    the foot, `Rider.grab`); a spread eagle (pointing down in straight air) and a flip laid out (pointing down in a flip). A horse
+    does its own: for a grab a whip (its skis flung out to one side under it, its body laid over the other way), for a spread eagle
+    a capriole on four short skis (the body carried forward over its skis, the fore ones up under the chest and the hind kicked out
+    behind) and the splits on a long pair; its rider a superman for a grab (up out of the saddle, stretched out flat behind it, the
+    hands on the pommel) and a no-hander for a spread eagle. Each named for what it did (`nameOf`: a 360 tail grab, a mute backflip,
+    a 360 superman whip). The demo flies nine: those of item 79, then a cork 720, a mute grab, a layout backflip, a 360 tail grab
+    and a spread eagle, the first six on the world's run; a flight named as it landed, and taken again if a flip or a 720 had less
+    than a second in the air. *Movement*: looked at frame by frame (filmstrips at a tenth of a second, side on and from behind,
+    `__slope.lookSide`): the skier had ridden the ramp in its stance and was tucked, its arms flung up, in the tenth of a second
+    after the lip; its flip was round halfway through the flight and it hung tucked for half a second before opening at the snow;
+    its 720 went round as one rigid block. Now: up the ramp it sinks into a crouch and springs out of it over the last metre or two
+    to the lip (`pop` in `RideControls`: the legs driven long, the arms swung through, up and back for a backflip), and folds from
+    that into the trick over a quarter of a second (`pop` in `AirControls`); the turns are set off the lip to come round a little
+    before the snow (`rate`, paced to the time in the air: at most 1.7 turns a second for a spin and 1.3 for a flip, as slow as half
+    that with time to spare, a quarter again quicker tucked); the shoulders and head lead a spin by part of what is left of it and
+    come round to the landing first (`lead`), the head goes back to look for the snow over the second half of a flip (`spot`); once
+    round it opens up, and the legs reach for the snow the last fifth of a second (`reach`); it sinks into the landing in a few
+    hundredths of a second and comes up over two thirds of one. The horse and its rider the same (`horseAirPose`, `saddlePose`).
+    The pilot tucks only when its turns are behind; untucked, a backflip now comes round on the groomed slope, held tall it is laid
+    out, and a 720 still needs the tuck. *Checked* in headless Chromium: the demo lands all its tricks for the person, the horse on
+    a long pair and the horse and rider, on the world's run (68 seconds; the backflip 360 taken again faster) and the groomed slope
+    (78); each trick ridden by script for the person and the horse and rider; filmstrips of every new trick; `figures.cjs` and
+    `crew.cjs` pass (the old jump clips' head now follows the chest's turn). Not yet seen on a graphics card.
+81. **Switch, half turns, life, and a cinematic camera.** Asked: "you can make it also possible to ride switch or land switch
+    (180/540/900...).. horse could spread its legs on spinning tricks while in air etc / rotating flips with human skiier could cross
+    the skis etc / also there should be some "life" movement going on even straight lining without turns and so on / then - add a
+    cinematic camera mode - adjust besides camera so that it eases so that there is more visibility to the side the rider is heading
+    to (now the rider is in the sharp center of framing) / then make the cinematic camera and hide menus enabled as default". *Spins
+    by half turns*: a little turn at the lip is a 180; a hard one (past six tenths of the pointer's range) is held: the spin goes
+    another half turn each time it comes within some two hundred degrees of where it is to stop, for as long as the turn is held hard
+    and not drawn up into a tuck or a grab (a cork's tuck off the lip is let be for a quarter of a second), and let go it stops at the
+    next half turn ahead, paced then to come round before the snow (`holding`, `rate.spin`; at most 1.9 turns a second). *Switch*: an
+    odd number of half turns toggles `ride.switch`; the body's facing is carried round by the spin it made and kept half a turn about
+    from the way it goes, the lean and the flicks mirrored in its own frame, the head turned back over the shoulder (`back`), and a
+    trick taken switch so named. Going round a flip and a spin together the skier crosses its skis (`cross`); a horse flings its legs
+    wide in a spin, the skis apart and on their outer edges (`fling` in `horseAirPose`). *Life* (`lifeAt` in `alpine.ts`: slow waves
+    of their own for breathing, looking about, shifting weight and the hands; for the horse its neck, head, ears and tail): and the
+    knees giving to the snow's shape at speed (`flex`, from the snow's bend along the way it goes by the speed squared, and a little
+    chatter). The demo flies twelve on the groomed slope (101 seconds) and six on the world's run (66), now a cork 540 and a switch 540
+    for the fifth and sixth. *Cinematic view* (`shotsOf`, `rideShots`, `placeCinema`): watching, the run cut into shots once, so that it
+    is the same each time and on the timeline: around each jump a camera set down by its kicker (beside the flight, the commonest;
+    going round the skier in the air; past the landing and to the side; beside and behind the lip; the low ones lost the skier behind
+    the convex snow of the world's run until raised), from a second and a half before the lip to a second after the landing; between
+    them chase, alongside, ahead drawing in, drone and passing shots of three and a half to six seconds; cameras set down raised until
+    nothing of the land stands between them and the skier, and zooming to keep it framed; riding, chase shots at changing heights and
+    distances, and beside the flight of a jump. *Beside*: looking ahead of the skier along its eased way by 4.5 metres times the
+    distance. The page opens in the cinematic view with the menus hidden (kept under a new name, so menus shown before are hidden
+    once). *Checked* in headless Chromium: the demo lands every trick for the person, the horse on both sets of skis and the horse and
+    rider on both slopes; half turns, held spins and switch landings ridden by script; contact sheets of the cinematic view on the
+    world's run and the groomed slope, and riding; filmstrips of riding switch and the switch 540, the crossed skis, a horse's 720;
+    `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
+82. **A sword on the back, and 180s on the snow.** Asked: "the human skiier could have the sword on their back / add a single
+    control to 180 to switch (and back), this could alternate between pops, smooth and cool nose butters and some other cool "land
+    tricks"". *The sword*: `dressAdventurer` takes `sword: 'back'` (and the library makes that body once more, `source(id, { sword })`):
+    the scabbard slung across the back over the cloak, from behind the left hip up to behind the right shoulder (twelve and a half
+    centimetres off the back's skin, measured there), its hilt standing up behind the shoulder, on a baldric across the chest and the
+    back, all hung from the chest and the spine below it; the skier and a horse's rider wear it so, the figures elsewhere at the hip.
+    *Ground 180s*: one control (*180* by *Brake*, `X`) does the next of four in turn, each half a turn to switch or back
+    (`start180`, `shape180`): a pop 180 (crouched, sprung thirty-four centimetres up, turned in the air, landed low; 0.62 seconds); a
+    nose butter (pressed up onto the tips, the skis tipped 17 degrees nose down with the tails off the snow, the body carried round
+    about the tips; 1.05 seconds); a smooth 180 (slid round flat, the skis scraping side on and throwing snow; 0.85 seconds); a tail
+    butter (sat back onto the tails, the tips 15 degrees up, round about the tails; 1.05 seconds). Each costs some speed while side on
+    (two or three metres a second, each second) and turns the way it is steered, or each way in turn. Riding with the menus hidden,
+    *Brake*, *180* and *Restart run* stay to hand at the lower right (with all the menus hidden, a touch screen had none). The demo
+    pilot does them where there is room for a pair, or on the way to the foot, so that it meets each kicker in the stance it left the
+    last one in: two before the world run's foot, four on a run-out past the groomed slope's last kicker. Kickers are now kept in from
+    the edges along the sixty metres of their approach as well as where they stand; on the world's run that let a seventh stand, at
+    484 metres, and the demo flies the mute grab off the seventh. *Checked* in headless Chromium: every trick of the demo lands for the
+    person, the horse on both sets of skis and the horse and rider on both slopes, with the ground 180s; the control by key and by
+    button while riding, each 180 toggling switch; filmstrips of the four, and of the horse and rider's nose butter and pop; pictures
+    of the sword on the back; `figures.cjs` and `crew.cjs` pass. Not yet seen on a graphics card.
+83. **Horse Mountain: an opening, simpler controls, tricks given, runs again.** Asked: "lets simplify controls so that bottom left has
+    thumb control for steering and tucked/straight on one control (doesnt control the tricks), then on bottom right there is a slider
+    that goes from Mild -> Wild and then a trick that could probably land is chosen randomly at the jump spots based on that slider.
+    below that we have the switch stance button, instead of 180 the label is "To switch" / "To regular" based on the current stance. /
+    Game opening shows a brief grand title: HORSE / Mountain / the demo runs on the background and after the title a dialog show
+    decision: "Watch demo run" / "Send it myself!" (which switches to player controlled run) / When player controlled run reaches end
+    or the player falls show a 5 second countdown after which a new run starts". *Controls*: the ring in the middle of the picture,
+    which the pointer anywhere steered by, and *Brake* and *180* are gone; a stick at the lower left (132 points across, its rim at
+    eight tenths of that; its sides shaded past seven tenths, where a turn skids), and at the lower right the *Mild*–*Wild* slider
+    (kept in the browser) over the stance button, named for where it goes; all three stay with the menus hidden and are lifted over
+    the foot when they are shown. The arrow keys, Shift to brake, `X` and Enter stay. *Tricks given*: lined up on a kicker (within
+    the breadth of its top and going within 35 degrees of its way) a second and a half or twelve metres from its lip, a trick is
+    chosen from eighteen, each with how wild it is (0 to 1) and how long in the air it wants: those that want no more than 0.95 of the
+    time in the air found by riding on to the lip unseen (`probeAirtime`: the ride stepped on quietly from a copy of its state, and
+    everything put back; the reckoning from the speed and the lip alone, `airtimeOff`, was right at 60 km/h and a third too long at 80,
+    and a 900 was chosen that could not come round), and not a tuck or a flip too late to be stood into, weighted by how near each is
+    to the slider's setting (a bell 0.16 wide); then made by the pilot's own `askAtLip` and `askInAir`, the stick set aside. Ridden by
+    script into the seven kickers of each slope at 14 and 18 m/s, at *Mild*, between and *Wild*, the person and the horse and rider,
+    the script steering onto each as a rider would: 167 of 168 landed (a 720, for the horse and rider at speed on the world's run,
+    after which spins of two turns and more want a little more time). *Opening*: the title (HORSE in Cinzel over a brass rule,
+    *Mountain* in Cormorant Garamond italic under it, from Google Fonts, the browser's serif else) rising over the demo run for
+    some three seconds, timed from the third frame drawn and held twenty frames at the least (in the headless browser the first
+    frames took seconds and the title went by unseen); then the choice; any other way of choosing a mode answers it. *Again*: fallen
+    and lain still for six tenths of a second, or stopped at the foot of the world's run, *New run in* 5, 4, 3, 2, 1 under what is told
+    of it, and a run from the top. The page is called *Horse Mountain*. *Checked* in headless Chromium: the opening at 800 by 500 and
+    390 by 760, and *Send it myself!*; the stick dragged by mouse (held left it turned, up it tucked, let go it sprang back); the stance
+    button twice, switch and back, its name changing; the count from five at the world run's foot and the new run; the demo run as
+    before for every skier. Then asked: "the opening title should be "Grand Horse Mountain" with the Grand Horse on first line and
+    Mountain on second row": GRAND HORSE on the first line, sized to stay one line across a phone, *Mountain* under it; the page and
+    the choice named so too. And: "also make the horse & rider the default mode": the page opens on the horse and its rider
+    (`?skier=person` for the person).
+
+84. **Every kind of place in the world, drawn as the game draws** (the rest of step 2, and step 3 of item 51; asked: "ok continue with
     the remaining scope", "and include all game side improvements done in parallel the previous work"). *Done:* harbour towns, islands
     and mountain tops are built into the world as valley heads are, each with its sea where it has one; the world's sea is the game's,
     about the walker; a place whose land does not fill its square (a mountain top's stops at its cloud) has a hole that follows its land,

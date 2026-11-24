@@ -7,6 +7,7 @@
     "lab": "vite --port 5178 --strictPort --open /lab/materials.html",
     "buildings": "vite --port 5179 --strictPort --open /lab/buildings.html",
     "buildings:page": "node tools/buildingLabPage.mjs",
+    "figures": "vite --port 5180 --strictPort --open /lab/figures.html",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -27,7 +28,10 @@
     "three-mesh-bvh": "^0.9.18"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
     "@types/three": "^0.187.0",
+    "sharp": "^0.35.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"

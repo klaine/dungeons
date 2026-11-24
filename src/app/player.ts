@@ -5,6 +5,9 @@ import { MeshBVH } from 'three-mesh-bvh';
  * First-person walking: gravity and a capsule that slides along the site geometry. Mouse and keyboard
  * are handled here; other inputs (touch) drive it through `analog`, `look` and `jump`.
  *
+ * The same body carries the figures (`src/figures/`), which no keys move and no eye looks out of: made
+ * without a camera and a page to listen on, it is driven by `steer`, the speed and heading it is to go at.
+ *
  * What it walks on and is stopped by is anything that can be asked for the triangles near the body
  * (`Colliders`): a site's one mesh (`MeshBVH`), or, walking a world streamed in, a set of them that
  * changes as one goes (`src/worldwalk/body.ts`).
@@ -27,6 +30,11 @@ export class Player {
   locked = false;
   /** Movement from an analogue stick: x right, y back, length up to 1. */
   readonly analog = new Vector2();
+  /**
+   * Where the body is to go, in metres a second over the ground (x, and z in `y`), in place of the keys and the stick: how a figure is
+   * driven. Not used while null.
+   */
+  steer: Vector2 | null = null;
   analogRun = false;
   /**
    * Flying: no weight and nothing solid, moving the way one looks. For seeing a place whole, and
@@ -54,6 +62,8 @@ export class Player {
   private onGround = false;
   /** Whether the player is standing on something, and whether they are running: for footsteps. */
   get grounded(): boolean { return this.onGround; }
+  /** How fast and which way the body is going, metres a second. */
+  get motion(): Readonly<Vector3> { return this.velocity; }
   running = false;
   private keys = new Set<string>();
   private spawn = new Vector3();
@@ -62,7 +72,8 @@ export class Player {
   private triPoint = new Vector3();
   private capPoint = new Vector3();
 
-  constructor(private camera: PerspectiveCamera, private dom: HTMLElement, private bvh: Colliders) {
+  constructor(private camera: PerspectiveCamera | null, private dom: HTMLElement | null, private bvh: Colliders) {
+    if (!dom) return;
     dom.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && !this.locked) dom.requestPointerLock?.();
     });
@@ -95,7 +106,16 @@ export class Player {
     this.flying = on;
     this.velocity.set(0, 0, 0);
     this.onGround = false;
-    document.body.classList.toggle('flying', on);
+    if (this.dom) document.body.classList.toggle('flying', on);
+  }
+
+  /** Stands the body with its feet at `feet`, still, facing `yaw`: where a figure is set down, or comes off what it climbed. */
+  stand(feet: Vector3, yaw = this.yaw): void {
+    this.position.copy(feet);
+    this.spawn.copy(feet);
+    this.yaw = yaw;
+    this.velocity.set(0, 0, 0);
+    this.onGround = true;
   }
 
   /** Places the player with their eyes at `eye`. */
@@ -116,18 +136,24 @@ export class Player {
     }
     const speed = run ? 6.5 : 3.2;
     this.running = run;
-    let fx = 0, fz = 0;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz -= 1;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz += 1;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) fx -= 1;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) fx += 1;
-    const keyLen = Math.hypot(fx, fz) || 1;
-    fx = fx / keyLen + this.analog.x;
-    fz = fz / keyLen + this.analog.y;
-    const len = Math.max(1, Math.hypot(fx, fz));
-    const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
-    const wx = ((fx * cos + fz * sin) / len) * speed;
-    const wz = ((-fx * sin + fz * cos) / len) * speed;
+    let wx: number, wz: number;
+    if (this.steer) {
+      wx = this.steer.x;
+      wz = this.steer.y;
+    } else {
+      let fx = 0, fz = 0;
+      if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) fz -= 1;
+      if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) fz += 1;
+      if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) fx -= 1;
+      if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) fx += 1;
+      const keyLen = Math.hypot(fx, fz) || 1;
+      fx = fx / keyLen + this.analog.x;
+      fz = fz / keyLen + this.analog.y;
+      const len = Math.max(1, Math.hypot(fx, fz));
+      const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+      wx = ((fx * cos + fz * sin) / len) * speed;
+      wz = ((-fx * sin + fz * cos) / len) * speed;
+    }
     // Ease towards the wanted velocity so starts and stops are not abrupt.
     const k = 1 - Math.exp(-dt * (this.onGround ? 14 : 3));
     this.velocity.x += (wx - this.velocity.x) * k;
@@ -292,6 +318,7 @@ export class Player {
   }
 
   private syncCamera(): void {
+    if (!this.camera) return;
     this.camera.position.set(this.position.x, this.position.y + EYE, this.position.z);
     this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
   }

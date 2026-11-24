@@ -3,11 +3,12 @@ import { Rng } from './rng';
 import { layOutIsland } from './island';
 import { layOutMountain } from './mountain';
 import { layOutTown as layOutHarbourTown } from './town';
+import { draftCathedral } from './cathedral';
 import { findValleys, highlands, ValleySpot } from './highlands';
 import { landAt as worldLandAt, makeTilesNear, placeSeed, worldLand, WORLD_REACH } from './worldLand';
 import { castleOff, layOutCastle } from './castle';
 import { armRise, armsOf, edgeAt, findSeat, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
-import { classicalFront, classicalVariations, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
+import { classicalFront, classicalVariations, dealChapel, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
 import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
@@ -203,8 +204,9 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     // Mostly a sky of broken cloud; now and then nearly clear, or heavy.
     cloud: Math.round(base.fork('cloud').pick([0.12, 0.3, 0.38, 0.45, 0.5, 0.58, 0.72]) * 100) / 100,
   };
-  // In a valley the house is a castle's: its hall and keep within a curtain wall, a village below it. (Asked for.)
-  if (kind === 'valley') setting.kind = 'castle';
+  // In a valley the house is a castle's: its hall and keep within a curtain wall, a village below it. (Asked for.) And on an island,
+  // its castle over the cove and the hamlet. (Asked for: the island's house in the castle's form.)
+  if (kind === 'valley' || kind === 'island') setting.kind = 'castle';
   // A mountain top has two seasons, not four: bare rock and thin turf in summer, snow in winter.
   // (From a stream of its own, so valleys and islands keep the seasons they had.)
   // And what stands on a pass or a peak, keeping travellers alive, is a hospice.
@@ -235,6 +237,16 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     const low = setting.hour === 'morning' || setting.hour === 'sunset' || setting.hour === 'dusk';
     setting.cloudForm = air.chance(0.2 + (low ? 0.3 : 0) + ((setting.cloud ?? 0) > 0.55 ? 0.2 : 0)) ? 'layered' : 'heaped';
   }
+  // A harbour town's house is a cathedral (`cathedral.ts`): a plan of its own, laid out once on the land found for the town. (Another
+  // stream of its measures is tried where the first will not go.)
+  if (kind === 'town') {
+    setting.kind = 'cathedral';
+    let why = '';
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try { return draftCathedral(seed, setting, base.fork(attempt ? `cathedral/${attempt}` : 'cathedral'), opts.world); } catch (e) { why = (e as Error).message; }
+    }
+    throw new Error(why);
+  }
   // How big a house this seed is for. Without a size to aim at, choosing the richest draft always
   // chooses the largest, and every site comes out with ten or eleven rooms.
   const size = pickFrom.pick([6, 7, 8, 8, 9, 9, 10, 11]);
@@ -253,9 +265,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
   if (!best) throw new Error(`no site could be generated (seed ${seed})`);
   // (The drafts are judged by their houses alone; worn land takes a second or two to make, so only the draft kept is made again with it.)
   // (Every kind of place unless asked otherwise, `plain`: valleys too, now that a found one walks and looks as a drawn one does.)
-  // (A town is always laid on land that was found: its drafts lay nothing out but the box it would have.)
-  if (opts.terrain !== 'plain' || kind === 'town') {
-    if (kind === 'town') return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' });
+  if (opts.terrain !== 'plain') {
     try { return draftSite(seed, setting, base.fork(`site/${bestAttempt}`), size, kind, { ...opts, terrain: 'eroded' }); } catch (e) {
       // (The plain draft stands. `DBG_TERRAIN=1` before a tool says why.)
       if ((globalThis as { process?: { env?: Record<string, string> } }).process?.env?.DBG_TERRAIN) console.log('terrain:', (e as Error).message);
@@ -1377,9 +1387,8 @@ function layOutVillageAlong(site: Site, fromTrack: (x: number, z: number) => num
   // from the square. (Its own stream, so nothing else moves.)
   let churchyard: { ring: [number, number][]; gate: [number, number] } | undefined;
   {
-    const cq = rng.fork('church'), W = round(cq.range(11, 14.5)), D = round(cq.range(6.6, 7.8)), H = round(cq.range(6.2, 7.4)), T = round(cq.range(4.2, 5));
-    const spire = cq.pick(['pyramid', 'pyramid', 'needle', 'saddle'] as const), before = cq.range(5, 7);
-    const chapel = { tower: T, height: round(H + cq.range(7, 10.5)), spire, spireHeight: round(spire === 'needle' ? cq.range(9, 13) : spire === 'pyramid' ? cq.range(5, 7.5) : cq.range(2.6, 3.4)), choir: round(cq.range(3.6, 5)), apse: cq.chance(0.6) };
+    // (Its measures dealt as the building lab deals a village church's: see `dealChapel`.)
+    const { W, D, H, before, chapel } = dealChapel(rng.fork('church'));
     for (let s = s0 + (square ? 4 : 2); s < s1 - 10 && !churchyard; s += 3) for (const side of [-1, 1] as const) {
       if (churchyard) break;
       const [px, pz, dx, dz] = along(s + W / 2 + chapel.tower), nx = -dz * side, nz = dx * side, th = Math.atan2(-nz, -nx), off = 4 + before + D / 2;
@@ -2153,7 +2162,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   // ---- what each room was for. The big ones get the communal uses, one of each at most.
   const communal = shuffle(['refectory', 'dormitory', 'chapter house'], rng);
   // (A castle's first great room is its chapel.)
-  if (kind === 'valley') communal.push('chapel');
+  if (kind === 'valley' || kind === 'island') communal.push('chapel');
   const working = shuffle(['kitchen', 'store', 'workshop', 'scriptorium', 'dormitory'], rng);
   for (const p of places) {
     if (p.name !== 'gallery') continue;
@@ -2255,7 +2264,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
     const up = rng.fork('storeys');
     const TREAD = 0.25, STEPS = 18, RISE = STEPS * STEP, RUN = STEPS * TREAD;
     // (A castle has a dungeon under it, always: the first room made below is that.)
-    const want = Math.max(kind === 'valley' ? 1 : 0, up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0);
+    const want = Math.max(kind === 'valley' || kind === 'island' ? 1 : 0, up.chance(0.6) ? (up.chance(0.3) ? 2 : 1) : 0);
     const hosts = shuffle(places.filter((p) => (p.roof === 'barrel' || p.roof === 'timber') && !p.fallen && p.id !== secretId && p.role !== 'goal' && p.role !== 'entrance' && p.id !== forecourt.id
       && Math.max(p.x1 - p.x0, p.z1 - p.z0) >= RUN + 1.55 && Math.min(p.x1 - p.x0, p.z1 - p.z0) >= 3.7), up);
     let made = 0;
@@ -2277,7 +2286,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         }
       }
       if (!options.length) continue;
-      const stair = up.pick(options), down = up.chance(0.5) || (kind === 'valley' && made === 0);
+      const stair = up.pick(options), down = up.chance(0.5) || ((kind === 'valley' || kind === 'island') && made === 0);
       const other: Place = {
         ...host, id: places.length, role: 'reward', roof: 'timber', fallen: undefined, shaft: undefined,
         wall: down ? RISE - 0.3 : up.range(2.9, 3.5),
@@ -2285,7 +2294,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
         level: down ? -1 : 1,
         // Never two dark rooms in a row: a cellar is dark unless the room over it is.
         light: down ? (host.light === 'dark' ? 'torch' : 'dark') : up.chance(0.5) && host.light !== 'dark' ? 'dark' : 'torch',
-        name: down ? (kind === 'valley' && !places.some((q) => q.name === 'dungeon') ? 'dungeon' : up.pick(['cellar', 'undercroft', 'crypt', 'cold store'])) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
+        name: down ? ((kind === 'valley' || kind === 'island') && !places.some((q) => q.name === 'dungeon') ? 'dungeon' : up.pick(['cellar', 'undercroft', 'crypt', 'cold store'])) : up.pick(['solar', 'loft', 'upper chamber', 'muniment room']),
       };
       // The lower of the two has a flat ceiling at the height the stair climbs to.
       if (!down) { host.roof = 'timber'; host.wall = RISE - 0.3; }

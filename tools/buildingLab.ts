@@ -11,6 +11,7 @@ import { ALL_KINDS, buildItem, deal, Item, Kind, normalise, Shape } from '../lab
 import { GROUND_PAINTS, natureKit, PLANT_PAINTS, TREES } from '../lab/nature';
 import { Rng } from '../src/core/rng';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
+import { castleOfPlan, CastlePlan, CastleTower, planOf, soundWall } from '../src/core/castle';
 
 const count = Number(process.argv[2]) || 60;
 let failed = 0;
@@ -69,7 +70,33 @@ function shake(kind: Kind, s: Shape): Shape {
       c.spireHeight = push(0, 36); c.choir = rng.pick(['apse', 'flat'] as const); c.choirLength = push(4, 10); c.end = rng.pick([-1, 1] as const);
     }
   }
+  if (kind === 'castle' && t.castle) t.castle = shakeWall(t.castle);
   return normalise(kind, t, rng.chance(0.5) ? 'w' : 'bays');
+}
+
+/**
+ * A castle's wall edited at random as a person editing it in the lab might (its plan, as `editCastle` there changes it): corners
+ * dragged far, added and taken away, towers of every kind given and taken away with their measures pushed past their ends, the gate
+ * moved, the wall made higher or lower and thicker or thinner. Each change kept only where the wall can still be built.
+ */
+function shakeWall(c: NonNullable<Shape['castle']>): NonNullable<Shape['castle']> {
+  let p: CastlePlan = planOf(c);
+  const kinds: CastleTower['kind'][] = ['round', 'half', 'square', 'turret'];
+  for (let step = rng.int(1, 12); step > 0; step--) {
+    const q: CastlePlan = JSON.parse(JSON.stringify(p)), n = q.corners.length, k = rng.int(0, n - 1), what = rng.int(0, 5);
+    // (Kept within sixty metres of the middle, so that the whole stays within what the check counts as near where it stands.)
+    const near = (v: number) => Math.min(60, Math.max(-60, v));
+    if (what === 0) { q.corners[k].x = near(q.corners[k].x + rng.range(-18, 18)); q.corners[k].z = near(q.corners[k].z + rng.range(-18, 18)); }
+    else if (what === 1) { const a = q.corners[k], b = q.corners[(k + 1) % n], f = rng.range(0.2, 0.8); q.corners.splice(k + 1, 0, { x: a.x + (b.x - a.x) * f + rng.range(-8, 8), z: a.z + (b.z - a.z) * f + rng.range(-8, 8) }); }
+    else if (what === 2 && n > 3) { q.corners.splice(k, 1); q.gate = { i: Math.min(q.gate.i, n - 2), t: q.gate.t }; }
+    else if (what === 3) {
+      const kind = rng.pick(kinds);
+      q.corners[k].tower = rng.chance(0.2) ? undefined : { kind, r: kind === 'turret' ? push(0.7, 1.8) : push(2.2, 6), over: kind === 'turret' ? push(1, 5) : push(1, 14), roof: rng.pick(['cone', 'battlement'] as const) };
+    } else if (what === 4) q.gate = { i: k, t: rng.range(-0.2, 1.2) };
+    else { q.height = push(6, 16); q.thick = push(1.6, 3.4); }
+    if (soundWall(q.corners.map((m): [number, number] => [m.x, m.z]))) p = q;
+  }
+  return castleOfPlan(p, c, rng.fork('bailey'));
 }
 
 const t0 = performance.now();

@@ -11,10 +11,10 @@
 // can be saved as a file of site documents and opened again.
 import {
   MOUSE, ACESFilmicToneMapping, Box3, BufferAttribute, Color, CubeCamera, DirectionalLight, GridHelper, Group, HalfFloatType, InterleavedBufferAttribute, LinearMipmapLinearFilter,
-  InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Material, Matrix4, Mesh, PCFShadowMap, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
+  InstancedMesh, Line, LineBasicMaterial, BufferGeometry, Float32BufferAttribute, Material, Matrix4, Mesh, PCFShadowMap, Euler, Quaternion, PerspectiveCamera, Plane, Ray, Raycaster, RenderTarget, Scene, SRGBColorSpace, Texture, Vector2, Vector3,
 } from 'three';
 import { CubeRenderTarget, MeshStandardNodeMaterial, PMREMGenerator, RenderPipeline, WebGPURenderer } from 'three/webgpu';
-import { rtt } from 'three/tsl';
+import { rtt, uniform } from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -24,17 +24,22 @@ import { Building, Hour, SKIES, Stone } from '../src/core/site';
 import { solids as plainSolids } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
 import { Atmosphere } from '../src/render/post';
-import { makeGroundMaterial, makePaneMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
+import { makeGroundMaterial, makePaneMaterial, makeRockMaterial, makeSiteMaterial, makeWindowMaterial, renderUniforms, siteUniforms, windowUniforms } from '../src/render/siteMaterial';
 import { cullCards, makeCards, paintCards, vegetationRange, vegetationUniforms } from '../src/render/vegetation';
 import { CardSet } from '../src/render/scene';
 import { acceleratedRaycast, MeshBVH } from 'three-mesh-bvh';
 import { GROUND_PAINTS, natureKit, Painted, PLANT_PAINTS, Season, SEASONS, TREES } from './nature';
 import { doneGenerating, generateTextureSet } from '../src/render/textures';
-import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour } from './buildingKinds';
+import { ALL_KINDS, buildGround, buildItem, deal, dealCharacter, dealTree, documentOf, eavesOf, isNature, Item, Kind, KIND_ORDER, KINDS, liftOf, nearOf, normalise, RANGES, roomOf, shackOf, Shape, standsIn, stoneColour, weathers, TOWER_DEALT, centredCastle } from './buildingKinds';
 import { crownOf, TREE_RANGES } from './nature';
 import { dealDress, PLAIN_DRESS } from '../src/core/building';
 import { Rng } from '../src/core/rng';
+import { castleOfPlan, CastlePlan, CastleTower, nearestOnWall, planOf, soundWall } from '../src/core/castle';
 import type { ClassicalDress } from '../src/core/site';
+import { BODIES } from '../src/figures/library';
+import { Solids } from '../src/figures/solids';
+import { Crew } from './figureCrew';
+import { BUILT_SURFACES, builtSurfaceSize, makeBuiltMaterials, makeWindowFor, type BuiltSurface } from '../src/render/builtMaterials';
 
 type Tool = 'move' | 'extrude' | 'scale' | 'paint';
 type Colour = [number, number, number];
@@ -61,6 +66,8 @@ interface State {
   overlays: boolean;
   /** Look mode: the right button held and the mouse moved turns the view where it stands, as in walking, instead of sliding it. */
   look: boolean;
+  /** Whether what is built shows its age, as the game shows it: render come away, brick flaked, stone chipped, rain streaked. */
+  weathered: boolean;
   /** The season: the green of the leaves, and how dry the grass is. */
   season: Season;
   /** What has been laid with the brushes (see `Painted` in `nature.ts`). */
@@ -73,7 +80,7 @@ const query = new URLSearchParams(location.search);
 const STONES: Stone[] = ['limestone', 'sandstone', 'greystone', 'basalt'];
 const DEFAULTS: State = {
   items: [], next: 1, selected: null, tool: 'move', hour: 'morning', stone: 'greystone', snap: 0.5, turnSnap: 15,
-  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, look: false, season: 'summer',
+  grid: true, clay: false, air: true, panel: true, cam: null, overlays: true, look: false, weathered: true, season: 'summer',
   paint: { ground: [], plants: [], rock: [] }, brush: { layer: 'ground', ground: 3, plant: 0, dig: false, size: 2 },
 };
 /** What was painted, read from storage or a file, made safe: lists of lists of numbers, and no more of them than can be built. */
@@ -89,7 +96,7 @@ function readItem(o: Partial<Item> & { building?: Building }, id: number): Item 
   const shape = o.shape ?? (o.building ? (({ x, z, faces, plan, ...rest }) => rest)(o.building) : deal(kind, String(o.seed ?? id)));
   const scale = Array.isArray(o.scale) && o.scale.length === 3 ? (o.scale.map((v) => Math.min(5, Math.max(0.2, num(v, 1)))) as [number, number, number]) : [1, 1, 1] as [number, number, number];
   try {
-    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, shape: normalise(kind, shape as Shape) };
+    return { id, kind, seed: String(o.seed ?? `s${id}`), x: num(o.x, 0), z: num(o.z, 0), turn: num(o.turn, 0), scale, inn: !!o.inn, ...(typeof o.wear === 'number' && Number.isFinite(o.wear) ? { wear: Math.min(4, Math.max(0, o.wear)) } : {}), shape: normalise(kind, shape as Shape) };
   } catch { return null; }
 }
 // While the page opens, a note says so; it is taken away once the first pictures are drawn. Found on opening, the page did not get
@@ -197,6 +204,9 @@ async function start(): Promise<void> {
     return t > 0 ? ray.origin.clone().addScaledVector(ray.direction, t) : null;
   };
   let press: { pointer: number; x: number; y: number; id: number | null; moved: boolean; height: number; grab: Vector3; from: [number, number] } | null = null;
+  // (A press on a figure, and a press that will give the chosen figures an order if it is let go of without moving.)
+  let figPress: { pointer: number; x: number; y: number; figure: import('../src/figures/figure').Figure; moved: boolean; shift: boolean } | null = null;
+  let orderPress: { pointer: number; x: number; y: number; right: boolean; moved: boolean } | null = null;
   let placing: number | null = null;
   // (Nothing is answered until the first buildings are built.)
   let ready = false;
@@ -246,6 +256,20 @@ async function start(): Promise<void> {
       return;
     }
     if (press) { if (press.id !== null) e.stopImmediatePropagation(); return; }
+    // Figures. A press on one chooses it (Shift: as well as those chosen), and dragging it moves it. With figures chosen, a click
+    // anywhere else gives them the order armed on the palette, and a click with the right button sends them there; a drag still turns
+    // or slides the view, and buildings are not taken up until the figures are let go of (Esc).
+    if (placing === null && (e.button === 0 || e.button === 2) && !figPress && !orderPress) {
+      const ray = rayAt(e.clientX, e.clientY), f = e.button === 0 ? crew.figureAt(ray) : null;
+      const b = f ? pick(ray) : null;
+      if (f && (!b || f.far <= b.point.distanceTo(ray.origin) + 0.3)) {
+        e.stopImmediatePropagation();
+        canvas.setPointerCapture(e.pointerId);
+        figPress = { pointer: e.pointerId, x: e.clientX, y: e.clientY, figure: f.figure, moved: false, shift: e.shiftKey };
+        return;
+      }
+      if (crew.chosen.length) { orderPress = { pointer: e.pointerId, x: e.clientX, y: e.clientY, right: e.button === 2, moved: false }; return; }
+    }
     if (e.button !== 0) return;
     const ray = rayAt(e.clientX, e.clientY);
     if (placing !== null) { e.stopImmediatePropagation(); placed(); return; }
@@ -272,6 +296,22 @@ async function start(): Promise<void> {
       return;
     }
     brushRing.visible = false;
+    if (figPress?.pointer === e.pointerId) {
+      if (Math.hypot(e.clientX - figPress.x, e.clientY - figPress.y) > 5) figPress.moved = true;
+      if (figPress.moved) {
+        // (Moved by hand: stood on whatever is under the pointer.)
+        const hit = solids.first(rayAt(e.clientX, e.clientY), 2000);
+        if (hit) crew.put(figPress.figure, hit.point);
+        canvas.style.cursor = 'grabbing';
+      }
+      return;
+    }
+    if (orderPress?.pointer === e.pointerId) { if (Math.hypot(e.clientX - orderPress.x, e.clientY - orderPress.y) > 5) orderPress.moved = true; return; }
+    if (!press && e.pointerType === 'mouse' && crew.figures.length && placing === null) {
+      const ray = rayAt(e.clientX, e.clientY);
+      if (crew.figureAt(ray)) { canvas.style.cursor = 'pointer'; return; }
+      if (crew.chosen.length) { canvas.style.cursor = 'crosshair'; return; }
+    }
     if (placing !== null && !press) {
       const p = levelAt(rayAt(e.clientX, e.clientY)), it = itemOf(placing);
       if (p && it) { it.x = snapped(p.x); it.z = snapped(p.z); placeItem(it); changed(false); reflect(); }
@@ -294,6 +334,22 @@ async function start(): Promise<void> {
     reflect();
   });
   const release = (e: PointerEvent) => {
+    if (figPress && e.pointerId === figPress.pointer) {
+      const p = figPress;
+      figPress = null;
+      canvas.style.cursor = '';
+      if (!p.moved) {
+        if (p.shift) crew.choose(crew.chosen.includes(p.figure) ? crew.chosen.filter((f) => f !== p.figure) : [...crew.chosen, p.figure], false);
+        else crew.choose([p.figure]);
+      }
+      return;
+    }
+    if (orderPress && e.pointerId === orderPress.pointer) {
+      const p = orderPress;
+      orderPress = null;
+      if (!p.moved && e.type === 'pointerup') crew.orderAt(rayAt(e.clientX, e.clientY), p.right);
+      return;
+    }
     if (looking !== null && e.pointerId === looking) {
       looking = null;
       if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -328,28 +384,38 @@ async function start(): Promise<void> {
   // (Each surface is kept twice, as pixels and on the graphics card: some 210 MB at 1024 for the seven, a quarter of it at 512,
   // which on a phone's screen looks much the same.)
   const size = Number(query.get('tex')) || (phone ? 512 : 1024);
-  // (The same recipes with the same seeds as `main.ts`, so that every surface is the game's.)
+  // (The same recipes with the same seeds as `main.ts`, from one table, so that every surface is the game's: see `builtMaterials.ts`.)
+  const paintBuilt = (name: BuiltSurface) => generateTextureSet(name, builtSurfaceSize(name, size), BUILT_SURFACES[name].seed);
   const T = {
-    stone: generateTextureSet('stone', size, 3), wood: generateTextureSet('wood', size, 5), moss: generateTextureSet('moss', size / 2, 9),
-    plaster: generateTextureSet('plaster', size, 41), tile: generateTextureSet('tile', size, 43),
-    redBrick: generateTextureSet('redBrick', size, 73), buffBrick: generateTextureSet('buffBrick', size, 79),
+    stone: paintBuilt('stone'), wood: paintBuilt('wood'), moss: paintBuilt('moss'), plaster: paintBuilt('plaster'), tile: paintBuilt('tile'),
+    redBrick: paintBuilt('redBrick'), buffBrick: paintBuilt('buffBrick'),
     // (The brown brick of the towns' classical buildings, laid in running bond: what a classical front of brick is built of.)
-    brick: generateTextureSet('brick', size, 83),
+    brick: paintBuilt('brick'),
   };
   doneGenerating();
+  /**
+   * What buildings are made of, made by the one maker the game uses (`makeBuiltMaterials`), with the same options: stone and timber
+   * with their edges rounded and chipped, render come away, roofs and brick weathered, rain streaks. Unless the lab shows them new
+   * (`weathered` under Scene, or `?chips=0` as in the game), when they are made plain.
+   */
+  /** The coursed rubble of a castle's walls and a village church's, painted when a castle or a church is first set out, as `main.ts` paints it. */
+  let castleStone: ReturnType<typeof generateTextureSet> | null = null;
+  const castleSurface = () => {
+    if (castleStone) return;
+    castleStone = paintBuilt('castle');
+    doneGenerating();
+    materials.castle = makeBuiltMaterials({ ...T, castle: castleStone }, { weathered: state.weathered }).castle;
+  };
+  /**
+   * What buildings are made of, as below; `wear`, a uniform of their own for how worn they are, for a building shown more or less worn
+   * than the rest (see `materialFor`).
+   */
+  const buildingMaterials = (weathered: boolean, wear?: { value: number }): Record<string, Material> => makeBuiltMaterials({ ...T, castle: castleStone }, { weathered, wear });
+  if (query.get('chips') === '0') state.weathered = false;
+  renderUniforms.uChips.value = state.weathered ? 1 : 0;
   const materials: Record<string, Material> = {
-    stone: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.0 }),
-    floor: makeSiteMaterial(T.stone, T.moss, { normalScale: 1.2 }),
-    wood: makeSiteMaterial(T.wood, T.moss, { normalScale: 1.0 }),
+    ...buildingMaterials(state.weathered),
     leaf: makeSiteMaterial(T.moss, T.moss, { normalScale: 2.4 }),
-    plaster: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.8 }),
-    tile: makeSiteMaterial(T.tile, T.moss, { normalScale: 1.3, mossScale: 3 }),
-    redBrick: makeSiteMaterial(T.redBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
-    buffBrick: makeSiteMaterial(T.buffBrick, T.moss, { normalScale: 1.1, mossScale: 2.2 }),
-    brick: makeSiteMaterial(T.brick, T.moss, { normalScale: 1.1, mossScale: 3 }),
-    metal: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.25, roughness: 0.5 }),
-    copper: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.45, roughness: 0.86, mossScale: 2.5 }),
-    glass: makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1 }),
     // (Clear glass, for the windows of a building that can be entered, as in the game.)
     pane: makePaneMaterial(),
   };
@@ -358,7 +424,7 @@ async function start(): Promise<void> {
   const windows = () => {
     materials.window?.dispose();
     const lamps = lampsAt(state.hour);
-    materials.window = lamps ? makeWindowMaterial() : makeSiteMaterial(T.plaster, T.moss, { normalScale: 0.12, roughness: 0.1, paint: [0.04, 0.055, 0.075] });
+    materials.window = makeWindowFor(lamps, T);
     if (materials.paneLit && materials.paneLit !== materials.pane) materials.paneLit.dispose();
     materials.paneLit = lamps ? makePaneMaterial(true) : materials.pane;
     windowUniforms.uLit.value = lamps;
@@ -367,6 +433,30 @@ async function start(): Promise<void> {
   siteUniforms.uBake.value = 1;
   const clay = new MeshStandardNodeMaterial({ color: new Color(0.42, 0.41, 0.4), roughness: 0.92, metalness: 0 });
   const materialOf = (name: string) => (state.clay ? clay : materials[name] ?? materials.stone);
+  /**
+   * A building shown more or less worn than the rest (`wear` on the item) has materials of its own, made once, with a uniform of their
+   * own for how worn they are, which its slider moves without building anything again. (One uniform for everything can't show two houses
+   * differently worn, and every point of a mesh's fields already says something else.)
+   */
+  const worn = new Map<number, { u: { value: number }; made: Record<string, Material> }>();
+  const wearShown = (it: Item) => (state.weathered ? it.wear ?? 1 : 0);
+  const materialFor = (it: Item | undefined, name: string): Material => {
+    if (state.clay || !it || it.wear === undefined || !weathers(it.kind)) return materialOf(name);
+    let own = worn.get(it.id);
+    if (!own) { const u = uniform(wearShown(it)); own = { u: u as unknown as { value: number }, made: buildingMaterials(state.weathered, u as unknown as { value: number }) }; worn.set(it.id, own); }
+    return own.made[name] ?? materialOf(name);
+  };
+  /** Lets go of a building's own materials, when it is taken away or shown as the rest again. */
+  const unwear = (id: number) => { const own = worn.get(id); if (!own) return; for (const m of Object.values(own.made)) m.dispose(); worn.delete(id); };
+  /** Shows what is built weathered, or new: its materials made again, and put on; and those of buildings worn as they are their own. */
+  const weather = (on: boolean) => {
+    const made = buildingMaterials(on);
+    for (const k of Object.keys(made)) materials[k]?.dispose();
+    Object.assign(materials, made);
+    renderUniforms.uChips.value = on ? 1 : 0;
+    for (const id of [...worn.keys()]) unwear(id);
+    dress();
+  };
 
   // ------------------------------------------------------------------ light from the sky, as the game gives what it does not bake
   /** Writes into a mesh's points the share of the whole sky's light that reaches each, from how much of the sky it sees. */
@@ -374,7 +464,16 @@ async function start(): Promise<void> {
     const S = SKIES[state.hour], L = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
     const g = mesh.geometry, open = mesh.userData.open as Float32Array;
     const sh = (['aSHr', 'aSHg', 'aSHb'] as const).map((n) => g.getAttribute(n) as InterleavedBufferAttribute), bk = g.getAttribute('aBake') as InterleavedBufferAttribute;
+    // (Indoors, as the game lights the rooms of its houses (`placeHouse` marks them with a share of sky less than nothing): a dim light
+    // come in at the windows, from the sky and the sunlit ground, about a fifth of a shaded wall's out of doors, as much from every side.)
+    const sd = S.sun, up = Math.max(0, sd[1] / (Math.hypot(sd[0], sd[1], sd[2]) || 1));
+    const G = [0, 1, 2].map((c) => (0.2 * (0.6 * S.intensity * S.colour[c] * up + Math.PI * 0.9 * L[c])) / Math.PI);
     for (let i = 0; i < open.length; i++) {
+      if (open[i] < 0) {
+        for (let c = 0; c < 3; c++) sh[c].setXYZW(i, 0.22 * (Math.PI / 2) * (0.6 * L[c] + 1.4 * G[c]), 0, 0, 0);
+        bk.setXY(i, 0.05, 0.6);
+        continue;
+      }
       const o = 0.3 + 0.7 * open[i];
       for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * o, 0, (Math.PI / 2) * L[c] * 0.8 * o, 0);
       bk.setXY(i, o, 0.6);
@@ -398,8 +497,8 @@ async function start(): Promise<void> {
     if (g.index) g.index.array = new Uint32Array(0);
     m.userData.open = EMPTY;
   };
-  const meshOf = (name: string, builder: MeshBuilder): Mesh => {
-    const mesh = new Mesh(builder.build(), materialOf(name));
+  const meshOf = (name: string, builder: MeshBuilder, it?: Item): Mesh => {
+    const mesh = new Mesh(builder.build(), materialFor(it, name));
     mesh.name = name;
     mesh.castShadow = name !== 'glass' && name !== 'window' && name !== 'pane' && name !== 'paneLit';
     mesh.receiveShadow = true;
@@ -542,6 +641,7 @@ async function start(): Promise<void> {
     try {
       const into = (m: string) => { let x = builders.get(m); if (!x) builders.set(m, (x = new MeshBuilder())); return x; };
       if (isNature(it.kind)) natureSurfaces();
+      if (it.kind === 'castle' || it.kind === 'chapel') castleSurface();
       made = buildItem(it, state.stone, into, nearItem(it), state.season, roomItem(it));
       const c = stoneColour(state.stone);
       buildGround(it, into, [c[0] * 0.66, c[1] * 0.66, c[2] * 0.66]);
@@ -558,7 +658,7 @@ async function start(): Promise<void> {
     b.meshes = []; b.box.makeEmpty(); b.triangles = 0;
     for (const [name, builder] of builders) {
       if (!builder.vertexCount) continue;
-      const m = meshOf(name, builder);
+      const m = meshOf(name, builder, it);
       b.holder.add(m); b.meshes.push(m);
       b.box.union(m.geometry.boundingBox!);
       b.triangles += (m.geometry.index?.count ?? 0) / 3;
@@ -573,12 +673,12 @@ async function start(): Promise<void> {
   const neighbours = () => { for (const it of state.items) { const b = built.get(it.id); if (b && b.sig !== sigOf(it)) dirty.add(it.id); } };
   /** Brings what is built into line with what is set out: new items built, changed ones built again (in the loop, a few at a time), gone ones taken away. */
   const sync = () => {
-    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); dropCards(b.cards); built.delete(id); dirty.delete(id); }
+    for (const [id, b] of built) if (!itemOf(id)) { world.remove(b.holder); for (const m of b.meshes) letGo(m); dropCards(b.cards); built.delete(id); dirty.delete(id); unwear(id); }
     for (const it of state.items) { const b = built.get(it.id); if (!b || b.sig !== sigOf(it)) dirty.add(it.id); else placeItem(it); }
     changed(true);
   };
   const dress = () => {
-    for (const b of built.values()) for (const m of b.meshes) m.material = materialOf(m.userData.material);
+    for (const [id, b] of built) for (const m of b.meshes) m.material = materialFor(itemOf(id), m.userData.material);
     for (const m of natureLayer.children as Mesh[]) m.material = materialOf(m.userData.material);
     if (ground) ground.material = materialOf('floor');
     shadowsDue = 3;
@@ -601,6 +701,70 @@ async function start(): Promise<void> {
     }
     return best;
   };
+
+  // ------------------------------------------------------------------ what figures walk on and are stopped by
+  // Everything solid, for the figures: the paving, each thing set out (its tree of bounds made in its own frame, so that moving it makes
+  // nothing again), and the rock and plants painted. Made only once there are figures, and again for a thing only once it has been
+  // left alone for a moment after being built again, so that dragging a slider does not make one tree after another.
+  const solids = new Solids();
+  {
+    const g = new BufferGeometry();
+    g.setAttribute('position', new Float32BufferAttribute([-400, 0, -400, 400, 0, 400, 400, 0, -400, -400, 0, -400, -400, 0, 400, 400, 0, 400], 3));
+    solids.set('paving', { bvh: new MeshBVH(g), matrix: new Matrix4(), level: true });
+  }
+  const solidFrom = new Map<unknown, unknown>();
+  /** One tree of bounds over meshes, in the frame they stand in. */
+  const treeOf = (meshes: Mesh[]): MeshBVH | null => {
+    let count = 0, tris = 0;
+    for (const m of meshes) { count += m.geometry.attributes.position.count; tris += m.geometry.index ? m.geometry.index.count : m.geometry.attributes.position.count; }
+    if (!tris) return null;
+    const pos = new Float32Array(count * 3), index = new Uint32Array(tris), v = new Vector3();
+    let base = 0, at = 0;
+    for (const m of meshes) {
+      m.updateMatrix();
+      const p = m.geometry.attributes.position, idx = m.geometry.index;
+      for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i).applyMatrix4(m.matrix); pos.set([v.x, v.y, v.z], (base + i) * 3); }
+      const n = idx ? idx.count : p.count;
+      for (let i = 0; i < n; i++) index[at++] = base + (idx ? idx.getX(i) : i);
+      base += p.count;
+    }
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(pos, 3));
+    g.setIndex(new BufferAttribute(index, 1));
+    return new MeshBVH(g);
+  };
+  let solidsMs = 0;
+  const keepSolids = () => {
+    const now = performance.now();
+    for (const [id, b] of built) {
+      if (solidFrom.get(id) === b.at || now - b.at < 300) continue;
+      const bvh = treeOf(b.meshes);
+      if (bvh) solids.set(id, { bvh, matrix: b.holder.matrixWorld }); else solids.delete(id);
+      solidFrom.set(id, b.at);
+    }
+    for (const key of solids.keys()) if (typeof key === 'number' && !built.has(key)) { solids.delete(key); solidFrom.delete(key); }
+    const rock = layers.rock, plants = layers.plants;
+    if (solidFrom.get('rock') !== rock) {
+      solidFrom.set('rock', rock);
+      const bvh = rock ? ((rock.geometry as unknown as { boundsTree?: MeshBVH }).boundsTree ?? treeOf([rock])) : null;
+      if (bvh) solids.set('rock', { bvh, matrix: rock!.matrixWorld }); else solids.delete('rock');
+    }
+    if (solidFrom.get('plants') !== plants[0]) {
+      solidFrom.set('plants', plants[0]);
+      const bvh = plants.length ? treeOf(plants) : null;
+      if (bvh) solids.set('plants', { bvh, matrix: new Matrix4() }); else solids.delete('plants');
+    }
+    solids.refresh();
+    solidsMs += performance.now() - now;
+  };
+  const crew = new Crew({
+    // (Beside the lab, in the folder the tool publishes; a page made of the lab alone says where they are, or carries them itself.)
+    scene, camera, controls, solids, base: (window as unknown as { __figureBase?: string }).__figureBase ?? new URL('../figures/', location.href).href,
+    say: (text, kind, seconds) => say(text, kind, seconds),
+    chosen: () => { if (crew.chosen.length && state.selected !== null) { state.selected = null; remember(); } renderSelected(); fit(); },
+    viewCentre: () => { const c = viewCentre(); return new Vector3(c.x, 0, c.z); },
+  });
+  document.body.appendChild(crew.palette);
 
   // ------------------------------------------------------------------ light
   const sunDir = new Vector3();
@@ -690,9 +854,13 @@ async function start(): Promise<void> {
   };
 
   // ------------------------------------------------------------------ choosing, adding, taking away
+  /** The corner of the chosen castle's wall that is chosen, whose tower the panel shows: by its place round the wall. */
+  let corner: number | null = null;
   const select = (id: number | null) => {
+    if (id !== null && crew.chosen.length) crew.choose([]);
     if (state.selected === id) return;
     state.selected = id;
+    corner = null;
     renderSelected();
     remember();
   };
@@ -956,8 +1124,52 @@ async function start(): Promise<void> {
   /** How many metres of the world one metre of the building's own measure is, along one of its axes. */
   const stretchOf = (it: Item, axis: keyof typeof AXES) => (axis === 'u' ? it.scale[0] : axis === 'y' ? it.scale[1] : it.scale[2]);
 
+  // A castle's wall, edited by hand: its corners, the lengths between them and its gate, by knobs over its wall-walk.
+  /** How far over the wall-walk its knobs are drawn: clear of the merlons, which stand 1.65 metres over it. */
+  const KNOB_UP = 2.2;
+  /** The frame a castle's record is built in, as the item stands: a point (x, z) of its record is (-z, x) in the holder (see `turnedWest`). */
+  const castleFrame = (it: Item) => new Matrix4().compose(new Vector3(it.x, liftOf(it), it.z), new Quaternion().setFromEuler(new Euler(0, Math.PI / 2 + rad(it.turn), 0)), new Vector3(it.scale[2], it.scale[1], it.scale[0]));
+  const castleToWorld = (it: Item, x: number, y: number, z: number) => new Vector3(-z, y, x).applyMatrix4(castleFrame(it));
+  /** Where the pointer is, over a castle's wall-walk at the height of its knobs, in its record's own measures, to a tenth of a metre. */
+  const onCastle = (it: Item, e: PointerEvent): [number, number] | null => {
+    const c = it.shape.castle!, p = levelAt(rayAt(e.clientX, e.clientY), castleToWorld(it, 0, c.height + KNOB_UP, 0).y);
+    if (!p) return null;
+    const q = p.applyMatrix4(castleFrame(it).invert());
+    return [Math.round(q.z * 10) / 10, Math.round(-q.x * 10) / 10];
+  };
+  /**
+   * A change to a castle's wall (`f`, to its plan, `planOf`), from the item as it was (`start`). If the wall can still be built
+   * (`soundWall`), the castle made from the plan, with its bailey laid out again from the item's own seed, so that what stands in it
+   * stays put while it still fits; its record moved so that the middle of its wall's bounds is its middle again, and the item moved by
+   * as much the other way, so that nothing moves where it stands. Otherwise nothing is changed, and false is given back.
+   */
+  const editCastle = (it: Item, start: Item, f: (p: CastlePlan) => void): boolean => {
+    const was = start.shape.castle!, p = planOf(was);
+    f(p);
+    if (!soundWall(p.corners.map((k): [number, number] => [k.x, k.z]))) return false;
+    const { c, by } = centredCastle(castleOfPlan(p, was, new Rng(`lab castle ${start.seed}`).fork('bailey')));
+    const o = castleToWorld(start, -by[0], 0, -by[1]).sub(castleToWorld(start, 0, 0, 0));
+    it.shape = normalise('castle', { ...clone(start.shape), castle: c });
+    it.x = Math.round((start.x + o.x) * 1000) / 1000; it.z = Math.round((start.z + o.z) * 1000) / 1000;
+    dirty.add(it.id);
+    return true;
+  };
+  /** A plan with the corners changed, its gate put back on the wall where it stood before (a corner added or taken away renumbers the lengths). */
+  const regate = (p: CastlePlan, was: { x: number; z: number }) => { const g = nearestOnWall(p.corners.map((k): [number, number] => [k.x, k.z]), was.x, was.z); p.gate = { i: g.i, t: g.t }; };
+  /** Takes a corner of a castle's wall away: the two lengths that met at it become one. */
+  const removeCorner = (it: Item, k: number) => {
+    const c = it.shape.castle!;
+    if (c.wall.length <= 3) { say('A wall needs three corners at least', 'bad', 3); return; }
+    if (!editCastle(it, clone(it), (p) => { p.corners.splice(k, 1); regate(p, c.gate); })) { say('Without that corner the wall would cross itself, or fold back on itself', 'bad', 4); return; }
+    corner = Math.min(k, c.wall.length - 2);
+    renderSelected(); commit();
+  };
+  const TOWER_NAMES: Record<CastleTower['kind'], string> = { round: 'round', half: 'half round', square: 'square', turret: 'turret' };
+
   interface Knob {
     id: string; label: string; at: Vector3; colour: string;
+    /** Given, for a knob that is chosen by a click as well as dragged: done when it is let go of without having been moved. */
+    click?: () => void;
     /** Dragged along a line: its axis in the building, and which way along it is outward. Or round the building, on the ground. */
     axis?: keyof typeof AXES; sign?: number; ring?: boolean;
     /** From the item as it was when the drag began and how far the knob has been dragged (in the building's own metres along its axis), the item now. */
@@ -1030,6 +1242,33 @@ async function start(): Promise<void> {
       out.push({ id: 'size', label: `${s.boulder!.size.toFixed(1)} m`, colour: GREEN, at: worldAt(it, 0, top + 0.3, D / 2), axis: 'y', sign: 1, drag: (q, st, by) => reshape(q, st, (x) => { x.boulder!.size = st.shape.boulder!.size + by * 1.4; }) });
       return out;
     }
+    // A castle's wall: a knob on each corner, dragged to move it or clicked to choose it (and give it a tower, or take one away); a +
+    // on each length, clicked to add a corner at its middle or dragged to add one where it is let go; and the gate, dragged along the
+    // wall. All drawn a little over the wall-walk, and dragged at that height.
+    if (it.kind === 'castle') {
+      const c = s.castle!, y = c.height + KNOB_UP, n = c.wall.length;
+      c.wall.forEach(([x, z], k) => {
+        const t = c.towers.find((q) => Math.hypot(q.x - x, q.z - z) < 0.5);
+        out.push({ id: `corner${k}`, label: t ? TOWER_NAMES[t.kind] : '', colour: corner === k ? ROSE : AMBER, at: castleToWorld(it, x, y, z),
+          click: () => { corner = k; renderSelected(); },
+          drag: (q, st, _by, e) => { const at = onCastle(st, e); if (at && editCastle(q, st, (p) => { p.corners[k].x = at[0]; p.corners[k].z = at[1]; })) corner = k; } });
+      });
+      for (let k = 0; k < n; k++) {
+        const [ax, az] = c.wall[k], [bx, bz] = c.wall[(k + 1) % n], mid: [number, number] = [Math.round(((ax + bx) / 2) * 10) / 10, Math.round(((az + bz) / 2) * 10) / 10];
+        const insert = (q: Item, st: Item, [x, z]: [number, number]) => editCastle(q, st, (p) => { p.corners.splice(k + 1, 0, { x, z }); regate(p, st.shape.castle!.gate); });
+        out.push({ id: `add${k}`, label: '+', colour: BLUE, at: castleToWorld(it, mid[0], y, mid[1]),
+          click: () => { if (insert(it, clone(it), mid)) { corner = k + 1; renderSelected(); commit(); } },
+          drag: (q, st, _by, e) => { const at = onCastle(st, e); if (at && insert(q, st, at)) corner = k + 1; } });
+      }
+      out.push({ id: 'gate', label: 'gate', colour: GREEN, at: castleToWorld(it, c.gate.x, y, c.gate.z),
+        drag: (q, st, _by, e) => {
+          const at = onCastle(st, e);
+          if (!at) return;
+          const g = nearestOnWall(st.shape.castle!.wall, at[0], at[1]);
+          editCastle(q, st, (p) => { p.gate = { i: g.i, t: g.t }; });
+        } });
+      return out;
+    }
     // Extruding: each face's arrow changes the measure it stands on, and the building is built again as it goes.
     const mid = Math.min(E / 2, 6);
     const church = it.kind === 'church';
@@ -1053,7 +1292,7 @@ async function start(): Promise<void> {
         drag: (q, st, by) => reshape(q, st, (t) => { t.brickwork!.church!.choirLength = st.shape.brickwork!.church!.choirLength + by; }) });
       return out;
     }
-    if (it.kind === 'shack') return out;
+    if (it.kind === 'shack' || it.kind === 'chapel' || it.kind === 'shed') return out;
     // Storeys: dragged up a storey's height, one more; down, one fewer.
     out.push({ id: 'storeys', label: `${s.storeys} storeys`, colour: GREEN, at: worldAt(it, 0, top + 0.6, D / 2), axis: 'y', sign: 1,
       drag: (q, st, by) => reshape(q, st, (t) => { const h = st.shape.heights[st.shape.heights.length - 1] ?? 3; t.storeys = st.shape.storeys + Math.round(by / h); }) });
@@ -1079,7 +1318,7 @@ async function start(): Promise<void> {
   };
 
   // The drag of a knob: from where the pointer first met the plane through the knob that holds its line and faces the eye.
-  let held: { knob: Knob; start: Item; plane: Plane; from: Vector3; axisW: Vector3; pointer: number } | null = null;
+  let held: { knob: Knob; start: Item; plane: Plane; from: Vector3; axisW: Vector3; pointer: number; down: [number, number]; moved: boolean } | null = null;
   const takeKnob = (knob: Knob, e: PointerEvent) => {
     const it = selectedItem();
     if (!it) return;
@@ -1094,12 +1333,17 @@ async function start(): Promise<void> {
       plane = new Plane().setFromNormalAndCoplanarPoint(n.lengthSq() > 1e-6 ? n.normalize() : view.clone().negate(), knob.at);
     }
     const from = rayAt(e.clientX, e.clientY).intersectPlane(plane, new Vector3()) ?? knob.at.clone();
-    held = { knob, start: clone(it), plane, from, axisW, pointer: e.pointerId };
+    held = { knob, start: clone(it), plane, from, axisW, pointer: e.pointerId, down: [e.clientX, e.clientY], moved: false };
   };
   const dragKnob = (e: PointerEvent) => {
     if (!held || held.pointer !== e.pointerId) return;
     const it = selectedItem();
     if (!it) return;
+    // (A knob that can be clicked is not moved until the pointer has gone a few pixels from where it was pressed.)
+    if (!held.moved) {
+      if (held.knob.click && Math.hypot(e.clientX - held.down[0], e.clientY - held.down[1]) < 5) return;
+      held.moved = true;
+    }
     let by = 0;
     if (held.knob.axis) {
       const p = rayAt(e.clientX, e.clientY).intersectPlane(held.plane, new Vector3());
@@ -1109,14 +1353,20 @@ async function start(): Promise<void> {
     held.knob.drag(it, held.start, by, e);
     reflect();
   };
-  const letKnobGo = (e: PointerEvent) => { if (!held || held.pointer !== e.pointerId) return; held = null; commit(); renderSelected(); };
+  const letKnobGo = (e: PointerEvent) => {
+    if (!held || held.pointer !== e.pointerId) return;
+    const was = held;
+    held = null;
+    if (!was.moved && was.knob.click) { was.knob.click(); return; }
+    commit(); renderSelected();
+  };
 
   // ------------------------------------------------------------------ what is drawn over the picture
   const NS = 'http://www.w3.org/2000/svg';
   const lines = document.createElementNS(NS, 'g'), knobLayer = document.createElementNS(NS, 'g');
   over.append(lines, knobLayer);
   const paths: Record<string, SVGPathElement> = {};
-  for (const [name, stroke, width, dash] of [['others', 'rgba(232,226,214,.35)', 1, ''], ['clash', '#ff7a5c', 2, '5 4'], ['chosen', AMBER, 2, ''], ['ring', 'rgba(255,255,255,.55)', 1.5, '3 5'], ['stems', 'rgba(255,255,255,.75)', 1.5, '']] as const) {
+  for (const [name, stroke, width, dash] of [['others', 'rgba(232,226,214,.35)', 1, ''], ['clash', '#ff7a5c', 2, '5 4'], ['chosen', AMBER, 2, ''], ['ring', 'rgba(255,255,255,.55)', 1.5, '3 5'], ['stems', 'rgba(255,255,255,.75)', 1.5, ''], ['wall', AMBER, 2, '7 5']] as const) {
     const p = document.createElementNS(NS, 'path');
     p.setAttribute('fill', 'none'); p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', String(width));
     if (dash) p.setAttribute('stroke-dasharray', dash);
@@ -1165,7 +1415,7 @@ async function start(): Promise<void> {
   };
   const drawOver = () => {
     const chosen = selectedItem(), clashing = new Set(clashes.flat());
-    let others = '', clash = '', mine = '', ring = '', stems = '';
+    let others = '', clash = '', mine = '', ring = '', stems = '', wall = '';
     for (const it of state.items) {
       const d = groundOf(it).map((r) => polyline(r, true)).join('');
       if (it === chosen) mine += d; else if (clashing.has(it.id)) clash += d; else if (!isNature(it.kind) && state.tool !== 'paint' && (state.tool !== 'move' || state.items.length < 40)) others += d;
@@ -1184,7 +1434,12 @@ async function start(): Promise<void> {
       }
     }
     paths.others.setAttribute('d', others); paths.clash.setAttribute('d', clash); paths.chosen.setAttribute('d', mine);
-    paths.ring.setAttribute('d', ring); paths.stems.setAttribute('d', stems);
+    // (A castle's wall, as its line runs from corner to corner, drawn through the knobs that edit it.)
+    if (chosen?.kind === 'castle' && knobs.length && state.tool === 'extrude') {
+      const c = chosen.shape.castle!;
+      wall = polyline(c.wall.map(([x, z]) => castleToWorld(chosen, x, c.height + KNOB_UP, z)), true);
+    }
+    paths.ring.setAttribute('d', ring); paths.stems.setAttribute('d', stems); paths.wall.setAttribute('d', wall);
     // The knobs: kept from frame to frame, so that one being dragged is not taken from under the pointer.
     const wanted = new Set<string>();
     for (const k of knobs) {
@@ -1196,7 +1451,7 @@ async function start(): Promise<void> {
       let e = knobEls.get(k.id);
       if (!e) {
         const g = document.createElementNS(NS, 'g'), dot = document.createElementNS(NS, 'circle'), text = document.createElementNS(NS, 'text'), reach = document.createElementNS(NS, 'circle');
-        g.setAttribute('class', 'knob');
+        g.setAttribute('class', 'knob'); g.setAttribute('data-knob', k.id);
         // (What the finger takes is broader than what is drawn: a clear ring round the knob.)
         reach.setAttribute('r', coarse ? '26' : '13'); reach.setAttribute('fill', 'transparent');
         g.appendChild(reach);
@@ -1238,7 +1493,10 @@ async function start(): Promise<void> {
     const s = it.shape, bw = s.brickwork;
     // (A canal house's panel has a control for its door in each bay, and others that come and go with its gable, front, shutters and shop front.)
     const cw = s.canalwork, canal = cw ? [s.bays, cw.gable, cw.front, !!cw.shutters, !!cw.pui] : null;
-    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire, canal]);
+    // (A castle's, its chosen corner and what stands at it, and whether its wall is being edited.)
+    const c = s.castle, at = c && corner !== null ? c.wall[corner] : undefined;
+    const castle = c ? [corner, c.wall.length, at && c.towers.find((t) => Math.hypot(t.x - at[0], t.z - at[1]) < 0.5)?.kind, state.tool === 'extrude'] : null;
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire, canal, castle]);
   };
   let shownLayout = '', sliding = false;
   /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
@@ -1338,6 +1596,24 @@ async function start(): Promise<void> {
   }
   renderPaint();
 
+  /** The panel for the figures chosen. */
+  function renderFigures() {
+    const list = crew.chosen, one = list.length === 1 ? list[0] : null;
+    el('h3', selBox, one ? BODIES.find((b) => b.id === crew.kinds.get(one))?.label ?? 'Figure' : `${list.length} figures`);
+    el('p', selBox, 'Orders are on the palette over the picture. Each finds its own way: round what stands in the way, through doors, up stairs, onto ledges and rocks.').className = 'note';
+    buttons(selBox, [
+      ['Let go', () => crew.choose([]), 'Esc'],
+      ['Look down', () => crew.lookDown(list[0]), 'F. The view turned to look down on it'],
+      ['Remove', () => { for (const f of [...list]) crew.remove(f); }, 'Delete or Backspace'],
+    ]);
+    checks(selBox, selRefreshers, [['the view follows', () => crew.follow, (v) => { crew.follow = v; }, 'The view goes along with the figure chosen first']]);
+  }
+
+  // Figures, added as buildings are.
+  el('h2', panel, 'Figures');
+  buttons(panel, BODIES.map((b): [string, (e: MouseEvent) => void, string] => [b.label, () => { void crew.add(b.id); }, `A ${b.label.toLowerCase()}, stood in the middle of the view. Click a figure to choose it and give it orders.`]));
+  el('p', panel, 'Click a figure to choose it, then give it orders from the palette over the picture: an order that wants a place waits for a click there. Right click sends it walking. Shift-click chooses more than one; drag one to move it; Esc lets go.').className = 'note';
+
   // The building chosen.
   el('h2', panel, 'Selected');
   const selBox = el('div', panel);
@@ -1347,7 +1623,8 @@ async function start(): Promise<void> {
     const it = selectedItem();
     shownLayout = layoutOf(it);
     sliding = false;
-    if (!it) { el('p', selBox, 'Nothing is selected. Tap a building, or add one.').className = 'note'; return; }
+    if (crew.chosen.length) { renderFigures(); return; }
+    if (!it) { el('p', selBox, 'Nothing is selected. Tap a building or a figure, or add one.').className = 'note'; return; }
     const R = RANGES, list = selRefreshers;
     el('h3', selBox, KINDS[it.kind].name);
     el('p', selBox, KINDS[it.kind].note).className = 'note';
@@ -1373,6 +1650,20 @@ async function start(): Promise<void> {
     slider(selBox, list, 'Depth', 0.2, 5, 0.01, () => it.scale[2], (v) => { it.scale[2] = v; moved(); }, { done: commit, title: 'Stretches it from front to back' });
     buttons(selBox, [['True size', () => { it.scale = [1, 1, 1]; moved(); reflect(); commit(); }, 'Takes the scale away']]);
     el('p', selBox, 'Scale stretches the building as it is built. The measures below build it again at its true size: a broader front gets more windows, a taller one more storeys.').className = 'note';
+    // How worn it is, where its kind weathers: its own materials' uniform moved as the slider goes, nothing built again.
+    if (weathers(it.kind)) {
+      el('h3', selBox, 'Wear');
+      slider(selBox, list, 'Worn', 0, 4, 0.05, () => it.wear ?? 1, (v) => {
+        const first = it.wear === undefined;
+        it.wear = v;
+        if (first) dress();
+        const own = worn.get(it.id);
+        if (own) own.u.value = wearShown(it);
+      }, { done: commit, title: 'How worn it is: render come away, brick flaked and its mortar raked, stone chipped, timber faded and paint peeling, roofs mossed, rain streaks. 0 new from the builder, 1 as the game builds it, 4 derelict: render mostly gone, the joints raked deep, the timber grey and rotten, paint all but gone, the roof dark and broken, the walls grimed and grown over' });
+      el('p', selBox, '0 new, 1 as the game builds it, 4 derelict.').className = 'note';
+      buttons(selBox, [['As the rest', () => { delete it.wear; unwear(it.id); dress(); reflect(); commit(); }, 'Worn as everything else is: as the game builds it, or new where weathered is off under Scene']]);
+      if (!state.weathered) el('p', selBox, 'Weathered is off under Scene: everything is shown new.').className = 'note';
+    }
 
     // Its measures, by kind. Each change is brought back within what the kind can be, and the building is built again.
     el('h3', selBox, 'Measures');
@@ -1411,7 +1702,63 @@ async function start(): Promise<void> {
       num('Roof pitch', roofRange, () => bw().pitch, (t, v) => { t.brickwork!.pitch = v; }, 'How steep the roof is, in degrees', 0.5);
       pick('Roof', [['Red tiles', 'red'], ['Dark tiles', 'dark'], ['Copper', 'copper']], () => bw().roof, (t, v) => { t.brickwork!.roof = v; });
     };
-    if (it.kind === 'timber') {
+    if (it.kind === 'chapel') {
+      const c = () => s().chapel!;
+      num('Length', R.chapel.w, () => s().w, (t, v) => { t.w = v; }, 'The nave, from the tower to the choir');
+      num('Breadth', R.chapel.d, () => s().d, (t, v) => { t.d = v; });
+      num('Walls', R.chapel.height, () => s().heights[0], (t, v) => { t.heights = [v]; }, 'How high the nave walls stand');
+      num('Tower', R.chapel.tower, () => c().tower, (t, v) => { t.chapel!.tower = v; }, 'How broad the tower is');
+      num('Tower height', [R.chapel.height[0] + R.chapel.over[0], R.chapel.height[1] + R.chapel.over[1]], () => c().height, (t, v) => { t.chapel!.height = v; }, 'From the ground to the top of its walls', 0.1);
+      pick('Spire', [['Pyramid', 'pyramid'], ['Needle', 'needle'], ['Saddle roof', 'saddle']], () => c().spire, (t, v) => { t.chapel!.spire = v; });
+      num('Spire height', R.chapel.spire, () => c().spireHeight, (t, v) => { t.chapel!.spireHeight = v; }, undefined, 0.1);
+      num('Choir', R.chapel.choir, () => c().choir, (t, v) => { t.chapel!.choir = v; }, 'How far the choir reaches beyond the nave');
+      tick([['Apse', () => c().apse, (t, v) => { t.chapel!.apse = v; }, 'The choir ends round, not square']]);
+      pick('Tower at', [['Left end', -1], ['Right end', 1]], () => c().end, (t, v) => { t.chapel!.end = v; }, 'Which end of the nave the tower stands at, as one stands before it');
+    } else if (it.kind === 'shed') {
+      num('Width', R.shed.w, () => s().w, (t, v) => { t.w = v; });
+      num('Depth', R.shed.d, () => s().d, (t, v) => { t.d = v; });
+      num('Height', R.shed.height, () => s().heights[0], (t, v) => { t.heights = [v]; }, 'At its front, under the eaves');
+      wash();
+    } else if (it.kind === 'castle') {
+      const c = () => s().castle!, n = c().wall.length, RC = R.castle;
+      /** A change to the wall from the panel (see `editCastle`); laid out again and kept at once, but for a slider's, kept when it is let go. */
+      const edit = (f: (p: CastlePlan) => void, again = true) => {
+        if (!editCastle(it, clone(it), f)) { say('Not so: the wall would cross itself, fold back on itself, or have a length under two metres', 'bad', 4); return; }
+        if (again) { renderSelected(); commit(); }
+      };
+      el('p', selBox, `${n} corners, ${c().towers.length} towers, ${c().ranges?.length ?? 0} ranges of buildings in the bailey. Its keep and the house it guards are built with a valley, stone by stone, and are not here.`).className = 'note';
+      el('h3', selBox, 'Wall');
+      el('p', selBox, state.tool === 'extrude'
+        ? 'Drag a corner to move it; click a corner to choose it. Click a + to add a corner at the middle of its length, or drag it out to add one there. Drag the gate along the wall. Delete takes the chosen corner away; Esc lets it go.'
+        : 'Its line runs from corner to corner round the bailey, and can be edited: its corners moved, added and taken away, and a tower given to any of them.').className = 'note';
+      if (state.tool !== 'extrude') buttons(selBox, [['Edit the wall', () => setTool('extrude'), 'E. Knobs on its corners, on its lengths and on its gate']]);
+      slider(selBox, list, 'Height', RC.height[0], RC.height[1], 0.1, () => c().height, (v) => edit((p) => { p.height = v; }, false), { done: () => { renderSelected(); commit(); }, title: 'From the ground to the wall-walk, in metres; its towers stand as far over the walk as they did' });
+      slider(selBox, list, 'Thickness', RC.thick[0], RC.thick[1], 0.05, () => c().thick, (v) => edit((p) => { p.thick = v; }, false), { done: () => { renderSelected(); commit(); }, title: 'How thick the wall is, and so how broad its walk' });
+      const k = corner;
+      if (k !== null && k < n) {
+        const tower = () => planOf(c()).corners[k]?.tower;
+        el('h3', selBox, `Corner ${k + 1} of ${n}`);
+        choice<CastleTower['kind'] | 'none'>(selBox, list, 'Tower', [['None', 'none'], ['Round', 'round'], ['Half round', 'half'], ['Square', 'square'], ['Turret', 'turret']], () => tower()?.kind ?? 'none', (v) => edit((p) => {
+          const was = p.corners[k].tower;
+          if (v === 'none') { delete p.corners[k].tower; return; }
+          // (Of another kind, it keeps its size and height where it can: a turret is of another size altogether.)
+          const alike = !!was && (was.kind === 'turret') === (v === 'turret');
+          p.corners[k].tower = { ...TOWER_DEALT[v], ...(alike ? { r: was.r, over: was.over, roof: was.roof } : {}), kind: v };
+        }), 'What stands at this corner: a tower standing out from the wall, round, half round with its back to the bailey, or square; a small turret corbelled out at the top; or nothing');
+        const t = tower();
+        if (t) {
+          const turret = t.kind === 'turret', rr = turret ? RC.turretR : RC.r, over = turret ? RC.turretOver : RC.over;
+          slider(selBox, list, 'Size', rr[0], rr[1], 0.05, () => tower()?.r ?? NaN, (v) => edit((p) => { p.corners[k].tower!.r = v; }, false), { done: commit, title: turret ? 'Its radius' : 'Its radius, or half its breadth' });
+          slider(selBox, list, 'Over the walk', over[0], over[1], 0.1, () => tower()?.over ?? NaN, (v) => edit((p) => { p.corners[k].tower!.over = v; }, false), { done: commit, title: 'How far it stands over the wall-walk, to the top of its walls' });
+          if (!turret) choice<CastleTower['roof']>(selBox, list, 'Roof', [['Cone of slates', 'cone'], ['Battlement', 'battlement']], () => tower()?.roof ?? 'cone', (v) => edit((p) => { p.corners[k].tower!.roof = v; }));
+        }
+        buttons(selBox, [
+          ['Previous', () => { corner = (k + n - 1) % n; renderSelected(); }, 'The corner before it, round the wall'],
+          ['Next', () => { corner = (k + 1) % n; renderSelected(); }, 'The corner after it, round the wall'],
+          ['Remove', () => removeCorner(it, k), 'Delete. Takes the corner away: the two lengths that met at it become one'],
+        ]);
+      } else el('p', selBox, 'Choose a corner by clicking its knob (with Extrude), to give it a tower or take one away.').className = 'note';
+    } else if (it.kind === 'timber') {
       num('Width', R.timber.w, () => s().w, (t, v) => { t.w = v; });
       num('Depth', R.timber.d, () => s().d, (t, v) => { t.d = v; });
       ints('Storeys', () => s().storeys, (t, v) => { t.storeys = v; });
@@ -1608,7 +1955,7 @@ async function start(): Promise<void> {
         brickMake(R.store.pitch);
       }
     }
-    el('p', selBox, 'In Extrude (E), drag the arrows on its faces: width, depth, storeys, wings, the roof’s pitch; on a church its tower, spire and choir.').className = 'note';
+    if (it.kind !== 'castle') el('p', selBox, 'In Extrude (E), drag the arrows on its faces: width, depth, storeys, wings, the roof’s pitch; on a church its tower, spire and choir.').className = 'note';
   }
 
   // The scene.
@@ -1623,6 +1970,7 @@ async function start(): Promise<void> {
     ['overlays', () => state.overlays, (v) => { state.overlays = v; showOverlays(); remember(); }, 'H. The grid, outlines, knobs, rings and the brush: off, the picture alone'],
     ['grid', () => state.grid, (v) => { state.grid = v; showOverlays(); remember(); }, 'A line every metre'],
     ['clay', () => state.clay, (v) => { state.clay = v; dress(); remember(); }, 'C. Everything in one plain grey: the shapes alone'],
+    ['weathered', () => state.weathered, (v) => { state.weathered = v; weather(v); remember(); }, 'As the game builds them: render come away, brick flaked, stone chipped, roofs worn, rain streaked. Off, all new'],
     ['air', () => state.air, (v) => { state.air = v; atmosphere.uniforms.uEnabled.value = v ? 1 : 0; remember(); }, 'Haze and the light in the air, as the game draws them'],
   ]);
   /**
@@ -1675,7 +2023,7 @@ async function start(): Promise<void> {
   const toolButtons: Record<string, HTMLButtonElement> = {};
   const toolDef: [string, string, () => void, string][] = [
     ['move', 'Move & turn', () => setTool('move'), 'M. Drag a building to move it; drag the knob on its ring to turn it'],
-    ['extrude', 'Extrude', () => setTool('extrude'), 'E. Drag the arrows on its faces to change its measures'],
+    ['extrude', 'Extrude', () => setTool('extrude'), 'E. Drag the arrows on its faces to change its measures; on a castle, the knobs on its wall\'s corners, lengths and gate'],
     ['scale', 'Scale', () => setTool('scale'), 'R. Drag a corner to scale it all, a face to stretch it one way'],
     ['paint', 'Paint', () => setTool(state.tool === 'paint' ? 'move' : 'paint'), 'B. Paint ground, plants or rock'],
     ['gap', '', () => {}, ''],
@@ -1701,6 +2049,8 @@ async function start(): Promise<void> {
     buttonsFor();
     if (t !== 'paint') { brushRing.visible = false; canvas.style.cursor = ''; }
     reflectTools(); renderPaint(); remember();
+    // (A castle's panel says how its wall is edited, which depends on the tool.)
+    if (selectedItem()?.kind === 'castle') reflect();
   };
   const togglePanel = () => { state.panel = !state.panel; document.body.classList.toggle('bare', !state.panel); fit(); remember(); };
 
@@ -1734,7 +2084,7 @@ async function start(): Promise<void> {
     note: 'Each building: the lab\'s own record (kind, seed, x, z, turn in degrees with 0 facing +z, scale along breadth, height, depth) and `building`, the site document the game builds it from, at the origin facing w.',
     // (A shack is no building of the site document: it is saved as the town keeps one.)
     // (Trees and boulders are no buildings: their measures are all there is of them.)
-    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : isNature(it.kind) ? it : { ...it, building: documentOf(it) })),
+    items: state.items.map((it) => (it.kind === 'shack' ? { ...it, shack: shackOf(it) } : isNature(it.kind) || it.kind === 'castle' ? it : { ...it, building: documentOf(it) })),
     // (What was painted, as the brushes laid it: see document 5.)
     paint: state.paint,
   }, null, 1);
@@ -1843,6 +2193,14 @@ async function start(): Promise<void> {
     if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (crew.chosen.length) {
+      // (With figures chosen, Esc first lets go of an order armed, then of the figures; the numbers arm orders.)
+      if (k === 'escape') { e.preventDefault(); if (!crew.disarm()) crew.choose([]); return; }
+      if (crew.key(e.key)) { e.preventDefault(); return; }
+      if (k === 'delete' || k === 'backspace') { e.preventDefault(); for (const f of [...crew.chosen]) crew.remove(f); return; }
+      if (k === 'f') { crew.lookDown(crew.chosen[0]); return; }
+    }
+    if (k === 'escape' && corner !== null && it?.kind === 'castle' && placing === null) { corner = null; renderSelected(); return; }
     if (k === 'escape') {
       if (placing !== null) { const id = placing; placing = null; state.items = state.items.filter((q) => q.id !== id); state.selected = null; sync(); renderSelected(); say('Taken back', 'dim', 2); commit(); }
       else select(null);
@@ -1859,6 +2217,8 @@ async function start(): Promise<void> {
     else if (k === 'l') setLook(!state.look);
     else if (k === 'p' || k === 'tab') { e.preventDefault(); togglePanel(); }
     else if (!it) return;
+    // (With a corner of a castle's wall chosen while the wall is being edited, Delete takes the corner away, not the castle.)
+    else if ((k === 'delete' || k === 'backspace') && it.kind === 'castle' && corner !== null && state.tool === 'extrude') { e.preventDefault(); removeCorner(it, corner); }
     else if (k === 'delete' || k === 'backspace') { e.preventDefault(); remove(it.id); }
     else if (k === 'n') nextDoor(e.shiftKey);
     else if (k === '[' || k === ']') { it.turn = turned(it.turn + (k === ']' ? -1 : 1) * (state.turnSnap || 15)); placeItem(it); changed(false); reflect(); commit(); }
@@ -1885,6 +2245,15 @@ async function start(): Promise<void> {
     over.style.width = `${w}px`; over.style.height = `${h}px`;
     foot.style.bottom = h < window.innerHeight ? `${window.innerHeight - h + 10}px` : 'calc(10px + env(safe-area-inset-bottom, 0px))';
     foot.style.right = `${window.innerWidth - w + 12}px`;
+    placePalette();
+  };
+  /** The orders' palette along the foot of the picture, and the words at the foot above it while it is shown. */
+  const footAt = () => (screen.h < window.innerHeight ? `${window.innerHeight - screen.h + 10}px` : 'calc(10px + env(safe-area-inset-bottom, 0px))');
+  const placePalette = () => {
+    const pal = crew.palette;
+    pal.style.width = `${screen.w}px`;
+    pal.style.bottom = footAt();
+    foot.style.bottom = pal.hidden ? footAt() : `calc(${footAt()} + ${pal.offsetHeight + 8}px)`;
   };
   window.addEventListener('resize', fit);
   document.body.classList.toggle('bare', !state.panel);
@@ -1908,6 +2277,19 @@ async function start(): Promise<void> {
   paintLayers();
   setTool(state.tool);
   ready = true;
+  // The figures kept from last time; or, the first time the lab is opened with figures, three in front of the first building.
+  {
+    const kept = Crew.kept();
+    if (kept) void crew.bringBack(kept);
+    else if (!query.has('nofigures')) void (async () => {
+      keepSolids();
+      const front = state.items[0] ? new Vector3(state.items[0].x, 0, state.items[0].z + 12) : new Vector3(0, 0, 8);
+      await crew.add('base-woman', front.clone().add(new Vector3(-2.2, 0, 0)), Math.PI, false);
+      await crew.add('base-man', front.clone().add(new Vector3(0, 0, 1.2)), Math.PI, false);
+      await crew.add('mannequin', front.clone().add(new Vector3(2.2, 0, 0)), Math.PI, false);
+      say('Three figures stand in front of the building: click one to give it orders', 'good', 10);
+    })();
+  }
 
   // ------------------------------------------------------------------ the loop
   let last = performance.now(), fps = 60, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5, told = 0;
@@ -1951,6 +2333,13 @@ async function start(): Promise<void> {
       }
     }
     if (tick % 10 === 0) { findClashes(); neighbours(); }
+    // The figures: what they stand on kept up with what is built, then each moved on. (Their shadows move with them, so the sun's are
+    // drawn again every other frame while there are any.)
+    if (crew.figures.length) {
+      keepSolids();
+      crew.update(Math.min(dt, 0.05));
+      if (tick % 2 === 0) shadowsDue = Math.max(shadowsDue, 1);
+    }
     vegetationUniforms.uTime.value = now / 1000;
     if (allCards.size) cullCards([...allCards], camera.position);
     controls.update();
@@ -1976,6 +2365,7 @@ async function start(): Promise<void> {
     if (tick === 5) try { localStorage.removeItem(OPENING); } catch { /* storage refused */ }
     if (now - told > 300) {
       told = now;
+      placePalette();
       if (performance.now() > said.until) said.text = '';
       foot.innerHTML = '';
       if (said.text) el('div', foot, said.text).className = said.kind;
@@ -1989,7 +2379,7 @@ async function start(): Promise<void> {
         const what = it.kind === 'tree' ? `${s.tree!.kind}, ${s.tree!.height.toFixed(1)} m tall` : it.kind === 'boulder' ? `${s.boulder!.size.toFixed(1)} m across` : `${s.w.toFixed(1)} by ${s.d.toFixed(1)} m, ${it.kind === 'church' ? `${s.bays} bays` : `${s.storeys} storey${s.storeys > 1 ? 's' : ''}, ${s.bays} bays`}`;
         el('div', foot, `${KINDS[it.kind].name}: ${what}${scaled}; built in ${b.ms.toFixed(0)} ms, ${Math.round(b.triangles).toLocaleString()} triangles${b.cards.length ? ` and ${b.cards.reduce((n, m) => n + m.count, 0).toLocaleString()} cards` : ''}`);
       }
-      el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawn.triangles / 1e6).toFixed(2)} million triangles drawn · ${state.items.length} building${state.items.length === 1 ? '' : 's'} · ${state.hour}, ${state.stone}`).className = 'dim';
+      el('div', foot, `${fps.toFixed(0)} frames a second · ${(drawn.triangles / 1e6).toFixed(2)} million triangles drawn · ${state.items.length} building${state.items.length === 1 ? '' : 's'}${crew.figures.length ? ` · ${crew.figures.length} figure${crew.figures.length === 1 ? '' : 's'}${crew.nav.lastMs ? `, last way found in ${crew.nav.lastMs.toFixed(0)} ms` : ''}` : ''} · ${state.hour}, ${state.stone}`).className = 'dim';
     }
   };
   renderer.setAnimationLoop((now: number) => { try { step(now); } catch (e) { console.error(e); } });
@@ -2018,6 +2408,19 @@ async function start(): Promise<void> {
       return ms;
     },
     remove, clear: () => { state.items = []; state.selected = null; sync(); renderSelected(); commit(); },
+    // (The figures: `crew` has them, `solids` what they stand on; `orderAt` gives the order `id` at a point as a click there would.)
+    crew, solids, keepSolids, solidsMs: () => solidsMs,
+    /** Every surface over (x, z) from `top` down: its height, and how much it faces the sky. */
+    surfaces: (x: number, z: number, top = 60) => solids.hits(new Ray(new Vector3(x, top, z), new Vector3(0, -1, 0)), top + 60).map((h) => [+h.point.y.toFixed(3), +h.up.toFixed(2)]),
+    orderAt: (id: string, at: number[], from?: number[]) => {
+      crew.armById(id);
+      const target = new Vector3(...at), eye = from ? new Vector3(...from) : target.clone().add(new Vector3(0, 30, 12));
+      return crew.orderAt(new Ray(eye, target.clone().sub(eye).normalize()));
+    },
+    // (A castle's wall: its plan, and a change to it as the knobs and the panel make one; and which corner is chosen.)
+    castlePlan: (id: number) => { const it = itemOf(id); return it?.shape.castle ? planOf(it.shape.castle) : null; },
+    editCastle: (id: number, f: (p: CastlePlan) => void) => { const it = itemOf(id); if (!it?.shape.castle) return false; const ok = editCastle(it, clone(it), f); if (ok) { renderSelected(); commit(); } return ok; },
+    corner: () => corner,
     capture: () => new Promise<string>((done) => { wantPicture = done; }),
     pending: () => dirty.size,
     ready: true,

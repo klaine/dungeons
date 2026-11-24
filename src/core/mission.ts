@@ -120,7 +120,7 @@ export function planMission(site: Site, rng: Rng): void {
 }
 
 /** Where a gate's lever stands: a pace or two inside the far room, to one side of the gateway. */
-function leverSpot(site: Site, w: Way, far: number): [number, number] {
+export function leverSpot(site: Site, w: Way, far: number): [number, number] {
   const p = site.places[far];
   const side = w.a === far ? w.side : ({ n: 's', s: 'n', e: 'w', w: 'e' } as const)[w.side];
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi - 0.6, Math.max(lo + 0.6, v));

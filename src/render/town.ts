@@ -204,6 +204,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // bumps; held to one in seven, the garden was refused on single points and came out a pair of beds in a great lawn.)
     const gentle = (x: number, z: number) => Math.hypot(ground(x + 1, z) - ground(x - 1, z), ground(x, z + 1) - ground(x, z - 1)) < 0.5;
     const plain = (x: number, z: number) => zoneAt(x, z) === Z.wild && gentle(x, z);
+    // (Nothing within three metres of the house's walls: no bed is laid where this is nothing, which it is anywhere inside the house.)
     const houseOff = (x: number, z: number) => Math.min(...b.outerRects.map((r) => outsideRect({ x0: r.x0 - clearOfHouse, x1: r.x1 + clearOfHouse, z0: r.z0 - clearOfHouse, z1: r.z1 + clearOfHouse }, x, z)));
     const lineOff = (v: number, o: number) => { const m = (((v - o) % S) + S) % S; return Math.min(m, S - m); };
     // The beds first, so that the walks are laid only where they lead between beds or round them.
@@ -212,7 +213,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     for (let cj = cj0; cj <= cj1; cj++) for (let ci = ci0; ci <= ci1; ci++) {
       const r = { x0: hx + ci * S + half + 0.6, x1: hx + (ci + 1) * S - half - 0.6, z0: zRef + cj * S + half + 0.6, z1: zRef + (cj + 1) * S - half - 0.6 };
       let ok = r.x0 > R.x0 && r.x1 < R.x1 && r.z0 > R.z0 && r.z1 < R.z1;
-      for (let z = r.z0 - 2; z <= r.z1 + 2.01 && ok; z += 1) for (let x = r.x0 - 2; x <= r.x1 + 2.01 && ok; x += 1) if (!plain(x, z) || houseOff(x, z) < 0) ok = false;
+      for (let z = r.z0 - 2; z <= r.z1 + 2.01 && ok; z += 1) for (let x = r.x0 - 2; x <= r.x1 + 2.01 && ok; x += 1) if (!plain(x, z) || houseOff(x, z) <= 0) ok = false;
       if (ok) fits.set(`${ci},${cj}`, r);
     }
     // (Only in pairs either side of the house's line, so that the garden is as symmetrical as the house; laid one-sided where the
@@ -759,7 +760,12 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       // (Within two to four metres of the quay's edge: further back they lay across the way along the waterfront, where one walks in
       // from the harbour light; and none on the bridge over a river's mouth.)
       if (t.river && Math.abs(x - t.river.line[t.river.line.length - 1][0]) < t.river.width[t.river.width.length - 1] / 2 + 4) continue;
-      heap(x, q.z - h.range(2.9, 3.2));
+      // (And a metre clear of the way along the waterfront, which runs down the middle of the apron: a heap reaches some 1.8 metres
+      // either side of where it is set, and on a narrow apron one came within a hand of the way, and whoever walked in from the light
+      // stuck against it. Towards the quay's edge then, as far as a quarter metre short of it; or none.)
+      const want = q.z - h.range(2.9, 3.2), clear = q.z - q.apron / 2 + 1.0 + 1.85, z = Math.max(want, clear);
+      if (z > q.z - 2.1) continue;
+      heap(x, z);
     }
     // The crane: on a block of stone at the quay's edge beside the ship, a mast with a jib raked up from low on it and out over the
     // water, held up by a rope from the mast's head; a winch at its foot, and a crate in a sling hanging from the jib's end.

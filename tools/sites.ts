@@ -6,7 +6,7 @@
 import { generateSite, MakeOptions } from '../src/core/generate';
 import { footprintOf } from '../src/core/building';
 import { solve } from '../src/core/mission';
-import { loopCount } from '../src/core/site';
+import { loopCount, roundStair, Site } from '../src/core/site';
 import { inland, landAt } from '../src/core/island';
 import { inside } from '../src/core/mountain';
 import { nearLine, outlineOf, outsideBuilt, townGround } from '../src/core/town';
@@ -14,6 +14,44 @@ import { brickDoor, brickShell } from '../src/core/brick';
 import { canalDoor, canalShell } from '../src/core/canal';
 import { planProblem } from '../src/core/interior';
 import { Building } from '../src/core/site';
+
+/**
+ * What is wrong with a cathedral, if anything: its nave's ridge must stand between half as high again and three times as high as the
+ * tallest buildings about the square (unless the least a nave with aisles and a clerestory can be is more); no two rooms on one storey
+ * may overlap; every stair stands within its room; and a stair round a tower's walls must come up through the floor over it on a leg
+ * long enough to keep a head clear of the ceiling; and the way to the shrine must climb a tower and go down into the dungeon.
+ */
+function cathedralProblem(site: Site): string | null {
+  const c = site.cathedral;
+  if (!c) return 'no cathedral';
+  const ratio = c.measure.ridge / c.measure.near;
+  if (ratio < 1.5 - 1e-6) return `its ridge is only ${ratio.toFixed(2)} times the houses about the square`;
+  if (ratio > 3.0001 && c.measure.ridge > c.measure.least + 0.15) return `its ridge is ${ratio.toFixed(2)} times the houses about the square`;
+  const ps = site.places.filter((p) => p.role !== 'approach');
+  for (const a of ps) for (const b of ps) {
+    if (a.id >= b.id || (a.level ?? 0) !== (b.level ?? 0)) continue;
+    if (Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) > 0.05 && Math.min(a.z1, b.z1) - Math.max(a.z0, b.z0) > 0.05) return `${a.name} and ${b.name} overlap`;
+  }
+  // Its plot goes high and low: the shortest way to the shrine climbs to a tower's top and goes down into the dungeon.
+  const route = solve(site).moves.map((m) => site.places[m.to].name);
+  if (!route.includes('tower top')) return 'the way to the shrine does not climb a tower';
+  if (!route.some((n) => n === 'cell' || n === 'oubliette')) return 'the way to the shrine does not go down into the dungeon';
+  for (const w of site.ways) {
+    if (w.kind !== 'stair') continue;
+    const p = site.places[w.a], q = site.places[w.b];
+    if (w.round) {
+      const { legs } = roundStair(site, w), last = legs[legs.length - 1], steps = legs.reduce((n, l) => n + l.steps, 0);
+      if (Math.abs(steps * 0.17 - (q.floor - p.floor)) > 0.02) return `the stair round the walls of the ${p.name} climbs ${(steps * 0.17).toFixed(2)} of ${(q.floor - p.floor).toFixed(2)}`;
+      if (last.steps < 12) return `the stair round the walls of the ${p.name} ends on a leg of ${last.steps} steps`;
+    } else {
+      const lo = w.side === 'n' || w.side === 's' ? p.x0 : p.z0, hi = w.side === 'n' || w.side === 's' ? p.x1 : p.z1;
+      if (Math.min(w.at, w.to ?? w.at) < lo + 0.3 || Math.max(w.at, w.to ?? w.at) > hi - 0.3) return `the stair in the ${p.name} runs out of it`;
+      const steps = Math.round((q.floor - p.floor) / 0.17), tread = Math.abs((w.to ?? w.at) - w.at) / steps;
+      if (tread < 0.165) return `the stair in the ${p.name} is too steep, treads of ${tread.toFixed(2)}`;
+    }
+  }
+  return null;
+}
 
 /** What is wrong with the plan of a house of brick or a canal house, if it has one. */
 function housePlan(b: Building): string | null {
@@ -266,6 +304,11 @@ for (let n = 0; n < townCount; n++) {
     const site = generateSite(seed, 'town'), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
     if (!solve(site).ok) throw new Error('cannot be completed');
     const tally3 = (k: string) => towns.set(k, (towns.get(k) ?? 0) + 1);
+    const cp = cathedralProblem(site);
+    if (cp) throw new Error(`the cathedral: ${cp}`);
+    const c = site.cathedral!;
+    tally3(`cathedral=${c.towers.length === 2 ? 'twin' : 'single'} ${c.towers.map((x) => x.spire).join('/')}${c.lantern ? ' +lantern' : ' +fleche'}`);
+    tally3(`ridge/houses=${(Math.round((c.measure.ridge / c.measure.near) * 4) / 4).toFixed(2)}`);
     const ground = (x: number, z: number) => townGround(t, F, x, z);
     // (Outlines as boxes, to find the pairs worth looking at; then their footprints, turned as they stand, tested exactly: a town's
     // streets need not run square to the world, and boxes about buildings on a slanting street overlap where the buildings do not.)
