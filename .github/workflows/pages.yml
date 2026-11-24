@@ -10,8 +10,10 @@ on:
 permissions:
   contents: write
 
+# One group per branch: a newer push to the default branch replaces a publish still running, but a push to any other branch,
+# whose run is skipped, must not cancel it (one group for every branch did, and the site was left unpublished).
 concurrency:
-  group: publish-site
+  group: publish-site-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
