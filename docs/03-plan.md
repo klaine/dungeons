@@ -461,6 +461,19 @@ The machine this is developed on now has a graphics card, and tablets were repor
     castle over its village too, built and drawn in its coursed stone, its game with it; but its house has moved to the castle's
     seat, and the town's way still ends at the world's old spot, out on the valley's side, so the body walked along it does not come
     to the house. Leading the ways to the valleys' own roads is the first of step 4's ways (document 6).
+    Then the land drawn with the game's materials (asked: "the looks should match pretty closely"): the world's land near the walker
+    the game's walked ground, from half a kilometre off its far-land material read from the world's cover, passing into each other in a
+    band about the walker; each kind of place's ground the game's; trees shading themselves past the near map (document 6, step 3).
+    Then the game's air, light and weather (asked: "bring to world-as-the-game everything that makes it look closer"): its haze, each
+    place's own weather and tones eased into, snow on the heights, a town's paving by its streets, light thrown up from the ground; its
+    speedups (the world's whole trees thinned, the resolution following the frame rate) and the mountain's tunings that suit the world.
+    Then winter over a snow line of 500 metres, as the game draws and lays its winter mountains: the materials' snow by height, winter's
+    growth, the far land's winter range, and a mountain top over the line built as a winter one (document 6, step 3).
+    Then step 4 finished (asked: "proceed autonomously to finish step 4"): the world's ways drawn and walked, roads, tracks and
+    footpaths joining every place, with a leg into each castle's valley and up to each mountain top from where its own road begins,
+    cleared through the place's own land; the world's ink map and the place's plan; riding the ways and the ferry in the game's boat;
+    the game's sound; the doors lit from the bake and each place's game kept. The body walks from Halhaven to Strath Norith's door and
+    up Elith Fell to its hospice's (document 6, step 4).
 
 ## Risks
 

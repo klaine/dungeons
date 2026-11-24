@@ -4,7 +4,7 @@ import { Site } from '../core/site';
 import { Hole, HoleGrid } from '../core/stream';
 import { siteFrame, SiteFrame } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
-import { CardSet, SceneDescription, SeaDesc } from './scene';
+import { CardSet, PaveFrame, SceneDescription, SeaDesc } from './scene';
 import { stoneStyles } from './geom/styles';
 
 /** The stone of the world's own rock (`groundLook` in the walk page colours it so). */
@@ -66,9 +66,26 @@ export interface PlacePack {
   life: PlaceLife;
   /** What its game is played with (`PlaceGame`). */
   game: PlaceGame;
+  /** How the game draws the air and the land's tones there (`PlaceLook`). */
+  look: PlaceLook;
   /** How long it took, milliseconds: laying out was before; meshing, and making ready. */
   ms: { mesh: number; pack: number };
   triangles: number;
+}
+
+/**
+ * How the game draws a place's air and the tones of its land, for the world about it while the walker is there (`main.ts` in the
+ * walk page eases into it): its weather, the ground its haze and mist lie on in the world's heights; the colours its far land, its
+ * distant grass and its bare ground take (`farUniforms`, `groundUniforms`); its snow and the height above which more lies; and its
+ * town's paving frame, in the site's own measures (its frame turns it into the world: `setPaving`'s `frame`).
+ */
+export interface PlaceLook {
+  weather: { cloud: number; layered: boolean; mist: number; haze: number; floor: number };
+  far?: SceneDescription['far'];
+  snow: number;
+  snowLine?: [number, number];
+  groundLow?: number;
+  paving?: PaveFrame;
 }
 
 /**
@@ -200,9 +217,35 @@ function tilePacked(m: PackedMesh, size: number, least = 3000): PackedMesh[] {
  * Builds a place laid out in a world (`generateWorldPlace`) ready to stand in it: see above. Only for a place whose site has a frame in
  * a world; the far land (`soft|far`) and the painted trees standing on it (cards `tree` and `fir`) left out.
  */
-export function packPlace(site: Site, info: { kind: string; n: number; name: string }, worldLand?: (x: number, z: number) => number): PlacePack {
+export function packPlace(site: Site, info: { kind: string; n: number; name: string }, worldLand?: (x: number, z: number) => number, o: { clear?: [number, number][]; path?: boolean } = {}): PlacePack {
   const f = siteFrame(site);
   if (!f) throw new Error('not a place in a world');
+  // A way of the world's that comes in over the place's own land (`clear`, in the world's coordinates: a castle's valley's leg, from
+  // where its road begins out to the world's ways): the trees standing on it cleared, their wood out of what stops the body, the grass
+  // off it, and the ground drawn as a track along it, so that it is a way there too. (The game's player starts where the valley's road
+  // begins, and its land beyond, a forest, has no way through it: walked in from the world, the body was held among its trunks.)
+  const legSite = (o.clear ?? []).map(([x, z]) => intoSite(f, x, z));
+  const LEG_CELL = 16, legCells = new Map<string, number[]>();
+  for (let k = 1; k < legSite.length; k++) {
+    const [ax, az] = legSite[k - 1], [bx, bz] = legSite[k];
+    for (let j = Math.floor((Math.min(az, bz) - 8) / LEG_CELL); j <= Math.floor((Math.max(az, bz) + 8) / LEG_CELL); j++) for (let i = Math.floor((Math.min(ax, bx) - 8) / LEG_CELL); i <= Math.floor((Math.max(ax, bx) + 8) / LEG_CELL); i++) {
+      const key = `${i},${j}`, list = legCells.get(key);
+      if (list) list.push(k); else legCells.set(key, [k]);
+    }
+  }
+  /** How far a point of the site lies from the leg (signed: + to its right going along), or nothing beyond eight metres. */
+  const offLeg = (x: number, z: number): number | null => {
+    const list = legCells.get(`${Math.floor(x / LEG_CELL)},${Math.floor(z / LEG_CELL)}`);
+    if (!list) return null;
+    let best = Infinity, side = 1;
+    for (const k of list) {
+      const [ax, az] = legSite[k - 1], dx = legSite[k][0] - ax, dz = legSite[k][1] - az, l2 = dx * dx + dz * dz;
+      const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / l2)) : 0, d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+      if (d < best) { best = d; side = dx * (z - az) - dz * (x - ax) < 0 ? 1 : -1; }
+    }
+    return best <= 8 ? best * side : null;
+  };
+  const offLegOr = (x: number, z: number, r: number) => { const off = offLeg(x, z); return off === null || Math.abs(off) > r; };
   const t0 = performance.now();
   const d = meshSite(site);
   const t1 = performance.now(), mv = frameMover(f);
@@ -220,12 +263,19 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
   const within = (x: number, z: number) => x > x0 - 2 && x < x1 + 2 && z > z0 - 2 && z < z1 + 2;
   const meshes: PackedMesh[] = [];
   for (const [k, b] of d.meshes) if (b.vertexCount) meshes.push(packBuilder(k, b, mv, true));
-  // What stands about the house, but its far land, and what of it lies beyond its square (a mountain top's shelters and cairns
+  // What stands about the house, but its far land and the tors on the game's hills (the world's hills are its own), and what of it lies beyond its square (a mountain top's shelters and cairns
   // kilometres off, on peaks the world has otherwise): cut into tiles of 64 metres, as the game cuts it.
   for (const [k, b] of d.scenery?.meshes ?? []) {
-    if (!b.vertexCount || k === 'soft|far') continue;
-    const m = packBuilder(k, b, mv, false, within);
+    if (!b.vertexCount || k === 'soft|far' || k.startsWith('tor|')) continue;
+    const wood = legSite.length > 1 && /\|bark/.test(k);
+    const m = packBuilder(k, b, mv, false, wood ? (x, z) => within(x, z) && offLegOr(x, z, 4.5) : within);
     if (m.index.length) meshes.push(...tilePacked(m, 64));
+  }
+  // The ground drawn as a track along the leg (a footpath on a mountain top, `path`): the ground's material reads how far to one side of a
+  // track's middle a point is, plus a hundred (a footpath's, plus two hundred), in the first of its fields.
+  if (legSite.length > 1) for (const m of meshes) if (m.material === 'turf') for (let i = 0; i < m.position.length / 3; i++) {
+    const [sx, sz] = intoSite(f, m.position[i * 3], m.position[i * 3 + 2]), off = offLeg(sx, sz);
+    if (off !== null && Math.abs(off) < 6) m.field[i * 4] = (o.path ? 200 : 100) + off;
   }
   // Its own rock (its cliffs, its sheet of rock, its scree, its loose stones) in the world's grey stone, as the world's rock is
   // coloured (`groundLook`): coloured with the place's stone, a warm sandstone or a pale limestone, it met the world's land along a
@@ -280,8 +330,11 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
   for (const set of d.scenery?.cards ?? []) {
     if (set.kind === 'tree' || set.kind === 'fir') continue;
     const matrices: number[] = [], centres: number[] = [], colours: number[] = [];
+    // (Off the leg: a tree's whole crown, by where the tree stands, which its cards' centre is; what grows low by where it stands.)
+    const clearBy = set.kind === 'leaf' || set.kind === 'needle' || set.kind === 'pine' ? 4.5 : 2.6;
     for (let i = 0; i < set.matrices.length / 16; i++) {
       if (!within(set.matrices[i * 16 + 12], set.matrices[i * 16 + 14])) continue;
+      if (legSite.length > 1 && !offLegOr(set.centres[i * 3], set.centres[i * 3 + 2], clearBy)) continue;
       mv.matrix(set.matrices, i * 16, matrices);
       centres.push(...mv.point(set.centres[i * 3], set.centres[i * 3 + 1], set.centres[i * 3 + 2]));
       colours.push(set.colours[i * 3], set.colours[i * 3 + 1], set.colours[i * 3 + 2]);
@@ -396,9 +449,18 @@ export function packPlace(site: Site, info: { kind: string; n: number; name: str
     anchors: [...(d.anchors ?? new Map<number, Vector3>())].map(([id, q]) => [id, q.x, q.y, q.z]),
     finds: (d.finds ?? []).map((q) => ({ at: v(q.at), what: q.what })),
   };
+  // How the game draws its air and the tones of its land (`PlaceLook`), its heights moved into the world's.
+  const lift = f.base - f.floor;
+  const look: PlaceLook = {
+    weather: { cloud: d.sun?.cloud ?? 0.4, layered: !!d.sun?.layered, mist: d.sun?.mist ?? 0, haze: d.sun?.haze ?? 0.5, floor: (d.sun?.floor ?? f.floor) + lift },
+    far: d.far, snow: d.snow ?? 0,
+    ...(d.snowLine ? { snowLine: [d.snowLine[0] + lift, d.snowLine[1]] as [number, number] } : {}),
+    ...(d.groundLow !== undefined ? { groundLow: d.groundLow + lift } : {}),
+    ...(d.paving ? { paving: d.paving } : {}),
+  };
   const triangles = meshes.reduce((s, m) => s + m.index.length / 3, 0);
   return {
-    ...info, title: d.title ?? '', meshes, cards, hole, water, sea, streams, falls, masses: Float32Array.from(masses), lights, life, game,
+    ...info, title: d.title ?? '', meshes, cards, hole, water, sea, streams, falls, masses: Float32Array.from(masses), lights, life, game, look,
     solid: { position: sPos, index: sIdx, bvh: MeshBVH.serialize(solidBvh) },
     ms: { mesh: t1 - t0, pack: performance.now() - t1 }, triangles, misses,
   };

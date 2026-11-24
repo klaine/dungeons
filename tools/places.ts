@@ -17,7 +17,9 @@ import { BufferAttribute, BufferGeometry, PerspectiveCamera, Ray, Vector3 } from
 import { MeshBVH } from 'three-mesh-bvh';
 import { Player } from '../src/app/player';
 import { generateWorldPlace } from '../src/core/generate';
-import { townValleyRoutes, wayOf } from '../src/core/route';
+import { gradeLine, legTo, networkLines, townValleyRoutes } from '../src/core/route';
+import { PATH_HALF } from '../src/core/way';
+import { siteFrame, toWorld } from '../src/core/worldLand';
 import { holeAt, makeSquare, Square, SQUARE, squareCount, TileData, TileGrid, tilesAt, tilesFor, wayThroughHoles } from '../src/core/stream';
 import { TILE, world, worldTile } from '../src/core/world';
 import { packPlace } from '../src/render/placePack';
@@ -28,15 +30,24 @@ const seed = process.argv[2] ?? 'w0', kindAsked = process.argv[3] as 'valley' | 
 const w = world(seed), p = w.plan, grid: TileGrid = { stride: TILE.stride, over: TILE.over, hx: p.hx, hz: p.hz }, f = w.field;
 const route = kindAsked ? null : townValleyRoutes(w)[0];
 if (!kindAsked && !route) { console.log(`${seed}: no way from a town to a valley head`); process.exit(1); }
-const way = route ? wayOf(w, route) : null, q = w.places.find((o) => (route ? o.kind === route.to.kind && o.n === route.to.n : o.kind === kindAsked && o.n === nAsked));
+const q = w.places.find((o) => (route ? o.kind === route.to.kind && o.n === route.to.n : o.kind === kindAsked && o.n === nAsked));
 if (!q) { console.log(`${seed}: no ${kindAsked} ${nAsked}`); process.exit(1); }
 let t = Date.now();
 const { site } = generateWorldPlace(seed, q.kind === 'coast' ? 'town' : q.kind, q.n);
+// The way from the town to where the valley's own road begins (the last point of its track, where the player arrives), laid as a
+// track is and graded, as the walk page lays a castle's valley's leg; and on from there up the valley's road to the house's door.
+// (A mountain top: from the world's ways up its leg, a footpath, to where its own way down the ridge ends, and on up that to its door.)
+const top = q.kind === 'mountain', sf = siteFrame(site), tr = top ? site.mountain?.way?.map(([x, z]) => [x, z] as [number, number]) : site.track;
+const arrival = sf && tr?.length ? toWorld(sf, tr[tr.length - 1][0], tr[tr.length - 1][1]) : null;
+const line = route && arrival ? legTo(w, [{ kind: 'track', line: [arrival] }], route.from)
+  : top && arrival ? legTo(w, networkLines(w), { x: arrival[0], z: arrival[1] })?.slice().reverse() ?? null : null;
+const way = line ? gradeLine(w, line, top ? PATH_HALF : undefined) : null;
+const doorward: [number, number][] = sf && tr ? tr.slice().reverse().map(([x, z]) => toWorld(sf, x, z)) : [];
 // (With the world's own land, as the page's worker gives it, for how far the place's stands off it at its edge.)
 const gridT = { stride: TILE.stride, over: TILE.over, hx: p.hx, hz: p.hz };
 const allTiles: { t: TileData; f: ReturnType<typeof worldTile>['field'] }[] = [];
 for (let i = 0; i < Math.round((2 * p.hx) / TILE.stride); i++) for (let j = 0; j < Math.round((2 * p.hz) / TILE.stride); j++) { const w5 = worldTile(w, i, j); allTiles.push({ t: { ox: w5.ox, oz: w5.oz } as TileData, f: w5.field }); }
-const pack = packPlace(site, { kind: q.kind, n: q.n, name: q.name }, (x, z) => tilesAt(allTiles, gridT, x, z));
+const pack = packPlace(site, { kind: q.kind, n: q.n, name: q.name }, (x, z) => tilesAt(allTiles, gridT, x, z), { clear: line ?? undefined, path: top });
 const h = pack.hole;
 const gaps = h.grid ? h.grid.gap : h.gap;
 console.log(`${seed}: ${q.name} laid out and built in ${((Date.now() - t) / 1000).toFixed(0)} s (meshed ${(pack.ms.mesh / 1000).toFixed(0)}), ${(pack.triangles / 1e6).toFixed(2)} million triangles; its square ${(2 * h.hx).toFixed(0)} by ${(2 * h.hz).toFixed(0)} m; ${pack.misses} of ${h.profile.length} heights round its edge found no land${h.grid ? `, so its hole follows its land, a lattice ${h.grid.nx} by ${h.grid.nz} at ${h.grid.cell} m` : ''}; the place's land stands off the world's at its edge by ${(gaps ? gaps.reduce((a, v) => Math.max(a, Math.abs(v)), 0) : 0).toFixed(1)} m at most`);
@@ -165,13 +176,16 @@ if (way) {
   const under = new Ray(new Vector3(), new Vector3(0, -1, 0));
   const placeGround = (x: number, y: number, z: number) => { under.origin.set(x, y + 1, z); return placeBvh.raycastFirst(under, 2)?.point.y ?? NaN; };
   player.constrain = (at) => { if (inside(at.x, at.z)) return; const g = heightAt(at.x, at.z); if (at.y < g - 0.3) at.y = g; };
-  const pts: [number, number][] = way.points.map(([x, z]) => [x, z]);
+  const pts: [number, number][] = [...way.points.map(([x, z]) => [x, z] as [number, number]), ...doorward.slice(1)];
   const [sx, sz] = pts[2];
   player.place(new Vector3(sx, heightAt(sx, sz) + 1.68, sz), 0);
   let k = 0, frames = 0, crossed = -1, sunk = 0, over = 0;
   t = Date.now();
-  while (k < pts.length - 1 && frames < 60 * 600) {
-    while (k < pts.length - 1 && Math.hypot(pts[k][0] - player.position.x, pts[k][1] - player.position.z) < 6) k++;
+  // (On to the last point itself, the house's door, not only until it is the one headed for.)
+  while ((k < pts.length - 1 || Math.hypot(pts[k][0] - player.position.x, pts[k][1] - player.position.z) > 2) && frames < 60 * 600) {
+    // (Along the valley's own road closely, within a couple of metres of each point: cutting its corners, as along the way, the body
+    // went into the side of the castle's gate tower instead of through its arch.)
+    while (k < pts.length - 1 && Math.hypot(pts[k][0] - player.position.x, pts[k][1] - player.position.z) < (k >= way.points.length ? 2.5 : 6)) k++;
     const [tx, tz] = pts[k];
     player.yaw = Math.atan2(-(tx - player.position.x), -(tz - player.position.z));
     player.analog.set(0, -1); player.analogRun = true;

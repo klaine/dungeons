@@ -1,6 +1,6 @@
 import { tilesAt, TileData } from './stream';
 import { leastPath, smoothLine } from './terrain';
-import { evenly, gradeWay, lengthOf, Way, WAY } from './way';
+import { evenly, gradeWay, lengthOf, PATH_HALF, Way, WAY } from './way';
 import { RIVER, TILE, World, WorldPlace, worldTile } from './world';
 
 /**
@@ -89,10 +89,13 @@ export function townValleyRoutes(w: World): WorldRoute[] {
  * overlap, `tilesAt`), so that it is cut into that land by a metre or two at most where the land is lumpy, not by the metres the world's
  * own lattice of 8 metres can lie off it. The tiles it crosses are made if they are not yet (a second or two each).
  */
-export function wayOf(w: World, r: WorldRoute): Way {
+export function wayOf(w: World, r: WorldRoute): Way { return gradeLine(w, r.line); }
+
+/** A line's way: its bed graded on the land the squares at a metre are made from (`wayOf`), as broad as `half` either side. */
+export function gradeLine(w: World, line: [number, number][], half = WAY.half): Way {
   const grid = { stride: TILE.stride, over: TILE.over, hx: w.plan.hx, hz: w.plan.hz }, reach = TILE.stride / 2 + TILE.over;
   const tx = Math.round((2 * w.plan.hx) / TILE.stride), tz = Math.round((2 * w.plan.hz) / TILE.stride), need = new Set<string>();
-  for (const [x, z] of r.line) for (let j = 0; j < tz; j++) for (let i = 0; i < tx; i++) {
+  for (const [x, z] of line) for (let j = 0; j < tz; j++) for (let i = 0; i < tx; i++) {
     const ox = -w.plan.hx + TILE.stride / 2 + i * TILE.stride, oz = -w.plan.hz + TILE.stride / 2 + j * TILE.stride;
     if (Math.abs(x - ox) < reach && Math.abs(z - oz) < reach) need.add(`${i},${j}`);
   }
@@ -101,7 +104,55 @@ export function wayOf(w: World, r: WorldRoute): Way {
     const data: TileData = { i, j, ox: t.ox, oz: t.oz, x0: f.x0, z0: f.z0, cell: f.cell, nx: f.nx, nz: f.nz, data: f.data };
     return { t: data, f };
   });
-  return gradeWay(r.line, (x, z) => tilesAt(read, grid, x, z));
+  return { ...gradeWay(line, (x, z) => tilesAt(read, grid, x, z)), half };
+}
+
+/** One of a world's ways to be walked: what kind it is (a road and a track are cart tracks, a path a footpath), and its line. */
+export interface NetLine { kind: 'road' | 'track' | 'path'; line: [number, number][]; to?: string }
+
+/**
+ * The world's ways joining every place, to be walked (asked: step 4 of the world as the game, "the ways joining every place"): its own
+ * roads between its towns, tracks from its villages, and paths up each mountain top's ridge (`layWays` in `world.ts`), with a leg from
+ * each coastal town to the nearest of them. Not the tracks laid to the valley heads: a valley head's place is a castle's valley now,
+ * reckoned down from its castle's seat, and where its own road begins is known only once it is laid out; its leg is laid then
+ * (`legTo`). Each line's points `WAY.step` apart.
+ */
+export function networkLines(w: World): NetLine[] {
+  // (Nor the path straight up a mountain top's ridge to its summit, which runs over the place's own land: its leg comes down from where
+  // its own way down the ridge ends, `legTo`, as a castle's valley's does.)
+  const valleys = w.places.filter((q) => q.kind === 'valley'), tops = w.places.filter((q) => q.kind === 'mountain');
+  const startsAt = (x: { points: [number, number][] }, qs: WorldPlace[]) => qs.some((q) => Math.hypot(x.points[0][0] - q.x, x.points[0][1] - q.z) < 40);
+  const out: NetLine[] = w.ways
+    .filter((x) => x.kind !== 'ferry' && !(x.kind === 'track' && startsAt(x, valleys)) && !(x.kind === 'path' && startsAt(x, tops)))
+    .map((x) => ({ kind: x.kind as NetLine['kind'], line: evenly(x.points, WAY.step) }));
+  for (const q of w.places.filter((p) => p.kind === 'coast')) {
+    const leg = legTo(w, out, routeEnd(w, q));
+    if (leg) out.push({ kind: 'track', line: leg, to: `coast${q.n}` });
+  }
+  return out;
+}
+
+/** A leg from a point to the nearest of the ways given, laid as a track is (`layRoute`), its points `WAY.step` apart; none if it is on one. */
+export function legTo(w: World, net: NetLine[], from: { x: number; z: number }): [number, number][] | null {
+  let best: [number, number] | null = null, bd = Infinity;
+  for (const n of net) for (const p of n.line) { const d = Math.hypot(p[0] - from.x, p[1] - from.z); if (d < bd) { bd = d; best = p; } }
+  if (!best || bd < WAY.step * 2) return null;
+  const L = latticeOf(w), steep = 0.11;
+  const stepLen = (p: number, q: number) => L.cell * (Math.abs((p % L.n) - (q % L.n)) && Math.abs(p - q) !== 1 ? Math.SQRT2 : 1);
+  const cost = (p: number, q: number) => {
+    if (L.water[q]) return Infinity;
+    const len = stepLen(p, q), s = Math.abs(L.H[q] - L.H[p]) / len;
+    return len * (1 + (s / steep) ** 2) + (L.river[q] && !L.river[p] ? 90 : 0);
+  };
+  const raw = leastPath(L.x0, L.z0, L.cell, L.n, L.m, [from.x, from.z], best, cost);
+  if (!raw) return null;
+  // (From the point itself and onto the way itself, which the lattice puts a few metres off.)
+  return evenly(smoothLine([[from.x, from.z], ...raw.slice(1, -1), best], 4), WAY.step);
+}
+
+/** A network's lines graded (`gradeLine`): a path as broad as a footpath, a road and a track as a cart track. */
+export function gradeNetwork(w: World, lines: NetLine[]): Way[] {
+  return lines.map((n) => gradeLine(w, n.line, n.kind === 'path' ? PATH_HALF : WAY.half));
 }
 
 /** How a way climbs: up and down along it in all, and its steepest over any twenty metres. */

@@ -13,7 +13,7 @@ import { turfColour } from '../render/landscape';
 import { Colour, growConifer, growTree, Planting } from '../render/planting';
 import { readyForSmoothing } from '../render/post';
 import { CardSet } from '../render/scene';
-import { groundUniforms, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, rockUniforms, siteUniforms, weatherUniforms } from '../render/siteMaterial';
+import { farUniforms, glassUniforms, groundUniforms, makeFarMaterial, makeGroundMaterial, makeRockMaterial, makeSiteMaterial, paveUniforms, rockUniforms, siteUniforms, weatherUniforms } from '../render/siteMaterial';
 import { GroundLook } from '../render/streamMesh';
 import { doneGenerating, generateTextureSet } from '../render/textures';
 import { makeCards, paintCards, TreeLevel, treeShare, vegetationRange, vegetationUniforms } from '../render/vegetation';
@@ -35,6 +35,8 @@ const smooth = (t: number) => { const c = Math.min(1, Math.max(0, t)); return c 
 export function makeMaterials(texSize: number): Record<string, Material> {
   const moss = generateTextureSet('moss', texSize / 2, 9), rock = generateTextureSet('rock', texSize, 13), ground = generateTextureSet('ground', texSize, 17);
   const scree = generateTextureSet('scree', texSize, 23), soil = generateTextureSet('soil', texSize, 31), litter = generateTextureSet('litter', texSize, 37), thatch = generateTextureSet('thatch', texSize, 47);
+  // (An island's bare ground is sand and a mountain top's loose stone is split by frost, as the game paints them for those places.)
+  const sand = generateTextureSet('sand', texSize, 53), talus = generateTextureSet('talus', texSize, 71);
   const bark = generateTextureSet('bark', texSize, 29), barkAsh = generateTextureSet('barkAsh', texSize, 59), barkPine = generateTextureSet('barkPine', texSize, 61), barkFir = generateTextureSet('barkFir', texSize, 67);
   doneGenerating();
   const barks: Record<string, () => MeshStandardNodeMaterial> = {
@@ -44,9 +46,18 @@ export function makeMaterials(texSize: number): Record<string, Material> {
     barkFir: () => makeSiteMaterial(barkFir, moss, { normalScale: 2, mossScale: 2.5, matt: true, deep: 0.03, hollow: 0.6 }),
   };
   const out: Record<string, Material> = {
-    turf: makeGroundMaterial(ground, soil, scree, litter, thatch, moss),
+    // The world's land near the walker is the game's walked ground and its rock sheet, and far off the game's far land: as about a
+    // place in the game, where the ground walked on gives way to the far land beyond. The two pass into each other across a band about
+    // the walker (`nearEyeUniforms`, set each frame), the near ground cut away beyond it and the far land within it.
+    turf: makeGroundMaterial(ground, soil, scree, litter, thatch, moss, 2.3, 'eye'),
     // (Rock laid as a sheet, not carved: its buttresses, gullies and ledges drawn on it, as the valley's far crags are.)
-    rock: makeRockMaterial(rock, moss, { relief: true }),
+    rock: makeRockMaterial(rock, moss, { relief: true, by: 'eye' }),
+    far: makeFarMaterial({ cover: true, by: 'eye' }),
+    // The places' own ground, as the game draws each kind's: never cut, since a place's land is all near ground, wherever it is seen from.
+    // (A valley's, a town's: beaten earth and the valley's scree; an island's sand; a mountain top's frost-split stone.)
+    placeTurf: makeGroundMaterial(ground, soil, scree, litter, thatch, moss),
+    islandTurf: makeGroundMaterial(ground, sand, scree, litter, thatch, moss),
+    mountainTurf: makeGroundMaterial(ground, soil, talus, litter, thatch, moss),
   };
   // A tree's wood is drawn at one level or the other, whole or simply, never both: it is all there at the level whose share of the tree
   // is half or more (`treeShare`), and drawn into a point at its foot at the other, so that each tree's wood changes once, at the distance
@@ -62,10 +73,15 @@ export function makeMaterials(texSize: number): Record<string, Material> {
 /** A mesh of the game's kind made into something to draw: lit by the sky as the game lights what it does not bake, by each point's share of it. */
 export function meshOf(builder: MeshBuilder, material: Material, hour: Hour): Mesh {
   const geometry = builder.build(), S = SKIES[hour], L = [0, 1, 2].map((c) => 0.55 * S.zenith[c] + 0.45 * S.horizon[c]);
+  // And the light thrown up from the ground, as the game lights what lies beyond its place (`main.ts`, the scenery): ground of a fifth's
+  // whiteness, sunlit over three fifths of it and under the open sky, seen by whatever faces down or sideways. (Without it a slope in
+  // shade had the sky's blue alone, colder and darker than the same slope about a place in the game.)
+  const sd = Math.hypot(S.sun[0], S.sun[1], S.sun[2]), sunUp = Math.max(0, S.sun[1] / sd);
+  const G = [0, 1, 2].map((c) => (0.2 * (0.6 * S.intensity * S.colour[c] * sunUp + Math.PI * 0.9 * L[c])) / Math.PI);
   const sh = [geometry.getAttribute('aSHr'), geometry.getAttribute('aSHg'), geometry.getAttribute('aSHb')] as BufferAttribute[], bk = geometry.getAttribute('aBake') as BufferAttribute;
   for (let i = 0; i < builder.vertexCount; i++) {
     const open = 0.3 + 0.7 * builder.openAt(i);
-    for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * L[c] * open, 0, (Math.PI / 2) * L[c] * 0.8 * open, 0);
+    for (let c = 0; c < 3; c++) sh[c].setXYZW(i, (Math.PI / 2) * (L[c] + G[c]) * open, 0, (Math.PI / 2) * (L[c] * 0.8 - G[c]) * open, 0);
     bk.setXY(i, open, 0.6);
   }
   const mesh = new Mesh(geometry, material);
@@ -135,6 +151,8 @@ export function woodDepth(cover: Uint8Array, nx: number, nz: number, x0: number,
  */
 export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, hour: Hour, o: {
   weather: Weather; clouds: number; occlusion: boolean; temporal: boolean; bloom: boolean; nearShadow: boolean; middleShadow?: boolean; box: { min: Vector3; max: Vector3 }; seed: string;
+  /** How much thinner the haze is than the game's (1, as the game's; less for the clearer air the world's pages once had, `?thin=`). */
+  thin?: number;
 }) {
   renderer.outputColorSpace = SRGBColorSpace;
   renderer.toneMapping = ACESFilmicToneMapping;
@@ -181,8 +199,15 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
   vegetationUniforms.uWind.value = 1;
   const u = atmosphere.uniforms, low = hour === 'sunset' || hour === 'dusk';
   lightAir(atmosphere, renderer, envScene, daylight, { clouds: o.clouds, cloud: o.weather.cloud });
-  weatherOf(atmosphere, sun, daylight, o.weather, { floor: 0, low, thin: 0.4 });
+  // (The haze as thick as the game's: thinned to four tenths, for the ten kilometres the eye sees here, the land beyond a place was
+  // clearer and greener than the game draws it from the same place in the same weather. It lies thickest low down, so the heights see far.)
+  const thin = o.thin ?? 1;
+  weatherOf(atmosphere, sun, daylight, o.weather, { floor: 0, low, thin });
   weatherUniforms.uWet.value = o.weather.rain ?? 0;
+  // (The sanctum's coloured glass glows with the day through it, as in the game: left at its first value it shone ten times as bright.)
+  glassUniforms.uGlow.value = daylight.intensity * 0.022 * (1 - 0.85 * (daylight.night ?? 0));
+  // (And the paving's joints are shaded from the sun where it is.)
+  paveUniforms.uSun.value.copy(sunDir);
   u.uDensity.value = 0.0018;
   u.uIndoorDensity.value = 14;
   u.uEnabled.value = 1;
@@ -226,9 +251,57 @@ export function makeLight(renderer: WebGPURenderer, scene: Scene, camera: Perspe
       sun.shadow.camera.updateProjectionMatrix();
       sun.shadow.needsUpdate = true;
     },
+    /** The weather as it is where the walker is (the place's own there, as the game has it: `PlaceLook`), on the ground `floor` its haze and mist lie on. */
+    setWeather(w: Weather, floor: number, groundLow?: number) { weatherOf(atmosphere, sun, daylight, w, { floor, low, thin, groundLow }); },
     /** The air's maps of what stands under the sun and the sky, for the light in the haze and the sun's shadow far off: drawn once the land far off is in. */
     land(statics: Mesh[], min: Vector3, max: Vector3) { atmosphere.updateStatic(statics, sunDir, min, max); },
     eyes: S.eyes ?? 1.7,
+  };
+}
+
+/**
+ * What the far land is covered with, by the season (`farUniforms`): its woods, from the mean of the season's broadleaves, and its open
+ * ground. As the game sets them for the land about a valley (`farCover` in `siteMesher.ts`).
+ */
+export function farCoverOf(season: Season): { wood: [number, number, number]; grass: [number, number, number] } {
+  const greens = greensOf(season), mean = greens.reduce((m, c) => [m[0] + c[0] / greens.length, m[1] + c[1] / greens.length, m[2] + c[2] / greens.length], [0, 0, 0]);
+  return { wood: [mean[0] * 0.62, mean[1] * 0.62, mean[2] * 0.62], grass: season === 'autumn' ? [0.24, 0.21, 0.08] : season === 'summer' ? [0.15, 0.21, 0.06] : [0.15, 0.24, 0.06] };
+}
+export function setFarCover(season: Season): void {
+  const c = farCoverOf(season);
+  farUniforms.uFarWood.value.set(...c.wood);
+  farUniforms.uFarGrass.value.set(...c.grass);
+  farUniforms.uFarRing.value.set(0, 0, 0);
+  farUniforms.uFarSnow.value = 0;
+}
+
+/**
+ * How the world's land looks far off, drawn as the game draws its far land (`makeFarMaterial`, with `cover`): each point the colour of
+ * the bare stone, as the game's far sheet is, and what the far material reads there: no water (the world's lakes are not drawn near
+ * by, and far off they came out white, mirroring the sky); how much of a wood it is (a half at a wood's edge, from `depthAt`, the world's woods); how much of a hollow (against the land 24 metres about it,
+ * as the game's sheet reckons it against its neighbours); and how high it stands in the game's sense, which the game reads off the
+ * height and the world says by what covers the ground: low and green, heath at four tenths, rock at a half, snow over seven; and over
+ * the snow line (`snowLine`) as high as the game's winter range, where it lays snow on all but the steep faces, over the band above the line (`snowBand`). (Averaged over a few points about it, so
+ * that one cover passes into the next over some metres and not at a line between two of the sheet's.)
+ */
+export function farLook(coverAt: (x: number, z: number) => number, depthAt: (x: number, z: number) => number, heightAt: (x: number, z: number) => number, stone: Stone = 'greystone', snowLine = Infinity, snowBand = 60): GroundLook {
+  const tint = stoneStyles(stone).tint, bare: Colour = [0.37 * (0.6 + 0.4 * tint[0]), 0.37 * (0.6 + 0.4 * tint[1]), 0.4 * (0.6 + 0.4 * tint[2])];
+  // (Rock at a half: high enough for the material to lay bare rock and scree, not so high that it lays snow wherever its noise rises,
+  // which put every summer peak under snow; snow is where the world says it lies.)
+  const highOf = (cv: number) => (cv === COVER.snow ? 0.78 : cv === COVER.rock ? 0.5 : cv === COVER.moor ? 0.42 : 0.12);
+  const S = 24, A = 10;
+  return {
+    turf: (x, z, y) => {
+      // (Over the snow line it is winter, as the near ground has it (`snowUniforms`' `uSnowWinter`): the land stands as high as the game's
+      // winter range does over its cloud (`layRange`), where the far material lays snow on all but the steep faces, coming in over the
+      // same band as near by, patchy at first.)
+      const over = Math.min(1, Math.max(0, (y - snowLine) / snowBand));
+      const high = Math.max((2 * highOf(coverAt(x, z)) + highOf(coverAt(x + A, z)) + highOf(coverAt(x - A, z)) + highOf(coverAt(x, z + A)) + highOf(coverAt(x, z - A))) / 6, y < snowLine ? 0 : 0.58 + 0.28 * over * over * (3 - 2 * over));
+      const hollow = Math.min(1, Math.max(-1, (((heightAt(x + S, z) + heightAt(x - S, z) + heightAt(x, z + S) + heightAt(x, z - S)) / 4 - y) / S) * 9));
+      const wood = Math.min(1, Math.max(0, 0.5 + depthAt(x, z) / 30));
+      return [bare[0], bare[1], bare[2], 0, wood, hollow, high];
+    },
+    rock: () => bare,
   };
 }
 
@@ -252,7 +325,10 @@ export function groundLook(coverAt: (x: number, z: number) => number, seed: numb
       const cv = coverAt(x, z), c = turfColour(x, z, seed);
       let r = c[0], g = c[1], b = c[2], wet = 0, bare = 0, litter = 0;
       const mix = (t: number[], k: number) => { r += (t[0] - r) * k; g += (t[1] - g) * k; b += (t[2] - b) * k; };
-      if (cv === COVER.fields) mix([1.25, 1.12, 0.62], 0.6 + 0.3 * fbm2(x * 0.02 + 3, z * 0.06, 2));
+      // (Hay a little paler and yellower than pasture, no more: the game's ground about a place is its turf's colour alone, and its far
+      // land, which the world's is drawn as further off, knows no fields; at six tenths of a pale yellow they stood out as a pale ring
+      // where the near ground passes into it.)
+      if (cv === COVER.fields) mix([1.25, 1.12, 0.62], 0.2 + 0.15 * fbm2(x * 0.02 + 3, z * 0.06, 2));
       else if (cv === COVER.moor) { mix([0.95, 0.7, 0.62], 0.65); bare = 0.15; }
       else if (cv === COVER.marsh) { mix([0.8, 0.95, 0.62], 0.5); wet = 0.7; }
       else if (cv === COVER.forest) { litter = 0.85; mix([0.75, 0.8, 0.55], 0.4); }
@@ -315,7 +391,17 @@ export function treesIn(x0: number, z0: number, size: number, coverAt: (x: numbe
  * trees grown more simply, a trunk and its main limbs with a few hundred larger sprays, between the
  * whole trees near by and the single painted cards beyond, which were too plain to come so near.
  */
-export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season, light = false, edge?: EdgeGround): { wood: Map<string, MeshBuilder>; sets: CardSet[]; owners: Map<string, Float32Array> } {
+/**
+ * Winter, as the game dresses it, for what grows on a world's heights over its snow line (`winterAt`: how far into winter a height is,
+ * 0 to 1): broadleaves bare, an oak keeping a few of its dead brown leaves; two in five of a conifer's sprays under snow; far off a
+ * conifer green and white together and a broadleaf the grey-brown of its twigs. (`siteMesher.ts`, a place in winter.)
+ */
+const SNOWED: Colour = [0.74, 0.77, 0.82];
+const WINTER_GREENS: Colour[] = [[0.19, 0.16, 0.15], [0.16, 0.14, 0.13], [0.21, 0.18, 0.16]];
+/** A number between 0 and 1 of a point's own. */
+const own01At = (x: number, z: number, salt: number) => { const v = Math.sin(x * 12.9898 + z * 78.233 + salt * 37.719) * 43758.5453; return v - Math.floor(v); };
+
+export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season, light = false, edge?: EdgeGround, winterAt: (y: number) => number = () => 0): { wood: Map<string, MeshBuilder>; sets: CardSet[]; owners: Map<string, Float32Array> } {
   const detail = light ? 0.25 : 0.75, cards = light ? 170 : 900, cardSize = light ? 1.9 : 0.8;
   const planting = new Planting(), wood = new Map<string, MeshBuilder>(), greens = greensOf(season);
   const mesh = (name: string) => { let m = wood.get(name); if (!m) wood.set(name, (m = new MeshBuilder())); return m; };
@@ -324,11 +410,14 @@ export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) =
   const tag = tagger(planting, wood);
   for (const t of trees) {
     const y = heightAt(t.x, t.z), rng = new Rng(`tree/${t.x.toFixed(1)},${t.z.toFixed(1)}`), green = greens[Math.floor(t.own * greens.length) % greens.length];
+    // (In winter, over the snow line: each tree its own way into it across the band, so that the change is not a line.)
+    const winter = own01At(t.x, t.z, 31) < winterAt(y);
+    const needleOf = (base: Colour) => (winter ? (q: Rng): Colour => (q.chance(0.4) ? leafOf(SNOWED)(q) : leafOf(base)(q)) : leafOf(base));
     tag.begin();
-    if (t.kind === 'oak') growTree(planting, mesh('bark'), t.x, y, t.z, t.tall, t.girth, { kind: 'oak', detail, cards, cardSize, leaf: leafOf(green), bark: [0.66, 0.58, 0.5], shaded: true, soft: mesh('bark') }, rng);
-    else if (t.kind === 'ash') growTree(planting, mesh('barkAsh'), t.x, y, t.z, t.tall, t.girth, { kind: 'ash', detail, cards, cardSize, leaf: leafOf(green), bark: [0.86, 0.84, 0.8], shaded: true, soft: mesh('barkAsh') }, rng);
-    else if (t.kind === 'spruce') growConifer(planting, mesh('barkFir'), t.x, y, t.z, t.tall, 2.1 + 0.6 * t.own, t.girth, { kind: 'spruce', detail, needle: leafOf([0.045, 0.13, 0.04]), bark: [0.62, 0.5, 0.42], shaded: true, soft: mesh('barkFir') }, rng);
-    else growConifer(planting, mesh('barkPine'), t.x, y, t.z, t.tall, 2.6 + 0.4 * t.own, t.girth, { kind: 'pine', detail, needle: leafOf([0.07, 0.15, 0.07]), bark: [0.98, 0.6, 0.42], shaded: true, soft: mesh('barkPine') }, rng);
+    if (t.kind === 'oak') growTree(planting, mesh('bark'), t.x, y, t.z, t.tall, t.girth, { kind: 'oak', detail, cards: winter ? Math.round(cards * 0.04) : cards, cardSize, leaf: winter ? leafOf([0.3, 0.18, 0.09]) : leafOf(green), bark: [0.66, 0.58, 0.5], shaded: true, soft: mesh('bark'), bare: winter }, rng);
+    else if (t.kind === 'ash') growTree(planting, mesh('barkAsh'), t.x, y, t.z, t.tall, t.girth, { kind: 'ash', detail, cards: winter ? 0 : cards, cardSize, leaf: leafOf(green), bark: [0.86, 0.84, 0.8], shaded: true, soft: mesh('barkAsh'), bare: winter }, rng);
+    else if (t.kind === 'spruce') growConifer(planting, mesh('barkFir'), t.x, y, t.z, t.tall, 2.1 + 0.6 * t.own, t.girth, { kind: 'spruce', detail, needle: needleOf([0.045, 0.13, 0.04]), bark: [0.62, 0.5, 0.42], shaded: true, soft: mesh('barkFir') }, rng);
+    else growConifer(planting, mesh('barkPine'), t.x, y, t.z, t.tall, 2.6 + 0.4 * t.own, t.girth, { kind: 'pine', detail, needle: needleOf([0.07, 0.15, 0.07]), bark: [0.98, 0.6, 0.42], shaded: true, soft: mesh('barkPine') }, rng);
     tag.end(t.x, y, t.z, t.own);
   }
   // Where wood meets open ground, near by: bramble, bushes and young trees, which is what a wood's edge mostly is, as the game's are.
@@ -343,6 +432,8 @@ export function growTrees(trees: WorldTree[], heightAt: (x: number, z: number) =
       if (belt <= 0 || r > 0.15 * belt) continue;
       const cv = coverAt(x, z), y = heightAt(x, z);
       if ((cv !== COVER.forest && cv !== COVER.pasture && cv !== COVER.moor) || y < 2) continue;
+      // (Over the snow line bramble and bushes are under the snow.)
+      if (own01At(x, z, 32) < winterAt(y)) continue;
       if (Math.hypot(heightAt(x + 1, z) - heightAt(x - 1, z), heightAt(x, z + 1) - heightAt(x, z - 1)) / 2 > 0.6) continue;
       const rng = new Rng(`edge/${x.toFixed(1)},${z.toFixed(1)}`), green = leafOf(greens[Math.floor(own * greens.length) % greens.length]);
       tag.begin();
@@ -395,11 +486,13 @@ function tagger(planting: Planting, wood: Map<string, MeshBuilder>) {
 }
 
 /** Trees far off, each one card with a whole tree painted on it, as the valley's far hillsides have them; each card saying which tree it is. */
-export function farTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season): CardSet[] {
+export function farTrees(trees: WorldTree[], heightAt: (x: number, z: number) => number, season: Season, winterAt: (y: number) => number = () => 0): CardSet[] {
   const planting = new Planting(), greens = greensOf(season), firs: Colour[] = [[0.05, 0.12, 0.05], [0.06, 0.14, 0.06], [0.07, 0.15, 0.07]];
   const tag = tagger(planting, new Map());
   for (const t of trees) {
-    const fir = t.kind === 'spruce' || t.kind === 'pine', c = fir ? firs[Math.floor(t.own * 2.999)] : greens[Math.floor(t.own * (greens.length - 0.001))], k = (fir ? 0.75 : 0.5) + 0.3 * ((t.own * 7.3) % 1), y = heightAt(t.x, t.z);
+    const y = heightAt(t.x, t.z), winter = own01At(t.x, t.z, 31) < winterAt(y), fir = t.kind === 'spruce' || t.kind === 'pine';
+    const c0 = fir ? firs[Math.floor(t.own * 2.999)] : (winter ? WINTER_GREENS : greens)[Math.floor(t.own * ((winter ? WINTER_GREENS : greens).length - 0.001))];
+    const c: Colour = winter && fir ? [c0[0] * 0.6 + SNOWED[0] * 0.4, c0[1] * 0.6 + SNOWED[1] * 0.4, c0[2] * 0.6 + SNOWED[2] * 0.4] : c0, k = (fir ? 0.75 : 0.5) + 0.3 * ((t.own * 7.3) % 1);
     tag.begin();
     planting.farTree(fir, t.x, y - 0.5, t.z, t.tall * (fir ? 0.42 : 0.95), t.tall, t.own * 6.283, [c[0] * k, c[1] * k, c[2] * k]);
     tag.end(t.x, y, t.z, t.own);
@@ -412,7 +505,7 @@ export function farTrees(trees: WorldTree[], heightAt: (x: number, z: number) =>
  * hay fields, short and brown on the heath, sparse in the woods and none on rock, shingle or water;
  * flowers in drifts in the open; ferns under the trees; reeds in the marsh. As the lab's meadow is grown.
  */
-export function growLow(x0: number, z0: number, size: number, heightAt: (x: number, z: number) => number, coverAt: (x: number, z: number) => number, seed: number, season: Season): CardSet[] {
+export function growLow(x0: number, z0: number, size: number, heightAt: (x: number, z: number) => number, coverAt: (x: number, z: number) => number, seed: number, season: Season, winterAt: (y: number) => number = () => 0): CardSet[] {
   const planting = new Planting(), plant = new Rng(`low/${seed}/${x0},${z0}`), STEP = 0.5;
   const parched = season === 'autumn' ? 0.55 : season === 'summer' ? 0.25 : 0;
   const fern: Colour = season === 'autumn' ? [0.34, 0.22, 0.05] : [0.1, 0.27, 0.05];
@@ -432,6 +525,13 @@ export function growLow(x0: number, z0: number, size: number, heightAt: (x: numb
     if (y < 1.2 || cv === COVER.sea || cv === COVER.lake || cv === COVER.shore || cv === COVER.rock || cv === COVER.snow) continue;
     const slope = Math.hypot(heightAt(x + 0.7, z) - heightAt(x - 0.7, z), heightAt(x, z + 0.7) - heightAt(x, z - 0.7)) / 1.4;
     if (slope > 0.7 || (slope > 0.45 && !plant.chance((0.7 - slope) / 0.25))) continue;
+    // Over the snow line, winter as on the game's winter mountains: everything under the snow, and only a few dry heads of grass standing
+    // up through it on the crests, where the wind has blown it thin, now and then (`plantMountain`).
+    if (own01(x, z, 21) < winterAt(y)) {
+      const crest = (heightAt(x + 3, z) + heightAt(x - 3, z) + heightAt(x, z + 3) + heightAt(x, z - 3)) / 4 - y < 0.05;
+      if (crest && fbm2(x * 0.4 - seed, z * 0.4 + seed, 2) > 0.6 && own01(x, z, 22) < 0.05) planting.tuft(planting.grass, x, y - 0.02, z, 0.3 + 0.15 * own01(x, z, 23), 0.18 + 0.12 * own01(x, z, 24), own01(x, z, 25) * Math.PI * 2, [0.36, 0.3, 0.16]);
+      continue;
+    }
     const wood = cv === COVER.forest, heath = cv === COVER.moor, hay = cv === COVER.fields, marsh = cv === COVER.marsh;
     if (wood && !plant.chance(0.25)) {
       if (plant.chance(0.06)) { const s = plant.range(0.8, 1.4), k = plant.range(0.75, 1.2); planting.tuft(planting.ferns, x, y - 0.04, z, s, s * plant.range(0.55, 0.8), plant.range(0, Math.PI), [fern[0] * k, fern[1] * k, fern[2] * k]); }

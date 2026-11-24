@@ -740,9 +740,10 @@ export function makeCards(set: CardSet, texture: Texture, level?: TreeLevel): In
   const at: N = attribute('aAt', 'vec4');
   // (Drawn in levels only where every card says which tree it belongs to.)
   const levelled = level && set.trees && set.trees.length === set.matrices.length / 4 ? level : undefined;
-  // (Leaves, needles and pines thin out with distance, but for trees drawn in levels, which have their own way of going.)
+  // (Leaves, needles and pines thin out with distance, but for trees drawn more simply further off, which have their own way of going.
+  // A world's whole trees, out to some hundred and fifty metres, thin as the game's do: there are as many of them about the walker.)
   // (`?thin=0` draws every card at every distance, as before, for comparing.)
-  const thinned = (set.kind === 'leaf' || set.kind === 'needle' || set.kind === 'pine') && !levelled && new URLSearchParams(location.search).get('thin') !== '0';
+  const thinned = (set.kind === 'leaf' || set.kind === 'needle' || set.kind === 'pine') && (!levelled || levelled === 'whole') && new URLSearchParams(location.search).get('thin') !== '0';
   const materialFor = (layer: 'painted' | 'blades' | 'sprigs' | 'far'): MeshStandardNodeMaterial => {
     const real = layer === 'blades', sprig = layer === 'sprigs', far = layer === 'far';
     const material = new MeshStandardNodeMaterial({

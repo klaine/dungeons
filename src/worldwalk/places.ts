@@ -11,7 +11,8 @@ import { Hole, holeAt } from '../core/stream';
 import { WorldPlace } from '../core/world';
 import { bake } from '../render/bake/bake';
 import type { Atmosphere } from '../render/post';
-import { intoSite, type PackedMesh, type PlaceGame, type PlacePack } from '../render/placePack';
+import { intoSite, type PackedMesh, type PlaceGame, type PlaceLook, type PlacePack } from '../render/placePack';
+import type { SiteFrame } from '../core/worldLand';
 import { Birds } from '../render/birds';
 import { Beacon } from '../render/beacon';
 import { Flocks } from '../render/creatures';
@@ -24,6 +25,7 @@ import { Water } from '../render/water';
 import { SunPicture } from '../render/sunShadow';
 import placesWorker from '../worldmap/placesWorker?worker&url';
 import { WorldColliders } from './body';
+import { placeAt } from '../maps/plan';
 import { cardsOf } from './dress';
 
 /**
@@ -101,11 +103,15 @@ export class WorldPlaces {
   onSite: ((kind: string, n: number, site: unknown) => void) | null = null;
   /** Called when the holes change: the page makes again the squares and what grows about them. */
   onHoles: ((changed: Hole) => void) | null = null;
+  /** A sheep or a goat of a place's bleating, as near as it is (0 to 1): for the sound. */
+  onBleat: ((near: number, goat: boolean) => void) | null = null;
+  /** What the places are made of, once painted: for the ferry's boat. */
+  get surfaces(): Record<string, Material> | null { return this.materials; }
   /** Called with a place's own sea when one with a sea stands, and with nothing when it goes. */
   onSea: ((sea: SeaDesc | null) => void) | null = null;
   private t0 = performance.now();
 
-  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; renderer: WebGPURenderer; lamps?: boolean; keep?: boolean; ui?: (place: string) => GameUi; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; texSize: number; turf: Material; sunDir: Vector3; atmosphere: Atmosphere }) {
+  constructor(private readonly o: { seed: string; size?: { x: number; z: number }; scene: Scene; renderer: WebGPURenderer; lamps?: boolean; keep?: boolean; ui?: (place: string) => GameUi; colliders: WorldColliders; places: WorldPlace[]; hour: Hour; season: string; winterAbove?: number; texSize: number; turf: Material; turfs?: Partial<Record<WorldPlace['kind'], Material>>; sunDir: Vector3; atmosphere: Atmosphere }) {
     this.shelf = worldShelf(o.seed);
   }
 
@@ -113,6 +119,28 @@ export class WorldPlaces {
   holes(): Hole[] { return [...this.built.values()].filter((b) => b.todo.length === 0).map((b) => b.pack.hole); }
   /** Whether a point lies inside a place standing in the world (so that its own land, not the world's, is under it). */
   inside(x: number, z: number, by = 0): boolean { for (const b of this.built.values()) if (b.todo.length === 0 && holeAt(b.pack.hole, x, z).out < -by) return true; return false; }
+  /** How each place's game stood when the place was last let go of, by place. */
+  private readonly games = new Map<string, { keys: string[]; visited: number[]; open: number[]; taken: string[]; thrown: number[]; won: boolean }>();
+  /** The sites laid out, by place (`valley1`): for the plan of the place one is in. */
+  readonly sites = new Map<string, Site>();
+  /** The place standing whose land a point is in: which it is, its site and frame, and its game, if it has one. */
+  here(x: number, z: number): { spec: string; site: Site; frame: SiteFrame; game: Game | null } | null {
+    for (const [spec, b] of this.built) {
+      if (b.todo.length || holeAt(b.pack.hole, x, z).out >= 0) continue;
+      const site = this.sites.get(spec);
+      if (site) return { spec, site, frame: b.pack.life.frame, game: b.play?.game ?? null };
+    }
+    return null;
+  }
+  /** Whether a point stands in one of a place's rooms under a roof (not its court, nor out of doors): for the sound, which is a room's there. */
+  roofed(x: number, y: number, z: number): boolean {
+    for (const b of this.built.values()) {
+      if (b.todo.length || holeAt(b.pack.hole, x, z).out >= 0) continue;
+      const f = b.pack.life.frame, [sx, sz] = intoSite(f, x, z), q = placeAt(b.pack.game.site as Site, sx, sz, y - (f.base - f.floor));
+      return !!q && q.role !== 'approach' && q.roof !== 'sky';
+    }
+    return false;
+  }
   /** The height of a place's ground under a point, looking down from `from`: for a walker a place has come to stand under. */
   groundAt(x: number, z: number, from: number): number | null {
     const ray = new Ray(new Vector3(x, from, z), new Vector3(0, -1, 0));
@@ -126,6 +154,10 @@ export class WorldPlaces {
   }
   /** The cards of the places standing, for the page's culling (grass and leaves drawn two ways near the eye). */
   cards(): InstancedMesh[] { return [...this.built.values()].flatMap((b) => b.cards); }
+  /** How each place standing is drawn by the game (`PlaceLook`), with its hole (how far a point lies outside its land) and its frame, for the page to ease into as the walker comes. */
+  looks(): { spec: string; kind: WorldPlace['kind']; look: PlaceLook; hole: Hole; frame: SiteFrame }[] {
+    return [...this.built.values()].filter((b) => !b.todo.length).map((b) => ({ spec: b.spec, kind: b.place.kind, look: b.pack.look, hole: b.pack.hole, frame: b.pack.life.frame }));
+  }
 
   /** Lays out places for the game only, keeping them (the route page's two ends). */
   layOut(specs: string[]): void { this.send({ only: specs.filter((s) => !this.asked.has(s)) }); }
@@ -144,7 +176,7 @@ export class WorldPlaces {
       this.worker.onmessage = (e) => this.heard(e.data);
       this.worker.onerror = (e) => { this.status = `The places could not be built: ${e.message}`; this.busy = false; };
     }
-    this.worker.postMessage({ seed: this.o.seed, size: this.o.size, season: this.o.season, hour: this.o.hour, ...this.queue.shift()! });
+    this.worker.postMessage({ seed: this.o.seed, size: this.o.size, season: this.o.season, winterAbove: this.o.winterAbove, hour: this.o.hour, ...this.queue.shift()! });
   }
 
   private keep(what: string, value: unknown): void { this.keeping = this.keeping.then(async () => (await this.shelf)?.set(what, value)); }
@@ -154,7 +186,7 @@ export class WorldPlaces {
     if (m.type === 'progress') { this.status = `${m.text}… ${secs()} s`; return; }
     if (m.type === 'world') { this.keep('world', m.world); return; }
     if (m.type === 'tile') { const t = m.tile as { i: number; j: number }; this.keep(`${t.i},${t.j}`, t); return; }
-    if (m.type === 'site') { this.keep(`site:${m.kind}${m.n}`, { seed: m.seed, site: m.site }); if (m.site) this.onSite?.(m.kind as string, m.n as number, m.site); return; }
+    if (m.type === 'site') { this.keep(`site:${m.kind}${m.n}`, { seed: m.seed, site: m.site }); if (m.site) { this.sites.set(`${m.kind}${m.n}`, m.site as Site); this.onSite?.(m.kind as string, m.n as number, m.site); } return; }
     if (m.type === 'pack') {
       const spec = `${m.kind}${m.n}`, place = this.o.places.find((q) => `${q.kind}${q.n}` === spec), pack = m.pack as PlacePack | null;
       if (!pack || !place) { this.status = `${place?.name ?? spec} could not be built: ${m.why ?? ''}`; return; }
@@ -312,7 +344,9 @@ export class WorldPlaces {
       for (let c = 0; c < 3; c++) { a[o + c * 4] = (Math.PI / 2) * (L[c] + G[c]) * open; a[o + c * 4 + 2] = (Math.PI / 2) * (L[c] * 0.8 - G[c]) * open; }
       a[o + 12] = open; a[o + 13] = 0.6;
     }
-    const mesh = new Mesh(g, this.materials![b.place.kind === 'mountain' && p.material === 'scree' ? 'talus' : p.material] ?? this.materials!.stone);
+    // (Its ground as the game draws its kind's: an island's bare ground sand, a mountain top's loose stone split by frost.)
+    const own = p.material === 'turf' ? this.o.turfs?.[b.place.kind] : undefined;
+    const mesh = new Mesh(g, own ?? this.materials![b.place.kind === 'mountain' && p.material === 'scree' ? 'talus' : p.material] ?? this.materials!.stone);
     mesh.name = `place:${p.key}`;
     mesh.castShadow = !['pane', 'paneLit', 'glass', 'window'].includes(p.material);
     mesh.receiveShadow = true;
@@ -349,7 +383,9 @@ export class WorldPlaces {
 
   /** Its meshes all in: its cards, its water, its solid part for the body, its hole in the world's land; then its house's light baked. */
   private finish(spec: string, b: Built): void {
-    for (const c of cardsOf(b.pack.cards)) { this.o.scene.add(c); b.cards.push(c); b.meshes.push(c); }
+    // (Its leaves that cast shadows cast them in the sun's finer picture about the walker too, as they do over the whole place in the
+    // game: without them every tree past the near map stood in full sun inside its own crown, pale and flecked with white.)
+    for (const c of cardsOf(b.pack.cards)) { if (c.castShadow) c.layers.enable(SunPicture.LAYER); this.o.scene.add(c); b.cards.push(c); b.meshes.push(c); }
     // (The pack's own lists of them let go of: the meshes and cards hold what they need.)
     b.pack.meshes = []; b.pack.cards = [];
     const S = SKIES[this.o.hour], life = b.pack.life;
@@ -400,6 +436,17 @@ export class WorldPlaces {
     const ui = this.o.ui?.(b.place.name) ?? { toast: () => undefined, keysChanged: () => undefined, won: () => undefined };
     const game = new Game(g.site as Site, desc, group as unknown as Scene, materials, proxy as unknown as Player, ui);
     for (const k of proxy.blockers) { k.frame = frame; player.blockers.push(k); }
+    // (As it stood when it was last let go of, if it was: a place's game goes on where it was left, not from its start.)
+    const was = this.games.get(b.spec);
+    if (was) {
+      for (const k of was.keys) game.keys.add(k as typeof game.keys extends Set<infer K> ? K : never);
+      for (const v of was.visited) game.visited.add(v);
+      for (const d of game.doors) if (was.open.includes(d.desc.way)) { d.open = true; d.blocker.active = false; d.angle = 1; if (d.gate) d.group.position.y = d.desc.hinge.y + d.desc.spring + d.desc.halfWidth + 0.15; else d.group.rotation.y = d.desc.yaw + d.desc.swing; }
+      for (const t of game.things) if (was.taken.includes(t.item.key)) { t.taken = true; t.group.visible = false; }
+      for (const l of game.levers) if (was.thrown.includes(l.lever.opens)) { l.thrown = true; l.swing = 1; l.handle.rotation.z = -0.55; }
+      game.won = was.won;
+      if (was.keys.length) ui.keysChanged([...game.keys]);
+    }
     return { game, group, proxy, frame };
   }
 
@@ -446,6 +493,8 @@ export class WorldPlaces {
         return sea === undefined || groundAt(x, z) > sea + 0.8;
       };
       flocks = new Flocks(l.flocks, seed, groundAt, free, l.flockKind);
+      // (Their bleats heard, as the game's are: `onBleat`.)
+      flocks.onBleat = (near) => this.onBleat?.(near, l.flockKind === 'goat');
       scene.add(flocks.group);
     }
     const torches = l.torches.map((t, i) => new Torch(new Vector3(...t.position), new Vector3(...t.out), i * 0.37 + 0.1, t.fire, t.flames?.map((q) => new Vector3(...q))));
@@ -504,7 +553,19 @@ export class WorldPlaces {
         lights: { sunDir: [d.x, d.y, d.z], sunE: [S.colour[0] * S.intensity, S.colour[1] * S.intensity, S.colour[2] * S.intensity], sky: { zenith: S.zenith, horizon: S.horizon, ground: S.ground }, points: b.pack.lights } },
       (label, f) => { this.status = `${b.place.name}: ${label.toLowerCase()} ${Math.round(f * 100)}%`; },
       apply,
-    ).then((r) => { apply(r); b.baked = 'done'; this.status = `${b.place.name} stands in the world, its light baked in ${((performance.now() - started) / 1000).toFixed(0)} s.`; })
+    ).then((r) => {
+      apply(r);
+      // The doors' leaves their share of the baked light, as the game gives it (`applyBake`): the light at the nearest baked point a step
+      // in front of each face, the site's point taken into the world.
+      const play = b.play, f = b.pack.life.frame, c = Math.cos(f.turn), sn = Math.sin(f.turn), dy = f.base - f.floor, n = positions.length / 3;
+      play?.game.applyBake((at) => {
+        const wx = f.u + c * (at.x - f.hx) - sn * (at.z - f.hz), wy = at.y + dy, wz = f.v + sn * (at.x - f.hx) + c * (at.z - f.hz);
+        let best = 0, bestD = Infinity;
+        for (let i = 0; i < n; i++) { const ex = positions[i * 3] - wx, ey = positions[i * 3 + 1] - wy, ez = positions[i * 3 + 2] - wz, dd = ex * ex + ey * ey + ez * ez; if (dd < bestD) { bestD = dd; best = i; } }
+        const e = [0, 1, 2].map((k) => { const o = best * 12 + k * 4; return r.sh[o] + 0.5 * Math.hypot(r.sh[o + 1], r.sh[o + 2], r.sh[o + 3]); }) as [number, number, number];
+        return { e, sky: r.skyVis[best], sun: r.sunVis[best] };
+      });
+      b.baked = 'done'; this.status = `${b.place.name} stands in the world, its light baked in ${((performance.now() - started) / 1000).toFixed(0)} s.`; })
       .catch((e) => { console.error(e); b.baked = 'failed'; this.status = `${b.place.name} stands in the world; its light could not be baked.`; })
       // (Its light final, the house's meshes go to the card as the rest went, unless the place was let go of meanwhile.)
       .finally(() => { if (this.built.get(b.spec) !== b) return; for (const m of parts) { delete m.userData.packed; this.toCard(m); } });
@@ -515,6 +576,9 @@ export class WorldPlaces {
     for (const m of b.meshes) { this.o.scene.remove(m); (m as Mesh).geometry?.dispose(); }
     if (b.life) for (const o of [b.life.birds?.mesh, b.life.flocks?.group, b.life.flames, b.life.beacon?.group, b.life.fireflies?.mesh]) if (o) this.o.scene.remove(o);
     if (b.play) {
+      // (How its game stood, for when it is built again: its keys, the rooms found, the doors opened, the keys taken, the levers thrown.)
+      const g = b.play.game;
+      this.games.set(spec, { keys: [...g.keys], visited: [...g.visited], open: g.doors.filter((d) => d.open).map((d) => d.desc.way), taken: g.things.filter((t) => t.taken).map((t) => t.item.key), thrown: g.levers.filter((l) => l.thrown).map((l) => l.lever.opens), won: g.won });
       this.o.scene.remove(b.play.group);
       const blockers = this.player?.blockers;
       if (blockers) for (const k of b.play.proxy.blockers) { const i = blockers.indexOf(k); if (i >= 0) blockers.splice(i, 1); }

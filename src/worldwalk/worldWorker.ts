@@ -1,4 +1,5 @@
-import { layRoute, townValleyRoutes, wayClimb, wayOf, WorldRoute } from '../core/route';
+import { gradeLine, gradeNetwork, layRoute, legTo, NetLine, networkLines, townValleyRoutes, wayClimb, wayOf, WorldRoute } from '../core/route';
+import { PATH_HALF, WAY } from '../core/way';
 import { World, worldSteps, worldTile } from '../core/world';
 import { worldData } from '../worldmap/worldData';
 
@@ -9,6 +10,8 @@ import { worldData } from '../worldmap/worldData';
  * each coastal town to the valley head nearest it, and the one to be walked with its bed graded (`route.ts`).
  */
 let w: World | null = null;
+// (The ways laid so far, for a leg to join: the network, then each leg as it is laid.)
+let net: NetLine[] = [], base: NetLine[] = [];
 self.onmessage = (e: MessageEvent) => {
   const m = e.data;
   if (m.type === 'world') {
@@ -30,6 +33,17 @@ self.onmessage = (e: MessageEvent) => {
     else if (from) route = routes.find((r) => r.from.kind === from.kind && r.from.n === from.n) ?? route;
     const way = route ? wayOf(world, route) : null;
     self.postMessage({ type: 'route', routes: routes.map((r) => ({ from: r.from, to: r.to, length: r.length })), route, way, climb: way ? wayClimb(way) : null });
+  } else if (m.type === 'ways' && w) {
+    // The world's ways joining its places, every one graded on the land at a metre, for the walk page to cut into its squares.
+    net = base = networkLines(w);
+    const ways = gradeNetwork(w, net);
+    self.postMessage({ type: 'ways', lines: net.map((n) => ({ kind: n.kind, to: n.to })), ways });
+  } else if (m.type === 'leg' && w) {
+    // A leg from a place's own arrival to the nearest way laid (a castle's valley, once laid out, from where its road begins).
+    // (Onto the network as laid at first, not other places' legs: so that it is the line the places' worker clears through the place.)
+    const line = legTo(w, base, { x: m.x, z: m.z });
+    if (line) { net = [...net.filter((n) => n.to !== m.to), { kind: 'track', line, to: m.to }]; }
+    self.postMessage({ type: 'leg', to: m.to, way: line ? gradeLine(w, line, m.path ? PATH_HALF : WAY.half) : null });
   } else if (m.type === 'tile' && w) {
     const t = worldTile(w, m.i, m.j), f = t.field, data = f.data.slice();
     self.postMessage({ type: 'tile', tile: { i: m.i, j: m.j, ox: t.ox, oz: t.oz, x0: f.x0, z0: f.z0, cell: f.cell, nx: f.nx, nz: f.nz, data } }, { transfer: [data.buffer] });

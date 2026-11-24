@@ -104,9 +104,32 @@ export const rainRings: N = Fn(([p, amount]: [N, N]) => {
  * whole, as the sea must be; and whatever says nothing says it with no opacity, and leaves what is under it.)
  */
 export const mirrorAs = (normal: N, amount: N): N => vec4(normalize(normal).mul(clamp(amount, 0, 1)).mul(0.5).add(0.5), 1);
-/** Lets a ground material be passed over into the far land, or the far land into the near ground, across the band (`nearFarUniforms`). */
-export function fadesAtNearEdge(m: MeshStandardNodeMaterial, side: 'near' | 'far'): MeshStandardNodeMaterial {
-  const cut = nearFarCut(side);
+/**
+ * Where a world's near ground gives way to its far land about the walker, on the walk and route pages (`by: 'eye'` below): the
+ * walker's x and z, how far off the far land is whole (`z`, metres), and how broad a band inside that the near ground passes into it
+ * over (`w`). As in the game, the near ground is what is walked on and the far land what is seen from afar, and they are not alike, so
+ * they pass into each other in patches, as at a valley's far ring; here the patches are some twenty metres across, since the band
+ * lies hundreds of metres off. A band of nothing passes nothing over, and both are drawn whole.
+ */
+export const nearEyeUniforms: { uNearEye: { value: Vector4 } } = { uNearEye: uniform(new Vector4(0, 0, 0, 0)) as N };
+function nearEyeCut(side: 'near' | 'far'): { opacity: N; test: N } {
+  const e = nearEyeUniforms.uNearEye as N, p: N = positionWorld.xz;
+  const share: N = clamp(e.z.sub(length(p.sub(e.xy))).div(max(e.w, 0.001)), 0, 1);
+  const patch: N = farNoise(p.div(23)).mul(0.65).add(farNoise(p.div(8.5).add(7.3)).mul(0.35));
+  // (As `nearFarCut`: the near ground where a patch is under its share, the far land where it is not, the far land cut a little
+  // short so that where the two see a patch's edge differently both are drawn rather than neither; and past either edge one alone.)
+  const spread: N = select(share.greaterThanEqual(0.999), float(2), select(share.lessThanEqual(0.001), float(-1), share.mul(0.7).add(0.15)));
+  const on: N = e.w.greaterThan(0);
+  const near: N = select(on.and(patch.greaterThanEqual(spread)), float(0), float(1));
+  const far: N = select(on.and(patch.lessThan(spread.sub(0.06))), float(0), float(1));
+  return { opacity: side === 'near' ? near : far, test: float(0.5) };
+}
+/**
+ * Lets a ground material be passed over into the far land, or the far land into the near ground, across the band: a place's
+ * (`nearFarUniforms`), or the band about the walker in a world (`by: 'eye'`, `nearEyeUniforms`).
+ */
+export function fadesAtNearEdge(m: MeshStandardNodeMaterial, side: 'near' | 'far', by: 'rect' | 'eye' = 'rect'): MeshStandardNodeMaterial {
+  const cut = by === 'eye' ? nearEyeCut(side) : nearFarCut(side);
   (m as N).opacityNode = cut.opacity;
   (m as N).alphaTestNode = cut.test;
   return m;
@@ -570,9 +593,15 @@ function makeDeepMaterial(base: TextureSet, moss: TextureSet, o: { normalScale?:
  * Its edges are drawn from noise at two sizes, drifts some tens of metres across and a ragged
  * fringe, so that it never ends along a line.
  */
-export const snowUniforms: { uSnow: { value: number }; uSnowLine: { value: Vector2 } } = { uSnow: uniform(0) as N, uSnowLine: uniform(new Vector2(0, 0)) as N };
+export const snowUniforms: { uSnow: { value: number }; uSnowLine: { value: Vector2 }; uSnowWinter: { value: Vector2 } } = { uSnow: uniform(0) as N, uSnowLine: uniform(new Vector2(0, 0)) as N, uSnowWinter: uniform(new Vector2(1e6, 60)) as N };
+/**
+ * How much snow lies at a point: `uSnow`, or winter's whole cover from a height up (`uSnowWinter`: the height, and how many metres
+ * over it the cover comes in, patchy at first), whichever is more. A place has one cover for all of it; a world has winter on its
+ * heights over a snow line and none below (the walk page), drawn by these same materials as the game's winter mountains are.
+ */
+const snowCover = (P: N): N => max(snowUniforms.uSnow as N, smoothstep((snowUniforms.uSnowWinter as N).x, (snowUniforms.uSnowWinter as N).x.add((snowUniforms.uSnowWinter as N).y), P.y));
 const snowOn = (P: N, up: N): N => {
-  const cover = snowUniforms.uSnow as N, line = snowUniforms.uSnowLine as N;
+  const cover: N = snowCover(P).toVar(), line = snowUniforms.uSnowLine as N;
   const drift: N = farFbm(P.xz.mul(0.045).add(3.7)), fringe: N = farNoise(P.xz.mul(0.85));
   // (And more of it higher up, above a line, if one is given: in summer the old snow lies on the summit and hardly anywhere below it.)
   const higher: N = smoothstep(line.x, line.x.add(35), P.y).mul(line.y);
@@ -653,11 +682,15 @@ paveFrameTex.generateMipmaps = false;
 paveFrameTex.needsUpdate = true;
 const paveFrameNode: N = texture(paveFrameTex);
 /** Where the lattice begins, how many points to a metre, and whether there is one (x0, z0, 1/cell, on); and how many points it has each way. */
-export const paveUniforms: { uPave: { value: Vector4 }; uPaveSize: { value: Vector2 }; uSun: { value: Vector3 } } = { uPave: uniform(new Vector4(0, 0, 1, 0)) as N, uPaveSize: uniform(new Vector2(1, 1)) as N, uSun: uniform(new Vector3(0.5, 0.6, 0.6)) as N };
+export const paveUniforms: { uPave: { value: Vector4 }; uPaveSize: { value: Vector2 }; uSun: { value: Vector3 }; uPaveTurn: { value: Vector4 }; uPaveRot: { value: Vector2 } } = { uPave: uniform(new Vector4(0, 0, 1, 0)) as N, uPaveSize: uniform(new Vector2(1, 1)) as N, uSun: uniform(new Vector3(0.5, 0.6, 0.6)) as N, uPaveTurn: uniform(new Vector4(0, 0, 0, 0)) as N, uPaveRot: uniform(new Vector2(1, 0)) as N };
+// (`uPaveTurn` and `uPaveRot`: where a town standing in a world is, its frame's point in the world and in the site, and the cosine and
+// sine of its turn, for the frame is in the site's own measures. Nothing and no turn for a town of its own.)
 // (`uSun` is the way to the sun, for the shadows in the paving's joints.)
 /** Gives the ground's material a town's paving frame, or none (`on` false where the graphics card cannot read one more texture). */
-export function setPaving(f: PaveFrame | undefined, on = true): void {
+export function setPaving(f: PaveFrame | undefined, on = true, frame?: { u: number; v: number; hx: number; hz: number; turn: number }): void {
   paveFrameUsed = !!f && on;
+  paveUniforms.uPaveTurn.value.set(frame?.u ?? 0, frame?.v ?? 0, frame?.hx ?? 0, frame?.hz ?? 0);
+  paveUniforms.uPaveRot.value.set(Math.cos(frame?.turn ?? 0), Math.sin(frame?.turn ?? 0));
   if (!f || !on) { paveUniforms.uPave.value.set(0, 0, 1, 0); return; }
   paveFrameTex.dispose();
   paveFrameTex.image = { data: f.data, width: f.nx, height: f.nz } as N;
@@ -672,9 +705,13 @@ export function setPaving(f: PaveFrame | undefined, on = true): void {
  * through. (Settled before the materials are first drawn, when their programs are made.)
  */
 let paveFrameUsed = false;
-const paveFrameAt = (p: N): { c: N; a: N; d: N; e: N; id: N } => {
-  if (!paveFrameUsed) return { c: p.x.negate(), a: p.y, d: vec2(0, 1), e: vec2(-1, 0), id: float(0) };
+const paveFrameAt = (pw: N): { c: N; a: N; d: N; e: N; id: N } => {
+  if (!paveFrameUsed) return { c: pw.x.negate(), a: pw.y, d: vec2(0, 1), e: vec2(-1, 0), id: float(0) };
   const P: N = paveUniforms.uPave, S: N = paveUniforms.uPaveSize;
+  // (Into the site's own measures, where the frame is: a town standing in a world is turned in it.)
+  const T: N = paveUniforms.uPaveTurn, R: N = paveUniforms.uPaveRot, q: N = pw.sub(T.xy);
+  const p: N = vec2(T.z.add(R.x.mul(q.x)).add(R.y.mul(q.y)), T.w.sub(R.y.mul(q.x)).add(R.x.mul(q.y))).toVar();
+  const toWorld = (v: N): N => vec2(R.x.mul(v.x).sub(R.y.mul(v.y)), R.y.mul(v.x).add(R.x.mul(v.y)));
   const gp: N = p.sub(P.xy).mul(P.z).toVar();
   const base: N = floor(gp).toVar(), w: N = gp.sub(base).toVar();
   const load = (ij: N): N => paveFrameNode.load(ivec2(clamp(ij, vec2(0, 0), S.sub(1))));
@@ -693,7 +730,7 @@ const paveFrameAt = (p: N): { c: N; a: N; d: N; e: N; id: N } => {
   const on: N = step(0.5, idN).mul(P.w).toVar();
   const fr: N = sum.div(max(wsum, 1e-6)).toVar(), dn: N = normalize(dir.add(vec2(1e-6, 0))).toVar();
   // (Where there is none, as everywhere but a town, courses run along x, as they always did.)
-  return { c: mix(p.x.negate(), fr.x, on), a: mix(p.y, fr.y, on), d: mix(vec2(0, 1), dn, on), e: mix(vec2(-1, 0), vec2(dn.y.negate(), dn.x), on), id: idN.mul(on) };
+  return { c: mix(pw.x.negate(), fr.x, on), a: mix(pw.y, fr.y, on), d: mix(vec2(0, 1), toWorld(dn), on), e: mix(vec2(-1, 0), toWorld(vec2(dn.y.negate(), dn.x)), on), id: idN.mul(on) };
 };
 /** A plane turned a little more than a third of a right angle, so that noise read through it shows none of the squares it is made on. */
 const rot = (q: N): N => vec2(q.x.mul(0.8).sub(q.y.mul(0.6)), q.x.mul(0.6).add(q.y.mul(0.8)));
@@ -758,7 +795,7 @@ const spotsOf = (q: N, cell: number, share: N, r0: number, r1: number, k: number
   return one(smoothstep(0.75, 1, d)).mul(step(farHash(i.add(k)), share));
 };
 
-export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3): MeshStandardNodeMaterial {
+export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: TextureSet, litter: TextureSet, thatch: TextureSet, moss: TextureSet, scale = 2.3, by: 'rect' | 'eye' = 'rect'): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 0.96, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
   // Where on the ground this point of the picture is, in metres; every texture is laid by that.
@@ -1051,7 +1088,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   // (And a town's streets and its square, trodden all over but along their edges, by the wall, where it lies clean.)
   const trodSnow: N = max(max(onTrack.mul(one(smoothstep(0.8, 2.2, off))), footBare), paved.mul(smoothstep(0.5, 1.8, paveSd)).mul(0.9)).toVar();
   // (In summer, what is left of the snow does not lie on a path that is walked every day; in winter it is only thinner there.)
-  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(mix(1, 0.25, smoothstep(0.4, 0.9, snowUniforms.uSnow as N))))).toVar();
+  const snowy: N = snowOn(positionWorld, normalize(normalWorldGeometry).y).mul(one(trodSnow.mul(mix(1, 0.25, smoothstep(0.4, 0.9, snowCover(positionWorld)))))).toVar();
   // A garden's walks are gravel: the shingle read small and pale, darker towards the edges where it is not raked.
   // (Read at nearly twice the shingle's size it was cobbles; and its dark grit between the stones is lightened, as dust fills a walk.)
   const gravelAt: N = at0.mul(4.3).add(0.37), gGravel: N = (texture(shingle.map, gravelAt) as N).bias(blur);
@@ -1097,7 +1134,7 @@ export function makeGroundMaterial(turf: TextureSet, soil: TextureSet, shingle: 
   (m.userData as N).mirror = mirrorAs(normalView, max(max(max(puddle, paveWater), wetV.mul(paved).mul(one(gravelled)).mul(0.75)), wetV.mul(bare).mul(0.2)).mul(one(snowy)));
   // Ground is matt, except where it is wet stones, or water stands in a rut and mirrors the sky.
   lit(m, { irradiance: irradianceOf(normalWorldGeometry, bk), sun: one(underHill(bk)).mul(mix(1, jointLit, paved)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake), gleam: mix(max(max(mix(0.12, 0.7, wetV.mul(bare)), max(puddle.mul(1.15), paveWater.mul(0.85))), wetV.mul(paved).mul(one(gravelled)).mul(0.65)), 0.55, snowy) });
-  return fadesAtNearEdge(m, 'near');
+  return fadesAtNearEdge(m, 'near', by);
 }
 
 /**
@@ -1196,7 +1233,7 @@ export const rockUniforms: { uRockBroad: { value: number }; uRockFacet: { value:
  *  - moss and damp from the per-vertex fields, as on masonry.
  * Light comes from the bake where there is one, and from the open sky where there is not.
  */
-export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number]; relief?: boolean } = {}): MeshStandardNodeMaterial {
+export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?: number; normalScale?: number; dip?: [number, number]; relief?: boolean; by?: 'rect' | 'eye' } = {}): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf(), bk = bakeOf();
   const P: N = positionWorld, rockN: N = normalize(normalWorldGeometry);
@@ -1309,7 +1346,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   rock = rock.mul(edge.mul(0.7).add(1));
   // Snow, on ledges and whatever faces up; it lies first in the cracks and the pits of the stone.
   // (Not on rock that was told it is under a roof of rock: a tunnel's floor.)
-  const snowy: N = max(snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).mul(one(max(f.z, 0))), smoothstep(-0.3, -0.8, f.z).mul(step(0.5, snowUniforms.uSnow as N))).toVar();
+  const snowy: N = max(snowOn(P, rockN.y.add(one(tex.a).mul(0.12))).mul(one(max(f.z, 0))), smoothstep(-0.3, -0.8, f.z).mul(step(0.5, snowCover(P)))).toVar();
   m.colorNode = vec4(mix(mix(vertexColor().rgb.mul(rock).mul(mix(1, 0.5, wet)), mossTex.rgb, mossy), vec3(...SNOW).mul(mix(0.9, 1.02, tex.a)), snowy), 1);
   const rough: N = smoothstep(0.55, 0.9, tex.a).mul(-0.14).add(0.93).clamp(0.5, 1).mul(mix(1, 0.45, wet.mul(one(mossy))));
   m.roughnessNode = mix(mix(rough, 0.97, mossy), 0.66, snowy);
@@ -1365,7 +1402,7 @@ export function makeRockMaterial(base: TextureSet, moss: TextureSet, o: { scale?
   // shade most of the day, and in shade the sky is all the light there is. Reckoned for the smooth surface, rock in shade is flat paint.)
   lit(m, { irradiance: irradianceOf(normalize(mix(rockN, bent, 0.85)), bk).add(shaft).mul(ao).mul(mix(1, sheetCavity, 0.8)), sun: one(underHill(bk)), sky: mix(0.3, smoothstep(0, 0.5, bk.x), uBake).mul(ao), gleam: mix(mix(0.3, 1, wet), 0.55, snowy) });
   // (Rock laid as a sheet is ground too, and is passed over into the far land with it; carved rock is not.)
-  return o.relief ? fadesAtNearEdge(m, 'near') : m;
+  return o.relief || o.by === 'eye' ? fadesAtNearEdge(m, 'near', o.by) : m;
 }
 
 /** What far land is covered with in this season: its woods and its open ground. */
@@ -1477,9 +1514,13 @@ const farCrowns: N = Fn(([p]: [N]) => {
  * the height where rock takes over) and how much of a hollow it is, in the fields other
  * materials use for moss and damp.
  */
-export function makeFarMaterial(): MeshStandardNodeMaterial {
+export function makeFarMaterial(o: { cover?: boolean; by?: 'rect' | 'eye' } = {}): MeshStandardNodeMaterial {
   const m = new MeshStandardNodeMaterial({ roughness: 1, metalness: 0, color: new Color(1, 1, 1) });
   const f = fieldOf();
+  // (A world's land knows where its woods are, and says so in the field other sheets use for how far a point lies in the land's shadow,
+  // which it does not reckon (`cover`): a half at a wood's edge, all in its heart, none in the open. The game's far land has them
+  // where the land is low enough, by `high`, which a world's says by what covers it instead.)
+  const covered: N = float(o.cover ? 1 : 0);
   const uWood = farUniforms.uFarWood as N, uGrass = farUniforms.uFarGrass as N;
   const P: N = positionWorld, fp: N = P.xz, n0: N = normalize(normalWorldGeometry);
   const high = f.w, hollow = f.z;
@@ -1515,12 +1556,14 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   pasture = mix(pasture, pasture.mul(vec3(1.22, 1.1, 0.78)).add(vec3(0.018, 0.012, 0)), dryLie.mul(0.55));
   const bracken: N = smoothstep(0.6, 0.7, farNoise(fp.mul(0.017).add(11.1)).mul(0.7).add(drift.mul(0.3))).mul(dryLie).mul(sloping.mul(0.6).add(0.4)).toVar();
   pasture = mix(pasture, vec3(0.16, 0.14, 0.06).mul(fine.mul(0.3).add(0.85)), bracken.mul(0.7));
-  const heath: N = smoothstep(0.62, 0.72, farNoise(fp.mul(0.013).add(23.7)).mul(0.7).add(fine.mul(0.3))).mul(smoothstep(0.32, 0.5, high)).toVar();
+  // (Where a world's cover says moor, heather is most of it, as the walked ground near by draws it brown; not here and there alone.)
+  const heathFrom: N = float(o.cover ? 0.46 : 0.62);
+  const heath: N = smoothstep(heathFrom, heathFrom.add(0.1), farNoise(fp.mul(0.013).add(23.7)).mul(0.7).add(fine.mul(0.3))).mul(smoothstep(0.32, 0.5, high)).toVar();
   pasture = mix(pasture, vec3(0.115, 0.075, 0.08).mul(fine.mul(0.3).add(0.85)), heath.mul(0.6));
   const grazed: N = smoothstep(0, 0.07, float(0.62).sub(high).add(ragged.mul(0.3))).mul(one(steep)).mul(0.9).toVar();
   land = mix(land, pasture, grazed);
   // Woods low down, reaching higher up the gullies than on the spurs between them.
-  const woodLine: N = float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42)).toVar();
+  const woodLine: N = (o.cover ? f.y.sub(0.5).mul(0.6).add(ragged.mul(0.25)) : float(0.37).sub(high).add(hollow.mul(0.13)).add(ragged.mul(0.42))).toVar();
   // (About a valley, the woods come in gradually from where the far land begins: there they began whole, dark and close, a ring of
   // forest round the open ground and the scattered trees of the valley's own woods, which from any height was a fence.)
   const ring = farUniforms.uFarRing as N;
@@ -1575,8 +1618,8 @@ export function makeFarMaterial(): MeshStandardNodeMaterial {
   m.normalNode = transformNormalToView(normalize(mix(faceN, vec3(0, 1, 0), water)));
   // (The sun is kept off what the land between it and the sun shades: the sheet says how far each point lies in that shadow, in the
   // field other materials use for damp. Sheets that do not reckon it say none.)
-  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: one(f.y), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
-  fadesAtNearEdge(m, 'far');
+  lit(m, { irradiance: mix(uFallback.mul(float(0.55).add(faceN.y.mul(0.45))), bakedAt(faceN), uBake).mul(mix(1, cavity, 0.8)), sun: mix(one(f.y), float(1), covered), gleam: mix(mix(0.08, 0.5, snow), 1.6, water) });
+  fadesAtNearEdge(m, 'far', o.by);
   // (About a valley, the near ground lies under the far land's first thirty metres, and the far land is let into it there in
   // patches, more of it the further out: its colours are not the near ground's, and where it began was a circle drawn round the
   // valley, seen from any height once the woods no longer hid it.)

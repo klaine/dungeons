@@ -1,15 +1,18 @@
 import { BufferAttribute, InstancedMesh, Material, Mesh, PerspectiveCamera, RingGeometry, Scene, Vector2, Vector3 } from 'three';
 import { MeshStandardNodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { QUALITY, qualityChosen, textureRoom } from '../render/air';
-import { Hour, SKIES } from '../core/site';
-import { FINE, FineSquare, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor, wayThroughHoles } from '../core/stream';
+import { Hour, Site, SKIES } from '../core/site';
+import { trackField, Way, WAY_REACH, WayIndex } from '../core/way';
+import { siteFrame, toWorld } from '../core/worldLand';
+import { FINE, FineSquare, holeAt, SQUARE, squareCount, squareOrigin, TileData, TileGrid, tilesFor, wayThroughHoles } from '../core/stream';
 import { HeightField } from '../core/terrain';
 import { COVER, WORLD_SIZE, WorldPlace } from '../core/world';
 import { MeshBuilder } from '../render/geom/meshBuilder';
 import { layTerrain } from '../render/landscape';
 import { squareBuilders, STEEP_REACH } from '../render/streamMesh';
 import { cullCards, treeGrownMap, treeLevels, vegetationUniforms } from '../render/vegetation';
-import { cardsOf, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, treesIn, woodDepth } from './dress';
+import { cardsOf, farCoverOf, farLook, farTrees, groundLook, growLow, growTrees, makeLight, makeMaterials, meshOf, Season, setFarCover, treesIn, woodDepth } from './dress';
+import { farUniforms, groundUniforms, nearEyeUniforms, setPaving, snowUniforms } from '../render/siteMaterial';
 import { worldMapOf, WorldData as HandedWorld } from '../worldmap/worldData';
 import { Player } from '../app/player';
 import { WorldColliders } from './body';
@@ -19,6 +22,8 @@ import { SEA_RING, WorldSea } from './worldSea';
 import { SunPicture } from '../render/sunShadow';
 import { RouteReply, RouteWalk } from './routeMode';
 import { WalkTouch } from './touch';
+import { Ferry, PlacePlan, Rider, WalkMap } from './travel';
+import { Sound, Surface } from '../app/sound';
 
 /**
  * A walk over a world's land at a metre, streamed in (`docs/06-world.md`), drawn as the game draws:
@@ -56,6 +61,11 @@ const LEVELS = [0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6];
 const levelFor = (d: number) => { const want = Math.max(0.02, d * 0.0016); const k = LEVELS.findIndex((e) => e >= want); return k < 0 ? LEVELS.length - 1 : k; };
 /** How near the walker squares are split into four at half a metre, and how far off they are let go of again. */
 const FINE_NEAR = 150, FINE_DROP = 230;
+// Where the near ground, walked on, gives way to the far land, seen from afar (`nearEyeUniforms`): whole far land from this many metres
+// off (`?nearfar=`), passing into the near ground over the band inside that. (Never so near that a square drawn at half a metre reaches it.)
+// (The game's own near ground is brighter than its far land, as there, so the band is broad and its patches large: a ring about the
+// walker is seen from any height.)
+const NEAR_FAR = Math.max(FINE_DROP + 250, Number(params.get('nearfar')) || 520), NEAR_BAND = 220;
 /**
  * How far about the walker grass grows (in blocks of `LOW`), and painted trees stand (in blocks of a square). Trees are drawn three ways
  * (whole, grown more simply with a trunk, its main limbs and fewer, larger sprays, and as one painted card), each tree giving way from
@@ -76,6 +86,8 @@ interface Sq {
   i: number; j: number; x0: number; z0: number; heights: Float32Array; errors: Float32Array; meshes: Mesh[] | null; level: number; triangles: number;
   /** Its four quarters at half a metre, once made; whether they are what is drawn (and walked on) in its place; and whether they are wanted. */
   fine: Part[] | null; fineShown: boolean; fineWanted: boolean;
+  /** Drawn as far land too, where it reaches past the band's inner edge, at the distance its own calls for; and whether each is wanted. */
+  farMesh: Mesh | null; farLevel: number; farTriangles: number; nearWanted: boolean; farWanted: boolean;
 }
 interface Part extends FineSquare { meshes: Mesh[] | null; level: number; triangles: number }
 const readFine = (): boolean => {
@@ -94,7 +106,12 @@ async function start(): Promise<void> {
   await renderer.init();
   // (The street lamps' light, if they are lit at this hour: settled before anything is drawn. See `lightLamps`.)
   lightLamps(hour, room);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, num('dpr', quality.dpr)));
+  // (And a town's paving laid by its streets, as the game lays it: whether the ground's program reads a frame is settled when it is first
+  // made, and the towns come later, so it is made reading one, empty until a town stands (`setPaving`, below), where the card has room.)
+  setPaving({ x0: 1e7, z0: 1e7, cell: 1, nx: 1, nz: 1, data: new Float32Array(4) }, room >= 20 && num('paveframe', 1) > 0);
+  // The picture's resolution follows how fast frames come, as the game's does (`?adapt=0` keeps it fixed): see the end of `frame`.
+  const fullRatio = Math.min(devicePixelRatio, num('dpr', quality.dpr)), leastRatio = Math.min(fullRatio, Math.max(0.75, fullRatio * 0.6)), adapt = params.get('adapt') !== '0';
+  renderer.setPixelRatio(fullRatio);
   renderer.setSize(innerWidth, innerHeight);
   const scene = new Scene(), camera = new PerspectiveCamera(62, innerWidth / innerHeight, 0.08, 14000);
   camera.layers.enable(1);
@@ -123,10 +140,16 @@ async function start(): Promise<void> {
   const worldMs = performance.now() - t0, { field, grid } = W, [SX, SZ] = squareCount(grid);
   // (The world's weather, as a place's is given: fair, the sky some four tenths cloud, heaped, unless the address says otherwise.)
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v || 0));
-  const weather = { cloud: clamp01(num('cloud', 0.4)), layered: params.get('layered') === '1', mist: clamp01(num('mist', 0)), haze: clamp01(num('haze', 0.4)), rain: clamp01(num('rain', 0)) };
+  // (The haze as the game's by default, a half; and each place's own weather about it, unless the address asks for some: `easeLook`.)
+  const weather = { cloud: clamp01(num('cloud', 0.4)), layered: params.get('layered') === '1', mist: clamp01(num('mist', 0)), haze: clamp01(num('haze', 0.5)), rain: clamp01(num('rain', 0)) };
+  const weatherAsked = ['cloud', 'layered', 'mist', 'haze', 'rain'].some((k) => params.has(k));
+  // (The height over which it is winter on the world, metres, and how many metres over it winter comes in, patchy at first: see
+  // `snowUniforms` below. How far into winter a height is, 0 to 1, for what grows: `winterAt`.)
+  const snowLine = num('snowline', 500), SNOW_BAND = 60;
+  const winterAt = (y: number) => { const t = Math.min(1, Math.max(0, (y - snowLine) / SNOW_BAND)); return t * t * (3 - 2 * t); };
   const light = makeLight(renderer, scene, camera, hour, {
     weather, clouds: Math.round(num('clouds', quality.clouds)), occlusion: num('ao', quality.ao) > 0, temporal: num('taa', 1) > 0, bloom: num('bloom', quality.bloom) > 0,
-    nearShadow: room > 17 && num('nearshadow', 1) > 0, middleShadow: num('midshadow', 1) > 0, box: { min: new Vector3(-grid.hx, -150, -grid.hz), max: new Vector3(grid.hx, 900, grid.hz) }, seed,
+    nearShadow: room > 17 && num('nearshadow', 1) > 0, middleShadow: num('midshadow', 1) > 0, box: { min: new Vector3(-grid.hx, -150, -grid.hz), max: new Vector3(grid.hx, 900, grid.hz) }, seed, thin: num('thin', 1),
   });
   // (The houses' grounds, fitted to the land: made on it in every square they reach.)
   const grounds = W.places.flatMap((q) => (q.ground ? [q.ground] : []));
@@ -162,7 +185,14 @@ async function start(): Promise<void> {
   worldWorker.onmessage = (e) => {
     if (e.data.type === 'tile') { const t = e.data.tile as TileData, key = `${t.i},${t.j}`; tiles.set(key, t); tileResolve.get(key)?.(t); }
     else if (e.data.type === 'route') routeReply?.(e.data as RouteReply);
+    else if (e.data.type === 'ways') netReply?.(e.data as NetReply);
+    else if (e.data.type === 'leg') onLeg?.(e.data as { to: string; way: Way | null });
   };
+  // The world's ways joining its places (`networkLines` in `route.ts`), every one graded on the land at a metre in the world's worker,
+  // before any square is asked for, since each is made with the beds it crosses: its roads, tracks and paths, and a leg from each
+  // coastal town; a castle's valley's leg once it is laid out (`onSite`, below). (`?ways=0` lays none.)
+  interface NetReply { lines: { kind: string; to?: string }[]; ways: Way[] }
+  let netReply: ((m: NetReply) => void) | null = null, onLeg: ((m: { to: string; way: Way | null }) => void) | null = null;
   // The route page: the way to walk, laid and graded in the world's worker, before any square is asked for, since each is made with its bed.
   const game = document.querySelector<HTMLMetaElement>('meta[name="dungeons-game"]')?.content || './index.html';
   const reply = document.body.dataset.walk === 'route'
@@ -172,7 +202,23 @@ async function start(): Promise<void> {
     ? new RouteWalk({ ...reply, route: reply.route, way: reply.way }, { seed, grid, broad: Math.max(40, Number(params.get('broad')) || 300), beyond: params.has('beyond') ? Math.max(0, Number(params.get('beyond'))) : 200, game, size })
     : null;
   if (reply && !route) hud.textContent = 'This world has no way from a town to a valley head to walk.';
-  const ways = route ? [route.way] : [];
+  const net = !route && !reply && params.get('ways') !== '0'
+    ? await new Promise<NetReply>((resolve) => { netReply = resolve; hud.textContent = 'Laying the ways…'; worldWorker.postMessage({ type: 'ways' }); })
+    : null;
+  /** A way as it was graded on the world's land, what place's leg it is if any, and the ground it reaches. */
+  interface Laid { way: Way; to?: string; box: [number, number, number, number] }
+  const boxOf = (way: Way): Laid['box'] => { let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity; for (const [x, z] of way.points) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); } return [x0 - WAY_REACH, z0 - WAY_REACH, x1 + WAY_REACH, z1 + WAY_REACH]; };
+  const laid: Laid[] = route ? [{ way: route.way, box: boxOf(route.way) }] : (net?.ways ?? []).map((way, k) => ({ way, to: net!.lines[k].to, box: boxOf(way) }));
+  // (The ways as drawn: graded again where places stand, so that each comes through the band about a place as a way (`wayThroughHoles`).)
+  let ways: Way[] = laid.map((l) => l.way), wayIxs = ways.map((w) => new WayIndex(w));
+  /** Whether a stretch of ground is within reach of a way. */
+  const waysAbout = (x0: number, z0: number, x1: number, z1: number) => ways.filter((_, k) => { const b = laid[k].box; return b[0] < x1 && b[2] > x0 && b[1] < z1 && b[3] > z0; });
+  if (net) {
+    // Their tracks and footpaths drawn by the ground's material; nothing growing on them, nor trees close beside them, as on the route page.
+    trackAt = (x, z) => trackField(wayIxs, x, z);
+    const clearOf = (clear: number) => (x: number, z: number) => { for (const ix of wayIxs) { const n = ix.near(x, z); if (n && n.d < ix.way.half + clear) return COVER.shore; } return coverAt(x, z); };
+    growCover = clearOf(0.8); treeCover = clearOf(4);
+  }
   if (route) {
     trackAt = (x, z) => route.track(x, z); growCover = route.coverFor(coverAt, 0.8); treeCover = route.coverFor(coverAt, 4);
     // (The ink map of the stretch the way crosses: from what the world's worker handed over, which is all the ink map needs.)
@@ -204,7 +250,7 @@ async function start(): Promise<void> {
     }
     pending.delete(key); squareMs.push(m.ms);
     if (colliders.covers(m.x0, m.z0, m.x0 + SQUARE.size, m.z0 + SQUARE.size)) landVersion++;
-    squares.set(key, { i: m.i, j: m.j, x0: m.x0, z0: m.z0, heights: m.heights, errors: m.errors, meshes: null, level: -1, triangles: 0, fine: null, fineShown: false, fineWanted: false });
+    squares.set(key, { i: m.i, j: m.j, x0: m.x0, z0: m.z0, heights: m.heights, errors: m.errors, meshes: null, level: -1, triangles: 0, fine: null, fineShown: false, fineWanted: false, farMesh: null, farLevel: -1, farTriangles: 0, nearWanted: true, farWanted: false });
   };
   const request = async (i: number, j: number) => {
     const key = `${i},${j}`, worker = pool.find((p) => !p.busy);
@@ -216,7 +262,7 @@ async function start(): Promise<void> {
     // (Only the places near enough to reach into it, as `makeSquare` reckons: a mountain top's hole is a lattice of some megabytes.)
     const [x0, z0] = squareOrigin(grid, i, j), mx = x0 + SQUARE.size / 2, mz = z0 + SQUARE.size / 2;
     const holes = placesBuilt.holes().filter((h) => { const r = Math.hypot(h.hx, h.hz) + 600 + SQUARE.size; return Math.abs(mx - h.cx) < r && Math.abs(mz - h.cz) < r; });
-    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways, holes });
+    worker.w.postMessage({ i, j, seed: W.plan.n, grid, need, tiles: send, grounds, ways: waysAbout(x0, z0, x0 + SQUARE.size, z0 + SQUARE.size), holes });
   };
   /** Asks a worker to split a square into four at half a metre, from its own heights. */
   const requestFine = (sq: Sq) => {
@@ -259,17 +305,18 @@ async function start(): Promise<void> {
     const low = (x: number, z: number) => field.smoothAt(x, z) - 1;
     for (let j = bj * BLOCK; j < Math.min(SZ, (bj + 1) * BLOCK); j++) for (let i = bi * BLOCK; i < Math.min(SX, (bi + 1) * BLOCK); i++) {
       const sq = squares.get(`${i},${j}`);
-      if (sq && (sq.meshes || sq.fineShown)) continue;
+      if (sq && (sq.meshes || sq.fineShown || sq.farMesh)) continue;
       const [x0, z0] = squareOrigin(grid, i, j);
+      // (As the game's far land, all of it one sheet that the material makes rock of where it is steep: `bare` of nothing lays no rock.)
       layTerrain(turf, rock, low, {
-        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, byCorners: Math.max(STEEP_REACH, FAR * 0.75), skip: (c) => placesBuilt.inside((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0.6,
-        colour: (x, z) => look.turf(x, z, field.smoothAt(x, z), Math.hypot(field.smoothAt(x + 8, z) - field.smoothAt(x - 8, z), field.smoothAt(x, z + 8) - field.smoothAt(x, z - 8)) / 16),
-        rock: (tone) => { const c = look.rock(0, 0, 0); return [c[0] * tone * 1.6, c[1] * tone * 1.6, c[2] * tone * 1.6]; },
+        area: { x0, x1: x0 + SQUARE.size, z0, z1: z0 + SQUARE.size }, cell: FAR, skip: (c) => placesBuilt.inside((c.x0 + c.x1) / 2, (c.z0 + c.z1) / 2), seed: 7, stone: [0.6, 0.58, 0.56], turfScale: 2.3, rockScale: 0.4, bare: 0,
+        colour: (x, z) => distantLook.turf(x, z, field.smoothAt(x, z), 0),
+        rock: () => [0, 0, 0],
       });
     }
     drop(farMeshes.get(key) ?? []);
     farMeshes.delete(key);
-    const made = [turf, rock].flatMap((b, k) => (b.triangleCount ? [meshOf(b, k ? materials.rock : materials.turf, hour)] : []));
+    const made = turf.triangleCount ? [meshOf(turf, materials.far, hour)] : [];
     for (const m of made) { m.castShadow = false; scene.add(m); }
     farMeshes.set(key, made);
   };
@@ -279,9 +326,12 @@ async function start(): Promise<void> {
   // How far inside the world's woods each point lies: a wood is close in its heart and thins to its edge, with single trees past it
   // and bramble, bushes and young trees along it (`treesIn`, `growTrees`).
   const depthAt = woodDepth(W.cover, field.nx, field.nz, field.x0, field.z0, field.cell);
+  // The world's land far off, as the game's far land: what covers it and how it lies, for its material (`farLook`).
+  const distantLook = farLook(coverAt, depthAt, (x, z) => field.smoothAt(x, z), 'greystone', snowLine, SNOW_BAND);
+  setFarCover(season);
   let counts = { tufts: 0, trees: 0, farTrees: 0 };
   const lowBlock = (bx: number, bz: number) => {
-    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growHere, W.plan.n % 997, season), meshes = cardsOf(sets);
+    const x0 = bx * LOW, z0 = bz * LOW, sets = growLow(x0, z0, LOW, heightAt, growHere, W.plan.n % 997, season, winterAt), meshes = cardsOf(sets);
     for (const m of meshes) scene.add(m);
     lows.set(`${bx},${bz}`, meshes);
     counts.tufts += sets.reduce((s, q) => s + q.matrices.length / 16, 0);
@@ -290,7 +340,7 @@ async function start(): Promise<void> {
   const treeBlock = (bx: number, bz: number, simply = false) => {
     const key = `${bx},${bz}`, x0 = bx * LOW, z0 = bz * LOW, trees = treesIn(x0, z0, LOW, treesHere, heightAt, W.plan.n, depthAt), out: (Mesh | InstancedMesh)[] = [];
     const level = simply ? 'simple' : 'whole';
-    const { wood, sets, owners } = growTrees(trees, heightAt, season, simply, simply ? undefined : { x0, z0, size: LOW, coverAt: treesHere, depthAt, seed: W.plan.n });
+    const { wood, sets, owners } = growTrees(trees, heightAt, season, simply, simply ? undefined : { x0, z0, size: LOW, coverAt: treesHere, depthAt, seed: W.plan.n }, winterAt);
     for (const [name, b] of wood) {
       if (!b.triangleCount) continue;
       // (Each point of wood says which tree it is, for the level it is drawn at: `aTree`.)
@@ -300,8 +350,9 @@ async function start(): Promise<void> {
     }
     out.push(...cardsOf(sets, level));
     // (Those grown simply are beyond the sun's shadows about the walker, and cast none.)
-    for (const m of out) { if (simply) m.castShadow = false; scene.add(m); }
-    if (!simply) { counts.trees += trees.length; nears.set(key, out); light.redraw(); } else mids.set(key, out);
+    // (Whole trees cast their shadows in the sun's finer picture too, so that past the near map their crowns still shade themselves.)
+    for (const m of out) { if (simply) m.castShadow = false; else if (m.castShadow) m.layers.enable(SunPicture.LAYER); scene.add(m); }
+    if (!simply) { counts.trees += trees.length; nears.set(key, out); light.redraw(); middleDirty = true; } else mids.set(key, out);
     rising.set(`${level}:${key}`, { bi: bx, bj: bz, level, t0: performance.now() });
   };
   /** Blocks of trees just grown, coming in over `RISE` milliseconds (`treeGrownMap`); and one let go of, gone at once. */
@@ -311,7 +362,7 @@ async function start(): Promise<void> {
   const farTreeBlock = (i: number, j: number) => {
     const [x0, z0] = squareOrigin(grid, i, j), key = `${i},${j}`, at = me.clone();
     const trees = treesIn(x0, z0, SQUARE.size, treesHere, heightAt, W.plan.n, depthAt);
-    const meshes = cardsOf(farTrees(trees, heightAt, season), 'painted');
+    const meshes = cardsOf(farTrees(trees, heightAt, season, winterAt), 'painted');
     for (const m of meshes) { m.castShadow = false; scene.add(m); }
     fars.set(key, { at, meshes });
   };
@@ -338,12 +389,60 @@ async function start(): Promise<void> {
   let toastTimer = 0;
   const toast = (message: string) => { toastLine.textContent = message; toastLine.style.opacity = '1'; clearTimeout(toastTimer); toastTimer = window.setTimeout(() => { toastLine.style.opacity = '0'; }, 4200); };
   const keysHeld = new Map<string, string[]>();
+  // The game's own sound (`Sound`): wind and leaves out of doors, a room's tone under a roof, footsteps by what is underfoot, the sea on
+  // the shore, sheep and goats, and the places' doors, keys and levers. Started at the first click or key, as browsers ask; `N` mutes it.
+  const sound = new Sound();
+  window.addEventListener('pointerdown', () => sound.start(), { once: true });
+  window.addEventListener('keydown', () => sound.start(), { once: true });
   const gameUi = (name: string): GameUi => ({
-    toast,
+    toast, sound: (event) => sound.play(event),
     keysChanged: (keys) => keysHeld.set(name, keys),
     won: (seconds) => toast(`You reached the heart of ${name} in ${seconds >= 60 ? `${Math.floor(seconds / 60)} min ` : ''}${Math.round(seconds % 60)} s.`),
   });
-  const placesBuilt = new WorldPlaces({ seed, size, scene, renderer, lamps: room >= 20, keep: params.get('keep') === '1', ui: gameUi, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), turf: materials.turf, sunDir: light.sunDir, atmosphere: light.atmosphere });
+  // ---- the air and the tones of the land, as the game draws them at the place the walker is at (`PlaceLook`): its weather, on its own
+  // ground; the colours its far land, its distant grass and its bare ground take (a mountain top's are browner and stonier); and its
+  // town's paving, laid by its streets. The world's own between places: fair weather on the sea's level, the season's far colours.
+  // Eased in from some eight hundred metres out from a place's land, whole within a hundred and fifty of it; where two are near, shared.
+  const worldLook = { ...farCoverOf(season), sward: [0.225, 0.3, 0.066], bare: [1, 1, 1, 0] };
+  // Winter on the world's heights, as the game draws its winter mountains: over the snow line (`?snowline=`, five hundred metres) its
+  // materials lay snow on all but the steep faces, fill the rock's hollows and tread it on the tracks, coming in over sixty metres,
+  // patchy at first; what grows there is winter's (`winterAt`); the far land is the game's winter range (`farLook`); and a mountain
+  // top whose house stands over the line is built as the game builds one in winter (`winterAbove`). Below it, the season's.
+  snowUniforms.uSnow.value = 0; snowUniforms.uSnowLine.value.set(0, 0); snowUniforms.uSnowWinter.value.set(snowLine, SNOW_BAND);
+  let lookAt = -1e9, paved: string | null = null;
+  const easeLook = (now: number) => {
+    if (now - lookAt < 300) return;
+    lookAt = now;
+    let total = 0, nearest: { spec: string; out: number } | null = null;
+    const parts = placesBuilt.looks().map((p) => {
+      const out = holeAt(p.hole, me.x, me.z).out, t = Math.min(1, Math.max(0, (out - 150) / 650)), w = 1 - t * t * (3 - 2 * t);
+      if (p.look.paving && out < 300 && (!nearest || out < nearest.out)) nearest = { spec: p.spec, out };
+      total += w;
+      return { ...p, w };
+    }).filter((p) => p.w > 0.001);
+    const k = total > 1 ? 1 / total : 1, world = 1 - Math.min(1, total);
+    const mixed = (own: number, of: (p: (typeof parts)[number]) => number) => world * own + parts.reduce((sum, p) => sum + p.w * k * of(p), 0);
+    if (!weatherAsked) {
+      const ew = (p: (typeof parts)[number]) => p.look.weather;
+      light.setWeather({
+        cloud: mixed(weather.cloud, (p) => ew(p).cloud), mist: mixed(weather.mist, (p) => ew(p).mist), haze: mixed(weather.haze, (p) => ew(p).haze), rain: weather.rain,
+        layered: mixed(weather.layered ? 1 : 0, (p) => (ew(p).layered ? 1 : 0)) > 0.5,
+      }, mixed(0, (p) => ew(p).floor));
+    }
+    const col = (own: number[], of: (p: (typeof parts)[number]) => number[] | undefined) => own.map((v, c) => mixed(v, (p) => (of(p) ?? own)[c]));
+    farUniforms.uFarWood.value.set(...(col(worldLook.wood, (p) => p.look.far?.wood) as [number, number, number]));
+    farUniforms.uFarGrass.value.set(...(col(worldLook.grass, (p) => p.look.far?.grass) as [number, number, number]));
+    groundUniforms.uSward.value.set(...(col(worldLook.sward, (p) => p.look.far?.sward) as [number, number, number]));
+    groundUniforms.uBare.value.set(...(col(worldLook.bare, (p) => p.look.far?.bare) as [number, number, number, number]));
+    // A town's paving frame: the nearest town's, while the walker is in it or near; one at a time, as the ground's program reads one.
+    const town = (nearest as { spec: string; out: number } | null)?.spec ?? null;
+    if (town !== paved) {
+      const p = town ? placesBuilt.looks().find((q) => q.spec === town) : undefined;
+      setPaving(p?.look.paving ?? { x0: 1e7, z0: 1e7, cell: 1, nx: 1, nz: 1, data: new Float32Array(4) }, room >= 20 && num('paveframe', 1) > 0, p ? { u: p.frame.u, v: p.frame.v, hx: p.frame.hx, hz: p.frame.hz, turn: p.frame.turn } : undefined);
+      paved = town;
+    }
+  };
+  const placesBuilt = new WorldPlaces({ seed, size, scene, renderer, lamps: room >= 20, keep: params.get('keep') === '1', ui: gameUi, colliders, places: params.get('places') === '0' ? [] : W.places, hour, season, texSize: num('tex', quality.tex), winterAbove: snowLine, turf: materials.placeTurf, turfs: { island: materials.islandTurf, mountain: materials.mountainTurf }, sunDir: light.sunDir, atmosphere: light.atmosphere });
   /** Where a square's triangles are left out, under a place standing in the world: only for a square that reaches into one. */
   const underPlace = (x0: number, z0: number, size: number) => {
     const near = placesBuilt.holes().some((h) => Math.hypot(Math.max(0, x0 - h.cx, h.cx - x0 - size), Math.max(0, z0 - h.cz, h.cz - z0 - size)) < Math.hypot(h.hx, h.hz));
@@ -353,6 +452,45 @@ async function start(): Promise<void> {
   // The game's own sea, about the walker, or a standing place's own (`WorldSea`).
   const worldSea = new WorldSea({ scene, atmosphere: light.atmosphere, field, hour, sheet: sea });
   placesBuilt.onSea = (d) => worldSea.override(d);
+  /** The ways as drawn, graded again on the land as the places standing leave it (`wayThroughHoles`): those near a place, the rest as laid. */
+  const regrade = () => {
+    const holes = placesBuilt.holes();
+    ways = laid.map((l) => { const near = holes.filter((h) => { const r = Math.hypot(h.hx, h.hz) + 200; return l.box[0] < h.cx + r && l.box[2] > h.cx - r && l.box[1] < h.cz + r && l.box[3] > h.cz - r; }); return near.length ? wayThroughHoles(l.way, near) : l.way; });
+    wayIxs = ways.map((w) => new WayIndex(w));
+  };
+  /** Makes again all that was made on a stretch of ground: its squares, what grows on it, the far land about it, the body's ground. */
+  const remakeAbout = (x0: number, z0: number, x1: number, z1: number) => {
+    const near = (bx: number, bz: number, sz: number) => bx < x1 && bx + sz > x0 && bz < z1 && bz + sz > z0;
+    for (const [k, sq] of squares) if (near(sq.x0, sq.z0, SQUARE.size)) {
+      drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []); if (sq.farMesh) drop([sq.farMesh]);
+      squares.delete(k); farDirty.add(blockOf(sq.i, sq.j));
+    }
+    for (const [k, meshes] of [...lows, ...nears, ...mids]) {
+      const [i, j] = k.split(',').map(Number);
+      if (!near(i * LOW, j * LOW, LOW)) continue;
+      drop(meshes); lows.delete(k); if (nears.delete(k)) grownMap.set(i, j, 'whole', 0); if (mids.delete(k)) grownMap.set(i, j, 'simple', 0);
+    }
+    for (const [k, f] of fars) { const [i, j] = k.split(',').map(Number), [fx, fz] = squareOrigin(grid, i, j); if (near(fx, fz, SQUARE.size)) { drop(f.meshes); fars.delete(k); } }
+    middleDirty = true; light.redraw(); landVersion++;
+  };
+  // A castle's valley's leg, once it is laid out: from where its own road begins (the last point of its `track`, where the player
+  // arrives) to the nearest way, laid and graded in the world's worker; and the ground it crosses made again with its bed.
+  if (net) {
+    placesBuilt.onSite = (kind, n, site) => {
+      // (A mountain top's from where its own way down the ridge ends, a footpath.)
+      const s = site as Site, f = siteFrame(s), t = kind === 'mountain' ? s.mountain?.way : s.track;
+      if ((kind !== 'valley' && kind !== 'mountain') || !f || !t?.length) return;
+      const [x, z] = toWorld(f, t[t.length - 1][0], t[t.length - 1][1]);
+      worldWorker.postMessage({ type: 'leg', to: `${kind}${n}`, x, z, path: kind === 'mountain' });
+    };
+    onLeg = (m) => {
+      const k = laid.findIndex((l) => l.to === m.to), was = k >= 0 ? laid[k] : null;
+      if (was) laid.splice(k, 1);
+      if (m.way) laid.push({ way: m.way, to: m.to, box: boxOf(m.way) });
+      regrade();
+      for (const b of [was?.box, m.way ? boxOf(m.way) : undefined]) if (b) remakeAbout(b[0], b[1], b[2], b[3]);
+    };
+  }
   // When a place comes into the world or goes from it, what was made about it is made again: the land (brought to meet the place's, or
   // let be), the far land, what grows (none inside a place), and the body's ground.
   placesBuilt.onHoles = (h) => {
@@ -361,7 +499,7 @@ async function start(): Promise<void> {
     middleDirty = true; light.redraw();
     const r = Math.hypot(h.hx, h.hz) + 160, cx = h.cx, cz = h.cz, near = (x0: number, z0: number, s: number) => Math.hypot(Math.max(0, x0 - cx, cx - x0 - s), Math.max(0, z0 - cz, cz - z0 - s)) < r;
     for (const [k, sq] of squares) if (near(sq.x0, sq.z0, SQUARE.size)) {
-      drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []);
+      drop(sq.meshes ?? []); for (const q of sq.fine ?? []) drop(q.meshes ?? []); if (sq.farMesh) drop([sq.farMesh]);
       squares.delete(k); farDirty.add(blockOf(sq.i, sq.j));
     }
     for (const [k, meshes] of [...lows, ...nears, ...mids]) {
@@ -371,8 +509,8 @@ async function start(): Promise<void> {
     }
     for (const [k, f] of fars) { const [i, j] = k.split(',').map(Number), [x0, z0] = squareOrigin(grid, i, j); if (near(x0, z0, SQUARE.size)) { drop(f.meshes); fars.delete(k); } }
     for (let bj = 0; bj < Math.ceil(SZ / BLOCK); bj++) for (let bi = 0; bi < Math.ceil(SX / BLOCK); bi++) { const [x0, z0] = squareOrigin(grid, bi * BLOCK, bj * BLOCK); if (near(x0, z0, SQUARE.size * BLOCK)) farDirty.add(`${bi},${bj}`); }
-    // (The way graded again on the land as the places now leave it, so that it comes through the band about one as a way.)
-    if (route) ways[0] = wayThroughHoles(route.way, placesBuilt.holes());
+    // (The ways graded again on the land as the places now leave it, so that each comes through the band about one as a way.)
+    regrade();
     landVersion++;
     // (A place come to stand where the walker is: stood on its ground, if that is over their feet, as on a town's quay.)
     if (!player.flying && placesBuilt.inside(me.x, me.z)) {
@@ -386,6 +524,29 @@ async function start(): Promise<void> {
   player.flySpeed = [40, 160];
   player.fallTo = -1e4;
   const EYE = 1.68, me = player.position;
+  // ---- getting about (step 4): the world's ink map (`M`), a place clicked on gone to; the plan of the place one is in, in the corner;
+  // riding the ways (`R`); and the ferry, the game's boat from a harbour to an island (`R` on the shore at either end).
+  const reached = new Set<string>();
+  const inkWorld = worldMapOf(W as unknown as HandedWorld);
+  const walkMap = !route && inkWorld ? new WalkMap(inkWorld, {
+    places: W.places, reached: () => reached,
+    // (To where its way begins, for a castle's valley whose leg is laid: where the game puts its player; else the place itself.)
+    go: (spec) => {
+      const leg = laid.find((l) => l.to === spec), menu = document.getElementById('where') as HTMLSelectElement | null;
+      if (leg && !spec.startsWith('coast')) { const [x, z] = leg.way.points[0]; teleport(x, z); return; }
+      if (menu && W.places.some((q) => `${q.kind}${q.n}` === spec)) { menu.value = spec; menu.dispatchEvent(new Event('change')); } else { const to = place(spec); teleport(to.x, to.z); }
+    },
+  }) : null;
+  const plan = new PlacePlan(), rider = new Rider();
+  const ferry = new Ferry(((W as unknown as HandedWorld).ways ?? []).filter((x) => x.kind === 'ferry').map((x) => x.points), scene, () => placesBuilt.surfaces);
+  placesBuilt.onBleat = (near, goat) => sound.bleat(near, goat);
+  let shiftDown = false, shoreFall = 0, shoreAt = -1e9;
+  const lastStep = { x: 0, z: 0 };
+  /** Dry land near a point of the sea, for setting one ashore: the nearest of a few rings about it standing a metre over the water. */
+  const dryNear = (x: number, z: number): [number, number] => {
+    for (let r = 4; r <= 120; r += 4) for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r; if (heightAt(px, pz) > 1) return [px, pz]; }
+    return [x, z];
+  };
   /** Puts the walker at a point, on the ground there (or, flying, so high over it). */
   const teleport = (x: number, z: number, yawTo = player.yaw, pitchTo = player.pitch, lift = player.flying ? 20 : EYE) => {
     colliders.follow(x, z, landVersion);
@@ -473,10 +634,21 @@ async function start(): Promise<void> {
   const wireframe = (on: boolean) => { for (const k of ['turf', 'rock']) (materials[k] as MeshStandardNodeMaterial).wireframe = on; };
   // (Walking, running, jumping and flying, `V`, are the body's own keys; these are the page's.)
   window.addEventListener('keydown', (e: KeyboardEvent) => {
-    // (On the route page M is the ink map, and T the triangles.)
-    if (e.code === (route ? 'KeyT' : 'KeyM') && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
+    // (M is the ink map, the world's or on the route page its stretch's; T the triangles; N the sound on or off.)
+    if (e.code === 'KeyT' && !e.repeat) wireframe(!(materials.turf as MeshStandardNodeMaterial).wireframe);
     if (route && e.code === 'KeyM' && !e.repeat) route.toggleInk();
-    if (route && e.code === 'Escape') route.toggleInk(false);
+    if (!route && e.code === 'KeyM' && !e.repeat) walkMap?.toggle();
+    if (e.code === 'Escape') { route?.toggleInk(false); walkMap?.toggle(false); }
+    if (e.code === 'KeyN' && !e.repeat) sound.toggleMute();
+    shiftDown = e.shiftKey;
+    // R: on a ferry's shore, aboard her; on a way, riding along it the way one faces; again, or walking, gets one down.
+    if (e.code === 'KeyR' && !e.repeat && !player.flying && !ferry.sailing) {
+      if (rider.riding) { rider.stop(); toast('You get down.'); }
+      else if (ferry.near(me) && ferry.board(me)) toast('You take the ferry across.');
+      else if (rider.toggle(ways, me, player.yaw)) toast('You ride along the way, looking about as you like: R or a step to get down, Shift for a gallop.');
+      else toast('No way here to ride: stand on a track or a path.');
+    }
+    if (rider.riding && ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) { rider.stop(); toast('You get down.'); }
     // (Numbers for valley heads, with Shift for islands; P for the next place of any kind. Ctrl with a number changes the browser's tab.)
     const digit = /^Digit([1-4])$/.exec(e.code);
     if (digit && !e.ctrlKey && !e.metaKey && !e.altKey && !route) {
@@ -486,10 +658,12 @@ async function start(): Promise<void> {
     }
     if (e.code === 'KeyP' && !e.repeat) nextPlace();
   });
+  window.addEventListener('keyup', (e: KeyboardEvent) => { shiftDown = e.shiftKey; });
 
   // ---- the loop
   const frames: number[] = [];
   let last = performance.now(), rebuilt = 0, shown = 0, tick = 0, metering = false, exposure = -1, exposureTarget = 0.5, layingAhead = false;
+  let ratio = fullRatio, spellAt = last, spellFrames = 0, quick = 0, timing = false;
   const begun = last;
   /** The squares within reach of where one stands. */
   function* squaresWanted(): Generator<string> {
@@ -514,6 +688,7 @@ async function start(): Promise<void> {
     let fine = 0, fineTriangles = 0;
     for (const s of squares.values()) {
       if (s.meshes) { tris += s.triangles; levels[s.level]++; }
+      tris += s.farTriangles;
       if (s.fineShown && s.fine) { fine++; for (const p of s.fine) fineTriangles += p.triangles; }
     }
     const ms = frames.length ? frames.reduce((a, b) => a + b, 0) / frames.length : 0, sorted = [...squareMs].sort((a, b) => a - b), fineSorted = [...fineMs].sort((a, b) => a - b);
@@ -538,6 +713,14 @@ async function start(): Promise<void> {
     stats, wireframe,
     /** The scene, the eye, the renderer and the places standing (with how many let go of have been collected, `WorldPlaces.collected`), for looking into from the browser's console. */
     three: { scene, camera, renderer, placesBuilt, WorldPlaces },
+    /** The world's ferries: each one's ends, harbour first. */
+    ferries: () => ((W as unknown as HandedWorld).ways ?? []).filter((x) => x.kind === 'ferry').map((x) => [x.points[0], x.points[x.points.length - 1]]),
+    /** The sound: whether it is muted, and whether the browser has let it start. */
+    sound: () => ({ muted: sound.muted, state: (sound as unknown as { ctx: AudioContext | null }).ctx?.state ?? 'not started' }),
+    /** Whether one is riding a way or aboard the ferry. */
+    carried: () => ({ riding: rider.riding, sailing: ferry.sailing }),
+    /** The ways drawn: what place's leg each is, if any, how broad, and its points (as graded through the places standing). */
+    ways: () => ways.map((w, k) => ({ to: laid[k]?.to, half: w.half, points: w.points, heights: w.heights })),
     /** The places standing in the world, and how they came in. */
     places: () => ({ status: placesBuilt.status, built: placesBuilt.report() }),
     /** On the route page: opens or closes the ink map of the stretch. */
@@ -554,7 +737,7 @@ async function start(): Promise<void> {
       teleport(x, z, yawTo ?? player.yaw, pitchTo ?? player.pitch, y ?? (player.flying ? 20 : EYE));
     },
     /** What is not yet in, of what `settled` waits for (for scripts that find it waiting). */
-    unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: paintedMissing().length, far: farDirty.size }),
+    unsettled: () => ({ pending: pending.size, finePending: finePending.size, squares: [...squaresWanted()].filter((k) => { const q = squares.get(k); return !(q && (q.fineWanted ? q.fineShown : !!q.meshes || !q.nearWanted) && (!q.farWanted || !!q.farMesh)); }).length, grass: wantedLow().filter(([i, j]) => !lows.has(`${i},${j}`)).length, trees: wantedTrees().filter(([i, j]) => !nears.has(`${i},${j}`)).length, simpler: wantedMids().filter(([i, j]) => !mids.has(`${i},${j}`)).length, painted: paintedMissing().length, far: farDirty.size }),
     /** Draws `n` frames back to back, each waited for on the graphics card, and says what they took: the middle, the mean and the
      *  worst, in milliseconds. The page's own frame time is the time between the browser's frames, which a screen's rate caps. */
     time: async (n = 60) => {
@@ -566,17 +749,18 @@ async function start(): Promise<void> {
       // which three's loop does before calling ours; without it only the last picture of the steps was drawn again, in a millisecond.)
       const nodeFrame = (renderer as unknown as { _nodes: { nodeFrame: { update(): void; frameId: number } } })._nodes.nodeFrame;
       const took: number[] = [];
+      timing = true;
       try {
         await done();
         for (let i = 0; i < n; i++) { const t = performance.now(); nodeFrame.update(); (renderer.info as { frame: number }).frame = nodeFrame.frameId; frame(t); await done(); took.push(performance.now() - t); }
       } finally {
         // (Its frames are not the browser's: left in the page's own average they made it look three times as fast as it was.)
-        frames.length = 0; last = performance.now(); renderer.setAnimationLoop(loop);
+        frames.length = 0; last = performance.now(); timing = false; spellAt = last; spellFrames = 0; renderer.setAnimationLoop(loop);
       }
       const sorted = [...took].sort((a, b) => a - b);
       return { middle: sorted[Math.floor(n / 2)], mean: took.reduce((a, b) => a + b, 0) / n, worst: sorted[n - 1], webgpu: !!device, size: [canvas.width, canvas.height] };
     },
-    settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && paintedMissing().length === 0 && farDirty.size === 0,
+    settled: () => pending.size === 0 && finePending.size === 0 && [...squaresWanted()].every((k) => { const s = squares.get(k); return s && (s.fineWanted ? s.fineShown : !!s.meshes || !s.nearWanted) && (!s.farWanted || !!s.farMesh); }) && wantedLow().every(([i, j]) => lows.has(`${i},${j}`)) && wantedTrees().every(([i, j]) => nears.has(`${i},${j}`)) && wantedMids().every(([i, j]) => mids.has(`${i},${j}`)) && paintedMissing().length === 0 && farDirty.size === 0,
   };
   const frame = (now: number) => {
     const dt = Math.min(0.1, (now - last) / 1000);
@@ -585,13 +769,55 @@ async function start(): Promise<void> {
     player.analog.set(touch.move.x, touch.move.y); player.analogRun = touch.move.run; player.analogRise = touch.move.rise;
     // (Not while flying: at a hundred and sixty metres a second the patch would be made again several times a second for nothing.
     // Coming down, `constrain` stands the body on the ground, and the next frame makes the patch there.)
-    if (!player.flying) colliders.follow(me.x, me.z, landVersion);
-    player.update(dt);
+    // Carried by the ferry or along a way, or walking (or flying) as the body does.
+    const sailing = ferry.step(dt, now / 1000, shiftDown), riding = sailing ? null : rider.step(dt, ways, shiftDown);
+    if (sailing) {
+      player.place(new Vector3(sailing.x, sailing.y + 1.15, sailing.z), player.yaw, player.pitch);
+      if (sailing.landed) {
+        // (At an island's own landing, where the world has one near, not on whatever dry ground is nearest: an island has sea cliffs.)
+        const isle = W.places.find((q) => q.kind === 'island' && q.landing && Math.hypot(q.landing.x - sailing.x, q.landing.z - sailing.z) < 500);
+        const [x, z] = isle?.landing ? [isle.landing.x, isle.landing.z] : dryNear(sailing.x, sailing.z);
+        teleport(x, z); toast(isle ? `You step ashore on ${isle.name}.` : 'You step ashore.');
+      }
+    } else if (riding) {
+      // (Up to a place's land, then on foot: inside it the way is the place's own.)
+      if (placesBuilt.inside(riding.x, riding.z, 2)) { rider.stop(); toast('You come to a place, and get down.'); }
+      else player.place(new Vector3(riding.x, heightAt(riding.x, riding.z) + EYE, riding.z), player.yaw, player.pitch);
+    } else {
+      if (!player.flying) colliders.follow(me.x, me.z, landVersion);
+      player.update(dt);
+    }
     if (touch.shownFlying !== player.flying) touch.flying(player.flying);
     // (The two places laid out for the game ahead, once the squares about the start are in, or after twenty seconds: not before, so
     // that the worker that does it, making the world again, does not slow the first squares.)
     if (route && !layingAhead && (now - begun > 20000 || (squares.size >= 6 && pending.size === 0))) { layingAhead = true; route.layOutAhead(placesBuilt); }
     placesBuilt.update(me, now, camera, renderer.getDrawingBufferSize(drawn).y);
+    {
+      // The sound: out of doors or under a roof; what is underfoot (the sea, a room's floor, a way's earth, grass); the sea heard along the
+      // shore, as near as it is (looked for a few times a second); no steps while carried.
+      const roofed = placesBuilt.roofed(me.x, me.y, me.z), wading = !player.flying && me.y < 0.3 && !placesBuilt.inside(me.x, me.z);
+      if (now - shoreAt > 500) {
+        shoreAt = now;
+        let d = Infinity;
+        for (let r = 10; r <= 90 && d === Infinity; r += 20) for (let k = 0; k < 12; k++) { const a = (k / 12) * Math.PI * 2; if (coverAt(me.x + Math.cos(a) * r, me.z + Math.sin(a) * r) === COVER.sea) { d = r; break; } }
+        shoreFall = d === Infinity ? 0 : 0.3 / (1 + (d / 30) ** 2);
+      }
+      const surface: Surface = wading ? 'water' : roofed ? 'stone' : trackAt && trackAt(me.x, me.z) ? 'earth' : 'grass';
+      const moved = sailing || riding ? 0 : Math.hypot(me.x - lastStep.x, me.z - lastStep.z);
+      lastStep.x = me.x; lastStep.z = me.z;
+      sound.rain = weather.rain;
+      sound.update(dt, now / 1000, roofed ? 0 : 1, moved < 1 ? moved : 0, player.grounded, player.running, surface, { brook: 0, fall: player.flying ? 0 : shoreFall });
+    }
+    if (tick % 6 === 0) {
+      // The place one is in (and so has reached), its plan in the corner as its game stands; the world's map, if open.
+      const at = placesBuilt.here(me.x, me.z);
+      if (at) reached.add(at.spec);
+      const g = at?.game;
+      plan.update(now, at ? { site: at.site, frame: at.frame, ...(g ? { game: { visited: g.visited, shut: new Set(g.doors.filter((d) => !d.open).map((d) => d.desc.way)), items: g.things.filter((k) => !k.taken).map((k) => k.item), levers: g.levers.filter((l) => !l.thrown).map((l) => l.lever) } } : {}) } : null, me, player.yaw);
+      walkMap?.update(now, me, player.yaw, ways, placesBuilt.looks().map((l) => l.spec));
+    }
+    nearEyeUniforms.uNearEye.value.set(camera.position.x, camera.position.z, NEAR_FAR, NEAR_BAND);
+    easeLook(now);
     worldSea.update(me, now / 1000);
     const groundY = heightAt(me.x, me.z);
     // Streaming: ask for what is near and missing, nearest first; let go of what is far.
@@ -604,7 +830,7 @@ async function start(): Promise<void> {
       if (sq.fineWanted && !sq.fine) requestFine(sq);
     }
     for (const [k, sq] of squares) if (distTo(sq.i, sq.j) > DROP) {
-      drop(sq.meshes ?? []);
+      drop(sq.meshes ?? []); if (sq.farMesh) drop([sq.farMesh]);
       for (const p of sq.fine ?? []) drop(p.meshes ?? []);
       squares.delete(k); farDirty.add(blockOf(sq.i, sq.j));
     }
@@ -614,6 +840,28 @@ async function start(): Promise<void> {
       if (budget <= 0) break;
       const sq = squares.get(q.k);
       if (!sq) continue;
+      // Near ground where it reaches inside the band's outer edge, far land where it reaches past its inner, both across the band;
+      // each made with some metres to spare, so that it is in before the walker brings the band to it.
+      const [sx0, sz0] = squareOrigin(grid, sq.i, sq.j), farthest = Math.hypot(Math.max(me.x - sx0, sx0 + SQUARE.size - me.x), Math.max(me.z - sz0, sz0 + SQUARE.size - me.z));
+      sq.nearWanted = q.d < NEAR_FAR + 60; sq.farWanted = farthest > NEAR_FAR - NEAR_BAND - 60;
+      if (sq.farWanted && (sq.farLevel !== levelFor(q.d) || !sq.farMesh)) {
+        const level = levelFor(q.d), m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], distantLook, 0, 1, underPlace(sq.x0, sq.z0, SQUARE.size));
+        const mesh = landMesh(m.turf, materials.far);
+        // (A little under the near ground, so that where both are drawn at a patch's edge the near ground is what shows; and casting no
+        // shadow of its own near the walker, where the near ground does.)
+        mesh.castShadow = false; mesh.position.y = -0.3; mesh.updateMatrix();
+        const was = !!(sq.meshes || sq.fineShown || sq.farMesh);
+        if (sq.farMesh) drop([sq.farMesh]);
+        sq.farMesh = mesh; sq.farLevel = level; sq.farTriangles = m.triangles; scene.add(mesh);
+        if (!was) farDirty.add(blockOf(sq.i, sq.j));
+        if (q.d < 600) middleDirty = true;
+        budget--; rebuilt++;
+      } else if (!sq.farWanted && sq.farMesh) { drop([sq.farMesh]); sq.farMesh = null; sq.farLevel = -1; sq.farTriangles = 0; }
+      if (!sq.nearWanted && !sq.fineShown) {
+        if (sq.meshes) { drop(sq.meshes); sq.meshes = null; sq.level = -1; sq.triangles = 0; if (!sq.farMesh) farDirty.add(blockOf(sq.i, sq.j)); }
+        continue;
+      }
+      if (budget <= 0) break;
       if (sq.fineWanted && sq.fine) {
         // Its four quarters at half a metre, each to its own distance; drawn in its place once all four are made.
         for (const p of sq.fine) {
@@ -629,7 +877,7 @@ async function start(): Promise<void> {
         }
         if (!sq.fineShown && sq.fine.every((p) => p.meshes)) {
           for (const p of sq.fine) for (const mesh of p.meshes!) scene.add(mesh);
-          if (sq.meshes) drop(sq.meshes); else farDirty.add(blockOf(sq.i, sq.j));
+          if (sq.meshes) drop(sq.meshes); else if (!sq.farMesh) farDirty.add(blockOf(sq.i, sq.j));
           sq.meshes = null; sq.level = -1; sq.fineShown = true;
           if (colliders.covers(sq.x0, sq.z0, sq.x0 + SQUARE.size, sq.z0 + SQUARE.size)) landVersion++;
           light.redraw();
@@ -640,7 +888,7 @@ async function start(): Promise<void> {
       const level = levelFor(q.d);
       if (level !== sq.level || !sq.meshes) {
         const m = squareBuilders(sq.x0, sq.z0, sq.heights, sq.errors, LEVELS[level], look, 0.72, 1, underPlace(sq.x0, sq.z0, SQUARE.size));
-        if (sq.meshes) drop(sq.meshes); else if (!sq.fineShown) farDirty.add(blockOf(sq.i, sq.j));
+        if (sq.meshes) drop(sq.meshes); else if (!sq.fineShown && !sq.farMesh) farDirty.add(blockOf(sq.i, sq.j));
         sq.meshes = [landMesh(m.turf, materials.turf), landMesh(m.rock, materials.rock)];
         if (q.d < 600) middleDirty = true;
         for (const mesh of sq.meshes) scene.add(mesh);
@@ -702,12 +950,27 @@ async function start(): Promise<void> {
     }
     exposure = exposure < 0 ? exposureTarget : exposure + (exposureTarget - exposure) * (1 - Math.exp(-dt * (exposureTarget < exposure ? 3.5 : 1.1)));
     renderer.toneMappingExposure = exposure;
+    // The resolution, as the game sets it: lowered a tenth at a time while frames come slower than forty a second (averaged over a second
+    // and a half), down to some three fifths of the chosen and never under three quarters; raised again after three spells at fifty-eight.
+    // (Not while frames are being timed, `time`, which draws them back to back.)
+    if (adapt && !timing && document.visibilityState === 'visible') {
+      spellFrames++;
+      if (now - spellAt > 1500) {
+        const each = (now - spellAt) / spellFrames;
+        if (each < 250) {
+          if (each > 25 && ratio > leastRatio + 0.01) { ratio = Math.max(leastRatio, Math.round((ratio - 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); }
+          else if (each < 17.2 && ratio < fullRatio - 0.01 && ++quick >= 3) { ratio = Math.min(fullRatio, Math.round((ratio + 0.1) * 100) / 100); quick = 0; renderer.setPixelRatio(ratio); }
+          else if (each >= 17.2) quick = 0;
+        }
+        spellAt = now; spellFrames = 0;
+      }
+    }
     if (now - shown > 250) {
       shown = now;
       const st = stats();
       if (route) { route.drawMap(me, player.yaw); route.markArrival(); route.drawInkWalker(me, player.yaw); }
       hud.textContent = (route ? `${route.lines().join('\n')}\n` : '') + (placesBuilt.status ? `${placesBuilt.status}\n` : '') + (route ? '\n' : '') + `${W.name}: world made in ${(worldMs / 1000).toFixed(0)} s · ${hour}, ${season}\n` +
-        `frame ${st.frameMs.toFixed(1)} ms · drawn ${st.drawnTriangles.toLocaleString()} triangles\n` +
+        `frame ${st.frameMs.toFixed(1)} ms${ratio < fullRatio - 0.01 ? ` at ${ratio.toFixed(2)}×` : ''} · drawn ${st.drawnTriangles.toLocaleString()} triangles\n` +
         `squares ${st.squares} (${st.pending} coming), ${st.squareTriangles.toLocaleString()} triangles; a square ${st.squareMsMiddle.toFixed(0)} ms in a worker (${cores} at work)\n` +
         (fineOn ? `at half a metre ${st.fine} (${st.finePending} coming), ${st.fineTriangles.toLocaleString()} triangles; four ${st.fineMsMiddle.toFixed(0)} ms\n` : '') +
         `grass in ${st.lowBlocks} blocks · ${st.treeBlocks} blocks of whole trees, ${st.midBlocks} of simpler · ${st.farTreeCards.toLocaleString()} painted trees\n` +

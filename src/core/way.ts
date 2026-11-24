@@ -9,6 +9,8 @@ export interface Way { points: [number, number][]; heights: number[]; half: numb
 
 /** How far apart the points of a way's line lie; half a cart track's breadth; how far its bed may reach out to the land. */
 export const WAY = { step: 4, half: 2.4, shoulder: 0.6, bankMost: 16, smooth: 32 };
+/** Half a footpath's breadth: a way this narrow or narrower is drawn as a footpath, not a cart track (`trackField`). */
+export const PATH_HALF = 0.9;
 /** How far from a way's middle anything of it reaches: its bed, its shoulder and the broadest bank. */
 export const WAY_REACH = WAY.half + WAY.shoulder + WAY.bankMost + 1;
 
@@ -123,6 +125,7 @@ export function withWay(ix: WayIndex, x: number, z: number, natural: number): nu
 
 /** How far to one side of a way's middle a point is, for the ground's material (its track: plus a hundred), or nothing if it is not near; for every way given. */
 export function trackField(ixs: WayIndex[], x: number, z: number): number {
-  for (const ix of ixs) { const n = ix.near(x, z); if (n && Math.abs(n.off) < 6) return 100 + n.off; }
+  // (A footpath is told by its breadth, and the ground's material draws it as one: plus two hundred, `onFoot` there.)
+  for (const ix of ixs) { const n = ix.near(x, z); if (n && Math.abs(n.off) < 6) return (ix.way.half <= PATH_HALF ? 200 : 100) + n.off; }
   return 0;
 }

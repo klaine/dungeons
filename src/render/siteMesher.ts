@@ -2521,7 +2521,13 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
         };
         const snapC = (v: number, up: boolean) => (up ? Math.ceil(v / CELL) : Math.floor(v / CELL)) * CELL;
         const greenSeed = own.int(1, 9999);
-        carveRock(softRock, air, {
+        // (In a group of their own, `tor`, which stops nobody, as the soft rock does: a world draws its own hills, and a place standing
+        // in it leaves out what stands on the game's, as it leaves out the far land, `packPlace`.)
+        const was = wild.group;
+        wild.group = 'tor';
+        const torRock = wild.mesh('rock');
+        wild.group = was;
+        carveRock(torRock, air, {
           min: V(snapC(x0 - reachC, false), snapC(low - 6, false), snapC(z0 - reachC, false)), max: V(snapC(x0 + reachC, true), snapC(top + high, true), snapC(z0 + reachC, true)),
           cell: CELL, uvScale: 0.4, fromSamples: true, occlusion: [CELL, CELL * 3], sharp: true, crease: 36 + 24 * rockKind.round, normalReach: CELL * 0.5,
           // Only the crag itself: where no stone stands over the hill, the hill's own sheet is the ground.

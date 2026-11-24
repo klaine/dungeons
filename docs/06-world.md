@@ -728,6 +728,74 @@ leaves both the game and the walk working:
    five goats, 39 torches). *Not yet:* lit windows' haze after dark (`WindowGlow`), the boats riding the swell, the sheep's bleating
    and every other sound; the game's tone choices; its lantern.
 
+   *The land drawn with the game's materials* (asked: "make this use the same materials for distant land and near land and
+   buildings etc. as the default game ... the looks should match pretty closely"). Pictures from the same point in both, the game
+   built on the world's Strath Norith and the walk page, in the same air, showed the buildings, rock and walked ground already the
+   game's own, and the land beyond the place not: the game draws it with its far-land material (pasture in drifts, bracken, heather,
+   woods as crowns, rock in beds, snow), the walk page drew all the world's land as walked turf, bright and yellow, with dark dots for
+   trees. Now:
+   - The world's land near the walker is the game's walked ground and rock sheet, as before, and from 520 metres off the game's far
+     land (`makeFarMaterial`), the two passing into each other in patches across a band 220 metres broad that moves with the walker
+     (`nearEyeUniforms`, `fadesAtNearEdge(…, 'eye')`): as about a place in the game, where the near ground gives way to the far land
+     at the far ring. A square reaching into the band is drawn both ways, its far half a little lower (`farMesh`); the blocks beyond
+     the squares as far land alone. The game's near ground is brighter than its far land there too; the band is broad so that no
+     ring shows from the air.
+   - The far land reads the world rather than a height: each point carries the bare stone's colour, as the game's far sheet does,
+     how much of a hollow it is, how much of a wood (from the world's woods), and how high in the game's sense, which the world says
+     by its cover: low and green, heath at four tenths, rock at a half, snow over seven (`farLook` in `dress.ts`; the material's
+     `cover`). Heather covers more of the moor than the game's own far land has, matching the brown the near ground draws it. Its
+     woods and grass are the season's, as the game sets them (`setFarCover`).
+   - Each kind of place's ground as the game draws that kind's: an island's bare ground sand, a mountain top's loose stone split by
+     frost (`placeTurf`, `islandTurf`, `mountainTurf`); never cut by the band, since a place's land is all near ground.
+   - Trees shade themselves past the near map: the places' leaves and the world's whole trees cast into the sun's middle picture.
+     Without it every crown beyond 64 metres stood in full sun inside itself, pale and flecked with white, where the game's (whose sun
+     map covers the whole place) are dark and full.
+   - The world's fields a little paler than pasture, no more: at six tenths of a pale yellow they made a pale ring at the band.
+   Timed against the last commit at the same two points (`places=0`, 1103 by 955): 47.5 milliseconds a frame at eye height against
+   48.3, and 41.1 from 120 metres up against 40.2, within the noise. *Not the same yet:* the haze lies thicker in the game's pictures
+   in the same air; the world's lakes are not drawn (a lake at sea level is bare shore); the game's ground shows a fine moiré on a
+   mountain's slopes seen from some tens of metres, in the game's places and the world's land alike; the way a town's road is drawn
+   stops at the band; and three WebGPU validation errors about a half-size picture read while drawn into come and go on the walk
+   page, older than this.
+
+   *The game's air, light and weather, its speedups and the mountain's tunings* (asked: "bring to world-as-the-game everything that
+   makes it look closer"; "do we have the default game's atmosphere, light and weather ... the default places' recent optimizations ...
+   mountain location specific tunings"). The air was already one code (`air.ts`); what each page set in it differed. Now:
+   - *Haze* as thick as the game's: the walk page had thinned it to four tenths (`thin`, for its ten-kilometre views) on a haze of
+     0.4 against the game's 0.5, three times clearer; it lies thickest low down, so the heights still see far (`?thin=` for the old).
+   - *Each place's own weather and tones, eased into* (`PlaceLook` in `placePack.ts`, `easeLook` in `main.ts`): its cloud and their kind,
+     its mist and haze, on its own floor in the world's heights; the colours the game gives its far woods and grass, its distant
+     sward and its bare ground (a mountain top's browner and stonier). Whole within 150 metres of a place's land, none from 800 out;
+     two places near share it; between places the world's fair weather on the sea's level. Strath Norith is in its banks of cloud and
+     thick haze (0.58, 0.95), as the game draws it unasked; Halhaven clear with a mist on the water; on Elith Fell (mist 0.6 on the
+     cloud's level, 709 metres) the land below goes white, as the game's sea of cloud does. An address asking for weather fixes it.
+   - *Winter on the heights*, as the game draws and lays its winter mountains (asked: "incorporate the default game's winter mountain
+     materials and how it is laid out on winter mountains ... above the snow line"; the line tried at 600, 500 and 400 metres, then
+     with winter at 600 and 500, and set at 500: "500 default!"; `?snowline=`). The materials' snow follows height (`snowUniforms`' `uSnowWinter`): none below the line, then over
+     sixty metres patchy and then the game's whole winter cover, white on all but the steep faces, the rock's hollows filled, trodden
+     on the tracks. What grows over it is the game's winter (`winterAt` in `dress.ts`, each tree and tuft its own way in across the
+     band): nothing but a few dry heads of grass on the crests where the wind has the snow thin, broadleaves bare, an oak with a few
+     dead leaves, two in five of a conifer's sprays under snow, far conifers green and white and far broadleaves twig-grey, no
+     bramble or bushes. The far land over it stands as high as the game's winter range (`farLook`), snow on all but the steep. And a
+     mountain top whose house stands over the line (all three of `w0`'s: Mor Pike at 559 metres, Elith Fell at 760, Ben Cal at 791) is built by the
+     game as a winter mountain (`placesWorker.ts`, `winterAbove`): its gentler rock buried in smooth snowfields with only what
+     stands out showing, cornices over its rim, snow cushioned on its stair, its winter colours and weather eased in. Seen against the
+     game's own winter Elith Fell from the same point, it is the same house in the same snow, roofs white on their lower slopes; its
+     front stands in its own shadow, since the world's sun is the world's and the place is turned some 169 degrees into it.
+   - *A town's paving* laid by its streets, as the game lays it: the town's frame, in the site's measures, read by the ground through
+     the town's turn into the world (`setPaving`'s `frame`; the nearest town's, one at a time). Halhaven's flags were laid along the
+     world's axes, nine degrees off its houses.
+   - *Light thrown up from the ground* on the world's land, as the game lights what lies beyond its place (`meshOf`); the sanctum's
+     glass glowing with the day as the game sets it (it was ten times as bright); the paving's joints shaded from the sun's side.
+   - *The valley's speedups*: a castle's valley built in half the time comes with the game's builder; the leaves' thinning with
+     distance was the places' already, and now the world's whole trees' too (a wood, at 1103 by 955: 48.1 milliseconds a frame against
+     50.6 unthinned); and the resolution follows the frame rate as the game's does (`?adapt=0` keeps it), which on this laptop
+     settles at three quarters (about 30 milliseconds at Strath Norith where 41 to 44 were measured at the full).
+   - *The mountain's tunings that suit the world*: its ground's frost-split stone, its tones and weather as above, its snow line.
+     Not its sea of cloud as a deck, which would hide the world below the summit (its mist stands in for it), nor its own band from
+     near ground to far land (the world's follows the walker), nor its wear (the world's land is worn by its own rivers).
+   *Not yet:* the game's weather menu (the walk page takes the address); the cloud deck itself; winter.
+
    *Mended from pictures of the mountain tops and of the country between* (asked: "first solve spotted issues like the patchwork"):
    - *The patchwork.* The world's squares were laid as rock or turf a triangle at a time by each triangle's own slope, as the valley's
      fine sheet is; meshed to a distance, a square's triangles are large, and on a slope near the line they tipped one way or the other
@@ -839,9 +907,9 @@ leaves both the game and the walk working:
    steep band and the stone. The arrival stands at the rim over that band, which no one could climb: a way to it is step 4.
    Still to look at: how the picture's 32 milliseconds divide among its steps, and the other levels of detail; a small flicker on the
    front of one timber-framed house some sixty metres across Halhaven's square, not yet traced.
-4. **The game in the world.** Each place's mission (keys, locks, the goal) as the game has it now; the maps (the world's, and the
-   place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to valleys, islands by sea), and
-   a boat for the sea legs; and something faster than walking for the kilometres between.
+4. **The game in the world.** *Done* (20 November 2026; below): each place's mission (keys, locks, the goal) as the game has it now;
+   the maps (the world's, and the place's plan); sound; the ways joining every place (towns to towns, valleys to valleys, mountains to
+   valleys, islands by sea), and a boat for the sea legs; and something faster than walking for the kilometres between.
 
    *Each place's game: done.* A place built in the world brings its game with it: the worker sends what the game needs of its site
    (its rooms, ways, keys, levers, start, goal and secret), its doors with each leaf's mesh as numbers, and where its keys, levers,
@@ -860,8 +928,11 @@ leaves both the game and the walk working:
    doorway. `tools/body.ts w0` walks as it did, and `tools/places.ts w0` (and `w0 mountain 1`) finds no sky through either join. The
    game's own doors, which carry no frame, stop the body as before: its play-through (`__dbg.walkTest` and `playthrough`, what
    `play.cjs` runs) walks every doorway of `ink-7` and `moss-3` both ways and wins.
-   *Not yet:* the leaves' light is one light for every door, not the bake's at each (the game's `applyBake`); the game's hour, its
-   relic and its secret are as the site has them, unchecked in the world; a place's game starts again when it is built again.
+   Since: each door's leaf takes the bake's light a step in front of each face once the place's light is baked, as the game gives it
+   (`applyBake`); and a place's game goes on where it was left when the place is built again (its keys, the rooms found, the doors
+   opened, the keys taken, the levers thrown, whether won; tried in the browser on Elith Fell: its gold key taken, the place let go of and
+   built again, the key held and gone from where it lay). *Not yet:* the game's hour, its relic and its secret are as the site has
+   them, unchecked in the world.
 
    *Castles' valleys, merged in* (20 November 2026, from the default branch: every valley a castle over its village, with forest,
    fields and pasture below; leaves thinned with distance; the game's resolution following its frame rate; the guided tour). A
@@ -877,7 +948,42 @@ leaves both the game and the walk working:
    short, where the way runs straight through the place's own wood and no road is cut for it). The ways must lead to the valley's
    foot, where its own road begins: the first of this step's ways. Frames on the walk page, drawn back to back with Halhaven standing
    too: 44 milliseconds by the castle's gate, 56 looking up the whole valley from the old spot, where each place's door had cost 31
-   to 38. The resolution following the frame rate is the game's page's alone; the walk page's is still fixed.
+   to 38. The resolution following the frame rate is the game's page's alone; the walk page's is still fixed (since: it follows too).
+
+   *The ways joining every place* (asked: "proceed autonomously to finish step 4"). The world lays its own ways (`layWays` in
+   `world.ts`): roads joining its towns, tracks from its villages and valley heads, paths up each mountain top's ridge, ferries to the
+   islands. The walk page now draws them (`networkLines`, `gradeNetwork` in `route.ts`): graded in the world's worker on the land at a
+   metre before any square is asked for (twenty ways, thirty-three kilometres, on `w0` in some seven seconds), cut into the squares as
+   the route page's one way was, drawn as cart tracks and, a path, as a footpath (`PATH_HALF`, `trackField`); nothing grows on them,
+   no tree stands close, and each is graded again where a place's edge crosses it (`wayThroughHoles`). Left out: the tracks to the old
+   spots of the valley heads, and the paths straight up a ridge, which ran over the places' own land. Added: a leg from each coastal
+   town to the nearest of them; and from each castle's valley and each mountain top, once it is laid out, a leg from where its own
+   road begins (the last point of its `track`, or of its `mountain.way`: where the game puts its player) to the nearest way (`legTo`,
+   asked of the world's worker on `onSite`). The leg crosses the place's own land before it reaches the world's: the places' worker,
+   laying the place out, lays the same leg and has the place's trees cleared off it, their wood out of what stops the body, its grass
+   off it, and its ground drawn as a track (`packPlace`'s `clear`). Walked by the game's body (`tools/places.ts w0`, which now walks
+   from the town to where the valley's road begins and up that road, close along it, to the house's door): from Halhaven through the
+   castle's valley's forest, up its road and through its gate to Strath Norith's door, two metres short, in 185 seconds. (Found on the
+   way: tors, which the game raises on the hills about a castle's valley, cut by the place's square into a sliver standing in the air;
+   they are a group of their own now, `tor`, soft in the game as before and left out of a place in the world, as its far land is.)
+   Up a mountain top: Elith Fell's way down its ridge ends a few metres from the world's path up from below, and the body walks from
+   the path up its leg and its way to the hospice's door, two metres short, in 38 seconds (`tools/places.ts w0 mountain 1`).
+   (`tools/route.ts w0` as before; `tools/land.ts 3`, all sound; `npm run check`: valleys 200 of 200, islands 50 of 50, and the same
+   two mountain tops and two towns failing as before this work, `peak-check-48` and `49`, `town-check-13` and `14`.)
+
+   *Getting about* (`travel.ts`): the world's ink map (`M`, the world page's own drawing), with the ways drawn over it, the places
+   standing marked and those reached in red, and the walker's arrow; a place clicked on is gone to (a castle's valley at where its road
+   begins). The plan of the place one is in, in the corner, as the game draws it as one goes (`drawPlan`: the rooms found, the doors
+   shut, the keys and levers still there; a click for a larger one). Riding (`R`): carried along the way one stands on, the way one
+   faces, at thirteen metres a second (thirty with Shift), on along the way that goes on most nearly straight at its end; stopped by
+   `R`, a step, a place's edge or the end of the ways. The ferry (`R` on the shore at either end): the game's own boat (`layBoat`) along
+   the world's ferry, the walker sitting in her, at twelve metres a second (twenty-four with Shift), set ashore at the far end;
+   tried on `w2`'s, out from its harbour. (`T` the triangles now, as on the route page.)
+
+   *Sound* (`Sound`, the game's own): wind and leaves out of doors and a room's tone under a place's roof (`roofed`), footsteps by what
+   is underfoot (a way's earth, a room's stone, grass, the sea), the sea along the shore as near as it is, the places' sheep and goats
+   (`onBleat`), and their games' doors, locks, keys, levers and the end; started at the first click or key, `N` to mute. Started and
+   running in the browser; still never heard, as the game's is not.
 5. **The world's own light, water and rock.** How much sky each point of the land sees, worked out in the workers that make the squares
    (from the heights about it), for the land between places that no bake reaches; lakes and rivers; the crags near the walker carved.
 6. **The world the default.** The game's own page opens on the world; single places stay, for making and checking them.

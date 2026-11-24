@@ -580,7 +580,7 @@ async function start(): Promise<void> {
       scene.add(mesh);
       scenic.push(mesh);
       // Twigs, roots and low boughs are drawn but stop nobody.
-      if (!key.startsWith('soft|')) solidScenery.push(mesh);
+      if (!key.startsWith('soft|') && !key.startsWith('tor|')) solidScenery.push(mesh);
     }
   }
   // Grass, flowers and leaves: one draw call for each kind.
