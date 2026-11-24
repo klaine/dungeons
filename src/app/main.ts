@@ -307,13 +307,15 @@ async function start(): Promise<void> {
   if (sheet >= 0.3 && sheet <= 3) VALLEY_GROUND.sheet = sheet;
   const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
   const settlement = settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined;
+  const planAsked = params.get('townplan') as MakeOptions['townPlan'] | null;
+  const townPlan = planAsked && ['planned', 'shore', 'fan', 'old', 'grown'].includes(planAsked) ? planAsked : undefined;
   // (In a world, the layout the world's page built beforehand, where it is this house's and nothing else is asked of it.)
   // (Its own house, or the next where its own will not go there, `generateWorldPlace`; unless a seed is asked for.)
-  const kept = inWorld && !settlement ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
+  const kept = inWorld && !settlement && !townPlan ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
   if (kept) seed = kept.seed;
-  const own = !kept && inWorld && !seedAsked && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
+  const own = !kept && inWorld && !seedAsked && !townPlan && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
   if (own) seed = own.seed;
-  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement });
+  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement, townPlan } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement, townPlan });
   // (Its name, where the world gave it one.)
   if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
   // (Whether the layout was one built beforehand, for whoever checks.)

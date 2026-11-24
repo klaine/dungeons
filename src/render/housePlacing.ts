@@ -1,4 +1,4 @@
-import { footprintOf } from '../core/building';
+import { footprintOf, inPart, offPart } from '../core/building';
 import type { Building } from '../core/site';
 import { MeshBuilder } from './geom/meshBuilder';
 
@@ -33,13 +33,13 @@ export function placeHouse(
   const outOf = (x: number, z: number) => {
     const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
     let best = Infinity;
-    for (const r of fp) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - w, 0, w - r.v1)));
+    for (const r of fp) best = Math.min(best, offPart(r, u, w));
     return best;
   };
   const inDepth = (x: number, z: number) => {
     const dx = x - bd.x, dz = z - bd.z, u = dx * faz - dz * fax, w = bd.d / 2 - (dx * fax + dz * faz);
     let best = -Infinity;
-    for (const r of fp) best = Math.max(best, Math.min(u - r.u0, r.u1 - u, w - r.v0, r.v1 - w));
+    for (const r of fp) best = Math.max(best, inPart(r, u, w));
     return best;
   };
   const wallTop = y + bd.heights.reduce((a, h) => a + h, 0) + (bd.basement ?? 0) + 1.2;

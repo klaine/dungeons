@@ -2,7 +2,7 @@ import { Rng, valueNoise2 } from '../core/rng';
 import { rimAt } from '../core/mountain';
 import { footprintOf } from '../core/building';
 import { boxValley, edgeAt } from '../core/valley';
-import { coastLine, inHarbour, nearLine, outlineOf, outsideBlock, outsideRect, riverAt, townBounds, townGround } from '../core/town';
+import { coastLine, inHarbour, nearLine, offSquare, outlineOf, outsideBlock, outsideRect, riverAt, squareRing, townBounds, townGround } from '../core/town';
 import { shoreOf, Site } from '../core/site';
 
 /**
@@ -303,7 +303,7 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
   }
   // (In a town: not on what the town has made, its blocks, streets, square, fields, harbour and river.)
   const inPoly = (pts: [number, number][], x: number, z: number) => { let inside = false; for (let a = 0, c = pts.length - 1; a < pts.length; c = a++) { const [xa, za] = pts[a], [xc, zc] = pts[c]; if ((za > z) !== (zc > z) && x < ((xc - xa) * (z - za)) / (zc - za) + xa) inside = !inside; } return inside; };
-  const inTownWork = (x: number, z: number) => !!town && (town.blocks.some((b) => outsideBlock(b, x, z) < 3) || outsideRect(town.square, x, z) < 3 || outsideRect(town.level, x, z) < 3
+  const inTownWork = (x: number, z: number) => !!town && (town.blocks.some((b) => outsideBlock(b, x, z) < 3) || offSquare(town, x, z) < 3 || outsideRect(town.level, x, z) < 3
     || town.streets.some((s0) => nearLine(s0.line, x, z).off < s0.width / 2 + 2) || town.fields.some((f) => inPoly(f.corners, x, z)) || inHarbour(town, x, z) || (!!town.river && riverAt(town, x, z).off < riverAt(town, x, z).half + 3));
   // Rough ground on the land: a scatter of little ticks, as a hand marks grass.
   ctx.lineWidth = Math.max(1, 1.2 * u);
@@ -451,7 +451,7 @@ export function drawInkCountry(canvas: HTMLCanvasElement, site: Site, opts: { pi
     }
     // The square: flagged, a fine grid; its stalls, its fountain; the stair up to the house's terrace in steps.
     {
-      const sq = town.square, c: [number, number][] = [[sq.x0, sq.z0], [sq.x1, sq.z0], [sq.x1, sq.z1], [sq.x0, sq.z1]];
+      const sq = town.square, c: [number, number][] = squareRing(town);
       ctx.fillStyle = PAPER; poly(c); ctx.fill();
       hatch(c, 9 * u, 0, Math.max(0.6, 0.6 * u), 'rgba(29,26,23,0.25)'); hatch(c, 9 * u, Math.PI / 2, Math.max(0.6, 0.6 * u), 'rgba(29,26,23,0.25)');
       ctx.strokeStyle = INK; ctx.lineWidth = Math.max(1, 1.8 * u); poly(c); ctx.stroke();

@@ -4,7 +4,7 @@ import { archipelago, findIslands, frameHeight, islandDetail, islandFrame, Islan
 import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
 import { HeightField, leastPath, smoothLine, wornLattice } from './terrain';
 import { Building, Island, Place, Site } from './site';
-import { CLASSICAL, classicalVariations, dealDress, footprintOf, planClassical } from './building';
+import { CLASSICAL, classicalVariations, dealDress, footprintOf, offPart, planClassical } from './building';
 
 /**
  * An island in the sea. Where a valley is a strip of land between two lines of rock, an island
@@ -108,7 +108,7 @@ function fromBeach(o: Island, x: number, z: number): number {
 export function outsideBuilding(b: Building, x: number, z: number): number {
   const turn = b.faces === 'w' ? 1 : -1, u = turn * (z - b.z), v = turn * (x - b.x) + b.d / 2;
   let best = Infinity;
-  for (const r of footprintOf(b)) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - v, 0, v - r.v1)));
+  for (const r of footprintOf(b)) best = Math.min(best, offPart(r, u, v));
   return best;
 }
 

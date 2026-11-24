@@ -91,28 +91,161 @@ export function classicalEnds(b: Building): number[] {
   return Array.from({ length: n }, (_, i) => 0.8 + (i + 0.5) * pitch);
 }
 
-/** The windows of a wing: along its two long walls (as `v`), and across its far end (as `u`). */
-export function wingWindows(b: Building, wing: NonNullable<Building['wings']>[number]): { along: number[]; across: number[] } {
-  const n = Math.max(1, Math.round((wing.length - 1.2) / 2.6)), pitch = (wing.length - 1.2) / n;
+type Wing = NonNullable<Building['wings']>[number];
+
+/**
+ * A wing's own frame: its measures as if it stood square to the back (`u` across, `v` back, as the building's), turned about the back
+ * corner of the end it stands on by its `lean`. `to` takes a point of those measures to the building's, `from` the building's back.
+ * `from0` is how far along its outer wall (from the back's line) the wing is whole across its width, which is where its rooms and its
+ * windows begin; `foot` is where its footprint begins, within the main block; `span` is how much of the back it covers. The line of the
+ * back runs across the wing's measures from its outer wall at nought to its inner at `back(width)`.
+ */
+export function wingFrame(b: Building, g: Wing) {
+  const a = ((g.lean ?? 0) * Math.PI) / 180, phi = -g.side * a, c = Math.cos(phi), s = Math.sin(phi), pu = (g.side * b.w) / 2, pv = b.d;
+  const tan = Math.tan(a), back = (x: number) => -x * tan;
+  return {
+    leans: !!g.lean, c, s,
+    to: (u: number, v: number): [number, number] => { const du = u - pu, dv = v - pv; return [pu + du * c - dv * s, pv + du * s + dv * c]; },
+    from: (u: number, v: number): [number, number] => { const du = u - pu, dv = v - pv; return [pu + du * c + dv * s, pv - du * s + dv * c]; },
+    /** How far back of the back's line, along the wing, a point `x` in from its outer wall is. */
+    back,
+    from0: Math.max(0, back(g.width)), foot: Math.min(0, back(g.width)), span: g.width / Math.cos(a),
+  };
+}
+
+/** Whether a point across the back (`u`) is where a wing stands against it, within `m` of it. */
+export const underWing = (b: Building, u: number, m = 0.3) => (b.wings ?? []).some((g) => g.side * u > b.w / 2 - wingFrame(b, g).span - m);
+
+/** The windows of a wing: along its two long walls (as `v`), and across its far end (as `u`); in the wing's own measures. */
+export function wingWindows(b: Building, wing: Wing): { along: number[]; across: number[] } {
+  const from = wingFrame(b, wing).from0, L = wing.length - from;
+  const n = Math.max(1, Math.round((L - 1.2) / 2.6)), pitch = (L - 1.2) / n;
   const mid = wing.side * (b.w / 2 - wing.width / 2);
   return {
-    along: Array.from({ length: n }, (_, i) => b.d + 0.6 + (i + 0.5) * pitch),
+    along: Array.from({ length: n }, (_, i) => b.d + from + 0.6 + (i + 0.5) * pitch),
     across: wing.width >= 7.8 ? [mid - wing.width / 4, mid + wing.width / 4] : [mid],
   };
 }
 
-/** Where a building stands on the ground, as rectangles in its own measures: the main block, what stands forward of it, and its wings. */
-export function footprintOf(b: Building): { u0: number; u1: number; v0: number; v1: number }[] {
+/**
+ * A part of where a building stands: an oblong in its own measures, or, for a wing that leans, in that wing's (`turned`, its side;
+ * `partAt` takes a point of the building's into them); or, for a wedge, any four-sided figure (`ring`, round in order, its sides
+ * straight and bending one way), the oblong then the box about it.
+ */
+export type FootPart = { u0: number; u1: number; v0: number; v1: number; turned?: { to: (u: number, v: number) => [number, number]; from: (u: number, v: number) => [number, number] }; ring?: [number, number][] };
+/** A point of a building's measures in a part's own. */
+export const partAt = (r: FootPart, u: number, v: number): [number, number] => (r.turned ? r.turned.from(u, v) : [u, v]);
+/** A part's corners, in the building's measures, round in order; `inset` in from its sides (less than nothing, out). */
+export const partCorners = (r: FootPart, inset = 0): [number, number][] => r.ring ? insetRing(r.ring, r.ring.map(() => inset))
+  : ([[r.u0 + inset, r.v0 + inset], [r.u1 - inset, r.v0 + inset], [r.u1 - inset, r.v1 - inset], [r.u0 + inset, r.v1 - inset]] as [number, number][]).map(([u, v]) => (r.turned ? r.turned.to(u, v) : [u, v]));
+/** How far within a figure that bends one way a point is: the least of how far it is within each side (less than nothing outside). */
+const inRing = (ring: [number, number][], u: number, v: number) => {
+  const turn = ringTurn(ring);
+  let best = Infinity;
+  for (let i = 0; i < ring.length; i++) {
+    const [au, av] = ring[i], [bu, bv] = ring[(i + 1) % ring.length], L = Math.hypot(bu - au, bv - av);
+    if (L < 1e-9) continue;
+    best = Math.min(best, (turn * ((bu - au) * (v - av) - (bv - av) * (u - au))) / L);
+  }
+  return best;
+};
+/** Which way round a figure goes: 1 one way, -1 the other. */
+const ringTurn = (ring: [number, number][]) => Math.sign(ring.reduce((a, [u, v], i) => { const [p, q] = ring[(i + 1) % ring.length]; return a + u * q - p * v; }, 0)) || 1;
+/** A figure that bends one way with each side moved in by its own distance (less than nothing, out): where the moved sides meet. */
+export function insetRing(ring: [number, number][], by: number[]): [number, number][] {
+  const turn = ringTurn(ring), n = ring.length;
+  const line = (i: number) => {
+    const [au, av] = ring[i], [bu, bv] = ring[(i + 1) % n], L = Math.hypot(bu - au, bv - av) || 1, du = (bu - au) / L, dv = (bv - av) / L;
+    // (The inward hand of a side, as the figure goes round.)
+    const nu = -dv * turn, nv = du * turn;
+    return { pu: au + nu * by[i], pv: av + nv * by[i], du, dv };
+  };
+  return ring.map((_, i) => {
+    const a = line((i + n - 1) % n), c = line(i), det = a.du * c.dv - a.dv * c.du;
+    if (Math.abs(det) < 1e-9) return [c.pu, c.pv];
+    const t = ((c.pu - a.pu) * c.dv - (c.pv - a.pv) * c.du) / det;
+    return [a.pu + a.du * t, a.pv + a.dv * t];
+  });
+}
+/** How far a point of the building's measures is outside a part (nothing within it). */
+export const offPart = (r: FootPart, u: number, v: number) => {
+  if (r.ring) {
+    if (inRing(r.ring, u, v) >= 0) return 0;
+    let best = Infinity;
+    for (let i = 0; i < r.ring.length; i++) {
+      const [au, av] = r.ring[i], [bu, bv] = r.ring[(i + 1) % r.ring.length], du = bu - au, dv = bv - av, t = Math.max(0, Math.min(1, ((u - au) * du + (v - av) * dv) / (du * du + dv * dv || 1)));
+      best = Math.min(best, Math.hypot(u - au - du * t, v - av - dv * t));
+    }
+    return best;
+  }
+  const [a, e] = partAt(r, u, v);
+  return Math.hypot(Math.max(r.u0 - a, 0, a - r.u1), Math.max(r.v0 - e, 0, e - r.v1));
+};
+/** How far within a part a point is (less than nothing outside it). */
+export const inPart = (r: FootPart, u: number, v: number) => { if (r.ring) return inRing(r.ring, u, v); const [a, e] = partAt(r, u, v); return Math.min(a - r.u0, r.u1 - a, e - r.v0, r.v1 - e); };
+/** A part as a figure that bends one way, from its corners. */
+const ringPart = (ring: [number, number][]): FootPart => ({ u0: Math.min(...ring.map((p) => p[0])), u1: Math.max(...ring.map((p) => p[0])), v0: Math.min(...ring.map((p) => p[1])), v1: Math.max(...ring.map((p) => p[1])), ring });
+
+/**
+ * A classical building's wedge (`wedge`), worked out: its ground (`ring`: the main block's end at the front, the far corner of the
+ * front, the far corner of the back, the main block's end at the back), and within it what the builder and the plans both need. Its
+ * front and back carry on the main block's windows at their pitch, as far as there is room before the slanting end; the slanting end has
+ * windows of its own, evenly; walls within it stand across from front to back midway between two of the front's windows, some five
+ * metres apart, where it is deep enough; and the main block's end wall has a door on every storey into each room against it.
+ */
+export function wedgeOf(b: Building) {
+  const g = b.wedge;
+  if (!g || b.style !== 'imperial') return null;
+  const s = g.side, W = b.w, D = b.d, e = (s * W) / 2, T = CLASSICAL.outer, skin = CLASSICAL.skin;
+  const F: [number, number] = [e + s * g.front, 0], B: [number, number] = [e + s * g.back, D];
+  const ring: [number, number][] = [[e, 0], F, B, [e, D]];
+  // The slanting end: from the front's far corner to the back's, its length, which way along it, and which way is in.
+  const len = Math.hypot(B[0] - F[0], D), du = (B[0] - F[0]) / len, dv = D / len, nu = -s * dv, nv = s * du;
+  // (The corners' angles within: at the front's far corner between the front and the end, and at the back's.)
+  const atFront = Math.acos(Math.max(-1, Math.min(1, -s * du))), atBack = Math.PI - atFront;
+  // How much of a side a window must keep clear of a corner whose angle is `a`: a wall's thickness more where the corner is sharp.
+  const clear = (a: number) => 0.9 + (a < Math.PI / 2 ? T / Math.tan(a) : 0);
+  const { windows } = classicalFront(b), pitch = (W - 1.6) / b.bays, last = s > 0 ? windows[windows.length - 1] : windows[0];
+  const along = (reach: number, a: number) => { const out: number[] = []; for (let k = 1; s * (last + s * k * pitch - e) + 0.6 + clear(a) <= reach; k++) out.push(last + s * k * pitch); return out; };
+  const fronts = along(g.front, atFront), backs = along(g.back, atBack);
+  const ends: number[] = [], n = Math.max(1, Math.round((len - 2 * Math.max(clear(atFront), clear(atBack)) - 0.4) / 2.6));
+  if (len - clear(atFront) - clear(atBack) >= 1.6) {
+    const a0 = clear(atFront) + 0.6, a1 = len - clear(atBack) - 0.6;
+    for (let k = 0; k < n; k++) ends.push(n === 1 ? (a0 + a1) / 2 : a0 + ((a1 - a0) * k) / (n - 1));
+  }
+  // Walls across, midway between two of the front's windows, every second or third bay, where the wedge is its full depth past them.
+  const full = Math.min(g.front, g.back), crosses: number[] = [];
+  for (let k = 2; ; k += 2) { const u = last + s * (k + 0.5) * pitch; if (s * (u - e) > full - 2.2) break; if (s * (u - e) >= 3.5) crosses.push(u); }
+  // The doors through the main block's end: one into each room against it, on every storey, at the middle of the room.
+  const endRooms = (b.plan?.rooms ?? []).filter((r) => r.frame === undefined && Math.abs(s * (s > 0 ? r.u1 : r.u0) - (W / 2 - T)) < 0.05);
+  const doors = endRooms.map((r) => ({ v: (r.v0 + r.v1) / 2, storey: r.storey }));
+  return { side: s, e, F, B, ring, len, du, dv, nu, nv, atFront, atBack, fronts, backs, ends, crosses, doors, pitch, skin, T,
+    /** A point of the slanting end, `a` along it from the front's corner and `t` in from its face. */
+    endAt: (a: number, t: number): [number, number] => [F[0] + du * a + nu * t, F[1] + dv * a + nv * t],
+    /** The floor within, to the faces of its walls' skins and the main block's end. */
+    inner: insetRing(ring, [skin, skin, skin, 0]),
+  };
+}
+
+/** Where a building stands on the ground, as oblongs in its own measures: the main block, what stands forward of it, and its wings. */
+export function footprintOf(b: Building): FootPart[] {
   if (b.style === 'brick') return brickFootprint(b);
   if (b.style === 'chapel' && b.chapel) return chapelParts(b).rects;
-  const out = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
+  const out: FootPart[] = [{ u0: -b.w / 2, u1: b.w / 2, v0: 0, v1: b.d }];
   if (b.style === 'imperial') {
     const f = classicalFront(b);
     // (Where there are columns, the ground storey of the middle comes forward to carry them.)
     if (b.portico) out.push({ u0: f.standL, u1: f.standR, v0: -CLASSICAL.out - (dressOf(b).order === 'columns' ? CLASSICAL.columns : 0), v1: 0 });
     if (f.pavilions) out.push({ u0: -b.w / 2, u1: f.pavL, v0: -CLASSICAL.pavilion, v1: 0 }, { u0: f.pavR, u1: b.w / 2, v0: -CLASSICAL.pavilion, v1: 0 });
   }
-  for (const g of b.wings ?? []) out.push({ u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d - 0.01, v1: b.d + g.length });
+  const wd = wedgeOf(b);
+  if (wd) out.push(ringPart(wd.ring));
+  for (const g of b.wings ?? []) {
+    // (A wing that leans begins within the main block, where its corner nearest the middle meets the back.)
+    const wf = wingFrame(b, g), part: FootPart = { u0: g.side > 0 ? b.w / 2 - g.width : -b.w / 2, u1: g.side > 0 ? b.w / 2 : -b.w / 2 + g.width, v0: b.d + wf.foot - 0.01, v1: b.d + g.length };
+    if (wf.leans) part.turned = { to: wf.to, from: wf.from };
+    out.push(part);
+  }
   return out;
 }
 
@@ -387,17 +520,24 @@ function planEntrances(b: Building, rng: Rng, plan: BuildingPlan, g: { edge: num
 function planWings(b: Building, rng: Rng, plan: BuildingPlan): BuildingPlan {
   const { outer: T, cross: CROSS } = CLASSICAL, W = b.w, D = b.d, IN = T - CLASSICAL.skin;
   for (const wing of b.wings ?? []) {
+    // (A wing that leans is planned in its own measures, as if it stood square, from where it is whole across its width; its rooms and
+    // doors say so, and the door through the back is where the wing's middle meets the back's line.)
+    const wf = wingFrame(b, wing), frame = wf.leans ? { frame: wing.side } : {};
     const { along } = wingWindows(b, wing), outer = wing.side * (W / 2 - T), inner = wing.side * (W / 2 - wing.width + T);
     const u0 = Math.min(outer, inner), u1 = Math.max(outer, inner), end = D + wing.length - T, door = (u0 + u1) / 2 + wing.side * -0.2;
     const cuts: number[] = [];
     for (let i = 1; i < along.length;) { const take = Math.min(along.length - i, rng.pick([1, 2, 2])); i += take; if (i < along.length) cuts.push((along[i - 1] + along[i]) / 2); }
-    const walls = [D + CLASSICAL.skin, ...cuts, end];
+    const walls = [D + wf.from0 + CLASSICAL.skin, ...cuts, end];
     for (let i = 0; i < walls.length - 1; i++) {
       const v0 = i ? walls[i] + CROSS / 2 : walls[0], v1 = i === walls.length - 2 ? walls[i + 1] : walls[i + 1] - CROSS / 2;
-      plan.rooms.push({ kind: 'wing', u0, u1, v0, v1, linings: [i ? CROSS / 2 : CLASSICAL.skin, i === walls.length - 2 ? IN : CROSS / 2, IN, IN] });
-      if (i) plan.doors.push({ line: 'v', at: walls[i], c: door, w: 1.1 });
+      plan.rooms.push({ kind: 'wing', u0, u1, v0, v1, linings: [i ? CROSS / 2 : CLASSICAL.skin, i === walls.length - 2 ? IN : CROSS / 2, IN, IN], ...frame });
+      if (i) plan.doors.push({ line: 'v', at: walls[i], c: door, w: 1.1, ...frame });
     }
-    plan.doors.push({ line: 'v', at: D - (T - CLASSICAL.skin) / 2, c: door, w: 1.1, through: T + CLASSICAL.skin });
+    if (!wf.leans) { plan.doors.push({ line: 'v', at: D - (T - CLASSICAL.skin) / 2, c: door, w: 1.1, through: T + CLASSICAL.skin }); continue; }
+    const [c] = wf.to(door, D + wf.back(W / 2 - wing.side * door));
+    plan.doors.push({ line: 'v', at: D - (T - CLASSICAL.skin) / 2, c, w: 1.1, through: T + CLASSICAL.skin });
+    // (And through the near wall of its first room, from the passage that crosses what lies between the back and that room.)
+    plan.doors.push({ line: 'v', at: walls[0] - CLASSICAL.skin / 2, c: door, w: 1.1, ...frame });
   }
   return plan;
 }

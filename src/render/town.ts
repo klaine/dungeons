@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { fbm2, fbm3, Rng } from '../core/rng';
 import { Building, Site, Town } from '../core/site';
-import { frameAt, inBuilding, inHarbour, nearLine, outsideBlock, outsideBuilt, outsideRect, riverAt, squareY, terraceWalls, townGround, townLand } from '../core/town';
+import { frameAt, inBuilding, inHarbour, inSquare, squareRing, nearLine, offSquare, outsideBlock, outsideBuilt, outsideRect, riverAt, squareDepth, squareY, terraceWalls, townGround, townLand } from '../core/town';
 import { footprintOf } from '../core/building';
 import { lakeLevelAt } from '../core/worldLand';
 import { MeshBuilder } from './geom/meshBuilder';
@@ -132,7 +132,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         if (surf === 'dirt' && s.width > 3 && n.off < half - 0.4) trodden[k] = 1;
       });
     }
-    paint(t.square, (k) => { zone[k] = Z.flags; });
+    paint(t.square, (k, x, z) => { if (inSquare(t, x, z)) zone[k] = Z.flags; });
     paint({ x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z }, (k) => { zone[k] = Z.flags; });
     paint(p, (k) => { zone[k] = Z.flags; });
     // The paving: each street as it is laid (setts, flags or gravel; earth is not paving), the square, the waterfront and the forecourt in flags.
@@ -151,7 +151,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       });
     }
     [t.square, { x0: t.quay.x0, x1: t.quay.x1, z0: t.quay.z - t.quay.apron, z1: t.quay.z + 0.6 }, { x0: p.x0, x1: p.x1, z0: p.z0, z1: p.z1 + 0.3 }].forEach((r, n) => paint({ x0: r.x0 - 3, x1: r.x1 + 3, z0: r.z0 - 3, z1: r.z1 + 3 }, (k, x, z) => {
-      const d = x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1 ? Math.min(x - r.x0, r.x1 - x, z - r.z0, r.z1 - z) : -outsideRect(r, x, z);
+      // (The square by its own outline, whatever its shape.)
+      const d = n === 0 ? squareDepth(t, x, z) : x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1 ? Math.min(x - r.x0, r.x1 - x, z - r.z0, r.z1 - z) : -outsideRect(r, x, z);
       // (Laid square to the place itself, from its corner; the waterfront's courses along the quay, as a quay's flags are laid, and
       // not out to the water's edge.)
       if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; laidBy.set(n === 1 ? [z - r.z0, r.x0 - x, Math.PI / 2, 1002] : [x - r.x0, z - r.z0, 0, 1001 + n], k * 4); }
@@ -473,7 +474,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       lay.code = zn === Z.track ? 100 + off : 200 + off;
       if (earthAt(x, z)) lay.bare = 0.8 + 0.15 * fbm2(x * 0.25, z * 0.25, 2);
     }
-    if (zn === Z.built || zn === Z.shack || zn === Z.yard) lay.bare = zn === Z.yard ? 0.25 + 0.4 * smooth((fbm2(x * 0.2, z * 0.2, 2) - 0.45) / 0.2) : 0.75;
+    // (A grown town's yards lie open behind its houses, not shut in a block: grass worn in places, not trodden earth.)
+    if (zn === Z.built || zn === Z.shack || zn === Z.yard) lay.bare = zn === Z.yard ? (t.plan === 'grown' ? 0.35 * smooth((fbm2(x * 0.2, z * 0.2, 2) - 0.55) / 0.2) : 0.25 + 0.4 * smooth((fbm2(x * 0.2, z * 0.2, 2) - 0.45) / 0.2)) : 0.75;
     let tintC: Colour = [1, 1, 1];
     if (zn === Z.field) {
       const f = t.fields[fieldAt(x, z)];
@@ -497,7 +499,7 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     if (zn !== Z.wild) return 0;
     const y = ground(x, z), above = y - sea;
     if (above < 5) return 0;
-    const fromTown = Math.min(outsideRect(t.square, x, z), ...t.blocks.map((r) => outsideBlock(r, x, z)));
+    const fromTown = Math.min(offSquare(t, x, z), ...t.blocks.map((r) => outsideBlock(r, x, z)));
     const stand = smooth((fbm2(x * 0.011 + s1, z * 0.011 - s2, 3) - 0.42 + 0.12 * smooth((above - 30) / 60)) / 0.12);
     return stand * smooth((fromTown - 30) / 30) * smooth((above - 5) / 10);
   }
@@ -547,6 +549,28 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   const { face, solid, rounded } = anyAngle(mesh);
   const stone: Colour = [0.74 * tint[0] + 0.1, 0.72 * tint[1] + 0.1, 0.68 * tint[2] + 0.1];
   /** A frame turned to face a bearing about a point: `a` to the right as one faces it, `f` forward, `h` up. */
+  /**
+   * Spots along a square's edge that has an outline, all but its north side against the terrace: every `step` metres, `inset` in from
+   * the edge, each with the way into the square, and none beside the stair.
+   */
+  const alongSquare = (step: number, inset: number, from: number): { x: number; z: number; nx: number; nz: number }[] => {
+    const ring = squareRing(t), out: { x: number; z: number; nx: number; nz: number }[] = [];
+    let since = step - from;
+    for (let k = 1; k < ring.length; k++) {
+      const [ax, az] = ring[k], [bx, bz] = ring[(k + 1) % ring.length], len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.1) continue;
+      const ux = (bx - ax) / len, uz = (bz - az) / len;
+      for (let d = step - since; d < len; d += step) {
+        const px = ax + ux * d, pz = az + uz * d;
+        let nx = -uz, nz = ux;
+        if (!inSquare(t, px + nx * inset, pz + nz * inset)) { nx = -nx; nz = -nz; }
+        const x = px + nx * inset, z = pz + nz * inset;
+        if (inSquare(t, x, z) && z > t.stair.z1 + 2) out.push({ x, z, nx, nz });
+      }
+      since = (since + len) % step;
+    }
+    return out;
+  };
   const frame = (x: number, z: number, y: number, facing: number) => { const fx = Math.cos(facing), fz = Math.sin(facing); return (a: number, h: number, f: number): P3 => [x + fx * f - fz * a, y + h, z + fz * f + fx * a]; };
   // (`bevel`, if given, takes the edges off by that much: see `chamfered`.)
   const box = (at: ReturnType<typeof frame>, material: string, a0: number, a1: number, h0: number, h1: number, f0: number, f1: number, colour: Colour, scale = 0.5, bevel = 0) => {
@@ -1084,7 +1108,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     const clearOf = (x: number, z: number) => !(t.river && riverAt(t, x, z).off < riverAt(t, x, z).half + 1.5) && !t.buildings.some((bd) => Math.abs(bd.x - x) < 30 && Math.abs(bd.z - z) < 30 && outsideBuilt(bd, x, z) < 1.1) && !t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 2.5) && (!t.fountain || Math.hypot(t.fountain.x - x, t.fountain.z - z) > t.fountain.r + 1.5);
     // (Along the waterfront by the quay's edge, between the bollards; round the square's edges; and along the streets, by turns on either side.)
     for (let x = q.x0 + 5; x < q.x1 - 5; x += 15) if (clearOf(x, q.z - 1.5)) lampAt(x, q.z - 1.5, h);
-    for (const side of [-1, 1]) for (let z = t.stair.z1 + 2; z < sq.z1 - 1; z += 12) { const x = side < 0 ? sq.x0 + 1.4 : sq.x1 - 1.4; if (clearOf(x, z)) lampAt(x, z, h); }
+    if (sq.outline) { for (const p of alongSquare(12, 1.4, 6)) if (clearOf(p.x, p.z)) lampAt(p.x, p.z, h); }
+    else for (const side of [-1, 1]) for (let z = t.stair.z1 + 2; z < sq.z1 - 1; z += 12) { const x = side < 0 ? sq.x0 + 1.4 : sq.x1 - 1.4; if (clearOf(x, z)) lampAt(x, z, h); }
     for (const st of t.streets) {
       if (st.kind !== 'street' && st.kind !== 'lane') continue;
       let since = h.range(4, 14), side = 1;
@@ -1099,10 +1124,12 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       }
     }
     // Benches along the square's sides, facing in.
-    for (const side of [-1, 1]) for (let z = t.stair.z1 + 8; z < sq.z1 - 4; z += h.range(9, 13)) {
-      const x = side < 0 ? sq.x0 + 1.3 : sq.x1 - 1.3;
+    // (Round a square of another shape, along its edge, each facing in.)
+    const benchSpots = sq.outline ? alongSquare(h.range(10, 12), 1.3, 11).map((p) => ({ x: p.x, z: p.z, facing: Math.atan2(p.nz, p.nx) }))
+      : [-1, 1].flatMap((side) => { const o: { x: number; z: number; facing: number }[] = []; for (let z = t.stair.z1 + 8; z < sq.z1 - 4; z += h.range(9, 13)) o.push({ x: side < 0 ? sq.x0 + 1.3 : sq.x1 - 1.3, z, facing: side < 0 ? 0 : Math.PI }); return o; });
+    for (const { x, z, facing } of benchSpots) {
       if (!clearOf(x, z) || !clearOf(x, z + 1) || !clearOf(x, z - 1)) continue;
-      const at = frame(x, z, ground(x, z), side < 0 ? 0 : Math.PI), oak: Colour = [0.36, 0.26, 0.16];
+      const at = frame(x, z, ground(x, z), facing), oak: Colour = [0.36, 0.26, 0.16];
       for (const a of [-0.75, 0.75]) box(at, 'stone', a - 0.12, a + 0.12, 0, 0.42, -0.22, 0.2, shade(stone, 1.05));
       for (let f = -0.2; f < 0.2; f += 0.1) box(at, 'wood', -0.95, 0.95, 0.42, 0.47, f, f + 0.085, oak, 0.9);
       for (const yy of [0.62, 0.78]) box(at, 'wood', -0.95, 0.95, yy, yy + 0.1, -0.27, -0.22, oak, 0.9);
@@ -1618,8 +1645,9 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       const wood = woodAt(px, pz);
       if (wood > 0.5) { if (qq.chance(0.5)) { pl.tuft(pl.ferns, px, y - 0.05, pz, qq.range(0.7, 1.2), qq.range(0.6, 1.0), yaw, season === 'autumn' || season === 'winter' ? [0.3, 0.15, 0.05] : [0.1, 0.2, 0.045]); count('ferns'); } continue; }
       if (above < 3 && dist > 60) { if (fine > 0.45) { pl.tuft(cropSet('marram'), px, y - 0.05, pz, qq.range(0.7, 1.1), qq.range(0.5, 0.85), yaw, [0.33, 0.33, 0.2]); count('marram'); } continue; }
-      const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(outsideRect(t.square, px, pz), ...t.blocks.map((r) => outsideBlock(r, px, pz))) - 5) / 30);
-      if (zn === Z.yard && fine < 0.45) continue;
+      const mown = mownAt(px, pz), town = zn === Z.yard || mown ? 1 : smooth(1 - (Math.min(offSquare(t, px, pz), ...t.blocks.map((r) => outsideBlock(r, px, pz))) - 5) / 30);
+      // (Yards are trodden and grass grows in them only in patches; a grown town's, open behind its houses, are grassed as the ground about them is.)
+      if (zn === Z.yard && fine < 0.45 && t.plan !== 'grown') continue;
       const tall = (0.22 + 0.4 * (1 - town) + 0.15 * fine) * qq.range(0.75, 1.25) * (mown ? 0.45 : 1) * (season === 'winter' ? 0.5 : 1), tone = qq.range(0.85, 1.15), c = turfAt(px, pz, y);
       // (In winter, dead and the colour of straw.)
       pl.tuft(pl.grass, px, y - 0.04, pz, qq.range(0.45, 0.7), tall, yaw, season === 'winter' ? [0.46 * tone, 0.36 * tone, 0.15 * tone] : [(0.17 + 0.16 * dried) * c[0] * tone, 0.3 * c[1] * tone, (0.05 + 0.05 * dried) * c[2] * tone]);
@@ -1690,12 +1718,14 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     let townTrees = 0;
     {
       const sq = t.square, from = t.stair.z1 + 4;
-      for (const side of [-1, 1]) for (let z = from; z < sq.z1 - 3; z += tr.range(7.5, 9)) {
-        const x = side < 0 ? sq.x0 + 3.2 : sq.x1 - 3.2;
-        if (t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 3.5) || (t.fountain && Math.hypot(t.fountain.x - x, t.fountain.z - z) < t.fountain.r + 4)) continue;
-        if (nearBuildings(x, z, 3).some((bd) => outsideBuilt(bd, x, z) < 2.2)) continue;
+      const plantAt = (x: number, z: number) => {
+        if (t.stalls.some((st) => Math.hypot(st.x - x, st.z - z) < 3.5) || (t.fountain && Math.hypot(t.fountain.x - x, t.fountain.z - z) < t.fountain.r + 4)) return;
+        if (nearBuildings(x, z, 3).some((bd) => outsideBuilt(bd, x, z) < 2.2)) return;
         lime(x, z, tr.range(9, 12), `lime${townTrees++}`);
-      }
+      };
+      // (Round a square of another shape, along its edge.)
+      if (sq.outline) for (const p of alongSquare(tr.range(7.5, 9), 3.2, 4)) { if (p.z > from) plantAt(p.x, p.z); }
+      else for (const side of [-1, 1]) for (let z = from; z < sq.z1 - 3; z += tr.range(7.5, 9)) plantAt(side < 0 ? sq.x0 + 3.2 : sq.x1 - 3.2, z);
       const zf = q.z - q.apron + 2.4;
       for (let x = q.x0 + 6; x < q.x1 - 6; x += tr.range(9, 11.5)) {
         if (x > sq.x0 - 3 && x < sq.x1 + 3) continue;
@@ -1707,6 +1737,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
     // Gardens in the yards: a fruit tree or two, beds of vegetables in rows, flowers along the walls.
     let fruitInYards = 0;
     for (const [n, blk] of t.blocks.entries()) {
+      // (A grown town's blocks are each house's lot, many and small: so many trees and beds as a planned town's yards have, no more.)
+      if (t.plan === 'grown' && fruitInYards >= 60) break;
       const yq = rng.fork(`yard${n}`), list = nearBuildings((blk.x0 + blk.x1) / 2, (blk.z0 + blk.z1) / 2, 30);
       const free = (x: number, z: number, m: number) => zoneAt(x, z) === Z.yard && !list.some((bd) => outsideBuilt(bd, x, z) < m);
       for (let tries = 0, made = 0; tries < 30 && made < (blk.kind === 'timber' ? 2 : 1); tries++) {
@@ -1717,7 +1749,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         made++; fruitInYards++;
       }
       // (A bed of vegetables in rows, in a timber block's yard.)
-      if (blk.kind === 'timber') for (let tries = 0; tries < 20; tries++) {
+      // (In a grown town, whose lots lie side by side, one yard in four: a bed in every one ran together into one dark field behind a row.)
+      if (blk.kind === 'timber' && (t.plan !== 'grown' || yq.fork('bed').chance(0.25))) for (let tries = 0; tries < 20; tries++) {
         const x = yq.range(blk.x0 + 6, blk.x1 - 9), z = yq.range(blk.z0 + 6, blk.z1 - 8), w = yq.range(3, 5), d = yq.range(2.5, 4);
         if (!free(x, z, 1.5) || !free(x + w, z + d, 1.5) || !free(x + w, z, 1.5) || !free(x, z + d, 1.5)) continue;
         for (let rz = z; rz < z + d; rz += 0.55) for (let rx = x; rx < x + w; rx += 0.45) pl.tuft(pl.herbs, rx + yq.range(-0.08, 0.08), ground(rx, rz) - 0.05, rz, yq.range(0.35, 0.5), yq.range(0.25, 0.4), yq.range(0, 6.28), yq.pick([[0.1, 0.22, 0.06], [0.14, 0.24, 0.05], [0.12, 0.18, 0.08]] as Colour[]));

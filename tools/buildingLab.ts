@@ -27,8 +27,9 @@ function shake(kind: Kind, s: Shape): Shape {
   if (kind === 'timber') { t.jetty = push(0, 0.6); t.gable = rng.chance(0.5); t.door = rng.pick([0.24, 0.5, 0.76]); t.burnt = rng.chance(0.2); }
   if (kind === 'classical') {
     t.portico = rng.chance(0.6);
-    const width = push(5, 9), side = rng.pick([[-1], [1], [-1, 1], []] as (-1 | 1)[][]);
-    t.wings = side.map((g) => ({ side: g, width, length: push(6, 18) }));
+    const width = push(5, 9), side = rng.pick([[-1], [1], [-1, 1], []] as (-1 | 1)[][]), lean = rng.chance(0.5) ? push(-35, 40) : undefined;
+    t.wings = side.map((g) => ({ side: g, width, length: push(6, 18), lean }));
+    t.wedge = rng.chance(0.35) ? { side: rng.pick([-1, 1] as const), front: push(0, 30), back: push(0, 30) } : undefined;
     // The town's variations, asked for whether they can be had or not.
     t.pediment = rng.chance(0.5) ? false : undefined;
     t.entrances = rng.chance(0.5) ? Array.from({ length: rng.int(1, 3) }, () => rng.int(0, 20)) : undefined;

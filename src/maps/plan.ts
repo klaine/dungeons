@@ -2,7 +2,7 @@ import { drawStorey } from './buildingPlan';
 import { rimAt } from '../core/mountain';
 import { footprintOf } from '../core/building';
 import { boxValley, edgeAt, hallOnward, joinLine } from '../core/valley';
-import { coastLine, fromBuilding, outlineOf, townBounds } from '../core/town';
+import { coastLine, fromBuilding, outlineOf, squareRing, townBounds } from '../core/town';
 import { Item, Lever, Place, shoreOf, Site, stairEnds, Way } from '../core/site';
 
 /**
@@ -224,7 +224,7 @@ export function drawPlan(canvas: HTMLCanvasElement, site: Site, opts: PlanOption
       ctx.strokeStyle = FLOOR; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       for (const st of town.streets) { if (st.kind === 'path') continue; ctx.lineWidth = st.width * scale; ctx.beginPath(); st.line.forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.stroke(); }
       ctx.lineCap = 'butt';
-      ctx.fillStyle = FLOOR; rect(town.square.x0, town.square.z0, town.square.x1, town.square.z1); rect(town.quay.x0, town.quay.z - town.quay.apron, town.quay.x1, town.quay.z);
+      ctx.fillStyle = FLOOR; ctx.beginPath(); squareRing(town).forEach(([x, z], k) => (k ? ctx.lineTo(X(x), Z(z)) : ctx.moveTo(X(x), Z(z)))); ctx.closePath(); ctx.fill(); rect(town.quay.x0, town.quay.z - town.quay.apron, town.quay.x1, town.quay.z);
       for (const b of town.buildings) {
         if (b.plan) { drawStorey(ctx, b, 0, (u, v) => { const [x, z] = fromBuilding(b, u, v); return [X(x), Z(z)]; }, scale); continue; }
         ctx.fillStyle = INK;

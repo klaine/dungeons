@@ -2,8 +2,9 @@ import { fbm2, Rng } from './rng';
 import { Building, Place, Site, Town } from './site';
 import { coastHeight, coastland, findTowns, townFrame, TownNeed, TownSpot } from './coastland';
 import { landAt as worldLandAt, makeTilesNear, worldLand, WORLD_REACH } from './worldLand';
+import { clearOfWays, GivenWay, GrowLand, GrowOptions, growWays, lineWays, Lot, Pt, splitWay } from './grown';
 import { HeightField, landDetail, leastPath, smoothLine, wornLattice } from './terrain';
-import { classicalArch, classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, timberFloor } from './building';
+import { classicalArch, classicalVariations, CLOSE, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, insetRing, offPart, partCorners, planClassical, planTimber, timberFloor, wingFrame } from './building';
 import { brickCountry } from './brick';
 import { canalEaves, dealCanalHouse, planCanal } from './canal';
 
@@ -46,6 +47,83 @@ export function outsideBlock(b: Rect & { corners?: [number, number][] }, x: numb
   return inside ? 0 : best;
 }
 
+/** The shapes a town's square may have (see `layOutTown`): an oblong, an oval piazza, a funnel, or an irregular place. */
+export type SquareShape = 'oblong' | 'oval' | 'funnel' | 'irregular';
+
+/** Whether a point is in a polygon, by the crossings of a ray from it. */
+function inRing(ring: [number, number][], x: number, z: number): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ax, az] = ring[j], [bx, bz] = ring[i];
+    if ((bz > z) !== (az > z) && x < ((ax - bx) * (z - bz)) / (az - bz || 1e-9) + bx) inside = !inside;
+  }
+  return inside;
+}
+
+/** How far a point is outside a town's square, or nothing inside it: its outline where it has one, else its box. */
+export function offSquare(t: Pick<Town, 'square'>, x: number, z: number): number {
+  const s = t.square, o = s.outline;
+  if (!o) return outsideRect(s, x, z);
+  if (outsideRect(s, x, z) > 0) return outsideRect(s, x, z);
+  if (inRing(o, x, z)) return 0;
+  let best = Infinity;
+  for (let k = 0; k < o.length; k++) {
+    const [ax, az] = o[k], [bx, bz] = o[(k + 1) % o.length], dx = bx - ax, dz = bz - az, f = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(x - ax - dx * f, z - az - dz * f));
+  }
+  return best;
+}
+/** How far a point is inside a town's square from its edge, or less than nothing by as much as it is outside. */
+export function squareDepth(t: Pick<Town, 'square'>, x: number, z: number): number {
+  const s = t.square;
+  if (!s.outline) return x > s.x0 && x < s.x1 && z > s.z0 && z < s.z1 ? Math.min(x - s.x0, s.x1 - x, z - s.z0, s.z1 - z) : -outsideRect(s, x, z);
+  const off = offSquare(t, x, z);
+  if (off > 0) return -off;
+  let best = Infinity;
+  const o = s.outline;
+  for (let k = 0; k < o.length; k++) {
+    const [ax, az] = o[k], [bx, bz] = o[(k + 1) % o.length], dx = bx - ax, dz = bz - az, f = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(x - ax - dx * f, z - az - dz * f));
+  }
+  return best;
+}
+/** Whether a point is in a town's square. */
+export const inSquare = (t: Pick<Town, 'square'>, x: number, z: number) => offSquare(t, x, z) === 0;
+/** A town's square as a ring of points: its outline, or the corners of its box, going round from its north-west corner. */
+export const squareRing = (t: Pick<Town, 'square'>): [number, number][] => t.square.outline ?? [[t.square.x0, t.square.z0], [t.square.x1, t.square.z0], [t.square.x1, t.square.z1], [t.square.x0, t.square.z1]];
+
+/**
+ * The outline of a square of the shape given, within its box: its north side always the box's whole breadth, against the house's
+ * terrace and the lanes beside it, and the rest as the shape has it, coming down to the box's south side at the stair's middle
+ * (`mid`), where the way out of it goes on south. Going round from the north-west corner, east first.
+ */
+function squareOutline(shape: SquareShape, b: Rect, mid: number, rng: Rng): [number, number][] | undefined {
+  const W = b.x1 - b.x0, D = b.z1 - b.z0, r = (v: number) => Math.round(v * 10) / 10;
+  const out: [number, number][] = [[b.x0, b.z0], [b.x1, b.z0]];
+  if (shape === 'oblong') return undefined;
+  if (shape === 'oval') {
+    // (A piazza: half an ellipse below the terrace, as broad as the box and as deep.)
+    const cx = (b.x0 + b.x1) / 2;
+    for (let k = 1; k < 24; k++) { const a = (Math.PI * k) / 24; out.push([cx + (W / 2) * Math.cos(a), b.z0 + D * Math.sin(a)]); }
+  } else if (shape === 'funnel') {
+    // (Narrowing towards the sea, to half the breadth or so, or widening to it from a north side only so broad as the terrace and its lanes need.)
+    if (rng.chance(0.5)) { const w = W * rng.range(0.38, 0.6); out.push([Math.min(b.x1, mid + w / 2), b.z1], [Math.max(b.x0, mid - w / 2), b.z1]); }
+    else { const pinch = W * rng.range(0.12, 0.2); out.push([b.x1 - pinch, b.z0 + D * rng.range(0.25, 0.4)], [b.x1, b.z1], [b.x0, b.z1], [b.x0 + pinch, b.z0 + D * rng.range(0.25, 0.4)]); }
+  } else {
+    // (Irregular: down the east side, along the south and up the west, each corner pulled in by its own amount, a corner or two left out.)
+    const j = () => rng.range(0, 0.22);
+    const pts: [number, number][] = [
+      [b.x1 - W * j() * 0.5, b.z0 + D * rng.range(0.3, 0.55)],
+      [b.x1 - W * j(), b.z1 - D * j()],
+      [mid + rng.range(-3, 3), b.z1],
+      [b.x0 + W * j(), b.z1 - D * j()],
+      [b.x0 + W * j() * 0.5, b.z0 + D * rng.range(0.3, 0.55)],
+    ];
+    out.push(...pts.filter((_, k) => k === 2 || !rng.chance(0.25)));
+  }
+  return out.map(([x, z]) => [r(x), r(z)]);
+}
+
 /** The nearest point of a line of points `[x, z, y]` to a point: how far off it, and the line's height there. */
 export function nearLine(line: [number, number, number][], x: number, z: number): { off: number; y: number } {
   let off = Infinity, y = 0;
@@ -68,7 +146,7 @@ export function inBuilding(b: Building, x: number, z: number): { u: number; v: n
 export function outsideBuilt(b: Building, x: number, z: number): number {
   const { u, v } = inBuilding(b, x, z);
   let best = Infinity;
-  for (const r of footprintOf(b)) best = Math.min(best, Math.hypot(Math.max(r.u0 - u, 0, u - r.u1), Math.max(r.v0 - v, 0, v - r.v1)));
+  for (const r of footprintOf(b)) best = Math.min(best, offPart(r, u, v));
   return best;
 }
 
@@ -94,7 +172,7 @@ export function frameAt(t: Town, floor: number, x: number, z: number, out = 0): 
  * where the world was made; then looked for again on them, within a few hundred metres, for this house; the best spot there nearest
  * the world's is taken, or failing any, the world's own.
  */
-function inWorldSpot(inWorld: { seed: string; n: number }, need: TownNeed, rng: Rng): { seed: number; spot: TownSpot; world: string } {
+function inWorldSpot(inWorld: { seed: string; n: number }, need: TownNeed, rng: Rng, strict = false): { seed: number; spot: TownSpot; world: string } | null {
   const land = worldLand(inWorld.seed), q = land.places.find((o) => o.kind === 'coast' && o.n === inWorld.n);
   if (!q?.town) throw new Error(`world ${inWorld.seed} has no coastal town ${inWorld.n}`);
   for (const _ of makeTilesNear(land, q.x, q.z, WORLD_REACH)) { /* (each a second or two) */ }
@@ -104,6 +182,7 @@ function inWorldSpot(inWorld: { seed: string; n: number }, need: TownNeed, rng: 
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) f.data[j * n + i] = worldLandAt(land, f.x0 + i * cell, f.z0 + j * cell);
   const spots = findTowns({ inner: f }, need, rng, undefined, { margin: M });
   const near = spots.filter((s) => Math.hypot(s.u - q.x, s.v - q.z) < 300).sort((a, b) => Math.hypot(a.u - q.x, a.v - q.z) - Math.hypot(b.u - q.x, b.v - q.z) || b.score - a.score);
+  if (strict && !near.length) return null;
   return { seed: 0, spot: near[0] ?? q.town, world: inWorld.seed };
 }
 
@@ -291,7 +370,11 @@ function makeLand(t: Town, floor: number, house: Rect): HeightField {
     const j0 = Math.max(0, Math.floor((r.z0 - pad - N.z0) / cell)), j1 = Math.min(nz - 1, Math.ceil((r.z1 + pad - N.z0) / cell));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const k = j * nx + i; if (W[k] < 1) W[k] = Math.max(W[k], 1 - smooth((d(N.x0 + i * cell, N.z0 + j * cell) - 2) / 12)); }
   };
-  for (const r of [...t.blocks, sq, ap]) over(r, 16, (x, z) => outsideBlock(r, x, z));
+  for (const r of [...t.blocks, ap]) over(r, 16, (x, z) => outsideBlock(r, x, z));
+  // (In a grown town the low ground behind the waterfront is made up to the quay's level all along it, as the grid's front blocks
+  // have it made up: between its houses it lay at the water's edge, and was drawn as a beach behind the quay.)
+  if (t.plan === 'grown') { const back = { x0: ap.x0, x1: ap.x1, z0: ap.z0 - 24, z1: ap.z0 }; over(back, 16, (x, z) => outsideRect(back, x, z)); }
+  over(sq, 16, (x, z) => offSquare(t, x, z));
   for (const s of t.streets) if (s.kind === 'street' || s.kind === 'lane') for (let k = 0; k + 1 < s.line.length; k++) {
     const seg = [s.line[k], s.line[k + 1]], half = s.width / 2;
     over({ x0: Math.min(seg[0][0], seg[1][0]), x1: Math.max(seg[0][0], seg[1][0]), z0: Math.min(seg[0][1], seg[1][1]), z1: Math.max(seg[0][1], seg[1][1]) }, half + 16, (x, z) => nearLine(seg, x, z).off - half);
@@ -310,8 +393,8 @@ function makeLand(t: Town, floor: number, house: Rect): HeightField {
   // Streets and lanes, at their own levels.
   for (const s of t.streets) if (s.kind === 'street' || s.kind === 'lane') each(boxOf(s.line), s.width + 4, (k, x, z) => { const n = nearLine(s.line, x, z); ease(k, n.y, 1 - smooth((n.off - s.width / 2 - 0.3) / 3)); });
   // The waterfront and the square.
-  each(ap, 4, (k, x, z) => { const d = outsideRect(ap, x, z); const back = x > sq.x0 && x < sq.x1 ? sq.yS : Math.max(low, G[k]); ease(k, apronY(t, back, Math.max(ap.z0, Math.min(ap.z1, z))), 1 - smooth(d / 3)); });
-  each(sq, 4, (k, x, z) => ease(k, squareY(t, z), 1 - smooth(outsideRect(sq, x, z) / 2.5)));
+  each(ap, 4, (k, x, z) => { const d = outsideRect(ap, x, z); const back = x > sq.x0 && x < sq.x1 && sq.z1 > ap.z0 - 0.5 ? sq.yS : Math.max(low, G[k]); ease(k, apronY(t, back, Math.max(ap.z0, Math.min(ap.z1, z))), 1 - smooth(d / 3)); });
+  each(sq, 4, (k, x, z) => ease(k, squareY(t, z), 1 - smooth(offSquare(t, x, z) / 2.5)));
   // The house's level ground, at the forecourt's floor; the square comes up to the terrace's wall.
   // (Its wall stands along its front and down its sides as far as the lanes beside it are lower: the land is not eased into them.)
   each(house, 6, (k, x, z) => ease(k, floor, 1 - smooth((outsideRect(house, x, z) - (z > house.z1 || x < house.x0 || x > house.x1 ? 0 : 1)) / (z > house.z1 || x < house.x0 || x > house.x1 ? 0.8 : 5))));
@@ -424,7 +507,7 @@ const STUCCO: [number, number, number][] = [[0.9, 0.76, 0.42], [0.86, 0.62, 0.56
  * site's `town`, `grounds`, `track` and `paths`. A town is always laid on land that was found: when only the house is being judged
  * (`worn` false), nothing is laid but the box the town would have.
  */
-export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }): void {
+export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, worn = false, inWorld?: { seed: string; n: number }, planAsked?: NonNullable<Town['plan']>): void {
   const T = site.wallThickness, F = meadow.floor;
   const others = site.places.filter((q) => q !== meadow);
   site.stands = 'free';
@@ -434,19 +517,46 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const dims = rng.fork('dims');
   const Wsq = round(Math.max(dims.range(50, 66), level.x1 - level.x0 + 12)), Dsq = round(dims.range(38, 52)), apron = round(dims.range(10, 13));
   let run = round(dims.range(6.5, 9.5));
-  const qx = round((level.x0 + level.x1) / 2), qz = round(meadow.z1 + Dsq + apron);
-  const box = { x0: qx - 470, x1: qx + 470, z0: qz - 360, z1: qz + 190 };
+  // Or, two towns in five, `grown`, as a village grows: no blocks and no grid, but lanes grown out from the waterfront and the square
+  // over the land, branching and joining, and houses along every way (`layOutGrown`, below). (From a stream of its own, so that the
+  // others' plans are as they were.)
+  type PlanKind = NonNullable<Town['plan']>;
+  const pq = rng.fork('plan');
+  const gridKind: PlanKind = pq.pick(['planned', 'shore', 'shore', 'fan', 'fan', 'old', 'old'] as PlanKind[]);
+  const planKind: PlanKind = planAsked ?? (rng.fork('grown plan').chance(0.4) ? 'grown' : gridKind);
+  // Where the square stands, and what shape it is. A planned town's square opens onto the waterfront straight below the house, as it
+  // always has. A grown town's need not: as watabou's villages put their square where the place is thickest by its main way, and
+  // shape it to the land, a grown town's square may stand back up the slope from the harbour, a main street coming up to it from the
+  // waterfront (`away`, metres between them), and off to one side of the quay (`aside`, metres the square's middle stands east of the
+  // quay's); and it may be an oblong, an oval piazza before the house, a funnel narrowing or widening towards the sea, or an
+  // irregular place of five to eight sides. The coast is looked for with the square where it is to stand; where none is found
+  // with room for it so, it stands as a planned town's does. (From a stream of its own.)
+  const sp0 = rng.fork('square place'), grownSq = planKind === 'grown';
+  let away = grownSq && !sp0.chance(0.35) ? round(sp0.range(14, 60)) : 0;
+  let aside = grownSq && sp0.chance(0.6) ? round(sp0.range(8, 30) * (sp0.chance(0.5) ? -1 : 1)) : 0;
+  const shape: SquareShape = grownSq ? sp0.pick(['oblong', 'oval', 'oval', 'funnel', 'irregular', 'irregular'] as SquareShape[]) : 'oblong';
+  let qx = 0, qz = 0, box = { x0: 0, x1: 0, z0: 0, z1: 0 };
+  const placeQuay = () => {
+    qx = round((level.x0 + level.x1) / 2 - aside); qz = round(meadow.z1 + Dsq + away + apron);
+    box = { x0: qx - 470, x1: qx + 470, z0: qz - 360, z1: qz + 190 };
+  };
+  placeQuay();
   if (!worn) { site.grounds = { x0: box.x0 + 12, x1: box.x1 - 12, z0: box.z0 + 12, z1: box.z1 - 12 }; return; }
 
   // ---- the land: a coast found with room for all of this
-  const need: TownNeed = { square: { x0: -Wsq / 2, x1: Wsq / 2, z0: -(Dsq + apron), z1: -apron }, house: { x0: level.x0 - qx, x1: level.x1 - qx, z0: level.z0 - qz, z1: level.z1 - qz }, half: 190, deep: 230 };
   // (The coasts are drawn from a pool, as islands' seas are, so that one made serves many sites.)
   const COASTS = 13, tr = rng.fork('terrain'), first = tr.int(0, COASTS - 1), stride = 1 + tr.int(0, 5);
   let found: { seed: number; spot: TownSpot; world?: string } | null = null;
-  if (inWorld) found = inWorldSpot(inWorld, need, tr.fork('world'));
-  else for (let tries = 0; tries < 9 && !found; tries++) {
-    const seed = 9001 + ((first + tries * stride) % COASTS) * 131, spots = findTowns(coastland(seed), need, tr.fork(`spot${tries}`));
-    if (spots.length) found = { seed, spot: spots[Math.min(spots.length - 1, tr.int(0, 2))] };
+  for (const moved of away || aside ? [true, false] : [false]) {
+    if (!moved) { away = 0; aside = 0; placeQuay(); }
+    const need: TownNeed = { square: { x0: aside - Wsq / 2, x1: aside + Wsq / 2, z0: -(Dsq + away + apron), z1: -(away + apron) }, house: { x0: level.x0 - qx, x1: level.x1 - qx, z0: level.z0 - qz, z1: level.z1 - qz }, half: 190, deep: 230 };
+    // (In a world, a square moved from the harbour takes only a spot found for it near the world's; the world's own was found for one at the harbour.)
+    if (inWorld) found = inWorldSpot(inWorld, need, tr.fork(moved ? 'world moved' : 'world'), moved);
+    else for (let tries = 0; tries < 9 && !found; tries++) {
+      const seed = 9001 + ((first + tries * stride) % COASTS) * 131, spots = findTowns(coastland(seed), need, tr.fork(`spot${tries}${moved ? ' moved' : ''}`));
+      if (spots.length) found = { seed, spot: spots[Math.min(spots.length - 1, tr.int(0, 2))] };
+    }
+    if (found) break;
   }
   if (!found) throw new Error(`no coast found has room for a town (seed ${site.seed})`);
   const sp = found.spot, sea = round(F - sp.base);
@@ -565,8 +675,10 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // ---- the square and the stair: the square's ground from the land, eased so that its fall is gentle and the stair can climb from it
   {
     const s = t.square;
-    s.yS = round(Math.max(quayY + 0.3, Math.min(nat(qx, s.z1 - 4), quayY + 2.5)));
-    let yN = Math.min(Math.max(nat(qx, s.z0 + 4), s.yS), s.yS + Dsq * 0.075);
+    // (Where it stands back from the harbour, its south side may stand as high over the waterfront as the main street can climb.)
+    const sxm = (s.x0 + s.x1) / 2;
+    s.yS = round(Math.max(quayY + 0.3, Math.min(nat(sxm, s.z1 - 4), quayY + 2.5 + away * 0.1)));
+    let yN = Math.min(Math.max(nat(sxm, s.z0 + 4), s.yS), s.yS + Dsq * 0.075);
     // (The forecourt stands at least a short flight over the square, and no higher than its stair can climb at one in two.)
     if (F - yN < 0.9) yN = F - 0.9;
     if (F - yN > run * 0.55) run = round(Math.min(Dsq * 0.4, (F - yN) / 0.55));
@@ -576,13 +688,21 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     const sx = Math.min(meadow.x1 - 2 - sw / 2, Math.max(meadow.x0 + 2 + sw / 2, doorX));
     t.stair = { x0: round(sx - sw / 2), x1: round(sx + sw / 2), z0: meadow.z1, z1: round(meadow.z1 + run) };
   }
+  // The square's outline, if it is not an oblong (see `squareOutline`).
+  {
+    const o = squareOutline(shape, t.square, (t.stair.x0 + t.stair.x1) / 2, sp0.fork('outline'));
+    if (o) { t.square.outline = o; t.square.shape = shape as Exclude<SquareShape, 'oblong'>; }
+  }
 
   // ---- the river: in some towns a river comes down out of the hills, through the open ground behind the house, and bending round
   // the back of the house's terrace runs straight down beside the square, between stone embankments with quays along their tops, into
   // the harbour. That side's blocks stand back across the far quay. (Its course, levels and bridges are laid below, once the streets are.)
-  const rq = rng.fork('river'), hasRiver = rq.chance(0.45), riverSide: -1 | 1 = rq.chance(0.5) ? -1 : 1;
-  const riverW = round(rq.range(9, 13.5)), riverQuay = round(rq.range(4.5, 6.5)), corridor = hasRiver ? riverW + 2 * riverQuay : 0;
+  // (Where the square stands off to one side of the quay, only if the river would still come out into the harbour.)
   const squareEdge = (side: number) => (side < 0 ? t.square.x0 : t.square.x1);
+  const rq = rng.fork('river'), riverWanted = rq.chance(0.45), riverSide: -1 | 1 = rq.chance(0.5) ? -1 : 1;
+  const riverW = round(rq.range(9, 13.5)), riverQuay = round(rq.range(4.5, 6.5)), riverAt0 = squareEdge(riverSide) + (riverSide * (riverW + 2 * riverQuay)) / 2;
+  const hasRiver = riverWanted && (!aside || (riverAt0 > t.quay.x0 + 8 && riverAt0 < t.quay.x1 - 8));
+  const corridor = hasRiver ? riverW + 2 * riverQuay : 0;
   const riverX = squareEdge(riverSide) + (riverSide * corridor) / 2;
 
   // ---- the plan: blocks either side of the square and back from the waterfront, between streets; but not every town's on a strict
@@ -594,149 +714,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   // and the house's ground stay as they are; how large its blocks are, how broad its streets, how far its classical quarter and its
   // timber one reach, are its own too. (Every town had been the same grid, five columns of blocks either side of the square and
   // six rows back from the water, and towns told apart only by which blocks the land refused.)
-  type PlanKind = 'planned' | 'shore' | 'fan' | 'old';
-  const pq = rng.fork('plan');
-  const planKind: PlanKind = pq.pick(['planned', 'shore', 'shore', 'fan', 'fan', 'old', 'old'] as PlanKind[]);
   t.plan = planKind;
-  const bw0 = pq.chance(0.25) ? pq.range(42, 54) : pq.range(27, 40), bd0 = pq.chance(0.2) ? pq.range(40, 50) : pq.range(26, 38), sw0 = pq.range(5.5, 8.2);
-  const cw = planKind === 'old' ? pq.int(1, 2) : pq.int(1, 3), cr = planKind === 'old' ? pq.int(1, 2) : pq.int(1, 3);
-  const ti = Math.max(cw, pq.int(2, bw0 > 41 ? 3 : 4)), tj = Math.max(cr, pq.int(3, bd0 > 39 ? 4 : 5)), cutCorner = pq.chance(0.6);
-  const nC = ti + 2, nR = tj + 2;
-  const fan = planKind === 'fan' ? pq.range(3.5, 6) : planKind === 'old' ? pq.range(0, 1.5) : 0, bow = planKind === 'fan' ? pq.range(0.0008, 0.0018) : 0;
-  const shoreFollow = planKind === 'shore' ? 1 : planKind === 'old' ? pq.range(0.3, 0.9) : planKind === 'fan' && pq.chance(0.4) ? 0.6 : 0;
-  const jitter = planKind === 'old' ? pq.range(2.5, 4) : planKind === 'planned' ? 0 : pq.range(0.6, 1.4);
-  const tilt = planKind === 'old' ? pq.range(4, 7) : planKind === 'shore' ? 1.5 : 0;
-  const deg = Math.PI / 180;
-  // Where the lines lie before they are moved: across the shore, out from the square's edge (`uL`); and inland, back from the quay's
-  // edge (`vL`); with the half breadth of the street on each (none on the square's edge, nor on the waterfront's back, which are edges).
-  const uL: Record<number, number[]> = {}, uH: Record<number, number[]> = {}, vL: number[] = [apron], vH: number[] = [0];
-  for (const side of [-1, 1]) {
-    uL[side] = [Wsq / 2 + (side === riverSide ? corridor : 0)]; uH[side] = [0];
-    for (let k = 1; k <= nC; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, w = bw0 * pq.range(0.85, 1.18); uL[side].push(uL[side][k - 1] + uH[side][k - 1] + w + hw); uH[side].push(hw); }
-  }
-  for (let k = 1; k <= nR; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, d = bd0 * pq.range(0.85, 1.18); vL.push(vL[k - 1] + vH[k - 1] + d + hw); vH.push(hw); }
-  // The shore beyond the quay, as an offset from the quay's line: where the land meets the water, smoothed over a long stretch,
-  // its slope held to one in three, and nothing of it within the quay's reach.
-  const shoreDz = (() => {
-    const S = 4, u0 = -520, n = 261, raw = new Float32Array(n), out = new Float32Array(n);
-    for (let k = 0; k < n; k++) {
-      const x = qx + u0 + k * S;
-      let z = qz - 30;
-      while (z < qz + 160 && nat(x, z) >= sea) z += 2;
-      raw[k] = Math.max(-60, Math.min(45, z - qz));
-    }
-    for (let k = 0; k < n; k++) { let sum = 0, cnt = 0; for (let d = -10; d <= 10; d++) { const kk = k + d; if (kk >= 0 && kk < n) { sum += raw[kk]; cnt++; } } out[k] = sum / cnt; }
-    const mid = Math.round(-u0 / S);
-    for (const dir of [1, -1]) for (let k = mid + dir; k >= 0 && k < n; k += dir) out[k] = Math.min(out[k - dir] + S / 3, Math.max(out[k - dir] - S / 3, out[k]));
-    return (u: number) => {
-      const reach = u < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, f = Math.min(n - 1.001, Math.max(0, (u - u0) / S)), i = Math.floor(f), a = f - i;
-      return (out[i] * (1 - a) + out[i + 1] * a - out[mid]) * smooth((Math.abs(u) - reach - 10) / 40);
-    };
-  })();
-  // The crossing points of the lines, moved as the plan has them. (The square's edge stays straight, and the waterfront along the quay;
-  // and nothing near the square is jittered.)
-  const vCore = qz - level.z0 + 4, colTilt: Record<number, number[]> = {}, rowTilt: Record<number, number[]> = {};
-  for (const side of [-1, 1]) {
-    colTilt[side] = Array.from({ length: nC + 1 }, (_, i) => (i >= 2 ? pq.range(-tilt, tilt) * deg : 0));
-    rowTilt[side] = Array.from({ length: nR + 1 }, (_, j) => (j >= 2 ? pq.range(-tilt, tilt) * deg : 0));
-  }
-  // (The crossings about the classical quarter's blocks are left where they fall, neither tilted nor jittered: classical buildings
-  // stand along straight streets, laid out at a stroke, whatever the plan of the rest.)
-  const classicAt = (i: number, j: number) => (i === 0 && j < cr) || (j === 0 && i < cw);
-  const trueNode = (i: number, j: number) => [[i - 1, j - 1], [i, j - 1], [i - 1, j], [i, j]].some(([a, c]) => a >= 0 && c >= 0 && classicAt(a, c));
-  const nodes: Record<number, [number, number][][]> = {};
-  for (const side of [-1, 1]) {
-    nodes[side] = [];
-    for (let i = 0; i <= nC; i++) {
-      nodes[side].push([]);
-      for (let j = 0; j <= nR; j++) {
-        const u = uL[side][i], v = vL[j], jq = pq.fork(`node${side}.${i}.${j}`);
-        let x = qx + side * u, z = qz - v;
-        // (The columns beside the square spread only behind the house's ground; the others from the waterfront. And the rows of a
-        // fanned town bow back from the water towards their ends, as an amphitheatre does about its stage.)
-        x += side * Math.max(0, v - (i <= 1 ? vCore : vL[0])) * Math.tan(fan * i * deg);
-        if (i > 0 && !(j === 0 && u < (side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx) + 5)) z -= bow * (u - uL[side][0]) ** 2;
-        const straight = trueNode(i, j);
-        if (!straight) {
-          x += side * (v - vL[0]) * Math.tan(colTilt[side][i]);
-          z += (u - uL[side][0]) * Math.tan(rowTilt[side][j]);
-        }
-        z += shoreFollow * shoreDz(side * u);
-        const reach = side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, still = i === 0 || (j === 0 && u < reach + 5) || straight;
-        if (!still) { const amount = i <= 1 && j <= 1 ? 0.2 : 1; x += jq.range(-jitter, jitter) * amount; z += jq.range(-jitter, jitter) * amount; }
-        nodes[side][i].push([x, z]);
-      }
-    }
-  }
-  const hw = (side: number, axis: 'u' | 'v', k: number) => (axis === 'u' ? uH[side][k] : vH[k]);
-  // A block's corners: each side of it is its street's centre line moved in by half the street's breadth, and each corner where two
-  // such sides meet. In order round it: south-west, south-east, north-east, north-west (south being towards the sea).
-  const cross = (p: [number, number], d: [number, number], q: [number, number], e: [number, number]): [number, number] | null => {
-    const den = d[0] * e[1] - d[1] * e[0];
-    if (Math.abs(den) < 1e-6) return null;
-    const tt = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den;
-    return [p[0] + d[0] * tt, p[1] + d[1] * tt];
-  };
-  const cellOf = (side: number, i: number, j: number): [number, number][] | null => {
-    const N = nodes[side], a = N[i][j], b = N[i + 1][j], c = N[i + 1][j + 1], d = N[i][j + 1];
-    const mid: [number, number] = [(a[0] + b[0] + c[0] + d[0]) / 4, (a[1] + b[1] + c[1] + d[1]) / 4];
-    // (Each side as a point and a direction, moved in towards the middle by its street's half breadth.)
-    const inward = (p: [number, number], q: [number, number], h: number): [[number, number], [number, number]] => {
-      const dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
-      let nx = -dz / l, nz = dx / l;
-      if ((mid[0] - p[0]) * nx + (mid[1] - p[1]) * nz < 0) { nx = -nx; nz = -nz; }
-      return [[p[0] + nx * h, p[1] + nz * h], [dx, dz]];
-    };
-    const inner = inward(a, d, hw(side, 'u', i)), outer = inward(b, c, hw(side, 'u', i + 1)), front = inward(a, b, hw(side, 'v', j)), back = inward(d, c, hw(side, 'v', j + 1));
-    const pts = [cross(...inner, ...front), cross(...outer, ...front), cross(...outer, ...back), cross(...inner, ...back)];
-    if (pts.some((q0) => !q0)) return null;
-    const [p0, p1, p2, p3] = pts as [number, number][];
-    // (West first: on the west side of the square the square's edge is the block's east side.)
-    const quad: [number, number][] = side < 0 ? [p1, p0, p3, p2] : [p0, p1, p2, p3];
-    // Sound: going round, the inside always on the same hand, every corner between 62 and 118 degrees, every side 16 metres or more.
-    for (let k = 0; k < 4; k++) {
-      const [px, pz] = quad[(k + 3) % 4], [cx, cz] = quad[k], [nx, nz] = quad[(k + 1) % 4];
-      const ax = px - cx, az = pz - cz, bx = nx - cx, bz = nz - cz, la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
-      if (la < 16 || lb < 16) return null;
-      const cos = (ax * bx + az * bz) / (la * lb), turn = bx * az - bz * ax;
-      if (turn > 0 || Math.abs(cos) > Math.cos(62 * deg)) return null;
-    }
-    return quad.map(([x, z]) => [round(x), round(z)] as [number, number]);
-  };
-  const boxOf = (c: [number, number][]): Rect => ({ x0: Math.min(...c.map((q0) => q0[0])), x1: Math.max(...c.map((q0) => q0[0])), z0: Math.min(...c.map((q0) => q0[1])), z1: Math.max(...c.map((q0) => q0[1])) });
-  // Which blocks are built, and with what: the land under each must be dry, even enough and not crag; classical nearest the square
-  // and the harbour, timber beyond, and none further out (the shacks are there).
-  // (The low ground along the shore is made up to the quay's level, as the waterfront is, so it is judged as it will be made.)
-  const blockOk = (r: Rect & { corners: [number, number][] }) => {
-    let lo = Infinity, hi = -Infinity;
-    for (let z = r.z0; z <= r.z1; z += 4) for (let x = r.x0; x <= r.x1; x += 4) {
-      if (outsideBlock(r, x, z) > 0) continue;
-      const y = nat(x, z); lo = Math.min(lo, y); hi = Math.max(hi, Math.max(y, quayY)); if (slopeAt(x, z) > 0.42) return false;
-    }
-    return lo > (r.z1 > qz - apron - 1 ? sea - 1.5 : sea + 1) && hi - Math.max(lo, quayY) < 9;
-  };
-  const near = (r: Rect, m: number) => outsideRect(level, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2) < m;
-  const cells: { side: number; i: number; j: number; corners: [number, number][]; built: boolean }[] = [];
-  const builtAt = new Set<string>(), want: { cell: (typeof cells)[number]; kind: 'classical' | 'timber'; rank: number; around: number }[] = [];
-  for (const side of [-1, 1]) for (let i = 0; i < nC; i++) for (let j = 0; j < nR; j++) {
-    const corners = cellOf(side, i, j);
-    if (!corners) continue;
-    const r = { ...boxOf(corners), corners };
-    const kind = classicAt(i, j) ? 'classical' : i < ti && j < tj && !(cutCorner && i === ti - 1 && j === tj - 1) ? 'timber' : null;
-    const cell = { side, i, j, corners, built: false };
-    cells.push(cell);
-    if (kind && !near(r, 0) && blockOk(r)) want.push({ cell, kind, rank: (kind === 'classical' ? 0 : 10) + i + j + pq.fork(`rank${side}.${i}.${j}`).range(0, 0.9), around: corners.reduce((sum, q0, k) => sum + Math.hypot(corners[(k + 1) % 4][0] - q0[0], corners[(k + 1) % 4][1] - q0[1]), 0) });
-  }
-  // (No more than so much frontage in all, nearest the square first: small blocks are many houses, and a town of three hundred and
-  // more was heavier than any place had been.)
-  let frontage = 0;
-  for (const w of want.sort((p0, o) => p0.rank - o.rank)) {
-    if (frontage + w.around > 2500 && w.kind === 'timber') continue;
-    frontage += w.around;
-    w.cell.built = true;
-    t.blocks.push({ ...boxOf(w.cell.corners), corners: w.cell.corners, kind: w.kind });
-    builtAt.add(`${w.cell.side},${w.cell.i},${w.cell.j}`);
-  }
 
   // The ground the streets are graded to: the land smoothed, as the made land has it (`makeLand`); for laying out, read off a lattice of its own.
   const gradeAt = (() => {
@@ -755,96 +733,29 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   })();
   /** The ground of the town at a point, as it is laid out: the square's, the waterfront's, or the grade. */
   const townY = (x: number, z: number) => {
-    if (x >= t.square.x0 && x <= t.square.x1 && z >= t.square.z0 && z <= t.square.z1) return squareY(t, z);
-    if (z > qz - apron && x > t.quay.x0 && x < t.quay.x1) return apronY(t, x > t.square.x0 && x < t.square.x1 ? t.square.yS : gradeAt(x, qz - apron), z);
+    if (inSquare(t, x, z)) return squareY(t, z);
+    if (z > qz - apron && x > t.quay.x0 && x < t.quay.x1) return apronY(t, !away && x > t.square.x0 && x < t.square.x1 ? t.square.yS : gradeAt(x, qz - apron), z);
     return gradeAt(x, z);
   };
+  /** A way's line through points, each step of four metres at the town's ground, graded. */
+  const lineAt = (pts: [number, number][]): [number, number, number][] => {
+    const out: [number, number, number][] = [];
+    for (let k = 0; k + 1 < pts.length; k++) {
+      const [ax, az] = pts[k], [bx, bz] = pts[k + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 4));
+      for (let s = 0; s < n; s++) { const x = ax + ((bx - ax) * s) / n, z = az + ((bz - az) * s) / n; out.push([round(x), round(z), round(townY(x, z) * 100) / 100]); }
+    }
+    const [lx, lz] = pts[pts.length - 1];
+    out.push([round(lx), round(lz), round(townY(lx, lz) * 100) / 100]);
+    // (No steeper than a street can be: where the land it is graded to jumps, as it does beside the house's terrace, the street
+    // ramps instead, from both ends towards the middle.)
+    const GRADE = 0.14;
+    for (const dir of [1, -1]) for (let k = dir > 0 ? 1 : out.length - 2; k >= 0 && k < out.length; k += dir) {
+      const p0 = out[k - dir], run = Math.hypot(out[k][0] - p0[0], out[k][1] - p0[1]);
+      out[k][2] = Math.round(Math.min(p0[2] + run * GRADE, Math.max(p0[2] - run * GRADE, out[k][2])) * 100) / 100;
+    }
+    return out;
+  };
 
-  // ---- the streets: the waterfront; between the rows, between the columns; lanes beside the house; only where there are blocks
-  {
-    const lineAt = (pts: [number, number][]): [number, number, number][] => {
-      const out: [number, number, number][] = [];
-      for (let k = 0; k + 1 < pts.length; k++) {
-        const [ax, az] = pts[k], [bx, bz] = pts[k + 1], n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 4));
-        for (let s = 0; s < n; s++) { const x = ax + ((bx - ax) * s) / n, z = az + ((bz - az) * s) / n; out.push([round(x), round(z), round(townY(x, z) * 100) / 100]); }
-      }
-      const [lx, lz] = pts[pts.length - 1];
-      out.push([round(lx), round(lz), round(townY(lx, lz) * 100) / 100]);
-      // (No steeper than a street can be: where the land it is graded to jumps, as it does beside the house's terrace, the street
-      // ramps instead, from both ends towards the middle.)
-      const GRADE = 0.14;
-      for (const dir of [1, -1]) for (let k = dir > 0 ? 1 : out.length - 2; k >= 0 && k < out.length; k += dir) {
-        const p0 = out[k - dir], run = Math.hypot(out[k][0] - p0[0], out[k][1] - p0[1]);
-        out[k][2] = Math.round(Math.min(p0[2] + run * GRADE, Math.max(p0[2] - run * GRADE, out[k][2])) * 100) / 100;
-      }
-      return out;
-    };
-    const span = (blocks: Rect[], along: 'x' | 'z'): [number, number] | null => {
-      if (!blocks.length) return null;
-      return along === 'x' ? [Math.min(...blocks.map((b) => b.x0)), Math.max(...blocks.map((b) => b.x1))] : [Math.min(...blocks.map((b) => b.z0)), Math.max(...blocks.map((b) => b.z1))];
-    };
-    // The waterfront, the length of the quay.
-    t.streets.push({ line: lineAt([[t.quay.x0 + 2, qz - apron / 2], [t.quay.x1 - 2, qz - apron / 2]]), width: apron, kind: 'street' });
-    // Along the rows and up the columns: each line's crossing points, over the stretches that have a block beside them.
-    const has = (side: number, i: number, j: number) => builtAt.has(`${side},${i},${j}`);
-    // What each stretch is laid with: flags beside the classical quarter; elsewhere, setts or beaten earth, the line's own (more
-    // earth further out, and in an old town most of all). (A town's streets were all setts.)
-    const kindAt = (side: number, i: number, j: number) => (has(side, i, j) ? (classicAt(i, j) ? 'classical' : 'timber') : null);
-    const earthy = planKind === 'old' ? 0.55 : planKind === 'planned' ? 0.15 : 0.3;
-    const lineSurface = (side: number, axis: 'u' | 'v', k: number): 'setts' | 'dirt' => (pq.fork(`surface${side}.${axis}.${k}`).chance(Math.min(0.9, earthy + (k >= 3 ? 0.3 : k >= 2 ? 0.12 : 0))) ? 'dirt' : 'setts');
-    /** A line's runs, each cut where what it is laid with changes, as streets. */
-    const lay = (pts: [number, number][], along: (string | null)[], width: number) => {
-      let cur: [number, number][] = [], kind: string | null = null;
-      const flush = () => { if (cur.length > 1) t.streets.push({ line: lineAt(cur), width, kind: 'street', surface: kind as 'flags' | 'setts' | 'dirt' }); cur = []; };
-      along.forEach((surf, k) => {
-        if (surf !== kind) { flush(); kind = surf; if (surf) cur.push(pts[k]); }
-        if (surf) cur.push(pts[k + 1]);
-      });
-      flush();
-    };
-    let behind: number | null = null;
-    for (const side of [-1, 1]) {
-      // Between the rows: out from the square's edge (or from beside the house, where the row reaches the house's ground: then it
-      // runs on to the lane beside it).
-      for (let j = 1; j <= nR; j++) {
-        const pts = Array.from({ length: nC + 1 }, (_, i) => nodes[side][i][j]);
-        const own = lineSurface(side, 'v', j);
-        const along = Array.from({ length: nC }, (_, i) => { const a = kindAt(side, i, j - 1), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
-        const [x0, z0] = pts[0];
-        // (Out from the square's edge; or from beside the house, where the row reaches the house's ground: then it runs on to the lane.)
-        if (along[0]) {
-          if (z0 > level.z0 - 3 && z0 < level.z1 + 3) { pts.unshift([side < 0 ? level.x0 - 3 : level.x1 + 3, z0]); along.unshift(along[0]); }
-          // (Across the river, by a bridge, to the square's edge, where the row meets the square.)
-          else if (corridor && side === riverSide && z0 > t.square.z0 && z0 < t.square.z1) { pts.unshift([squareEdge(side), z0]); along.unshift(along[0]); }
-          else if (z0 < level.z0 && (behind === null || z0 > behind)) behind = z0;
-        }
-        lay(pts, along, round(hw(side, 'v', j) * 2));
-      }
-      // Up the columns: from the waterfront, where the column reaches it, up to the last block.
-      for (let i = 1; i <= nC; i++) {
-        const pts = nodes[side][i].slice(), own = lineSurface(side, 'u', i);
-        const along = Array.from({ length: nR }, (_, j) => { const a = kindAt(side, i - 1, j), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
-        // (From the waterfront, where the column reaches it.)
-        const [x0, z0] = pts[0];
-        if (along[0] && Math.abs(z0 - (qz - apron)) < 0.5 && x0 > t.quay.x0 && x0 < t.quay.x1) { pts.unshift([x0, qz - apron + 0.5]); along.unshift(along[0]); }
-        lay(pts, along, round(hw(side, 'u', i) * 2));
-      }
-    }
-    // The quays along the river, on each bank, from the waterfront up to where the river bends away behind the house.
-    if (corridor) {
-      const zTop = Math.min(level.z0 - 14, t.square.z0 - 20), classicBeside = t.blocks.some((b) => b.kind === 'classical' && outsideRect(b, riverX + riverSide * (corridor / 2 + 2), (b.z0 + b.z1) / 2) < 3);
-      for (const bank of [-1, 1]) {
-        const x = riverX + bank * (riverW / 2 + riverQuay / 2);
-        t.streets.push({ line: lineAt([[x, qz - apron + 0.5], [x, zTop]]), width: riverQuay, kind: 'street', surface: classicBeside ? 'flags' : 'setts' });
-      }
-    }
-    // Lanes either side of the house, from the square up to the street behind it, if any.
-    for (const side of [-1, 1]) {
-      const x = side < 0 ? (t.square.x0 + level.x0) / 2 : (t.square.x1 + level.x1) / 2, w = Math.abs(side < 0 ? level.x0 - t.square.x0 : t.square.x1 - level.x1);
-      if (w < 3) continue;
-      t.streets.push({ line: lineAt([[x, t.square.z0 + 1], [x, behind ?? level.z0 - 2]]), width: round(Math.min(6, w)), kind: 'lane' });
-    }
-  }
 
   /** Whether a classical building can have a carriage way through its end: two bays free of the middle, and no wing behind them. */
   const archable = (b: Building) => b.style === 'imperial' && !b.wings?.length && freeAtEnds(b) >= 2;
@@ -870,152 +781,615 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   const canalSide = (x: number, z: number, turn: number) =>
     (corridor > 0 && Math.abs(x - riverX) < corridor / 2 + 1.5 && Math.cos(turn) * (riverX - x) > 0 && z > Math.min(level.z0 - 14, t.square.z0 - 20)) ||
     (dutch && Math.sin(turn) > 0.9 && z > qz - apron - 1.5);
-  {
-    const b0 = rng.fork('buildings');
-    let n = 0;
-    for (const blk of t.blocks) {
-      const q = b0.fork(`block${n++}`), classic = blk.kind === 'classical';
-      const deep = classic ? q.range(9.6, 11.8) : q.range(6.4, 8.6);
-      const wash = (r: Rng) => (classic ? r.pick(STUCCO) : r.pick(WASHES));
-      // Along a front from `a` to `c` (in the front's own run), facing `turn`, its edge given: buildings side by side.
-      const front = (edge: (s: number) => [number, number], a: number, c: number, turn: number, depth: number, canal = false) => {
-        let s = a;
-        while (c - s > (canal ? 2.4 : classic ? 9.3 : 5.6)) {
-          const r = q.fork(`b${t.buildings.length}`);
-          let spec: Omit<Building, 'x' | 'z' | 'faces'>;
-          if (canal) {
-            // (As much of the front as is left, if a house of one window is all that fits; otherwise any breadth that fits.)
-            const deal = dealCanalHouse(r.fork('canal'), { deep: depth, room: c - s, country });
-            if (!deal) break;
-            spec = { ...deal, d: depth };
-          } else if (classic) {
-            let bays = Math.floor((c - s - 1.6) / 2.55);
-            if (bays > 13) bays = r.pick([5, 7, 7, 9, 9, 11]);
-            if (bays % 2 === 0) bays--;
-            if (bays < 3) break;
-            spec = classical(r, bays, depth, wash(r));
-          } else if (c - s > 14 && r.fork('wooden').chance(0.28) && (() => {
-            // (Now and then, among the timber-framed houses, a classical house of wood, long and low; its door is in an end wall, and
-            // the steps up to it want room beside it. It is deeper than the timber houses are, so it keeps away from the block's corners,
-            // where it would reach into the first house of the side street.)
-            const wW = Math.min(c - s - 3, r.range(11, 18)), dW = Math.max(depth, r.range(8, 9.5));
-            return dW <= depth || (s - a > depth + 3.5 && c - s - wW > depth + 3.5);
-          })()) {
-            spec = wooden(r.fork('wooden house'), Math.min(c - s - 3, r.range(11, 18)), Math.max(depth, r.range(8, 9.5)));
-            if (spec.endDoor! < 0) s += 3;
-            if (spec.d > depth && (s - a < depth + 0.5 || c - s - spec.w < depth + 0.5)) spec.d = depth;
-          } else {
-            const w = Math.min(c - s, r.range(6, 8.8));
-            if (w < 5.6) break;
-            spec = timber(r, w, depth, wash(r));
-          }
-          const mid = s + spec.w / 2, [ex, ez] = edge(mid);
-          const b: Building = { ...spec, x: round(ex - Math.cos(turn) * spec.d / 2), z: round(ez - Math.sin(turn) * spec.d / 2), faces: 'w', turn };
-          // (Its ground: the street's or the square's, just before its front.)
-          b.y = round(townY(ex + Math.cos(turn) * 1.5, ez + Math.sin(turn) * 1.5) * 100) / 100;
-          if (b.style === 'imperial') {
-            classicalVariations(b, r.fork('variations'));
-            // (Now and then a carriage way through it into the block's yard: see below for the one every closed block has.)
-            if (archable(b) && r.fork('arch').chance(0.25)) b.arch = { side: r.fork('arch side').chance(0.5) ? -1 : 1 };
-            // (Dressed from a stream of its own: nothing standing forward of the street's line, its plinth raised over the fall of the
-            // street along it, a basement under it where that is a metre or more.)
-            dealDress(b, r.fork('dress'), { raise: 1.3, fall: fallAlong(b), forward: false, fit: true });
-            b.plan = planClassical(b, r.fork('plan'));
-          }
-          else if (b.style === 'timber') { b.door = r.pick([0.24, 0.76]); b.plan = planTimber(b); }
-          // (A canal house is planned once its depth is the lot's; one whose stair would not fit in it stays shut.)
-          else if (b.style === 'canal') { const p = planCanal(b); if (p) b.plan = p; }
-          t.buildings.push(b);
-          s += spec.w + (canal ? 0.02 : classic ? r.range(0, 0.4) : spec.endDoor! > 0 ? 3 : r.chance(0.15) ? r.range(1.4, 2.6) : r.range(0, 0.25));
-        }
-      };
-      // The block's four fronts: each the line of its edge, the run along it, and the bearing it faces. Two opposite fronts run the
-      // block's whole length, corner to corner; the other two run between them.
-      // (Of a block's corners, south-west, south-east, north-east, north-west: each side from one to the next, facing out from it, and
-      // how square the corner at each end of it is.)
-      const C: [number, number][] = blk.corners ?? [[blk.x0, blk.z1], [blk.x1, blk.z1], [blk.x1, blk.z0], [blk.x0, blk.z0]];
-      const cornerCos = (k: number) => {
-        const [px, pz] = C[(k + 3) % 4], [cx, cz] = C[k], [nx, nz] = C[(k + 1) % 4], ax = px - cx, az = pz - cz, bx = nx - cx, bz = nz - cz;
-        return (ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz));
-      };
-      const sideFrom = (k: number) => {
-        const [ax, az] = C[k], [bx, bz] = C[(k + 1) % 4], len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
-        return { edge: (s: number): [number, number] => [ax + dx * s, az + dz * s], run: [0, len] as [number, number], turn: Math.atan2(dx, -dz), cosA: cornerCos(k), cosB: cornerCos((k + 1) % 4), len };
-      };
-      const sides = { s: sideFrom(0), e: sideFrom(1), n: sideFrom(2), w: sideFrom(3) };
-      type Side = keyof typeof sides;
-      const square = [0, 1, 2, 3].every((k) => Math.abs(cornerCos(k)) < 0.07);
-      // A classical block next to the square fronts it; any other, the street to the south. Half the time its chief front is one
-      // building, as broad as the block allows, with wings back along the side streets about a court: a U, or now and then an L.
-      const chief = (classic && blocksBySquare(blk) ? (blk.x0 >= t.square.x1 - 0.1 ? 'w' : 'e') : 's') as Side;
-      const across: Side = ({ s: 'n', n: 's', e: 'w', w: 'e' } as const)[chief];
-      const ends: Side[] = chief === 's' || chief === 'n' ? ['e', 'w'] : ['n', 's'];
-      const full = (k: Side) => k === chief || k === across;
-      // (Where the corner at an end of a side is not square, the houses along the two sides would meet in it: a full side keeps out of an
-      // acute corner by as much as the other side's houses stand in it, and an end side keeps further off as the corner closes.)
-      const trimFull = (cos: number) => (cos > 0 ? (deep * cos) / Math.sqrt(1 - cos * cos) + 0.3 : 0);
-      const trimEnd = (cos: number) => (deep * (1 + Math.max(0, cos))) / Math.sqrt(1 - cos * cos) + (Math.abs(cos) > 0.02 ? 0.3 : 0);
-      const span = (k: Side): [number, number] => {
-        const { run: [a, c], cosA, cosB } = sides[k];
-        return full(k) ? [a + trimFull(cosA), c - trimFull(cosB)] : [a + trimEnd(cosA), c - trimEnd(cosB)];
-      };
-      const winged = new Set<Side>();
-      const bySquare = classic && blocksBySquare(blk);
-      const isCanal = (k: Side) => { const S0 = sides[k], [mx, mz] = S0.edge(S0.len / 2); return canalSide(mx, mz, S0.turn) || (dutch && classic && !(bySquare && k === chief)); };
-      if (classic && square && !isCanal(chief) && q.fork('u').chance(0.5)) {
-        const r = q.fork('chief'), [a, c] = span(chief);
-        let bays = Math.min(15, Math.floor((c - a - 0.6 - 1.6) / 2.55));
-        if (bays % 2 === 0) bays--;
-        const length = Math.min(...ends.map((e) => sides[e].len)) - 2 * deep - 1.2;
-        if (bays >= 7 && length >= 6) {
-          const spec = classical(r, bays, deep, wash(r)), mid = (a + c) / 2, [ex, ez] = sides[chief].edge(mid), turn = sides[chief].turn;
-          const b: Building = { ...spec, x: round(ex - Math.cos(turn) * deep / 2), z: round(ez - Math.sin(turn) * deep / 2), faces: 'w', turn };
-          const width = round(r.range(5.4, Math.min(8.8, b.w / 2 - 4))), both = r.chance(0.75), one: -1 | 1 = r.chance(0.5) ? -1 : 1;
-          b.wings = (both ? [-1, 1] as const : [one]).map((side) => ({ side, width, length: round(length) }));
-          // (The side a wing stands on: the right hand of one who faces the front is (fz, -fx); the block's side that faces most that way.)
-          for (const g of b.wings) {
-            const rx = Math.sin(turn) * g.side, rz = -Math.cos(turn) * g.side;
-            winged.add((Object.keys(sides) as Side[]).reduce((m, k0) => (Math.cos(sides[k0].turn) * rx + Math.sin(sides[k0].turn) * rz > Math.cos(sides[m].turn) * rx + Math.sin(sides[m].turn) * rz ? k0 : m), 's' as Side));
-          }
-          b.y = round(townY(ex + Math.cos(turn) * 1.5, ez + Math.sin(turn) * 1.5) * 100) / 100;
-          classicalVariations(b, r.fork('variations'));
-          // (The chief building of the block on the square may be grander: columns, pavilions, a higher base.)
-          dealDress(b, r.fork('dress'), { raise: 1.8, fall: fallAlong(b), columns: true, fit: true });
-          b.plan = planClassical(b, r.fork('plan'));
-          t.buildings.push(b);
-        }
-      }
-      // A timber block may have on a corner of its south front a classical house of wood built as an L: its front on the street to the
-      // south, its wing down the side street; its door in its other end. The runs of the two fronts it stands on are shortened for it.
-      const trim: Partial<Record<Side, [number, number]>> = {};
-      if (!classic && square && q.fork('corner').chance(0.45)) {
-        const r = q.fork('corner house'), side: -1 | 1 = r.chance(0.5) ? -1 : 1, spec = wooden(r, r.range(11, 15), r.range(8.5, 10));
-        const width = round(r.range(7, Math.min(8.6, spec.w - 3))), length = round(Math.min(r.range(6, 10), Math.min(sides.e.len, sides.w.len) - spec.d - deep - 2));
-        if (length >= 5) {
-          const S = sides.s, [ex, ez] = S.edge(side > 0 ? S.len - spec.w / 2 : spec.w / 2), fx = Math.cos(S.turn), fz = Math.sin(S.turn);
-          const b: Building = { ...spec, x: round(ex - fx * spec.d / 2), z: round(ez - fz * spec.d / 2), faces: 'w', turn: S.turn, endDoor: side > 0 ? -1 : 1, wings: [{ side, width, length }] };
-          b.y = round(townY(ex + fx * 1.5, ez + fz * 1.5) * 100) / 100;
-          t.buildings.push(b);
-          trim.s = side > 0 ? [0, spec.w + 3] : [spec.w + 3, 0];
-          // (The side street's run, counted from the south for the west front and from the north for the east one.)
-          if (side > 0) trim.e = [spec.d + length + 0.6 - deep, 0]; else trim.w = [0, spec.d + length + 0.6 - deep];
-        }
-      }
-      const from = t.buildings.length;
-      for (const k of [chief, across, ...ends]) {
-        if (winged.has(k) || (k === chief && t.buildings.some((b) => b.wings && b.style === 'imperial' && outsideBlock(blk, b.x, b.z) === 0))) continue;
-        const [a0, c0] = span(k), [ta, tc] = trim[k] ?? [0, 0];
-        front(sides[k].edge, a0 + ta, c0 - tc, sides[k].turn, full(k) ? deep : Math.min(deep, Math.min(sides[chief].len, sides[across].len) / 2 - 1), isCanal(k));
-      }
-      // A closed block of classical buildings is entered from the street: through a carriage way under an arch in one of them, at least,
-      // into the yard within. (If none was given one, the broadest that can take one is.)
-      const mine = t.buildings.slice(from).filter((b) => b.style === 'imperial');
-      if (classic && !mine.some((b) => b.arch)) {
-        const pick = mine.filter((b) => archable(b) && !b.dress?.pavilions).sort((p, o) => o.w - p.w)[0];
-        if (pick) { const r = q.fork('arch'); pick.arch = { side: r.chance(0.5) ? -1 : 1 }; pick.plan = planClassical(pick, r.fork('plan')); }
+
+  /**
+   * A town grown rather than planned (`grown.ts`), as watabou's villages grow, on the land this coast gave: the waterfront along the
+   * quay, the square under the house and (where there is one) the river's far quay are there first; lanes grow out from them over the
+   * land, along the slope where it is steep and up it where it is gentle, branching where they have gone far enough and joining what
+   * they come up to, and thinning into tracks to a farmstead at the town's edge. Then houses line every way, fronts to it: classical
+   * buildings where the town is thickest, about the square and the harbour; canal houses along the river's quay (and the waterfront,
+   * in a Dutch town); timber houses beyond. Each house's lot, the house and a yard behind it, is a block of the town.
+   */
+  function layOutGrown(): void {
+    const gq = rng.fork('grown'), sq = t.square, zTop = Math.min(level.z0 - 14, sq.z0 - 20);
+    const heart = { x: qx, z: qz - apron };
+    const reach = gq.range(140, 210), classicCut = gq.range(0.6, 0.72);
+    const inRect = (r: Rect, x: number, z: number, m: number) => x > r.x0 - m && x < r.x1 + m && z > r.z0 - m && z < r.z1 + m;
+    // (The river's straight course beside the square, and its quays: kept clear. Its course above that is laid later, and what it
+    // runs through then is taken away.)
+    const inRiver = (x: number, z: number, m: number) => corridor > 0 && z > zTop - 6 && z < qz && Math.abs(x - riverX) < corridor / 2 + m;
+    // (The low ground along the waterfront is made up to the quay's level, as the grid's front blocks are.)
+    const dry = (x: number, z: number) => nat(x, z) > sea + 1 || (z > qz - apron - 12 && z < qz && x > t.quay.x0 && x < t.quay.x1);
+    const offQuay = (x: number) => Math.max(0, t.quay.x0 - x, x - t.quay.x1);
+    const land: GrowLand = {
+      open: (x, z) => inRect(box, x, z, -40) && z < qz - 0.5 && offSquare(t, x, z) > 1 && !inRect(level, x, z, 2.5) && !inRiver(x, z, 0.5) && dry(x, z) && !inHarbour(t, x, z) && slopeAt(x, z) < 0.42,
+      density: (x, z) => {
+        if (!inRect(box, x, z, -40) || !dry(x, z)) return 0;
+        // (Thickest about the square and along the harbour, thinning inland and along the shore beyond the quay.)
+        const core = Math.min(Math.hypot(x - heart.x, z - heart.z), Math.hypot(offQuay(x), (qz - apron - z) * 1.4) + 10);
+        const steep = 1 - smooth((slopeAt(x, z) - 0.24) / 0.2);
+        return (1 - smooth((core - 30) / reach)) * steep;
+      },
+      height: nat,
+    };
+    // The ways there first: the waterfront, the square's two sides (or across the river, its far quay), the river's quays, and the
+    // lanes either side of the house's terrace.
+    const wf: Pt[] = [[t.quay.x0 + 2, qz - apron / 2], [t.quay.x1 - 2, qz - apron / 2]];
+    t.streets.push({ line: lineAt(wf), width: apron, kind: 'street' });
+    const given: GivenWay[] = [{ points: wf, clear: apron / 2 + 0.1, setback: apron / 2 + 0.3, span: [0, t.quay.x1 - t.quay.x0 - 4], ends: true, spread: 1.35, tight: true }];
+    let farQuay = -1, nearQuay = -1;
+    for (const side of [-1, 1]) {
+      if (corridor && side === riverSide) {
+        const x = riverX + side * (riverW / 2 + riverQuay / 2);
+        given.push({ points: [[x, qz - apron + 0.5], [x, zTop]], clear: riverQuay / 2 + 0.1, setback: riverQuay / 2 + 0.3, span: [0, qz - apron + 0.5 - zTop], spread: 1.35, tight: true });
+        farQuay = given.length - 1;
+        // (And the near quay, between the river and the square: where the square's edge stands back from the river, as an oval's or
+        // an irregular square's does, houses face the river from there too.)
+        const xn = riverX - side * (riverW / 2 + riverQuay / 2);
+        given.push({ points: [[xn, qz - apron + 0.5], [xn, zTop]], clear: riverQuay / 2 + 0.1, setback: riverQuay / 2 + 0.3, span: [0, qz - apron + 0.5 - zTop], spread: 1.35, tight: true });
+        nearQuay = given.length - 1;
       }
     }
+    // (The square's edge but its north side, against the house's terrace: from its north-east corner round by the south to its
+    // north-west, as a way that houses face from outside it and lanes leave.)
+    {
+      const ring = squareRing(t), edge: Pt[] = [...ring.slice(1), ring[0]];
+      let len = 0;
+      for (let k = 1; k < edge.length; k++) len += Math.hypot(edge[k][0] - edge[k - 1][0], edge[k][1] - edge[k - 1][1]);
+      given.push({ points: edge, clear: 0.1, setback: 0.3, span: [0, len], spread: 1.35, tight: true });
+    }
+    // The main street, where the square stands back from the harbour: from the middle of its south side straight down to the
+    // waterfront, the way the player comes up from the harbour; a way houses line and lanes leave, as the waterfront is.
+    if (away) {
+      const mid = (t.stair.x0 + t.stair.x1) / 2, W = 7, pts: Pt[] = [[mid, qz - apron], [mid, sq.z1 - 0.5]];
+      t.streets.push({ line: lineAt(pts), width: W, kind: 'street', surface: 'setts' });
+      given.push({ points: pts, clear: W / 2 + 0.2, setback: W / 2 + 0.5, span: [0, qz - apron - sq.z1 + 0.5], spread: 1.35, tight: true });
+    }
+    if (corridor) for (const bank of [-1, 1]) {
+      const x = riverX + bank * (riverW / 2 + riverQuay / 2);
+      t.streets.push({ line: lineAt([[x, qz - apron + 0.5], [x, zTop]]), width: riverQuay, kind: 'street', surface: 'setts' });
+    }
+    for (const side of [-1, 1]) {
+      const x = side < 0 ? (sq.x0 + level.x0) / 2 : (sq.x1 + level.x1) / 2, w = Math.abs(side < 0 ? level.x0 - sq.x0 : sq.x1 - level.x1);
+      if (w < 3) continue;
+      const pts: Pt[] = [[x, sq.z0 + 1], [x, level.z0 - 2]];
+      t.streets.push({ line: lineAt(pts), width: round(Math.min(6, w)), kind: 'lane' });
+      given.push({ points: pts, clear: Math.min(6, w) / 2 + 0.3, setback: 3 });
+    }
+    const LANE = round(gq.range(4.8, 6.2));
+    const opts: GrowOptions = {
+      step: 4, block: gq.range(20, 30), rigid: gq.range(0.1, 0.22), laneClear: LANE / 2 + 0.2, laneSetback: LANE / 2 + 0.6,
+      longest: gq.range(110, 180), most: gq.int(30, 46), trail: [14, 36], houses: gq.int(170, 230), apart: LANE + gq.range(14, 18),
+    };
+    const ways = growWays(given, land, opts, gq.fork('ways'));
+
+    // The houses, and each one's lot.
+    type Spec = Omit<Building, 'x' | 'z' | 'faces'>;
+    // (Each kept ring with the building it is the ground of, and each building's lot, so that one can give way to another.)
+    const kept: [number, number][][] = [], keptBy: Building[] = [], lotOf = new Map<Building, (typeof t.blocks)[number]>();
+    const evict = (o: Building) => {
+      t.buildings.splice(t.buildings.indexOf(o), 1);
+      const blk = lotOf.get(o);
+      if (blk) t.blocks.splice(t.blocks.indexOf(blk), 1);
+      for (let k = kept.length - 1; k >= 0; k--) if (keptBy[k] === o) { kept.splice(k, 1); keptBy.splice(k, 1); }
+    };
+    const ringOf = (x: number, z: number, w: number, d: number, th: number, grow: number): [number, number][] => {
+      const c = Math.cos(th), sn = Math.sin(th), hw2 = w / 2 + grow, hd = d / 2 + grow;
+      return [[-hw2, -hd], [hw2, -hd], [hw2, hd], [-hw2, hd]].map(([u, v]) => [x + u * sn + v * c, z - u * c + v * sn]);
+    };
+    const parted = (a: [number, number][], b: [number, number][]) => {
+      for (const poly of [a, b]) for (let i = 0; i < poly.length; i++) {
+        const [x0, z0] = poly[i], [x1, z1] = poly[(i + 1) % poly.length], nx = z1 - z0, nz = x0 - x1;
+        const pa = a.map(([x, z]) => x * nx + z * nz), pb = b.map(([x, z]) => x * nx + z * nz);
+        if (Math.max(...pa) < Math.min(...pb) || Math.max(...pb) < Math.min(...pa)) return true;
+      }
+      return false;
+    };
+    let dealt = 0;
+    const deal = (_: number, d: number, way: number): Spec => {
+      const r = gq.fork(`house${dealt++}`);
+      const canal = way === farQuay || way === nearQuay || (dutch && way === 0);
+      if (canal) { const c = dealCanalHouse(r.fork('canal'), { deep: r.range(10, 12), room: r.range(5, 9), country }); if (c) return { ...c, d: r.range(10, 12) }; }
+      // (Classical buildings face the waterfront, the square and the river's quay, where the town is thick, as the grid's classical
+      // quarter does; on a lane only now and then in the heart of the town, where it is straight enough to take one.)
+      if (d > classicCut && (way < given.length || (d > 0.85 && r.chance(0.3)))) return classical(r, r.pick([5, 5, 7, 7, 9]), r.range(9.6, 11.8), r.pick(STUCCO));
+      return timber(r, r.range(6, 8.8), r.range(6.4, 8.6), r.pick(WASHES));
+    };
+    /**
+     * A classical building whose end looks toward the river's quay is given a wing that fronts the river: where its end stands close
+     * by the quay, one back along it, turned to run with the river; where it stands further off, across the ground between, one out
+     * from its back corner square to the river, its far end standing on the quay. Either way an L that opens wider or narrower than a
+     * right angle however the building stands (`lean`, see `wingFrame`). It returns the wing's ground on the site, if it has room there.
+     */
+    const lanes = () => ways.filter((_, k) => k !== farQuay && k !== nearQuay);
+    // (Canal houses on the quay give way to what fronts the river, `most` of them at the most: the river is the point of it. Nothing else
+    // does. Those in the way of a ring of ground, or null where something else is.)
+    const giving = (ring: [number, number][], most: number) => {
+      const inWay = [...new Set(kept.flatMap((o, k) => (parted(ring, o) ? [] : [keptBy[k]])))];
+      return inWay.length > most || inWay.some((o) => o.style !== 'canal') ? null : inWay;
+    };
+    const onGround = (pts: [number, number][]) => !pts.some(([x, z]) => !inRect(box, x, z, -40) || offSquare(t, x, z) < 0.1 || inRect(level, x, z, 1.5) || inRiver(x, z, 0.2) || z > qz - apron + 0.1 || !dry(x, z) || inHarbour(t, x, z));
+    const withMids = (core: [number, number][]) => [...core, ...core.map((p, k) => [(p[0] + core[(k + 1) % core.length][0]) / 2, (p[1] + core[(k + 1) % core.length][1]) / 2] as [number, number])];
+    /**
+     * A wedge (`wedge`) carrying the building's end on along its front and its back to the river's quay, so that its end stands along
+     * the quay, slanting as the river runs; where that is no more than 34 metres, and the end slants no more than 65 degrees from square.
+     * Kept clear of the way the building fronts as its front is, and of every other.
+     */
+    const riverWedge = (b: Building, side: -1 | 1, own: number, edge: number): [number, number][] | null => {
+      const fx = Math.cos(b.turn!), fz = Math.sin(b.turn!), rate = side * fz, target = edge - Math.sign(riverX - b.x) * 0.5;
+      if (Math.abs(rate) < 0.4) return null;
+      const e = (side * b.w) / 2, [x0] = fromBuilding(b, e, 0), [x1] = fromBuilding(b, e, b.d);
+      const front = round((target - x0) / rate), back = round((target - x1) / rate);
+      if (front < 0 || back < 0 || Math.max(front, back) < 2 || Math.max(front, back) > 34 || Math.abs(front - back) > b.d * Math.tan((65 * Math.PI) / 180)) return null;
+      const local: [number, number][] = [[e, 0], [e + side * front, 0], [e + side * back, b.d], [e, b.d]];
+      const core = local.map(([u, v]) => fromBuilding(b, u, v)), ring = insetRing(local, local.map(() => -0.3)).map(([u, v]) => fromBuilding(b, u, v));
+      if (!onGround(withMids(core))) return null;
+      // (Its front no nearer the way it fronts than the building's own front stands.)
+      const ownWay = ways[own], ownClear = own < given.length ? given[own].clear : opts.laneClear;
+      if ([core[1], [(core[0][0] + core[1][0]) / 2, (core[0][1] + core[1][1]) / 2] as [number, number]].some(([x, z]) => nearLine(ownWay.points.map(([px, pz]) => [px, pz, 0] as [number, number, number]), x, z).off < ownClear - 0.05)) return null;
+      const reach = Math.max(front, back), [mx, mz] = fromBuilding(b, e + (side * reach) / 2, b.d / 2);
+      if (!ways.every((w, k) => k === own || k === farQuay || k === nearQuay || clearOfWays([w], mx, mz, reach, b.d, b.turn!, k < given.length ? given[k].clear : LANE / 2 + 0.3))) return null;
+      const inWay = giving(ring, 6);
+      if (!inWay || Math.max(...ring.map(([x, z]) => nat(x, z))) - (b.y ?? 0) > 5) return null;
+      for (const o of inWay) evict(o);
+      b.wedge = { side, front, back };
+      return ring;
+    };
+    const riverWing = (b: Building, own: number): [number, number][] | null => {
+      if (!corridor) return null;
+      const fx = Math.cos(b.turn!), fz = Math.sin(b.turn!), wq = gq.fork(`river wing${t.buildings.length}`);
+      const edge = riverX - Math.sign(riverX - b.x) * (corridor / 2);
+      for (const side of [-1, 1] as const) {
+        const [cx, cz] = fromBuilding(b, (side * b.w) / 2, b.d), [ox] = fromBuilding(b, side * (b.w / 2 + 1), b.d), off = Math.abs(edge - cx);
+        // (The end facing the river, its back corner between the square and the harbour's apron.)
+        if (Math.sign(ox - cx) !== Math.sign(edge - cx) || cz < zTop || cz > qz - apron || off > 30) continue;
+        // A wedge out to the quay first; or, where the end's back corner stands close by the quay, as often a wing along it.
+        if (!(off < 6 && wq.chance(0.5))) { const ring = riverWedge(b, side, own, edge); if (ring) return ring; }
+        // The ways the wing may run, in the site: along the river, the way that leads back from the building's front; or straight out
+        // to it. Each as the building's own measures, how far it turns from square to the back, and how long it is.
+        const options: { ax: number; az: number; lengths: number[] }[] = [];
+        if (off < 6) options.push({ ax: 0, az: fz < 0 ? 1 : -1, lengths: [round(wq.range(12, 22)), 14, 10] });
+        if (off > 7 && off < 26) options.push({ ax: Math.sign(edge - cx), az: 0, lengths: [round(off - 0.4)] });
+        for (const { ax, az, lengths } of options) {
+          const du = ax * fz - az * fx, dv = -(ax * fx + az * fz), lean = Math.round((Math.atan2(side * du, dv) * 180) / Math.PI);
+          if (lean < -35 || lean > 55) continue;
+          // (As broad as the back allows: a wing that leans covers more of it than its breadth.)
+          const cos = Math.cos((lean * Math.PI) / 180), most = Math.min(8.8, (b.w / 2 - 1.5) * cos);
+          if (most < 4.8) continue;
+          const width = round(wq.range(4.8, most));
+          for (const length of lengths) {
+            const g = { side, width, length, ...(lean ? { lean } : {}) }, wf = wingFrame(b, g);
+            const part = { u0: side > 0 ? b.w / 2 - width : -b.w / 2, u1: side > 0 ? b.w / 2 : -b.w / 2 + width, v0: b.d + wf.foot, v1: b.d + length, turned: { to: wf.to, from: wf.from } };
+            const ring = partCorners(part, -0.3).map(([u, v]) => fromBuilding(b, u, v)), core = partCorners(part).map(([u, v]) => fromBuilding(b, u, v));
+            const pts = [...core, ...core.map((p, k) => [(p[0] + core[(k + 1) % 4][0]) / 2, (p[1] + core[(k + 1) % 4][1]) / 2] as [number, number])];
+            if (!onGround(pts)) continue;
+            const inWay = giving(ring, 3);
+            if (!inWay || Math.max(...ring.map(([x, z]) => nat(x, z))) - (b.y ?? 0) > 5) continue;
+            // (Clear of the lanes, as the houses along them are; the quays are kept clear by the river's corridor.)
+            const mx = core.reduce((sum, p) => sum + p[0], 0) / 4, mz = core.reduce((sum, p) => sum + p[1], 0) / 4;
+            if (!clearOfWays(lanes(), mx, mz, width, length - wf.foot, Math.atan2(az, ax), LANE / 2 + 0.3)) continue;
+            for (const o of inWay) evict(o);
+            b.wings = [g];
+            return ring;
+          }
+        }
+      }
+      return null;
+    };
+    const place = (lot: Lot<Spec>): boolean => {
+      const s = lot.house, b: Building = { ...s, x: round(lot.x), z: round(lot.z), faces: 'w', turn: lot.turn };
+      const ring = ringOf(b.x, b.z, b.w, b.d, lot.turn, 0.3);
+      for (const [x, z] of [...ringOf(b.x, b.z, b.w, b.d, lot.turn, 0), [b.x, b.z] as [number, number]]) {
+        if (!inRect(box, x, z, -40) || offSquare(t, x, z) < 0.1 || inRect(level, x, z, 1.5) || inRiver(x, z, 0.2) || z > qz - apron + 0.1 || !dry(x, z) || inHarbour(t, x, z)) return false;
+      }
+      if (slopeAt(b.x, b.z) > 0.42 || !kept.every((o) => parted(ring, o))) return false;
+      // (Its ground, the street's before its front; the land under it no more than five metres over that at the back, where the made
+      // ground is banked against it.)
+      const fx = Math.cos(lot.turn), fz = Math.sin(lot.turn), [ex, ez] = [b.x + fx * (b.d / 2 + 1.5), b.z + fz * (b.d / 2 + 1.5)];
+      b.y = round(townY(ex, ez) * 100) / 100;
+      if (Math.max(...ring.map(([x, z]) => nat(x, z))) - b.y > 5) return false;
+      const wingRing = b.style === 'imperial' ? riverWing(b, lot.way) : null;
+      if (wingRing) { kept.push(wingRing); keptBy.push(b); }
+      if (b.style === 'imperial') {
+        classicalVariations(b, gq.fork(`variations${t.buildings.length}`));
+        dealDress(b, gq.fork(`dress${t.buildings.length}`), { raise: 1.3, fall: fallAlong(b), forward: false, fit: true });
+        // (A wedge's end carries on the front: no pavilion there, nor a tower or a carriage way at that end.)
+        if (b.wedge) {
+          if (b.dress?.pavilions) b.dress.pavilions = 0;
+          if (b.towers) { b.towers = b.towers.filter((tw) => tw.corner === 'wing' || tw.side !== b.wedge!.side); if (!b.towers.length) delete b.towers; }
+          if (b.arch?.side === b.wedge.side) delete b.arch;
+        }
+        b.plan = planClassical(b, gq.fork(`plan${t.buildings.length}`));
+      } else if (b.style === 'timber') { b.door = gq.fork(`door${t.buildings.length}`).pick([0.24, 0.76]); b.plan = planTimber(b); }
+      else if (b.style === 'canal') { const p = planCanal(b); if (p) b.plan = p; }
+      t.buildings.push(b);
+      kept.push(ring); keptBy.push(b);
+      // (Its lot: the house and a yard behind it, as deep as there is room for, clear of every way.)
+      for (const yard of [7, 4, 1.5]) {
+        const deep = b.d + yard, cx = b.x - fx * yard / 2, cz = b.z - fz * yard / 2;
+        if (!clearOfWays(ways, cx, cz, b.w, deep, lot.turn, 1)) continue;
+        const corners = ringOf(cx, cz, b.w, deep, lot.turn, 0).map(([x, z]) => [round(x), round(z)] as [number, number]);
+        const blk = { x0: Math.min(...corners.map((p) => p[0])), x1: Math.max(...corners.map((p) => p[0])), z0: Math.min(...corners.map((p) => p[1])), z1: Math.max(...corners.map((p) => p[1])), kind: (b.style === 'imperial' ? 'classical' : 'timber') as 'classical' | 'timber', corners };
+        // (Wound as a block's corners are, the inside on the hand `outsideBlock` takes it to be.)
+        if (outsideBlock(blk, cx, cz) > 0) corners.reverse();
+        t.blocks.push(blk); lotOf.set(b, blk);
+        break;
+      }
+      return true;
+    };
+    lineWays(ways, given, land, opts, gq.fork('houses'), deal, place);
+    // The lanes as the town's streets, graded; laid with flags beside classical buildings, setts where the town is thick, and beaten
+    // earth further out; and where a lane went on as a trail, a track.
+    for (const w of ways.slice(given.length)) {
+      const { lane, trail } = splitWay(w);
+      if (lane.length > 1) {
+        const mid = lane[Math.floor(lane.length / 2)], d = land.density(mid[0], mid[1]);
+        const classicBeside = t.buildings.some((b) => b.style === 'imperial' && nearLine(lane.map(([x, z]) => [x, z, 0] as [number, number, number]), b.x, b.z).off < b.d / 2 + LANE);
+        t.streets.push({ line: lineAt(lane), width: LANE, kind: 'street', surface: classicBeside ? 'flags' : d > 0.45 ? 'setts' : 'dirt' });
+      }
+      if (trail.length > 1) t.streets.push({ line: lineAt(trail), width: 3, kind: 'track' });
+    }
   }
+
+  if (planKind !== 'grown') {
+    const bw0 = pq.chance(0.25) ? pq.range(42, 54) : pq.range(27, 40), bd0 = pq.chance(0.2) ? pq.range(40, 50) : pq.range(26, 38), sw0 = pq.range(5.5, 8.2);
+    const cw = planKind === 'old' ? pq.int(1, 2) : pq.int(1, 3), cr = planKind === 'old' ? pq.int(1, 2) : pq.int(1, 3);
+    const ti = Math.max(cw, pq.int(2, bw0 > 41 ? 3 : 4)), tj = Math.max(cr, pq.int(3, bd0 > 39 ? 4 : 5)), cutCorner = pq.chance(0.6);
+    const nC = ti + 2, nR = tj + 2;
+    const fan = planKind === 'fan' ? pq.range(3.5, 6) : planKind === 'old' ? pq.range(0, 1.5) : 0, bow = planKind === 'fan' ? pq.range(0.0008, 0.0018) : 0;
+    const shoreFollow = planKind === 'shore' ? 1 : planKind === 'old' ? pq.range(0.3, 0.9) : planKind === 'fan' && pq.chance(0.4) ? 0.6 : 0;
+    const jitter = planKind === 'old' ? pq.range(2.5, 4) : planKind === 'planned' ? 0 : pq.range(0.6, 1.4);
+    const tilt = planKind === 'old' ? pq.range(4, 7) : planKind === 'shore' ? 1.5 : 0;
+    const deg = Math.PI / 180;
+    // Where the lines lie before they are moved: across the shore, out from the square's edge (`uL`); and inland, back from the quay's
+    // edge (`vL`); with the half breadth of the street on each (none on the square's edge, nor on the waterfront's back, which are edges).
+    const uL: Record<number, number[]> = {}, uH: Record<number, number[]> = {}, vL: number[] = [apron], vH: number[] = [0];
+    for (const side of [-1, 1]) {
+      uL[side] = [Wsq / 2 + (side === riverSide ? corridor : 0)]; uH[side] = [0];
+      for (let k = 1; k <= nC; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, w = bw0 * pq.range(0.85, 1.18); uL[side].push(uL[side][k - 1] + uH[side][k - 1] + w + hw); uH[side].push(hw); }
+    }
+    for (let k = 1; k <= nR; k++) { const hw = round(pq.range(sw0 - 0.8, sw0 + 0.8)) / 2, d = bd0 * pq.range(0.85, 1.18); vL.push(vL[k - 1] + vH[k - 1] + d + hw); vH.push(hw); }
+    // The shore beyond the quay, as an offset from the quay's line: where the land meets the water, smoothed over a long stretch,
+    // its slope held to one in three, and nothing of it within the quay's reach.
+    const shoreDz = (() => {
+      const S = 4, u0 = -520, n = 261, raw = new Float32Array(n), out = new Float32Array(n);
+      for (let k = 0; k < n; k++) {
+        const x = qx + u0 + k * S;
+        let z = qz - 30;
+        while (z < qz + 160 && nat(x, z) >= sea) z += 2;
+        raw[k] = Math.max(-60, Math.min(45, z - qz));
+      }
+      for (let k = 0; k < n; k++) { let sum = 0, cnt = 0; for (let d = -10; d <= 10; d++) { const kk = k + d; if (kk >= 0 && kk < n) { sum += raw[kk]; cnt++; } } out[k] = sum / cnt; }
+      const mid = Math.round(-u0 / S);
+      for (const dir of [1, -1]) for (let k = mid + dir; k >= 0 && k < n; k += dir) out[k] = Math.min(out[k - dir] + S / 3, Math.max(out[k - dir] - S / 3, out[k]));
+      return (u: number) => {
+        const reach = u < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, f = Math.min(n - 1.001, Math.max(0, (u - u0) / S)), i = Math.floor(f), a = f - i;
+        return (out[i] * (1 - a) + out[i + 1] * a - out[mid]) * smooth((Math.abs(u) - reach - 10) / 40);
+      };
+    })();
+    // The crossing points of the lines, moved as the plan has them. (The square's edge stays straight, and the waterfront along the quay;
+    // and nothing near the square is jittered.)
+    const vCore = qz - level.z0 + 4, colTilt: Record<number, number[]> = {}, rowTilt: Record<number, number[]> = {};
+    for (const side of [-1, 1]) {
+      colTilt[side] = Array.from({ length: nC + 1 }, (_, i) => (i >= 2 ? pq.range(-tilt, tilt) * deg : 0));
+      rowTilt[side] = Array.from({ length: nR + 1 }, (_, j) => (j >= 2 ? pq.range(-tilt, tilt) * deg : 0));
+    }
+    // (The crossings about the classical quarter's blocks are left where they fall, neither tilted nor jittered: classical buildings
+    // stand along straight streets, laid out at a stroke, whatever the plan of the rest.)
+    const classicAt = (i: number, j: number) => (i === 0 && j < cr) || (j === 0 && i < cw);
+    const trueNode = (i: number, j: number) => [[i - 1, j - 1], [i, j - 1], [i - 1, j], [i, j]].some(([a, c]) => a >= 0 && c >= 0 && classicAt(a, c));
+    const nodes: Record<number, [number, number][][]> = {};
+    for (const side of [-1, 1]) {
+      nodes[side] = [];
+      for (let i = 0; i <= nC; i++) {
+        nodes[side].push([]);
+        for (let j = 0; j <= nR; j++) {
+          const u = uL[side][i], v = vL[j], jq = pq.fork(`node${side}.${i}.${j}`);
+          let x = qx + side * u, z = qz - v;
+          // (The columns beside the square spread only behind the house's ground; the others from the waterfront. And the rows of a
+          // fanned town bow back from the water towards their ends, as an amphitheatre does about its stage.)
+          x += side * Math.max(0, v - (i <= 1 ? vCore : vL[0])) * Math.tan(fan * i * deg);
+          if (i > 0 && !(j === 0 && u < (side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx) + 5)) z -= bow * (u - uL[side][0]) ** 2;
+          const straight = trueNode(i, j);
+          if (!straight) {
+            x += side * (v - vL[0]) * Math.tan(colTilt[side][i]);
+            z += (u - uL[side][0]) * Math.tan(rowTilt[side][j]);
+          }
+          z += shoreFollow * shoreDz(side * u);
+          const reach = side < 0 ? qx - t.quay.x0 : t.quay.x1 - qx, still = i === 0 || (j === 0 && u < reach + 5) || straight;
+          if (!still) { const amount = i <= 1 && j <= 1 ? 0.2 : 1; x += jq.range(-jitter, jitter) * amount; z += jq.range(-jitter, jitter) * amount; }
+          nodes[side][i].push([x, z]);
+        }
+      }
+    }
+    const hw = (side: number, axis: 'u' | 'v', k: number) => (axis === 'u' ? uH[side][k] : vH[k]);
+    // A block's corners: each side of it is its street's centre line moved in by half the street's breadth, and each corner where two
+    // such sides meet. In order round it: south-west, south-east, north-east, north-west (south being towards the sea).
+    const cross = (p: [number, number], d: [number, number], q: [number, number], e: [number, number]): [number, number] | null => {
+      const den = d[0] * e[1] - d[1] * e[0];
+      if (Math.abs(den) < 1e-6) return null;
+      const tt = ((q[0] - p[0]) * e[1] - (q[1] - p[1]) * e[0]) / den;
+      return [p[0] + d[0] * tt, p[1] + d[1] * tt];
+    };
+    const cellOf = (side: number, i: number, j: number): [number, number][] | null => {
+      const N = nodes[side], a = N[i][j], b = N[i + 1][j], c = N[i + 1][j + 1], d = N[i][j + 1];
+      const mid: [number, number] = [(a[0] + b[0] + c[0] + d[0]) / 4, (a[1] + b[1] + c[1] + d[1]) / 4];
+      // (Each side as a point and a direction, moved in towards the middle by its street's half breadth.)
+      const inward = (p: [number, number], q: [number, number], h: number): [[number, number], [number, number]] => {
+        const dx = q[0] - p[0], dz = q[1] - p[1], l = Math.hypot(dx, dz) || 1;
+        let nx = -dz / l, nz = dx / l;
+        if ((mid[0] - p[0]) * nx + (mid[1] - p[1]) * nz < 0) { nx = -nx; nz = -nz; }
+        return [[p[0] + nx * h, p[1] + nz * h], [dx, dz]];
+      };
+      const inner = inward(a, d, hw(side, 'u', i)), outer = inward(b, c, hw(side, 'u', i + 1)), front = inward(a, b, hw(side, 'v', j)), back = inward(d, c, hw(side, 'v', j + 1));
+      const pts = [cross(...inner, ...front), cross(...outer, ...front), cross(...outer, ...back), cross(...inner, ...back)];
+      if (pts.some((q0) => !q0)) return null;
+      const [p0, p1, p2, p3] = pts as [number, number][];
+      // (West first: on the west side of the square the square's edge is the block's east side.)
+      const quad: [number, number][] = side < 0 ? [p1, p0, p3, p2] : [p0, p1, p2, p3];
+      // Sound: going round, the inside always on the same hand, every corner between 62 and 118 degrees, every side 16 metres or more.
+      for (let k = 0; k < 4; k++) {
+        const [px, pz] = quad[(k + 3) % 4], [cx, cz] = quad[k], [nx, nz] = quad[(k + 1) % 4];
+        const ax = px - cx, az = pz - cz, bx = nx - cx, bz = nz - cz, la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+        if (la < 16 || lb < 16) return null;
+        const cos = (ax * bx + az * bz) / (la * lb), turn = bx * az - bz * ax;
+        if (turn > 0 || Math.abs(cos) > Math.cos(62 * deg)) return null;
+      }
+      return quad.map(([x, z]) => [round(x), round(z)] as [number, number]);
+    };
+    const boxOf = (c: [number, number][]): Rect => ({ x0: Math.min(...c.map((q0) => q0[0])), x1: Math.max(...c.map((q0) => q0[0])), z0: Math.min(...c.map((q0) => q0[1])), z1: Math.max(...c.map((q0) => q0[1])) });
+    // Which blocks are built, and with what: the land under each must be dry, even enough and not crag; classical nearest the square
+    // and the harbour, timber beyond, and none further out (the shacks are there).
+    // (The low ground along the shore is made up to the quay's level, as the waterfront is, so it is judged as it will be made.)
+    const blockOk = (r: Rect & { corners: [number, number][] }) => {
+      let lo = Infinity, hi = -Infinity;
+      for (let z = r.z0; z <= r.z1; z += 4) for (let x = r.x0; x <= r.x1; x += 4) {
+        if (outsideBlock(r, x, z) > 0) continue;
+        const y = nat(x, z); lo = Math.min(lo, y); hi = Math.max(hi, Math.max(y, quayY)); if (slopeAt(x, z) > 0.42) return false;
+      }
+      return lo > (r.z1 > qz - apron - 1 ? sea - 1.5 : sea + 1) && hi - Math.max(lo, quayY) < 9;
+    };
+    const near = (r: Rect, m: number) => outsideRect(level, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2) < m;
+    const cells: { side: number; i: number; j: number; corners: [number, number][]; built: boolean }[] = [];
+    const builtAt = new Set<string>(), want: { cell: (typeof cells)[number]; kind: 'classical' | 'timber'; rank: number; around: number }[] = [];
+    for (const side of [-1, 1]) for (let i = 0; i < nC; i++) for (let j = 0; j < nR; j++) {
+      const corners = cellOf(side, i, j);
+      if (!corners) continue;
+      const r = { ...boxOf(corners), corners };
+      const kind = classicAt(i, j) ? 'classical' : i < ti && j < tj && !(cutCorner && i === ti - 1 && j === tj - 1) ? 'timber' : null;
+      const cell = { side, i, j, corners, built: false };
+      cells.push(cell);
+      if (kind && !near(r, 0) && blockOk(r)) want.push({ cell, kind, rank: (kind === 'classical' ? 0 : 10) + i + j + pq.fork(`rank${side}.${i}.${j}`).range(0, 0.9), around: corners.reduce((sum, q0, k) => sum + Math.hypot(corners[(k + 1) % 4][0] - q0[0], corners[(k + 1) % 4][1] - q0[1]), 0) });
+    }
+    // (No more than so much frontage in all, nearest the square first: small blocks are many houses, and a town of three hundred and
+    // more was heavier than any place had been.)
+    let frontage = 0;
+    for (const w of want.sort((p0, o) => p0.rank - o.rank)) {
+      if (frontage + w.around > 2500 && w.kind === 'timber') continue;
+      frontage += w.around;
+      w.cell.built = true;
+      t.blocks.push({ ...boxOf(w.cell.corners), corners: w.cell.corners, kind: w.kind });
+      builtAt.add(`${w.cell.side},${w.cell.i},${w.cell.j}`);
+    }
+
+
+    // ---- the streets: the waterfront; between the rows, between the columns; lanes beside the house; only where there are blocks
+    {
+      const span = (blocks: Rect[], along: 'x' | 'z'): [number, number] | null => {
+        if (!blocks.length) return null;
+        return along === 'x' ? [Math.min(...blocks.map((b) => b.x0)), Math.max(...blocks.map((b) => b.x1))] : [Math.min(...blocks.map((b) => b.z0)), Math.max(...blocks.map((b) => b.z1))];
+      };
+      // The waterfront, the length of the quay.
+      t.streets.push({ line: lineAt([[t.quay.x0 + 2, qz - apron / 2], [t.quay.x1 - 2, qz - apron / 2]]), width: apron, kind: 'street' });
+      // Along the rows and up the columns: each line's crossing points, over the stretches that have a block beside them.
+      const has = (side: number, i: number, j: number) => builtAt.has(`${side},${i},${j}`);
+      // What each stretch is laid with: flags beside the classical quarter; elsewhere, setts or beaten earth, the line's own (more
+      // earth further out, and in an old town most of all). (A town's streets were all setts.)
+      const kindAt = (side: number, i: number, j: number) => (has(side, i, j) ? (classicAt(i, j) ? 'classical' : 'timber') : null);
+      const earthy = planKind === 'old' ? 0.55 : planKind === 'planned' ? 0.15 : 0.3;
+      const lineSurface = (side: number, axis: 'u' | 'v', k: number): 'setts' | 'dirt' => (pq.fork(`surface${side}.${axis}.${k}`).chance(Math.min(0.9, earthy + (k >= 3 ? 0.3 : k >= 2 ? 0.12 : 0))) ? 'dirt' : 'setts');
+      /** A line's runs, each cut where what it is laid with changes, as streets. */
+      const lay = (pts: [number, number][], along: (string | null)[], width: number) => {
+        let cur: [number, number][] = [], kind: string | null = null;
+        const flush = () => { if (cur.length > 1) t.streets.push({ line: lineAt(cur), width, kind: 'street', surface: kind as 'flags' | 'setts' | 'dirt' }); cur = []; };
+        along.forEach((surf, k) => {
+          if (surf !== kind) { flush(); kind = surf; if (surf) cur.push(pts[k]); }
+          if (surf) cur.push(pts[k + 1]);
+        });
+        flush();
+      };
+      let behind: number | null = null;
+      for (const side of [-1, 1]) {
+        // Between the rows: out from the square's edge (or from beside the house, where the row reaches the house's ground: then it
+        // runs on to the lane beside it).
+        for (let j = 1; j <= nR; j++) {
+          const pts = Array.from({ length: nC + 1 }, (_, i) => nodes[side][i][j]);
+          const own = lineSurface(side, 'v', j);
+          const along = Array.from({ length: nC }, (_, i) => { const a = kindAt(side, i, j - 1), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
+          const [x0, z0] = pts[0];
+          // (Out from the square's edge; or from beside the house, where the row reaches the house's ground: then it runs on to the lane.)
+          if (along[0]) {
+            if (z0 > level.z0 - 3 && z0 < level.z1 + 3) { pts.unshift([side < 0 ? level.x0 - 3 : level.x1 + 3, z0]); along.unshift(along[0]); }
+            // (Across the river, by a bridge, to the square's edge, where the row meets the square.)
+            else if (corridor && side === riverSide && z0 > t.square.z0 && z0 < t.square.z1) { pts.unshift([squareEdge(side), z0]); along.unshift(along[0]); }
+            else if (z0 < level.z0 && (behind === null || z0 > behind)) behind = z0;
+          }
+          lay(pts, along, round(hw(side, 'v', j) * 2));
+        }
+        // Up the columns: from the waterfront, where the column reaches it, up to the last block.
+        for (let i = 1; i <= nC; i++) {
+          const pts = nodes[side][i].slice(), own = lineSurface(side, 'u', i);
+          const along = Array.from({ length: nR }, (_, j) => { const a = kindAt(side, i - 1, j), c = kindAt(side, i, j); return a === 'classical' || c === 'classical' ? 'flags' : a || c ? own : null; });
+          // (From the waterfront, where the column reaches it.)
+          const [x0, z0] = pts[0];
+          if (along[0] && Math.abs(z0 - (qz - apron)) < 0.5 && x0 > t.quay.x0 && x0 < t.quay.x1) { pts.unshift([x0, qz - apron + 0.5]); along.unshift(along[0]); }
+          lay(pts, along, round(hw(side, 'u', i) * 2));
+        }
+      }
+      // The quays along the river, on each bank, from the waterfront up to where the river bends away behind the house.
+      if (corridor) {
+        const zTop = Math.min(level.z0 - 14, t.square.z0 - 20), classicBeside = t.blocks.some((b) => b.kind === 'classical' && outsideRect(b, riverX + riverSide * (corridor / 2 + 2), (b.z0 + b.z1) / 2) < 3);
+        for (const bank of [-1, 1]) {
+          const x = riverX + bank * (riverW / 2 + riverQuay / 2);
+          t.streets.push({ line: lineAt([[x, qz - apron + 0.5], [x, zTop]]), width: riverQuay, kind: 'street', surface: classicBeside ? 'flags' : 'setts' });
+        }
+      }
+      // Lanes either side of the house, from the square up to the street behind it, if any.
+      for (const side of [-1, 1]) {
+        const x = side < 0 ? (t.square.x0 + level.x0) / 2 : (t.square.x1 + level.x1) / 2, w = Math.abs(side < 0 ? level.x0 - t.square.x0 : t.square.x1 - level.x1);
+        if (w < 3) continue;
+        t.streets.push({ line: lineAt([[x, t.square.z0 + 1], [x, behind ?? level.z0 - 2]]), width: round(Math.min(6, w)), kind: 'lane' });
+      }
+    }
+
+
+    {
+      const b0 = rng.fork('buildings');
+      let n = 0;
+      for (const blk of t.blocks) {
+        const q = b0.fork(`block${n++}`), classic = blk.kind === 'classical';
+        const deep = classic ? q.range(9.6, 11.8) : q.range(6.4, 8.6);
+        const wash = (r: Rng) => (classic ? r.pick(STUCCO) : r.pick(WASHES));
+        // Along a front from `a` to `c` (in the front's own run), facing `turn`, its edge given: buildings side by side.
+        const front = (edge: (s: number) => [number, number], a: number, c: number, turn: number, depth: number, canal = false) => {
+          let s = a;
+          while (c - s > (canal ? 2.4 : classic ? 9.3 : 5.6)) {
+            const r = q.fork(`b${t.buildings.length}`);
+            let spec: Omit<Building, 'x' | 'z' | 'faces'>;
+            if (canal) {
+              // (As much of the front as is left, if a house of one window is all that fits; otherwise any breadth that fits.)
+              const deal = dealCanalHouse(r.fork('canal'), { deep: depth, room: c - s, country });
+              if (!deal) break;
+              spec = { ...deal, d: depth };
+            } else if (classic) {
+              let bays = Math.floor((c - s - 1.6) / 2.55);
+              if (bays > 13) bays = r.pick([5, 7, 7, 9, 9, 11]);
+              if (bays % 2 === 0) bays--;
+              if (bays < 3) break;
+              spec = classical(r, bays, depth, wash(r));
+            } else if (c - s > 14 && r.fork('wooden').chance(0.28) && (() => {
+              // (Now and then, among the timber-framed houses, a classical house of wood, long and low; its door is in an end wall, and
+              // the steps up to it want room beside it. It is deeper than the timber houses are, so it keeps away from the block's corners,
+              // where it would reach into the first house of the side street.)
+              const wW = Math.min(c - s - 3, r.range(11, 18)), dW = Math.max(depth, r.range(8, 9.5));
+              return dW <= depth || (s - a > depth + 3.5 && c - s - wW > depth + 3.5);
+            })()) {
+              spec = wooden(r.fork('wooden house'), Math.min(c - s - 3, r.range(11, 18)), Math.max(depth, r.range(8, 9.5)));
+              if (spec.endDoor! < 0) s += 3;
+              if (spec.d > depth && (s - a < depth + 0.5 || c - s - spec.w < depth + 0.5)) spec.d = depth;
+            } else {
+              const w = Math.min(c - s, r.range(6, 8.8));
+              if (w < 5.6) break;
+              spec = timber(r, w, depth, wash(r));
+            }
+            const mid = s + spec.w / 2, [ex, ez] = edge(mid);
+            const b: Building = { ...spec, x: round(ex - Math.cos(turn) * spec.d / 2), z: round(ez - Math.sin(turn) * spec.d / 2), faces: 'w', turn };
+            // (Its ground: the street's or the square's, just before its front.)
+            b.y = round(townY(ex + Math.cos(turn) * 1.5, ez + Math.sin(turn) * 1.5) * 100) / 100;
+            if (b.style === 'imperial') {
+              classicalVariations(b, r.fork('variations'));
+              // (Now and then a carriage way through it into the block's yard: see below for the one every closed block has.)
+              if (archable(b) && r.fork('arch').chance(0.25)) b.arch = { side: r.fork('arch side').chance(0.5) ? -1 : 1 };
+              // (Dressed from a stream of its own: nothing standing forward of the street's line, its plinth raised over the fall of the
+              // street along it, a basement under it where that is a metre or more.)
+              dealDress(b, r.fork('dress'), { raise: 1.3, fall: fallAlong(b), forward: false, fit: true });
+              b.plan = planClassical(b, r.fork('plan'));
+            }
+            else if (b.style === 'timber') { b.door = r.pick([0.24, 0.76]); b.plan = planTimber(b); }
+            // (A canal house is planned once its depth is the lot's; one whose stair would not fit in it stays shut.)
+            else if (b.style === 'canal') { const p = planCanal(b); if (p) b.plan = p; }
+            t.buildings.push(b);
+            s += spec.w + (canal ? 0.02 : classic ? r.range(0, 0.4) : spec.endDoor! > 0 ? 3 : r.chance(0.15) ? r.range(1.4, 2.6) : r.range(0, 0.25));
+          }
+        };
+        // The block's four fronts: each the line of its edge, the run along it, and the bearing it faces. Two opposite fronts run the
+        // block's whole length, corner to corner; the other two run between them.
+        // (Of a block's corners, south-west, south-east, north-east, north-west: each side from one to the next, facing out from it, and
+        // how square the corner at each end of it is.)
+        const C: [number, number][] = blk.corners ?? [[blk.x0, blk.z1], [blk.x1, blk.z1], [blk.x1, blk.z0], [blk.x0, blk.z0]];
+        const cornerCos = (k: number) => {
+          const [px, pz] = C[(k + 3) % 4], [cx, cz] = C[k], [nx, nz] = C[(k + 1) % 4], ax = px - cx, az = pz - cz, bx = nx - cx, bz = nz - cz;
+          return (ax * bx + az * bz) / (Math.hypot(ax, az) * Math.hypot(bx, bz));
+        };
+        const sideFrom = (k: number) => {
+          const [ax, az] = C[k], [bx, bz] = C[(k + 1) % 4], len = Math.hypot(bx - ax, bz - az), dx = (bx - ax) / len, dz = (bz - az) / len;
+          return { edge: (s: number): [number, number] => [ax + dx * s, az + dz * s], run: [0, len] as [number, number], turn: Math.atan2(dx, -dz), cosA: cornerCos(k), cosB: cornerCos((k + 1) % 4), len };
+        };
+        const sides = { s: sideFrom(0), e: sideFrom(1), n: sideFrom(2), w: sideFrom(3) };
+        type Side = keyof typeof sides;
+        const square = [0, 1, 2, 3].every((k) => Math.abs(cornerCos(k)) < 0.07);
+        // A classical block next to the square fronts it; any other, the street to the south. Half the time its chief front is one
+        // building, as broad as the block allows, with wings back along the side streets about a court: a U, or now and then an L.
+        const chief = (classic && blocksBySquare(blk) ? (blk.x0 >= t.square.x1 - 0.1 ? 'w' : 'e') : 's') as Side;
+        const across: Side = ({ s: 'n', n: 's', e: 'w', w: 'e' } as const)[chief];
+        const ends: Side[] = chief === 's' || chief === 'n' ? ['e', 'w'] : ['n', 's'];
+        const full = (k: Side) => k === chief || k === across;
+        // (Where the corner at an end of a side is not square, the houses along the two sides would meet in it: a full side keeps out of an
+        // acute corner by as much as the other side's houses stand in it, and an end side keeps further off as the corner closes.)
+        const trimFull = (cos: number) => (cos > 0 ? (deep * cos) / Math.sqrt(1 - cos * cos) + 0.3 : 0);
+        const trimEnd = (cos: number) => (deep * (1 + Math.max(0, cos))) / Math.sqrt(1 - cos * cos) + (Math.abs(cos) > 0.02 ? 0.3 : 0);
+        const span = (k: Side): [number, number] => {
+          const { run: [a, c], cosA, cosB } = sides[k];
+          return full(k) ? [a + trimFull(cosA), c - trimFull(cosB)] : [a + trimEnd(cosA), c - trimEnd(cosB)];
+        };
+        const winged = new Set<Side>();
+        const bySquare = classic && blocksBySquare(blk);
+        const isCanal = (k: Side) => { const S0 = sides[k], [mx, mz] = S0.edge(S0.len / 2); return canalSide(mx, mz, S0.turn) || (dutch && classic && !(bySquare && k === chief)); };
+        if (classic && square && !isCanal(chief) && q.fork('u').chance(0.5)) {
+          const r = q.fork('chief'), [a, c] = span(chief);
+          let bays = Math.min(15, Math.floor((c - a - 0.6 - 1.6) / 2.55));
+          if (bays % 2 === 0) bays--;
+          const length = Math.min(...ends.map((e) => sides[e].len)) - 2 * deep - 1.2;
+          if (bays >= 7 && length >= 6) {
+            const spec = classical(r, bays, deep, wash(r)), mid = (a + c) / 2, [ex, ez] = sides[chief].edge(mid), turn = sides[chief].turn;
+            const b: Building = { ...spec, x: round(ex - Math.cos(turn) * deep / 2), z: round(ez - Math.sin(turn) * deep / 2), faces: 'w', turn };
+            const width = round(r.range(5.4, Math.min(8.8, b.w / 2 - 4))), both = r.chance(0.75), one: -1 | 1 = r.chance(0.5) ? -1 : 1;
+            b.wings = (both ? [-1, 1] as const : [one]).map((side) => ({ side, width, length: round(length) }));
+            // (The side a wing stands on: the right hand of one who faces the front is (fz, -fx); the block's side that faces most that way.)
+            for (const g of b.wings) {
+              const rx = Math.sin(turn) * g.side, rz = -Math.cos(turn) * g.side;
+              winged.add((Object.keys(sides) as Side[]).reduce((m, k0) => (Math.cos(sides[k0].turn) * rx + Math.sin(sides[k0].turn) * rz > Math.cos(sides[m].turn) * rx + Math.sin(sides[m].turn) * rz ? k0 : m), 's' as Side));
+            }
+            b.y = round(townY(ex + Math.cos(turn) * 1.5, ez + Math.sin(turn) * 1.5) * 100) / 100;
+            classicalVariations(b, r.fork('variations'));
+            // (The chief building of the block on the square may be grander: columns, pavilions, a higher base.)
+            dealDress(b, r.fork('dress'), { raise: 1.8, fall: fallAlong(b), columns: true, fit: true });
+            b.plan = planClassical(b, r.fork('plan'));
+            t.buildings.push(b);
+          }
+        }
+        // A timber block may have on a corner of its south front a classical house of wood built as an L: its front on the street to the
+        // south, its wing down the side street; its door in its other end. The runs of the two fronts it stands on are shortened for it.
+        const trim: Partial<Record<Side, [number, number]>> = {};
+        if (!classic && square && q.fork('corner').chance(0.45)) {
+          const r = q.fork('corner house'), side: -1 | 1 = r.chance(0.5) ? -1 : 1, spec = wooden(r, r.range(11, 15), r.range(8.5, 10));
+          const width = round(r.range(7, Math.min(8.6, spec.w - 3))), length = round(Math.min(r.range(6, 10), Math.min(sides.e.len, sides.w.len) - spec.d - deep - 2));
+          if (length >= 5) {
+            const S = sides.s, [ex, ez] = S.edge(side > 0 ? S.len - spec.w / 2 : spec.w / 2), fx = Math.cos(S.turn), fz = Math.sin(S.turn);
+            const b: Building = { ...spec, x: round(ex - fx * spec.d / 2), z: round(ez - fz * spec.d / 2), faces: 'w', turn: S.turn, endDoor: side > 0 ? -1 : 1, wings: [{ side, width, length }] };
+            b.y = round(townY(ex + fx * 1.5, ez + fz * 1.5) * 100) / 100;
+            t.buildings.push(b);
+            trim.s = side > 0 ? [0, spec.w + 3] : [spec.w + 3, 0];
+            // (The side street's run, counted from the south for the west front and from the north for the east one.)
+            if (side > 0) trim.e = [spec.d + length + 0.6 - deep, 0]; else trim.w = [0, spec.d + length + 0.6 - deep];
+          }
+        }
+        const from = t.buildings.length;
+        for (const k of [chief, across, ...ends]) {
+          if (winged.has(k) || (k === chief && t.buildings.some((b) => b.wings && b.style === 'imperial' && outsideBlock(blk, b.x, b.z) === 0))) continue;
+          const [a0, c0] = span(k), [ta, tc] = trim[k] ?? [0, 0];
+          front(sides[k].edge, a0 + ta, c0 - tc, sides[k].turn, full(k) ? deep : Math.min(deep, Math.min(sides[chief].len, sides[across].len) / 2 - 1), isCanal(k));
+        }
+        // A closed block of classical buildings is entered from the street: through a carriage way under an arch in one of them, at least,
+        // into the yard within. (If none was given one, the broadest that can take one is.)
+        const mine = t.buildings.slice(from).filter((b) => b.style === 'imperial');
+        if (classic && !mine.some((b) => b.arch)) {
+          const pick = mine.filter((b) => archable(b) && !b.dress?.pavilions).sort((p, o) => o.w - p.w)[0];
+          if (pick) { const r = q.fork('arch'); pick.arch = { side: r.chance(0.5) ? -1 : 1 }; pick.plan = planClassical(pick, r.fork('plan')); }
+        }
+      }
+    }
+  } else layOutGrown();
 
   // ---- what stands close about each building: its neighbours' ground, in its own measures, and how high their walls rise over its
   // ground, so that no window is made that would look into a wall a stride or two off (`near`, `blinded`)
@@ -1024,13 +1398,13 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
     const wallTop = (b: Building) => (b.y ?? 0) + eavesOf(b);
     const tenth = (x: number) => Math.round(x * 10) / 10;
     for (const b of t.buildings) {
-      const own = footprintOf(b), m = CLOSE + 0.8;
-      const u0 = Math.min(...own.map((r) => r.u0)) - m, u1 = Math.max(...own.map((r) => r.u1)) + m, v0 = Math.min(...own.map((r) => r.v0)) - m, v1 = Math.max(...own.map((r) => r.v1)) + m;
+      const own = footprintOf(b).flatMap(partCorners), m = CLOSE + 0.8;
+      const u0 = Math.min(...own.map((p) => p[0])) - m, u1 = Math.max(...own.map((p) => p[0])) + m, v0 = Math.min(...own.map((p) => p[1])) - m, v1 = Math.max(...own.map((p) => p[1])) + m;
       const near: NonNullable<Building['near']> = [];
       for (const o of t.buildings) {
         if (o === b || Math.hypot(o.x - b.x, o.z - b.z) > reach(o) + reach(b) + m) continue;
         for (const r of footprintOf(o)) {
-          const at = ([[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]] as [number, number][]).map(([u, v]): [number, number] => { const [x, z] = fromBuilding(o, u, v), p = inBuilding(b, x, z); return [tenth(p.u), tenth(p.v)]; });
+          const at = partCorners(r).map(([u, v]): [number, number] => { const [x, z] = fromBuilding(o, u, v), p = inBuilding(b, x, z); return [tenth(p.u), tenth(p.v)]; });
           if (at.every(([u]) => u < u0) || at.every(([u]) => u > u1) || at.every(([, v]) => v < v0) || at.every(([, v]) => v > v1)) continue;
           near.push({ at, top: tenth(wallTop(o) - (b.y ?? 0)) });
         }
@@ -1043,6 +1417,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   {
     const s = t.square, q = rng.fork('market'), mid = (t.stair.x0 + t.stair.x1) / 2;
     t.fountain = { x: round(mid), z: round(s.z0 + run + (s.z1 - s.z0 - run) * q.range(0.4, 0.55)), r: round(q.range(2.8, 4)) };
+    // (In a square narrower to the south than its box, the fountain comes north until it has room about it.)
+    while (offSquare(t, t.fountain.x, t.fountain.z + t.fountain.r + 3) > 0 && t.fountain.z > s.z0 + run + t.fountain.r + 2) t.fountain.z = round(t.fountain.z - 1);
     const goods = ['fish', 'fruit', 'cloth', 'pots', 'bread'] as const;
     for (const side of [-1, 1]) {
       const x = side < 0 ? (s.x0 + mid - 5) / 2 : (s.x1 + mid + 5) / 2;
@@ -1050,6 +1426,8 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
         if (Math.hypot(x - t.fountain.x, z - t.fountain.z) < t.fountain.r + 4 || q.chance(0.25)) continue;
         for (const face of [-1, 1]) {
           if (q.chance(0.3)) continue;
+          // (Only well within the square, whatever its shape.)
+          if ([[-2.5, -1.6], [2.5, -1.6], [-2.5, 1.6], [2.5, 1.6]].some(([du, dv]) => !inSquare(t, x + face * 2.7 + du, z + dv))) continue;
           t.stalls.push({ x: round(x + face * q.range(2.2, 3.2)), z: round(z), w: round(q.range(2.4, 3.4)), d: round(q.range(1.6, 2.1)), turn: face < 0 ? 0 : Math.PI, awning: q.pick([[0.62, 0.12, 0.08], [0.15, 0.3, 0.5], [0.75, 0.6, 0.2], [0.2, 0.42, 0.25], [0.85, 0.82, 0.74]] as [number, number, number][]), goods: q.pick([...goods]) });
         }
       }
@@ -1099,6 +1477,14 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
   }
   /** Whether a point is in the river or on its banks, within a margin. */
   const nearRiver = (x: number, z: number, m: number) => !!t.river && riverAt(t, x, z).off < riverAt(t, x, z).half + m;
+  // (In a grown town the river's course above the square is laid after the houses, among them: those it runs through, or so near it
+  // that its banks would be against their walls, are taken away, with their lots.)
+  if (planKind === 'grown' && t.river) {
+    const wet = (b: Building) => outlineOf(b).some((ring) => ring.some(([x, z]) => nearRiver(x, z, 2.5))) || nearRiver(b.x, b.z, 2.5 + b.d / 2);
+    const gone = new Set(t.buildings.filter(wet));
+    t.buildings = t.buildings.filter((b) => !gone.has(b));
+    t.blocks = t.blocks.filter((blk) => ![...gone].some((b) => outsideBlock(blk, b.x, b.z) === 0));
+  }
 
   // ---- shacks: along the shore beyond the quay's ends, facing the water, some on posts at its edge; and on the fringes of the town
   {
@@ -1190,7 +1576,7 @@ export function layOutTown(site: Site, meadow: Place, doorX: number, rng: Rng, w
       for (let k = starts.length - 1; k > 0; k--) { const m = lq.int(0, k); [starts[k], starts[m]] = [starts[m], starts[k]]; }
       const open = (x: number, z: number) => x > box.x0 + 40 && x < box.x1 - 40 && z > box.z0 + 40 && nat(x, z) > sea + 1.5 && !inHarbour(t, x, z)
         && Math.hypot(x - centre.x, z - centre.z) < 380 && !t.blocks.some((b) => outsideBlock(b, x, z) < 3) && !t.buildings.some((b) => outsideBuilt(b, x, z) < 3)
-        && outsideRect(level, x, z) > 5 && outsideRect(t.square, x, z) > 3 && !t.storehouses.some((o) => Math.hypot(o.x - x, o.z - z) < 12) && !nearRiver(x, z, 5);
+        && outsideRect(level, x, z) > 5 && offSquare(t, x, z) > 3 && !t.storehouses.some((o) => Math.hypot(o.x - x, o.z - z) < 12) && !nearRiver(x, z, 5);
       let lanes = 0;
       const want = lq.int(3, 6);
       for (const st of starts) {
@@ -1426,7 +1812,7 @@ export function coastLine(t: Town, floor: number, x0: number, x1: number, z0: nu
 
 /** A building's outline on the ground, wings and all, as polygons of the site's points. */
 export function outlineOf(b: Building): [number, number][][] {
-  return footprintOf(b).map((r) => [[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]].map(([u, v]) => fromBuilding(b, u, v)));
+  return footprintOf(b).map((r) => partCorners(r).map(([u, v]) => fromBuilding(b, u, v)));
 }
 
 /**

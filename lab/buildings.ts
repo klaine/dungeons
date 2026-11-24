@@ -19,7 +19,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { churchParts } from '../src/core/brick';
-import { footprintOf } from '../src/core/building';
+import { FootPart, footprintOf, partCorners, wingFrame } from '../src/core/building';
 import { Building, Hour, SKIES, Stone } from '../src/core/site';
 import { solids as plainSolids } from '../src/render/buildings';
 import { MeshBuilder } from '../src/render/geom/meshBuilder';
@@ -150,7 +150,7 @@ const frameWait = () => new Promise<void>((done) => requestAnimationFrame(() => 
 /** Which way a building's front looks, and which way its breadth runs from its left end to its right as seen from before it, on the ground. */
 const axesOf = (turn: number) => { const t = rad(turn); return { front: new Vector3(Math.sin(t), 0, Math.cos(t)), along: new Vector3(Math.cos(t), 0, -Math.sin(t)) }; };
 /** How far the ground a building stands on reaches along its breadth, either side of its middle (a church's towers and choir included). */
-const spanOf = (it: Item) => { const r = footprintOf({ ...it.shape, x: 0, z: 0, faces: 'w' } as Building); return { lo: Math.min(...r.map((q) => q.u0)), hi: Math.max(...r.map((q) => q.u1)) }; };
+const spanOf = (it: Item) => { const r = footprintOf({ ...it.shape, x: 0, z: 0, faces: 'w' } as Building).flatMap((q) => partCorners(q)); return { lo: Math.min(...r.map((q) => q[0])), hi: Math.max(...r.map((q) => q[0])) }; };
 /** Sets `next` beside `prev`, wall to wall to its right as one stands before it, turned the same way, with their fronts on one line. */
 function besides(prev: Item, next: Item, gap = 0): void {
   const { front, along } = axesOf(prev.turn), a = spanOf(prev), b = spanOf(next);
@@ -608,7 +608,7 @@ async function start(): Promise<void> {
 
   // ------------------------------------------------------------------ buildings
   /** What is built of an item: its meshes, the box they fill, the ground it stands on, what it was built from, when and how long it took. */
-  interface Built { holder: Group; meshes: Mesh[]; cards: InstancedMesh[]; box: Box3; rects: { u0: number; u1: number; v0: number; v1: number }[]; sig: string; ms: number; at: number; triangles: number }
+  interface Built { holder: Group; meshes: Mesh[]; cards: InstancedMesh[]; box: Box3; rects: FootPart[]; sig: string; ms: number; at: number; triangles: number }
   const built = new Map<number, Built>();
   const dirty = new Set<number>();
   const world = new Group();
@@ -692,8 +692,10 @@ async function start(): Promise<void> {
       if (!it || b.box.isEmpty()) continue;
       local.copy(ray).applyMatrix4(b.holder.matrixWorld.clone().invert());
       for (const r of b.rects) {
-        box.min.set(-it.shape.d / 2 + r.v0, b.box.min.y, r.u0);
-        box.max.set(-it.shape.d / 2 + r.v1, b.box.max.y, r.u1);
+        // (A part turned with a wing that leans is taken by the box about it.)
+        const c = partCorners(r), us = c.map((p) => p[0]), vs = c.map((p) => p[1]);
+        box.min.set(-it.shape.d / 2 + Math.min(...vs), b.box.min.y, Math.min(...us));
+        box.max.set(-it.shape.d / 2 + Math.max(...vs), b.box.max.y, Math.max(...us));
         if (!local.intersectBox(box, at)) continue;
         const p = at.clone().applyMatrix4(b.holder.matrixWorld), far = p.distanceTo(ray.origin);
         if (!best || far < best.far) best = { id, point: p, far };
@@ -1303,8 +1305,9 @@ async function start(): Promise<void> {
         drag: (q, st, by) => reshape(q, st, (t) => { t.brickwork!.pitch = deg(Math.atan(Math.max(0.1, y + by - E) / half)); }) });
     }
     for (const g of s.wings ?? []) {
-      const u = g.side * (W / 2 - g.width / 2);
-      out.push({ id: `wing${g.side}`, label: 'wing', colour: ROSE, at: worldAt(it, u, mid, D + g.length), axis: 'v', sign: 1,
+      // (At the middle of its far end, where that is when it leans.)
+      const [u, v] = wingFrame({ ...s, x: 0, z: 0, faces: 'w' } as Building, g).to(g.side * (W / 2 - g.width / 2), D + g.length);
+      out.push({ id: `wing${g.side}`, label: 'wing', colour: ROSE, at: worldAt(it, u, mid, v), axis: 'v', sign: 1,
         drag: (q, st, by) => reshape(q, st, (t) => { const w = t.wings!.find((x) => x.side === g.side)!; w.length = st.shape.wings!.find((x) => x.side === g.side)!.length + by; }) });
     }
     return out;
@@ -1313,7 +1316,7 @@ async function start(): Promise<void> {
   const ringOf = (it: Item) => {
     const b = built.get(it.id)!, s = it.shape;
     let r = 2;
-    for (const q of b.rects) for (const [u, v] of [[q.u0, q.v0], [q.u1, q.v0], [q.u0, q.v1], [q.u1, q.v1]]) r = Math.max(r, Math.hypot(u * it.scale[0], (v - s.d / 2) * it.scale[2]));
+    for (const q of b.rects) for (const [u, v] of partCorners(q)) r = Math.max(r, Math.hypot(u * it.scale[0], (v - s.d / 2) * it.scale[2]));
     return r + 1.6;
   };
 
@@ -1392,7 +1395,7 @@ async function start(): Promise<void> {
   const groundOf = (it: Item, shrink = 0): Vector3[][] => {
     const b = built.get(it.id);
     if (!b) return [];
-    return b.rects.map((r) => [[r.u0 + shrink, r.v0 + shrink], [r.u1 - shrink, r.v0 + shrink], [r.u1 - shrink, r.v1 - shrink], [r.u0 + shrink, r.v1 - shrink]].map(([u, v]) => worldAt(it, u, 0.04, v)));
+    return b.rects.map((r) => partCorners(r, shrink).map(([u, v]) => worldAt(it, u, 0.04, v)));
   };
   /** Whether two four-sided figures on the ground overlap: there is no line between them along any of their sides' directions. */
   const overlaps = (a: Vector3[], c: Vector3[]) => {
@@ -1496,7 +1499,7 @@ async function start(): Promise<void> {
     // (A castle's, its chosen corner and what stands at it, and whether its wall is being edited.)
     const c = s.castle, at = c && corner !== null ? c.wall[corner] : undefined;
     const castle = c ? [corner, c.wall.length, at && c.towers.find((t) => Math.hypot(t.x - at[0], t.z - at[1]) < 0.5)?.kind, state.tool === 'extrude'] : null;
-    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire, canal, castle]);
+    return JSON.stringify([it.id, it.kind, s.storeys, s.heights.length, s.bays >= 7, s.bays >= 11, s.portico, s.pediment, s.wings?.length ?? 0, !!s.wedge, s.towers?.length ?? 0, bw?.gable, bw?.rendered, bw?.church?.towers, bw?.church?.spire, canal, castle]);
   };
   let shownLayout = '', sliding = false;
   /** Shows on the panel what everything now is. (One control that cannot show itself does not stop the rest.) */
@@ -1785,8 +1788,16 @@ async function start(): Promise<void> {
         if (s().wings?.length) {
           num('Wing width', R.classical.wingWidth, () => s().wings![0].width, (t, v) => { for (const g of t.wings!) g.width = v; });
           num('Wing length', R.classical.wingLength, () => s().wings![0].length, (t, v) => { for (const g of t.wings!) g.length = v; }, 'How far the wings reach back; each has its own arrow too', 0.1);
+          num('Wing lean', R.classical.wingLean, () => s().wings![0].lean ?? 0, (t, v) => { for (const g of t.wings!) g.lean = v; }, 'How far each wing turns from square to the back, in degrees: outward more than nothing, in over the court less; an L that is not square, as at a corner of streets that do not meet square, or a wing along a quay', 1);
         }
       } else el('p', selBox, 'Seven bays or more can have wings.').className = 'note';
+      pick('Wedge', [['None', 'none'], ['Left end', 'left'], ['Right end', 'right']], () => (s().wedge ? (s().wedge!.side < 0 ? 'left' : 'right') : 'none'), (t, v) => {
+        t.wedge = v === 'none' ? undefined : { side: v === 'left' ? -1 : 1, front: t.wedge?.front ?? 8, back: t.wedge?.back ?? 3 };
+      }, 'An end carried on to a slanting end wall, as where a building fills a corner whose streets do not meet square or stands on a river quay (in place of a wing at that end)');
+      if (s().wedge) {
+        num('Wedge front', R.classical.wedge, () => s().wedge!.front, (t, v) => { t.wedge!.front = v; }, 'How far the end is carried on along the front', 0.1);
+        num('Wedge back', R.classical.wedge, () => s().wedge!.back, (t, v) => { t.wedge!.back = v; }, 'How far along the back', 0.1);
+      }
       // The variations the town deals.
       if (s().portico) tick([['Pediment', () => s().pediment !== false, (t, v) => { t.pediment = v ? undefined : false; }, 'Over the middle that stands forward; without it the cornice runs straight across']]);
       if (s().bays >= 11) pick('Entrances', [['One', 1], ['Two', 2], ['Three', 3]], () => s().entrances?.length ?? 1, (t, v) => { t.entrances = v > 1 ? Array.from({ length: v }, () => 0) : undefined; }, 'Doors along a long front, each with its own hall and stair');

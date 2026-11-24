@@ -301,7 +301,7 @@ const townCount = only && only !== 'town' ? 0 : Math.ceil(count / 8);
 for (let n = 0; n < townCount; n++) {
   const seed = `town-check-${n}`;
   try {
-    const site = generateSite(seed, 'town'), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
+    const site = generateSite(seed, 'town', { townPlan: process.env.TOWNPLAN as MakeOptions['townPlan'] }), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
     if (!solve(site).ok) throw new Error('cannot be completed');
     const tally3 = (k: string) => towns.set(k, (towns.get(k) ?? 0) + 1);
     const cp = cathedralProblem(site);

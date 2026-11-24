@@ -7,7 +7,7 @@
 // from a site document, as a valley builds it; only where it stands, which way it is turned and how
 // it is scaled are the lab's. The document is always made at the origin facing `w`, and the lab
 // places what is built.
-import { classicalVariations, CLOSE, dealChapel, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
+import { classicalVariations, CLOSE, dealChapel, dealDress, floorOf, footprintOf, freeAtEnds, groundOf, inPart, partCorners, planClassical, planTimber, PLAIN_DRESS, timberFloor } from '../src/core/building';
 import { brickCountry, brickEaves, dealBrickHouse, dealChurch, planBrick } from '../src/core/brick';
 import { Rng } from '../src/core/rng';
 import { Vector3 } from 'three';
@@ -98,7 +98,7 @@ export const SHACK_BOARDS: Colour[] = [[0.42, 0.33, 0.24], [0.3, 0.26, 0.22], [0
 
 /** What belongs to one kind and to no other: taken away from a shape of another kind. */
 const OWN = {
-  classical: ['portico', 'wings', 'pediment', 'entrances', 'arch', 'brick', 'towers', 'dress'],
+  classical: ['portico', 'wings', 'wedge', 'pediment', 'entrances', 'arch', 'brick', 'towers', 'dress'],
   wooden: ['basement', 'endDoor', 'dormers'],
   timber: ['jetty', 'gable', 'door', 'burnt'],
   brick: ['brickwork'],
@@ -128,7 +128,7 @@ export function entrancesFor(bays: number, count: 2 | 3): number[] {
  */
 export const RANGES = {
   timber: { w: [5, 11], d: [5.5, 10], storeys: [1, 4], height: [2.2, 3.8], bays: [1, 4], jetty: [0, 0.6] },
-  classical: { bays: [3, 25], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 16], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], towerSize: [4, 6.4], towerExtra: [1, 3], plinth: [0.5, 2.5] },
+  classical: { bays: [3, 25], pitch: [2.2, 3.2], margin: 1.6, d: [8.5, 16], storeys: [1, 6], height: [2.8, 5.5], wingWidth: [5.4, 8.8], wingLength: [6, 18], wingLean: [-35, 40], wedge: [0, 30], towerSize: [4, 6.4], towerExtra: [1, 3], plinth: [0.5, 2.5] },
   wooden: { w: [9, 24], d: [7, 12], storeys: [1, 2], height: [2.7, 3.8], basement: [0.4, 2], dormers: [0, 5], wingWidth: [5, 10], wingLength: [5, 14] },
   shack: { w: [2.6, 6], d: [3, 6.5], stilts: [0, 2.5] },
   // (The village church's as the village deals it, and somewhat past: its nave, its tower's breadth and how far it rises over the nave,
@@ -320,9 +320,25 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     if (s.bays < 7 || most < R.wingWidth[0]) delete s.wings;
     else if (s.wings?.length) {
       const sides = [...new Set(s.wings.map((g) => (g.side < 0 ? -1 : 1) as -1 | 1))].sort();
-      const width = r2(clamp(s.wings[0].width, R.wingWidth[0], most));
-      s.wings = sides.map((side) => ({ side, width, length: r2(clamp(s.wings!.find((g) => (g.side < 0 ? -1 : 1) === side)!.length, R.wingLength[0], R.wingLength[1])) }));
+      // (A wing that leans covers more of the back than its width, `width / cos(lean)`: it is kept as narrow as that needs. And two that
+      // lean in are kept from closing the court between them, three metres wide at the least at their far ends.)
+      let lean = Math.round(clamp(s.wings[0].lean ?? 0, R.wingLean[0], R.wingLean[1]));
+      const width = r2(clamp(s.wings[0].width, R.wingWidth[0], Math.max(R.wingWidth[0], most * Math.cos((lean * Math.PI) / 180))));
+      const lengths = sides.map((side) => r2(clamp(s.wings!.find((g) => (g.side < 0 ? -1 : 1) === side)!.length, R.wingLength[0], R.wingLength[1])));
+      const court = (a: number) => s.w - (2 * width) / Math.cos((a * Math.PI) / 180) - 2 * Math.max(...lengths) * Math.sin((-a * Math.PI) / 180);
+      while (sides.length === 2 && lean < 0 && court(lean) < 3) lean++;
+      while (width / Math.cos((lean * Math.PI) / 180) > s.w / 2 - 3) lean += lean > 0 ? -1 : 1;
+      s.wings = sides.map((side, i) => ({ side, width, length: lengths[i], ...(lean ? { lean } : {}) }));
     } else delete s.wings;
+    // A wedge at one end, in place of a wing there: carried on along the front and the back, not both by nothing, its end slanting no
+    // more than sixty-five degrees from square.
+    if (s.wedge) {
+      const side: -1 | 1 = s.wedge.side < 0 ? -1 : 1, most = s.d * Math.tan((65 * Math.PI) / 180);
+      let front = r2(clamp(s.wedge.front, R.wedge[0], R.wedge[1])), back = r2(clamp(s.wedge.back, R.wedge[0], R.wedge[1]));
+      if (Math.abs(front - back) > most) { if (front > back) front = r2(back + most); else back = r2(front + most); }
+      if (Math.max(front, back) < 1) delete s.wedge;
+      else { s.wedge = { side, front, back }; if (s.wings) { s.wings = s.wings.filter((g) => g.side !== side); if (!s.wings.length) delete s.wings; } }
+    }
     keep(s, 'classical');
     // The variations the town deals: a middle that stands forward without its pediment; two or three entrances along a front of
     // eleven bays or more; a carriage way through the two bays at an end with no wing; walls of bare brick; towers at the corners.
@@ -331,7 +347,7 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     if (s.bays < 11 || doors < 2) delete s.entrances;
     else s.entrances = entrancesFor(s.bays, doors >= 3 ? 3 : 2);
     if (s.arch) {
-      if (s.wings?.length || freeAtEnds(s as Building) < 2) delete s.arch;
+      if (s.wings?.length || freeAtEnds(s as Building) < 2 || (s.wedge && s.wedge.side === (s.arch.side < 0 ? -1 : 1))) delete s.arch;
       else s.arch = { side: s.arch.side < 0 ? -1 : 1 };
     }
     if (s.brick !== 'stucco' && s.brick !== 'bare') delete s.brick;
@@ -342,7 +358,8 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
     d.centre = s.portico ? clamp(odd(d.centre), 3, Math.max(3, Math.min(9, s.bays - 2))) : 3;
     d.order = s.portico && d.order === 'columns' ? 'columns' : 'pilasters';
     const beside = s.portico ? middle - (d.centre - 1) / 2 : middle - (s.bays >= 7 ? 1 : 0);
-    d.pavilions = clamp(Math.round(d.pavilions), 0, Math.max(0, Math.min(3, beside - 1)));
+    // (None where there is a wedge: a pavilion would stand forward in the middle of the front carried on.)
+    d.pavilions = s.wedge ? 0 : clamp(Math.round(d.pavilions), 0, Math.max(0, Math.min(3, beside - 1)));
     if ((d.centre > 3 || d.pavilions) && s.entrances) delete s.entrances;
     if (d.pavilions && s.arch) delete s.arch;
     d.arches = clamp(Math.round(d.arches), 0, s.storeys > 1 ? 2 : 1) as 0 | 1 | 2;
@@ -369,6 +386,7 @@ export function normalise(kind: Kind, given: Shape, asked: 'w' | 'bays' = 'w'): 
         const most = t.corner === 'wing' ? Math.min(front, s.wings!.find((g) => g.side === t.side)!.width) : front;
         return { corner: t.corner, side: (t.side < 0 ? -1 : 1) as -1 | 1, size: r2(clamp(t.size, R.towerSize[0], most)), extra: clamp(Math.round(t.extra), R.towerExtra[0], R.towerExtra[1]) };
       }).filter((t) => t.size >= R.towerSize[0] && (t.corner !== 'wing' || s.wings!.find((g) => g.side === t.side)!.width >= R.towerSize[0]) && (t.corner === 'wing' || Math.min(R.towerSize[1], s.w / 2 - 3.5) >= R.towerSize[0]));
+      if (s.wedge) s.towers = s.towers.filter((t) => t.corner === 'wing' || t.side !== s.wedge!.side);
       if (!s.towers.length) delete s.towers;
     } else delete s.towers;
     return s;
@@ -662,7 +680,7 @@ export function roomOf(item: Item, others: Item[], topOf: (q: Item) => number, r
   for (const q of others) {
     if (q.id === item.id || q.kind === 'tree') continue;
     for (const r of footprintOfItem(q)) {
-      const at = ([[r.u0 - m, r.v0 - m], [r.u1 + m, r.v0 - m], [r.u1 + m, r.v1 + m], [r.u0 - m, r.v1 + m]] as [number, number][]).map(([u, v]) => local(...squareAt(q, u, v)));
+      const at = partCorners(r, -m).map(([u, v]) => local(...squareAt(q, u, v)));
       if (at.every(([x]) => x < -reach) || at.every(([x]) => x > reach) || at.every(([, z]) => z < -reach) || at.every(([, z]) => z > reach)) continue;
       walls.push({ at, y0: -2, y1: tenth((topOf(q) + 0.3) / sy) });
     }
@@ -690,7 +708,7 @@ function within2(ring: [number, number][], x: number, y: number): boolean {
 export function standsIn(item: Item, x: number, z: number, room = 0): boolean {
   const [u, v] = planAt(item, x, z);
   if (item.kind === 'tree') return Math.hypot(u, v - item.shape.d / 2) < Math.max(0.4, item.shape.tree!.girth * 2) + room;
-  return footprintOfItem(item).some((r) => u > r.u0 - room && u < r.u1 + room && v > r.v0 - room && v < r.v1 + room);
+  return footprintOfItem(item).some((r) => inPart(r, u, v) > -room);
 }
 
 /** Where a point of an item's ground plan (`u` across its front, `v` back from it, in its own measures) stands in the square. */
@@ -714,14 +732,14 @@ const footprintOfItem = (item: Item) => footprintOf({ ...item.shape, x: 0, z: 0,
 export function nearOf(item: Item, others: Item[]): Building['near'] {
   // (Trees and stones shut no windows; and have none.)
   if (isNature(item.kind)) return undefined;
-  const own = footprintOfItem(item), reach = CLOSE + 0.8;
-  const u0 = Math.min(...own.map((r) => r.u0)) - reach, u1 = Math.max(...own.map((r) => r.u1)) + reach, v0 = Math.min(...own.map((r) => r.v0)) - reach, v1 = Math.max(...own.map((r) => r.v1)) + reach;
+  const own = footprintOfItem(item).flatMap((r) => partCorners(r)), reach = CLOSE + 0.8;
+  const u0 = Math.min(...own.map((p) => p[0])) - reach, u1 = Math.max(...own.map((p) => p[0])) + reach, v0 = Math.min(...own.map((p) => p[1])) - reach, v1 = Math.max(...own.map((p) => p[1])) + reach;
   const out: NonNullable<Building['near']> = [], tenth = (x: number) => Math.round(x * 10) / 10;
   for (const q of others) {
     if (q.id === item.id || isNature(q.kind)) continue;
     const top = tenth((eavesOf(q) * q.scale[1] + liftOf(q) - liftOf(item)) / item.scale[1]);
     for (const r of footprintOfItem(q)) {
-      const at = ([[r.u0, r.v0], [r.u1, r.v0], [r.u1, r.v1], [r.u0, r.v1]] as [number, number][]).map(([u, v]) => planAt(item, ...squareAt(q, u, v)));
+      const at = partCorners(r).map(([u, v]) => planAt(item, ...squareAt(q, u, v)));
       if (at.every(([u]) => u < u0) || at.every(([u]) => u > u1) || at.every(([, v]) => v < v0) || at.every(([, v]) => v > v1)) continue;
       out.push({ at: at.map(([u, v]) => [tenth(u), tenth(v)]), top });
     }
