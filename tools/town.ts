@@ -11,6 +11,7 @@
 import { generateSite, MakeOptions } from '../src/core/generate';
 import { meshSite } from '../src/render/siteMesher';
 import { worldLand } from '../src/core/worldLand';
+import { cityAskedFromWords } from '../src/core/town';
 
 const count = Number(process.argv[2] ?? 12), prefix = process.argv[3] ?? 'town';
 const inWorld = process.env.WORLD, coasts = inWorld ? worldLand(inWorld).places.filter((q) => q.kind === 'coast') : [];
@@ -18,9 +19,9 @@ if (inWorld && !coasts.length) { console.log(`world ${inWorld} has no coastal to
 let failed = 0, slowest = 0;
 for (let k = 0; k < count; k++) {
   const seed = `${prefix}${k}`, at = inWorld ? coasts[k % coasts.length] : undefined, t1 = performance.now();
-  // (`TOWNPLAN=grown` before it asks for towns of that plan.)
-  const townPlan = process.env.TOWNPLAN as MakeOptions['townPlan'];
-  const site = generateSite(seed, 'town', at ? { world: { seed: inWorld!, n: at.n }, townPlan } : { townPlan });
+  // (`TOWNPLAN=city` before it asks for towns of that plan; `CITY='size=medium walls=1'` for a city's settings.)
+  const townPlan = process.env.TOWNPLAN as MakeOptions['townPlan'], city = cityAskedFromWords(process.env.CITY);
+  const site = generateSite(seed, 'town', at ? { world: { seed: inWorld!, n: at.n }, townPlan, city } : { townPlan, city });
   if (at) console.log(`${seed} at ${at.name} (coastal town ${at.n} of ${inWorld}${site.town?.terrain.world ? '' : ', NOT FOUND THERE'}), laid out in ${(performance.now() - t1).toFixed(0)} ms; the quay ${Math.hypot(site.town!.terrain.u - at.x, site.town!.terrain.v - at.z).toFixed(0)} m from the world's spot`);
   const t0 = performance.now();
   const scene = meshSite(site);

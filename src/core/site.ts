@@ -641,6 +641,32 @@ export interface Building {
  * and on the fringes, along the shore and up the slopes, shacks. Outside the town are fields, and
  * woods up the hills.
  */
+/**
+ * The settings of a city (a harbour town of the plan `city`), named as watabou's Medieval Fantasy City Generator names them (and
+ * asked for by the same names in the address: `?size=small&walls=1&citadel=1&urban_castle=0&river=1&greens=0&shantytown=1&gates=-1`).
+ * A harbour town always has its temple (the house, at the head of the square), its plaza (the square) and its coast.
+ */
+export interface CityOptions {
+  /** How much of a city: small unless asked, as a larger one is heavier to draw. */
+  size: 'small' | 'medium' | 'large';
+  /** A citadel: a ward walled round, with a gate, and a great building in it. */
+  citadel: boolean;
+  /** The citadel within the city (an inner castle) rather than at its edge. */
+  urbanCastle: boolean;
+  /** A curtain wall round the city's wards, with towers and a gate where each road goes through. */
+  walls: boolean;
+  river: boolean;
+  /** Some wards left as parks. */
+  greens: boolean;
+  /** Shacks along lanes wandering out from the city's edge. */
+  shantytown: boolean;
+  /** How many roads come in, each a main street to the square; −1 for as many as the world's ways bring (two or three without a world). */
+  gates: number;
+  temple: true;
+  plaza: true;
+  coast: true;
+}
+
 export interface Town {
   /**
    * Where the land was found: the frame's seed, the point of the frame under the middle of the quay's edge, how far the frame is
@@ -695,9 +721,28 @@ export interface Town {
    * as an old town's; or none, `grown` as a village grows, its lanes grown over the land and houses along them (its `blocks` are then
    * each house's lot, the house and its yard behind it).
    */
-  plan?: 'planned' | 'shore' | 'fan' | 'old' | 'grown';
-  /** The blocks of buildings: each its four corners, south-west, south-east, north-east, north-west (south being towards the sea), and the box about them. */
-  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber'; corners?: [number, number][] }[];
+  plan?: 'planned' | 'shore' | 'fan' | 'old' | 'grown' | 'city';
+  /** A city's settings (the plan `city`), as watabou's City Generator offers them: what was asked for, and the rest as dealt. */
+  city?: CityOptions;
+  /**
+   * A city's walls: the curtain round its wards, from the shore round to the shore (`closed` false), and a citadel's round it (`closed`):
+   * each its line of corners, its towers, and its gates, each where a road goes through, facing out along the bearing `out` (from
+   * greater x towards greater z), `w` broad. `height` from the ground to the wall-walk, `thick` through.
+   */
+  cityWalls?: { line: [number, number][]; closed: boolean; towers: { x: number; z: number; r: number }[]; gates: { x: number; z: number; out: number; w: number }[]; height: number; thick: number }[];
+  /**
+   * A city's citadel, built as a valley's castle is (`Castle`, drawn by `render/castle.ts`): its curtain round its ward with towers of
+   * several kinds at its corners, its gate onto its best street, the stair to its walk, ranges and a well in its bailey; its bailey
+   * levelled at `floor`; and its `keep`, a tower that can be gone into and climbed. Its great building, if it has room for one, is
+   * among the town's buildings.
+   */
+  citadel?: { castle: Castle; floor: number; keep: Tower };
+  /**
+   * The blocks of buildings: each its corners, going round with its inside on the right hand (for four, south-west, south-east,
+   * north-east, north-west, south being towards the sea), and the box about them. A city's blocks may have more corners than four,
+   * and a `green` one is a park, built on by nothing.
+   */
+  blocks: { x0: number; x1: number; z0: number; z1: number; kind: 'classical' | 'timber' | 'green'; corners?: [number, number][] }[];
   /** The buildings of the blocks and the farms: each with its `turn` and its `y`. */
   buildings: Building[];
   /**

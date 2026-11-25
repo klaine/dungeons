@@ -1,7 +1,7 @@
 import { Rng } from './rng';
 import { leverSpot, solve } from './mission';
 import { buildingHeight, layOutTown } from './town';
-import type { Town } from './site';
+import type { CityOptions, Town } from './site';
 import {
   allReachable, Cathedral, CathedralPart, neighbours, OPPOSITE, Place, POINTED_RISE, ROUND_TREAD as ROUND, roundLegs, Setting, Side, Site, SKIES,
   SpireKind, STEP_RISE, SUNWISE, vaultRise, Way, WHEN,
@@ -48,7 +48,7 @@ export function toplineOf(p: Place): number {
   return p.floor + p.wall + (p.roof === 'barrel' ? vaultRise(p) + 0.7 : p.roof === 'timber' ? 0.35 : 0);
 }
 
-export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld?: { seed: string; n: number }, townPlan?: NonNullable<Town['plan']>): Site {
+export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld?: { seed: string; n: number }, townPlan?: NonNullable<Town['plan']>, city?: Partial<CityOptions>): Site {
   // ---- its measures: from a stream of their own
   const m = streamOf(rng, 'measures');
   const twin = m.chance(0.7);
@@ -204,7 +204,7 @@ export function draftCathedral(seed: string, setting: Setting, rng: Rng, inWorld
     seed, places, ways, items: [], levers: [], secret: hidden.id, start: forecourt.id, wallThickness: T, top: 0, entrance: narthex.id, goal: shrine.id,
     setting, sun: [sky[0] / l, sky[1] / l, sky[2] / l], title: '', cathedral,
   };
-  layOutTown(site, forecourt, 0, rng.fork('town'), true, inWorld, townPlan);
+  layOutTown(site, forecourt, 0, rng.fork('town'), true, inWorld, townPlan, city);
 
   // ---- how high: the tallest buildings about the square, and the nave's ridge between half as high again as they are and three times
   const h = streamOf(rng, 'heights');

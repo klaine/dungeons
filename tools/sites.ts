@@ -9,7 +9,7 @@ import { solve } from '../src/core/mission';
 import { loopCount, roundStair, Site } from '../src/core/site';
 import { inland, landAt } from '../src/core/island';
 import { inside } from '../src/core/mountain';
-import { nearLine, outlineOf, outsideBuilt, townGround } from '../src/core/town';
+import { cityAskedFromWords, nearLine, outlineOf, outsideBuilt, townGround } from '../src/core/town';
 import { brickDoor, brickShell } from '../src/core/brick';
 import { canalDoor, canalShell } from '../src/core/canal';
 import { planProblem } from '../src/core/interior';
@@ -301,7 +301,7 @@ const townCount = only && only !== 'town' ? 0 : Math.ceil(count / 8);
 for (let n = 0; n < townCount; n++) {
   const seed = `town-check-${n}`;
   try {
-    const site = generateSite(seed, 'town', { townPlan: process.env.TOWNPLAN as MakeOptions['townPlan'] }), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
+    const site = generateSite(seed, 'town', { townPlan: process.env.TOWNPLAN as MakeOptions['townPlan'], city: cityAskedFromWords(process.env.CITY) }), t = site.town!, F = site.places.find((p) => p.role === 'approach')!.floor;
     if (!solve(site).ok) throw new Error('cannot be completed');
     const tally3 = (k: string) => towns.set(k, (towns.get(k) ?? 0) + 1);
     const cp = cathedralProblem(site);

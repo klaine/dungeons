@@ -11,7 +11,7 @@ import { clearOfWays, GivenWay, GrowLand, GrowOptions, growWays, lineWays, Pt } 
 import { armRise, armsOf, edgeAt, findSeat, hallOnward, insideOf, joinLine, shapeValley, slantAt, valleyLand, walkable } from './valley';
 import { classicalFront, classicalVariations, dealChapel, dealDress, floorOf, footprintOf, planClassical, planTimber, timberFloor } from './building';
 import { brickCountry, dealBrickHouse, dealChurch, planBrick } from './brick';
-import { allReachable, Building, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
+import { allReachable, Building, CityOptions, Feature, Hour, loopCount, neighbours, Place, Role, Roof, Setting, Side, shoreOf, Site, SKIES, Stone, Stream, Terrace, Way, WHEN } from './site';
 
 /**
  * Site generator: a walled house of rooms, entered from a forecourt, with a sanctum to reach.
@@ -191,7 +191,9 @@ export interface MakeOptions {
   /** What settlement a valley is to have, whatever the seed would give it (`none` for none); if there is no room for it, what there is room for. */
   settlement?: NonNullable<Site['settlement']> | 'none';
   /** What plan a harbour town's streets are to be laid on, whatever the seed would give it (`grown` for none: see `layOutGrown` in `town.ts`). */
-  townPlan?: 'planned' | 'shore' | 'fan' | 'old' | 'grown';
+  townPlan?: 'planned' | 'shore' | 'fan' | 'old' | 'grown' | 'city';
+  /** A city's settings (`townPlan` `city`, two towns in five), whatever the seed would deal; small unless a size is asked. */
+  city?: Partial<CityOptions>;
 }
 
 export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: MakeOptions = {}): Site {
@@ -246,7 +248,7 @@ export function generateSite(seed: string, kind: PlaceKind = 'valley', opts: Mak
     setting.kind = 'cathedral';
     let why = '';
     for (let attempt = 0; attempt < 4; attempt++) {
-      try { return draftCathedral(seed, setting, base.fork(attempt ? `cathedral/${attempt}` : 'cathedral'), opts.world, opts.townPlan); } catch (e) { why = (e as Error).message; }
+      try { return draftCathedral(seed, setting, base.fork(attempt ? `cathedral/${attempt}` : 'cathedral'), opts.world, opts.townPlan, opts.city); } catch (e) { why = (e as Error).message; }
     }
     throw new Error(why);
   }
@@ -2315,7 +2317,7 @@ function draftSite(seed: string, setting: Setting, rng: Rng, size = MAX_ROOMS, k
   const inWorld = opts.terrain === 'eroded' ? opts.world : undefined;
   if (kind === 'island') layOutIsland(site, forecourt, ecx, rng.fork('island'), opts.terrain === 'eroded', inWorld);
   else if (kind === 'mountain') layOutMountain(site, forecourt, ecx, rng.fork('mountain'), opts.terrain === 'eroded', inWorld);
-  else if (kind === 'town') layOutHarbourTown(site, forecourt, ecx, rng.fork('town'), opts.terrain === 'eroded', inWorld, opts.townPlan);
+  else if (kind === 'town') layOutHarbourTown(site, forecourt, ecx, rng.fork('town'), opts.terrain === 'eroded', inWorld, opts.townPlan, opts.city);
   else layOutValley(site, forecourt, ecx, rng.fork('valley'), opts.terrain === 'eroded', inWorld, opts.settlement);
   const adj = neighbours(site);
   const depth = new Map<number, number>([[forecourt.id, 0]]);

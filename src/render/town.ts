@@ -14,6 +14,7 @@ import { anyAngle, layBoat, layBollard } from './coast';
 import { buildShack } from './shack';
 import { buildBuilding } from './buildings';
 import { layWall } from './walls';
+import { buildCityWall } from './cityWall';
 import { placeHouse } from './housePlacing';
 import { hallGeometry } from './greatHall';
 import type { IslandBuild, IslandResult } from './island';
@@ -119,7 +120,8 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
         zone[k] = Z.field; fieldOf[k] = n;
       });
     });
-    for (const blk of t.blocks) paint(blk, (k, x, z) => { if (outsideBlock(blk, x, z) === 0) zone[k] = Z.yard; });
+    // (A city's park is open ground, grass and trees, not a yard.)
+    for (const blk of t.blocks) if (blk.kind !== 'green') paint(blk, (k, x, z) => { if (outsideBlock(blk, x, z) === 0) zone[k] = Z.yard; });
     for (const s of t.streets) {
       const xs = s.line.map((q) => q[0]), zs = s.line.map((q) => q[1]), half = s.width / 2;
       paint({ x0: Math.min(...xs) - half - 1, x1: Math.max(...xs) + half + 1, z0: Math.min(...zs) - half - 1, z1: Math.max(...zs) + half + 1 }, (k, x, z) => {
@@ -158,6 +160,16 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       if (d > pave[k] - 0.3) { pave[k] = Math.max(pave[k], d); flagsAt[k] = 1; laidBy.set(n === 1 ? [z - r.z0, r.x0 - x, Math.PI / 2, 1002] : [x - r.x0, z - r.z0, 0, 1001 + n], k * 4); }
     }));
     for (const bd of t.buildings) { const r = Math.max(bd.w, bd.d) + 14; paint({ x0: bd.x - r, x1: bd.x + r, z0: bd.z - r, z1: bd.z + r }, (k, x, z) => { if (outsideBuilt(bd, x, z) < 0.6) zone[k] = Z.built; }); }
+    // (A city's walls and towers, where nothing grows; but its gates, where the way goes through. Its citadel's curtain, towers and
+    // keep likewise.)
+    const cd = t.citadel;
+    for (const w of [...(t.cityWalls ?? []), ...(cd ? [{ line: cd.castle.wall, closed: true, thick: cd.castle.thick, gates: [{ ...cd.castle.gate, w: cd.castle.gate.w }], towers: [...cd.castle.towers.map((tw) => ({ x: tw.x, z: tw.z, r: tw.r })), { x: cd.keep.x, z: cd.keep.z, r: cd.keep.half * 1.45 }] }] : [])]) {
+      const line = (w.closed ? [...w.line, w.line[0]] : w.line).map(([x, z]) => [x, z, 0] as [number, number, number]), xs = line.map((p) => p[0]), zs = line.map((p) => p[1]);
+      paint({ x0: Math.min(...xs) - 8, x1: Math.max(...xs) + 8, z0: Math.min(...zs) - 8, z1: Math.max(...zs) + 8 }, (k, x, z) => {
+        if (w.gates.some((g) => Math.hypot(g.x - x, g.z - z) < g.w / 2)) return;
+        if (nearLine(line, x, z).off < w.thick / 2 + 0.8 || w.towers.some((tw) => Math.hypot(tw.x - x, tw.z - z) < tw.r + 0.8)) zone[k] = Z.built;
+      });
+    }
     for (const s of t.shacks) { const r = Math.max(s.w, s.d); paint({ x0: s.x - r, x1: s.x + r, z0: s.z - r, z1: s.z + r }, (k, x, z) => { if (Math.hypot(x - s.x, z - s.z) < r * 0.62) zone[k] = Z.shack; }); }
     // (The storehouses' quays, a band either side of their line: made, not rock; and the outlook's ring, flagged.)
     for (const w of t.wharves) { const xs = w.line.map((q0) => q0[0]), zs = w.line.map((q0) => q0[1]); paint({ x0: Math.min(...xs) - 6, x1: Math.max(...xs) + 6, z0: Math.min(...zs) - 6, z1: Math.max(...zs) + 6 }, (k, x, z) => { if (nearLine(w.line.map(([a, c]) => [a, c, 0] as P3), x, z).off < 4.5) zone[k] = Z.quay; }); }
@@ -1523,6 +1535,12 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
   // ---- walls of dry stone about the fields
   t.walls.forEach((w, k) => layWall(mesh, w, ground, [0.62 * (0.6 + 0.4 * tint[0]), 0.6 * (0.6 + 0.4 * tint[1]), 0.56 * (0.6 + 0.4 * tint[2])], rng.fork(`wall${k}`)));
 
+  // ---- a city's walls and its citadel's (`cityWall.ts`): within an open one is the square; within a citadel's, its middle
+  (t.cityWalls ?? []).forEach((w, k) => {
+    const inside: [number, number] = w.closed ? [w.line.reduce((s, p) => s + p[0], 0) / w.line.length, w.line.reduce((s, p) => s + p[1], 0) / w.line.length] : [(t.square.x0 + t.square.x1) / 2, (t.square.z0 + t.square.z1) / 2];
+    buildCityWall(mesh, w, ground, shade(stone, 0.92), rng.fork(`city wall${k}`), inside);
+  });
+
   // ---- the outlook: a ring of stone at the cliff's edge with a parapet towards the sea, and a belvedere: a round temple of six columns
   if (t.outlook) {
     const o = t.outlook, at = frame(o.x, o.z, o.y, o.facing), n = 20, white: Colour = shade(stone, 1.15);
@@ -1734,6 +1752,19 @@ export function buildTown(b: IslandBuild): IslandResult & { smokes: { x: number;
       }
     }
     count('town trees', townTrees);
+    // A city's parks: limes standing about in the grass, a dozen or so to a ward, well in from its streets.
+    let parkTrees = 0;
+    for (const [n, blk] of t.blocks.entries()) {
+      if (blk.kind !== 'green') continue;
+      const pq = rng.fork(`park${n}`), want = Math.min(14, Math.round(((blk.x1 - blk.x0) * (blk.z1 - blk.z0) * 0.6) / 170));
+      for (let tries = 0, made = 0; tries < want * 8 && made < want; tries++) {
+        const x = pq.range(blk.x0 + 3, blk.x1 - 3), z = pq.range(blk.z0 + 3, blk.z1 - 3);
+        if ([[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]].some(([dx, dz]) => outsideBlock(blk, x + dx, z + dz) > 0) || zoneAt(x, z) !== Z.wild || !roomFor(x, z, 3.5)) continue;
+        lime(x, z, pq.range(9, 13), `park${n}.${made}`);
+        made++; parkTrees++;
+      }
+    }
+    count('park trees', parkTrees);
     // Gardens in the yards: a fruit tree or two, beds of vegetables in rows, flowers along the walls.
     let fruitInYards = 0;
     for (const [n, blk] of t.blocks.entries()) {

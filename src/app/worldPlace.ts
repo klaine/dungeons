@@ -49,7 +49,7 @@ export async function loadWorldPlace(seed: string, kind: WorldPlace['kind'], n: 
       map = worldMapOf(data);
       const f = new HeightField(data.field.x0, data.field.z0, data.field.cell, data.field.nx, data.field.nz);
       f.data.set(data.field.data);
-      land = adoptWorldLand({ seed, hx: data.plan.hx, hz: data.plan.hz, field: f, tiles: new Map(), places: data.places, lakes: data.lakes });
+      land = adoptWorldLand({ seed, hx: data.plan.hx, hz: data.plan.hz, field: f, tiles: new Map(), places: data.places, lakes: data.lakes, ways: data.ways });
     }
     const place = land.places.find((q) => q.kind === kind && q.n === n);
     if (!place) {

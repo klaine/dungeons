@@ -29,6 +29,7 @@ import { buildIsland } from './island';
 import { landAt as islandLandAt } from '../core/island';
 import { buildMountain } from './mountain';
 import { buildTown } from './town';
+import { townGround } from '../core/town';
 import { layWall } from './walls';
 import { bartizan, buildCastle } from './castle';
 import { castleOff } from '../core/castle';
@@ -4270,6 +4271,15 @@ export function* meshSiteSteps(site: Site): Generator<MeshStage, SceneDescriptio
     buildFront(p, fx0, fx1);
     wild.field = outdoorFieldAt(p.floor, 1.5);
     const made = buildTown({ site, p, kit, wild, rng: rng.fork('approach'), planting, cards: scenery.cards, fences, finds, outerRects, stoneTint, flag: built.flag });
+    // A city's citadel, built as a valley's castle is: its curtain, towers, gate, stair, ranges and well (`render/castle.ts`), on the
+    // town's own ground about a bailey levelled at its floor; and its keep, as the castle's keep is built.
+    if (site.town?.citadel) {
+      const T = site.town, cd = T.citadel!, wasGroup = wild.group;
+      wild.group = 'castle';
+      buildCastle({ c: cd.castle, mesh: (material) => wild.mesh(material), ground: (x, z) => townGround(T, p.floor, x, z), floor: cd.floor, stone: stoneTint });
+      wild.group = wasGroup;
+      buildTower(cd.keep, cd.floor);
+    }
     smokes.push(...made.smokes);
     paving = made.paving;
     lamps = made.lamps;

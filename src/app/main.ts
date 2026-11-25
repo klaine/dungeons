@@ -1,3 +1,4 @@
+import { cityAsked } from '../core/town';
 import {
   ACESFilmicToneMapping, AgXToneMapping, NeutralToneMapping, BoxGeometry, BufferAttribute, InterleavedBufferAttribute, BufferGeometry, Color, FrontSide, InstancedMesh, PointLight, DirectionalLight, DoubleSide, Mesh, MeshBasicMaterial,
   SphereGeometry,
@@ -250,9 +251,9 @@ async function start(): Promise<void> {
   // (The brown brick of a town's classical buildings, in running bond, is only in towns.)
   const brick = place === 'town' ? await built('brick') : null;
   // (The coursed stone of a castle's walls and towers, in a valley.)
-  // (A valley's castle and its village's church, and an island's castle, are of it.)
+  // (A valley's castle and its village's church, an island's castle, and a city's walls and towers, are of it.)
   // (Painted at twice the breadth of the others, up to 2048, since it covers four metres to their two: see `laidUnrepeated`.)
-  const castleStone = place === 'valley' || place === 'island' ? await built('castle') : null;
+  const castleStone = place === 'valley' || place === 'island' || place === 'town' ? await built('castle') : null;
   // (And the ashlar of a cathedral's walls, laid as a picture and not stone by stone, is only in towns, where the cathedral is.)
   const ashlar = place === 'town' ? await built('ashlar') : null;
   // On an island the bare ground is sand, where in a valley it is beaten earth.
@@ -308,14 +309,17 @@ async function start(): Promise<void> {
   const settleAsked = params.get('settle') as MakeOptions['settlement'] | null;
   const settlement = settleAsked && ['village', 'hamlet', 'manor', 'town', 'none'].includes(settleAsked) ? settleAsked : undefined;
   const planAsked = params.get('townplan') as MakeOptions['townPlan'] | null;
-  const townPlan = planAsked && ['planned', 'shore', 'fan', 'old', 'grown'].includes(planAsked) ? planAsked : undefined;
+  const townPlan = planAsked && ['planned', 'shore', 'fan', 'old', 'grown', 'city'].includes(planAsked) ? planAsked : undefined;
+  // (A city's settings, by the names watabou's generator gives them: `?size=medium&walls=1&citadel=1&gates=3`.)
+  const city = cityAsked((n) => params.get(n));
   // (In a world, the layout the world's page built beforehand, where it is this house's and nothing else is asked of it.)
   // (Its own house, or the next where its own will not go there, `generateWorldPlace`; unless a seed is asked for.)
-  const kept = inWorld && !settlement && !townPlan ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
+  const askedCity = Object.keys(city).length > 0;
+  const kept = inWorld && !settlement && !townPlan && !askedCity ? inWorld.sites.find((k) => k.kind === worldKind(place) && k.n === worldN && (!seedAsked || k.seed === seed)) : undefined;
   if (kept) seed = kept.seed;
-  const own = !kept && inWorld && !seedAsked && !townPlan && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
+  const own = !kept && inWorld && !seedAsked && !townPlan && !askedCity && params.get('scene') !== 'test' ? generateWorldPlace(worldSeed!, place, worldN, settlement) : null;
   if (own) seed = own.seed;
-  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement, townPlan } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement, townPlan });
+  const site = params.get('scene') === 'test' ? null : kept ? kept.site : own ? own.site : generateSite(seed, place, inWorld ? { world: { seed: worldSeed!, n: worldN }, settlement, townPlan, city } : { terrain: params.get('terrain') === 'plain' ? 'plain' : params.get('terrain') === 'eroded' ? 'eroded' : undefined, settlement, townPlan, city });
   // (Its name, where the world gave it one.)
   if (site && inWorld) site.title = `${inWorld.place.name}. ${site.title}`;
   // (Whether the layout was one built beforehand, for whoever checks.)
