@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Site viewer</title>
+  <style>html,body{color:#eadfc9;background:#14110e;height:100%;margin:0;font:14px/1.4 system-ui,sans-serif}canvas{touch-action:none;width:100%;height:100%;display:block}@media (min-width:800px){canvas{width:calc(100% - 300px);position:fixed;left:300px}#panel{height:100%}}#panel{box-sizing:border-box;background:#14110ed1;width:min(300px,80vw);max-height:100%;padding:12px 14px;position:fixed;top:0;left:0;overflow:auto}h1{margin:0 0 4px;font-size:15px}p{color:#b9ad97;margin:0 0 10px}label{margin:8px 0 2px;display:block}input[type=file],input[type=range]{width:100%}ol{margin:8px 0 0;padding-left:22px}li{cursor:pointer;padding:1px 0}li:hover{color:#fff}#status{color:#e0a45c}</style>
+  <script type="module" crossorigin src="../../assets/viewer-iIhwZaAE.js"></script>
+  <link rel="modulepreload" crossorigin href="../../assets/modulepreload-polyfill-P2Xu9kJm.js">
+  <link rel="modulepreload" crossorigin href="../../assets/BufferGeometryUtils-BRVHU7iX.js">
+  <link rel="modulepreload" crossorigin href="../../assets/three.module-ehfymr6h.js">
+  <link rel="modulepreload" crossorigin href="../../assets/GLTFLoader-DbkFzdHb.js">
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="panel">
+    <h1 id="name">Site viewer</h1>
+    <p id="title">Choose the model (.glb) and the site data (.json) exported from the same place, or drop both files on the page.</p>
+    <label>Model and site data <input id="files" type="file" accept=".glb,.json" multiple></label>
+    <label>Cut the building open at <span id="cutAt"></span> <input id="cut" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+    <label><input id="route" type="checkbox" checked> Show the solver's route</label>
+    <p id="status"></p>
+    <ol id="places"></ol>
+  </div>
+</body>
+</html>

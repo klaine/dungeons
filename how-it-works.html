@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Dungeons Works</title>
+<meta name="description" content="A guided tour of Dungeons: how a line of text becomes a house of rooms and caves, set in a country found in worn land, built stone by stone and walked in the browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23231f1a'/%3E%3Cpath d='M7 25 V13 L16 6 L25 13 V25 Z M13 25 V18 A3 3 0 0 1 19 18 V25' fill='none' stroke='%23e0573f' stroke-width='2.4' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f5f1e8; --surface: #fffdf8; --surface-2: #efe9dc; --surface-3: #e4dbc9;
+  --ink: #231f1a; --ink-2: #5a5248; --ink-3: #8b8275; --line: #ddd3c2;
+  --accent: #b23a26; --accent-soft: rgba(178, 58, 38, .10); --on-accent: #fff;
+  --core: #2f6690; --core-soft: rgba(47, 102, 144, .10);
+  --draw: #3d7a46; --draw-soft: rgba(61, 122, 70, .11);
+  --play: #a3650f; --play-soft: rgba(163, 101, 15, .12);
+  --world: #6b4fa0; --world-soft: rgba(107, 79, 160, .10);
+  --sea: #3f7f8c; --land: #c9bf9f; --rock: #8f8676;
+  --shadow: 0 1px 2px rgba(40, 30, 10, .05), 0 6px 24px rgba(40, 30, 10, .05);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14120f; --surface: #1c1a16; --surface-2: #24211c; --surface-3: #2e2a24;
+    --ink: #ece6da; --ink-2: #b0a796; --ink-3: #7d7567; --line: #36312a;
+    --accent: #e0573f; --accent-soft: rgba(224, 87, 63, .15); --on-accent: #1a0703;
+    --core: #6fa8d6; --core-soft: rgba(111, 168, 214, .13);
+    --draw: #7cc086; --draw-soft: rgba(124, 192, 134, .13);
+    --play: #e2a64e; --play-soft: rgba(226, 166, 78, .14);
+    --world: #b49ae6; --world-soft: rgba(180, 154, 230, .14);
+    --sea: #5fa9b6; --land: #5d5644; --rock: #8a8170;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14120f; --surface: #1c1a16; --surface-2: #24211c; --surface-3: #2e2a24;
+  --ink: #ece6da; --ink-2: #b0a796; --ink-3: #7d7567; --line: #36312a;
+  --accent: #e0573f; --accent-soft: rgba(224, 87, 63, .15); --on-accent: #1a0703;
+  --core: #6fa8d6; --core-soft: rgba(111, 168, 214, .13);
+  --draw: #7cc086; --draw-soft: rgba(124, 192, 134, .13);
+  --play: #e2a64e; --play-soft: rgba(226, 166, 78, .14);
+  --world: #b49ae6; --world-soft: rgba(180, 154, 230, .14);
+  --sea: #5fa9b6; --land: #5d5644; --rock: #8a8170;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 28px rgba(0, 0, 0, .25);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.65 var(--sans); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+}
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+code, kbd, .mono { font-family: var(--mono); font-size: .86em; }
+code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: .05em .35em; overflow-wrap: anywhere; }
+strong { font-weight: 650; }
+h1, h2, h3, h4 { line-height: 1.2; margin: 0; }
+h1, h2 { font-family: var(--serif); font-weight: 600; letter-spacing: -.01em; }
+p { margin: 0 0 1em; }
+ul, ol { padding-left: 1.3em; margin: 0 0 1em; }
+li { margin: .25em 0; }
+
+/* ---- top bar ---- */
+.topbar {
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px 22px; flex-wrap: wrap;
+  padding: 10px 24px; background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: baseline; gap: 10px; color: var(--ink); text-decoration: none; }
+.brand .logo { font-family: var(--serif); font-weight: 700; font-size: 19px; letter-spacing: .02em; }
+.brand .logo b { color: var(--accent); font-weight: 700; }
+.brand .sub { font-size: 12.5px; color: var(--ink-2); letter-spacing: .02em; }
+.topbar nav { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+.topbar nav a { font-size: 14px; color: var(--ink-2); text-decoration: none; padding: 5px 11px; border-radius: 999px; }
+.topbar nav a:hover { color: var(--ink); background: var(--surface-2); }
+.topbar nav a[aria-current="page"] { color: var(--ink); background: var(--surface-3); font-weight: 600; }
+.theme-btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); width: 34px; height: 34px;
+  border-radius: 50%; cursor: pointer; display: grid; place-items: center; padding: 0; flex: none;
+}
+.theme-btn:hover { color: var(--ink); }
+.theme-btn svg { width: 17px; height: 17px; }
+
+/* ---- hero ---- */
+.hero { max-width: 1180px; margin: 0 auto; padding: 64px 24px 28px; }
+.kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: 14px; }
+.hero h1 { font-size: clamp(2.2rem, 5.4vw, 3.8rem); max-width: 17ch; }
+.hero .lede { font-size: clamp(1.08rem, 1.8vw, 1.28rem); color: var(--ink-2); max-width: 62ch; margin: 18px 0 0; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; }
+.chip { font-size: 13px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); }
+.note-sm { font-size: 13.5px; color: var(--ink-2); margin: 12px 0 0; max-width: 72ch; }
+
+/* ---- layout ---- */
+.layout { max-width: 1180px; margin: 0 auto; padding: 8px 24px 80px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; }
+.toc { position: sticky; top: 76px; align-self: start; max-height: calc(100vh - 96px); overflow: auto; font-size: 14px; }
+.toc h2 { font-family: var(--sans); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); margin: 6px 0 10px; }
+.toc ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+.toc li { margin: 0; counter-increment: toc; }
+.toc a { display: flex; gap: 8px; padding: 5px 10px; border-left: 2px solid var(--line); color: var(--ink-2); text-decoration: none; line-height: 1.35; }
+.toc a::before { content: counter(toc, decimal-leading-zero); font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding-top: 2px; }
+.toc a:hover { color: var(--ink); }
+.toc a.active { color: var(--ink); border-left-color: var(--accent); font-weight: 600; }
+article { min-width: 0; max-width: 900px; }
+@media (max-width: 1060px) {
+  .layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .toc { position: static; max-height: none; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; background: var(--surface); margin-bottom: 28px; }
+  .toc ol { columns: 2; column-gap: 18px; }
+  .toc a { border-left: 0; padding: 3px 0; }
+}
+@media (max-width: 560px) {
+  body { font-size: 16px; }
+  .topbar { padding: 10px 16px; gap: 8px; flex-wrap: nowrap; }
+  .topbar nav { gap: 0; flex-wrap: nowrap; overflow-x: auto; }
+  .topbar nav a { padding: 5px 8px; font-size: 13px; white-space: nowrap; }
+  .brand .sub, .topbar nav a.wide-only { display: none; }
+  .hero { padding: 40px 16px 18px; }
+  .pair { gap: 8px; }
+  .layout { padding: 8px 16px 64px; }
+  .toc ol { columns: 1; }
+  .fig { padding: 14px; }
+}
+
+/* ---- sections ---- */
+section { padding-top: 40px; }
+section + section { border-top: 1px solid var(--line); margin-top: 40px; }
+article > section:first-child { padding-top: 12px; }
+.sec-num { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: .06em; display: block; margin-bottom: 8px; }
+section h2 { font-size: clamp(1.65rem, 3vw, 2.2rem); margin-bottom: 18px; }
+section h3 { font-size: 1.2rem; font-weight: 680; margin: 34px 0 12px; }
+section h4 { font-size: 1.02rem; font-weight: 680; margin: 0 0 6px; }
+.prose { max-width: 70ch; }
+.lead-in { font-size: 1.12em; color: var(--ink-2); }
+
+/* ---- figures ---- */
+figure { margin: 28px 0; }
+.fig { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); }
+figcaption { font-size: 14px; color: var(--ink-2); margin-top: 12px; line-height: 1.5; max-width: 72ch; }
+figcaption b { color: var(--ink); }
+.svg-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.svg-wrap > svg { display: block; width: 100%; height: auto; min-width: var(--min, 0); }
+.fig img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot { padding: 0; overflow: hidden; }
+.shot img { border-radius: 0; }
+svg text { font-family: var(--sans); fill: var(--ink); font-size: 13px; }
+svg .t-sm { font-size: 11.5px; fill: var(--ink-2); }
+svg .t-xs { font-size: 10.5px; fill: var(--ink-3); }
+svg .t-lg { font-size: 15px; font-weight: 650; }
+svg .t-b { font-weight: 650; }
+svg .t-serif { font-family: var(--serif); }
+svg .t-mono { font-family: var(--mono); }
+svg .t-acc { fill: var(--accent); } svg .t-core { fill: var(--core); } svg .t-draw { fill: var(--draw); }
+svg .t-play { fill: var(--play); } svg .t-world { fill: var(--world); } svg .t-sea { fill: var(--sea); }
+svg .t-inv { fill: var(--on-accent); }
+svg .box { fill: var(--surface-2); stroke: var(--line); stroke-width: 1.2; }
+svg .box-plain { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+svg .box-core { fill: var(--core-soft); stroke: var(--core); stroke-width: 1.3; }
+svg .box-draw { fill: var(--draw-soft); stroke: var(--draw); stroke-width: 1.3; }
+svg .box-acc { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.3; }
+svg .box-play { fill: var(--play-soft); stroke: var(--play); stroke-width: 1.3; }
+svg .box-world { fill: var(--world-soft); stroke: var(--world); stroke-width: 1.3; }
+svg .ln { stroke: var(--ink-3); stroke-width: 1.5; fill: none; }
+svg .ln-ink { stroke: var(--ink); stroke-width: 1.6; fill: none; }
+svg .ln-core { stroke: var(--core); stroke-width: 1.6; fill: none; }
+svg .ln-draw { stroke: var(--draw); stroke-width: 1.6; fill: none; }
+svg .ln-acc { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+svg .ln-play { stroke: var(--play); stroke-width: 1.6; fill: none; }
+svg .ln-world { stroke: var(--world); stroke-width: 1.6; fill: none; }
+svg .ln-sea { stroke: var(--sea); stroke-width: 1.6; fill: none; }
+svg .thick { stroke-width: 2.6; }
+svg .dash { stroke-dasharray: 4 4; }
+svg .grid { stroke: var(--line); stroke-width: 1; fill: none; }
+svg .axis { stroke: var(--ink-3); stroke-width: 1; fill: none; }
+svg .f-acc { fill: var(--accent); } svg .f-core { fill: var(--core); } svg .f-draw { fill: var(--draw); }
+svg .f-play { fill: var(--play); } svg .f-world { fill: var(--world); } svg .f-ink { fill: var(--ink); } svg .f-ink3 { fill: var(--ink-3); }
+svg .f-surface { fill: var(--surface); } svg .f-surface2 { fill: var(--surface-2); } svg .f-surface3 { fill: var(--surface-3); } svg .f-line { fill: var(--line); }
+svg .f-sea { fill: var(--sea); fill-opacity: .22; } svg .f-land { fill: var(--land); } svg .f-rock { fill: var(--rock); }
+svg .f-soft-acc { fill: var(--accent-soft); } svg .f-soft-draw { fill: var(--draw-soft); } svg .f-soft-core { fill: var(--core-soft); }
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13.5px; color: var(--ink-2); margin-top: 14px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1.5px solid; }
+.legend .k-core { background: var(--core-soft); border-color: var(--core); }
+.legend .k-draw { background: var(--draw-soft); border-color: var(--draw); }
+.legend .k-acc { background: var(--accent-soft); border-color: var(--accent); }
+.legend .k-play { background: var(--play-soft); border-color: var(--play); }
+.legend .k-world { background: var(--world-soft); border-color: var(--world); }
+
+/* ---- callouts ---- */
+.callout { border: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--surface); border-radius: 10px; padding: 14px 18px; margin: 22px 0; font-size: .96em; max-width: 72ch; }
+.callout > :last-child { margin-bottom: 0; }
+.callout .label { display: block; font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.callout.analogy { border-left-color: var(--draw); }
+.callout.analogy .label { color: var(--draw); }
+.callout.tech { border-left-color: var(--core); }
+.callout.tech .label { color: var(--core); }
+.callout.limit { border-left-color: var(--play); }
+.callout.limit .label { color: var(--play); }
+
+/* ---- small things ---- */
+kbd { display: inline-block; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: var(--surface); padding: .02em .45em; font-size: .8em; color: var(--ink); white-space: nowrap; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 28px 0; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.stat b { display: block; font-size: 1.65rem; font-weight: 750; letter-spacing: -.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 13.5px; color: var(--ink-2); line-height: 1.35; display: block; margin-top: 4px; }
+.tbl { overflow-x: auto; margin: 22px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); background: var(--surface-2); font-weight: 650; }
+tr:last-child td { border-bottom: 0; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.steps { list-style: none; padding: 0; counter-reset: st; margin: 20px 0; }
+.steps > li { counter-increment: st; position: relative; padding: 0 0 18px 46px; margin: 0; }
+.steps > li::before { content: counter(st); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px; display: grid; place-items: center; }
+.steps > li::after { content: ""; position: absolute; left: 14.5px; top: 34px; bottom: 4px; width: 1px; background: var(--line); }
+.steps > li:last-child::after { display: none; }
+.steps > li > b:first-child { display: block; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 14px; margin: 22px 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; font-size: 15px; }
+.card h4 { font-size: 1.04rem; margin-bottom: 4px; }
+.card .tag { font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: .04em; text-transform: uppercase; }
+.card p { margin: 6px 0 0; color: var(--ink-2); }
+.card code { font-size: .8em; }
+
+/* ---- widgets ---- */
+.controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
+.controls label { font-size: 14px; color: var(--ink-2); display: inline-flex; gap: 8px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+.seg button { font: 600 13.5px/1 var(--sans); color: var(--ink-2); background: transparent; border: 0; padding: 8px 12px; cursor: pointer; white-space: nowrap; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+.pair a { display: block; }
+.btn { font: 600 13.5px/1 var(--sans); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn:disabled { opacity: .45; cursor: default; }
+input[type="range"] { accent-color: var(--accent); width: 150px; }
+.readout { font-family: var(--mono); font-size: 13px; color: var(--ink-2); margin: 12px 0 0; min-height: 2.9em; }
+
+footer.site { border-top: 1px solid var(--line); padding: 28px 24px 48px; text-align: center; font-size: 14px; color: var(--ink-2); }
+footer.site a { margin: 0 6px; }
+</style>
+</head>
+<body>
+<svg class="defs" aria-hidden="true"><defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-ink3"/></marker>
+  <marker id="ah-core" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-core"/></marker>
+  <marker id="ah-draw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-draw"/></marker>
+  <marker id="ah-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-acc"/></marker>
+  <marker id="ah-play" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-play"/></marker>
+  <marker id="ah-world" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-world"/></marker>
+</defs></svg>
+
+<header class="topbar">
+  <a class="brand" href="index.html"><span class="logo">Dungeons<b>.</b></span><span class="sub">places for adventure</span></a>
+  <nav>
+    <a href="index.html">Play</a>
+    <a href="world.html">World</a>
+    <a class="wide-only" href="walk.html">Walk</a>
+    <a class="wide-only" href="lab/buildings.html">Buildings</a>
+    <a href="how-it-works.html" aria-current="page">How it works</a>
+  </nav>
+  <button class="theme-btn" type="button" aria-label="Switch light or dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+</header>
+
+<div class="hero">
+  <div class="kicker">Dungeons · technical tour</div>
+  <h1>How Dungeons works</h1>
+  <p class="lede">Dungeons makes places for adventure and lets you walk through them: a walled house of rooms and caves with locks and keys between you and its sanctum, built stone by stone, in a country whose land was lifted up and worn down by its rivers. All of it is made in your browser from a line of text. Here's how, from the seed to the stones.</p>
+  <p class="note-sm">Written from the code and the design documents in November 2026. The project moves quickly: where this page and <a href="https://github.com/klaine/dungeons/tree/HEAD/docs">the documents in <code>docs/</code></a> disagree, trust the documents and the code.</p>
+  <div class="meta"><span class="chip">TypeScript and three.js</span><span class="chip">WebGPU, or WebGL 2 where there is none</span><span class="chip">No server</span><span class="chip">One seed, one place</span></div>
+</div>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#big-idea">The big idea</a></li>
+    <li><a href="#seed">One seed, one place</a></li>
+    <li><a href="#house">The house: rooms in loops</a></li>
+    <li><a href="#locks">Locks, keys and the proof</a></li>
+    <li><a href="#kinds">Four kinds of place</a></li>
+    <li><a href="#world">The world</a></li>
+    <li><a href="#found">Found, not drawn</a></li>
+    <li><a href="#build">From document to stones</a></li>
+    <li><a href="#growth">What grows where</a></li>
+    <li><a href="#light">Light, air and one renderer</a></li>
+    <li><a href="#loading">From a link to a walk</a></li>
+    <li><a href="#play">The body and the rules</a></li>
+    <li><a href="#stream">The land at a metre</a></li>
+    <li><a href="#maps">Maps and exports</a></li>
+    <li><a href="#checks">How it is checked</a></li>
+    <li><a href="#limits">What it doesn't do yet</a></li>
+  </ol>
+</nav>
+
+<article>
+
+<!-- 1 ------------------------------------------------------------------------------------------------>
+<section id="big-idea">
+  <span class="sec-num">01</span>
+  <h2>The big idea: decide first, then draw</h2>
+  <div class="prose">
+    <p class="lead-in">Every place Dungeons makes starts as a plain written record, the <strong>site document</strong>: every room, every door and what locks it, every key and where it lies, the shape of the valley, each tree and building outside. Nothing in that record knows about triangles or pixels.</p>
+    <p>The program is split along that line. <code>src/core</code> decides what a place contains and writes it down; it draws nothing. <code>src/render</code> reads the document and builds the 3D world from it; it decides nothing. The plan, the ink map, the battle map and the exported files are made by reading the same document, so they always agree with it and with each other.</p>
+  </div>
+  <div class="callout analogy"><span class="label">Think of it like this</span>The generator is the architect and the mesher is the builders. The architect decides where every wall, door and key goes and puts it on paper. The builders lay every stone exactly as drawn, but never move a wall. The maps are copies of the drawings, so they can't disagree with the building.</div>
+
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:680px">
+      <svg viewBox="0 0 880 300" role="img" aria-labelledby="f1t">
+        <title id="f1t">A seed goes into the generator, which writes the site document; the 3D world, the maps, the exports and the game's rules are all made by reading that document.</title>
+        <g id="f1"></g>
+      </svg>
+    </div>
+    <div class="legend"><span><i class="k-core"></i>deciding: <code>src/core</code></span><span><i class="k-acc"></i>the record</span><span><i class="k-draw"></i>drawing: <code>src/render</code>, <code>src/maps</code></span><span><i class="k-play"></i>playing: <code>src/app</code></span></div>
+    </div>
+    <figcaption><b>Figure 1.</b> One record, many views. The game reads the document too: which doors are locked, where the keys are, and what counts as the end.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <p>There is no server. The page you open holds the whole program; the place is made on your own machine, in a few tens of seconds, and is gone when you close the tab. The address carries the seed, so a link brings back exactly the same place.</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>5–11</b><span>rooms in a house, with a forecourt in front and a sanctum at the far end</span></div>
+    <div class="stat"><b>6</b><span>drafts of each house made and scored; only the best is built</span></div>
+    <div class="stat"><b>4</b><span>kinds of place: valley head, island, mountain top, harbour town</span></div>
+    <div class="stat"><b>6 × 10 km</b><span>of country in a world, in which the places are found</span></div>
+  </div>
+</section>
+
+<!-- 2 ------------------------------------------------------------------------------------------------>
+<section id="seed">
+  <span class="sec-num">02</span>
+  <h2>One seed, one place</h2>
+  <div class="prose">
+    <p>Every choice the generator makes comes from a stream of pseudo-random numbers, and every stream comes from the seed. The seed is any text (<code>?seed=ink-3</code> in the address); it is hashed into four 32-bit numbers that start a small, fast generator (<code>src/core/rng.ts</code>). The same text gives the same numbers on any machine, so the same place.</p>
+    <p>The catch with a single stream is that every choice shifts the ones after it. Add one new decision early on, say whether a valley has a charcoal burners' camp, and every later draw moves along by one: every place anyone has seen changes. So choices aren't drawn from one stream. They're drawn from <strong>forks</strong>.</p>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:640px">
+      <svg viewBox="0 0 880 290" role="img" aria-labelledby="f2t">
+        <title id="f2t">A tree of random streams: the seed forks into labelled streams for each draft, the mission, the valley and so on; a stream added later is a new branch and leaves the others unchanged.</title>
+        <g id="f2"></g>
+      </svg>
+    </div></div>
+    <figcaption><b>Figure 2.</b> <code>fork(label)</code> makes a new stream from the parent's seed and a label, such as <code>ink-3/site/1/mission</code>, without drawing anything from the parent. A choice added later, on a fork of its own (dashed), changes nothing that was already there.</figcaption>
+  </figure>
+  <div class="callout tech"><span class="label">The same idea, everywhere</span>The rule in the code is plain: random choices use <code>Rng.fork(label)</code> so that adding a choice does not reshuffle existing sites. Names in a world follow it too: each is drawn from a stream keyed by what it names and where it is, to fifty metres, so a valley keeps its name whatever else the world gains or loses. And a world made in the browser is kept under a name that includes a hash of the code that made it, so a world made by older code is never read back.</div>
+</section>
+
+<!-- 3 ------------------------------------------------------------------------------------------------>
+<section id="house">
+  <span class="sec-num">03</span>
+  <h2>The house: rooms in loops</h2>
+  <div class="prose">
+    <p class="lead-in">At the heart of every place is a walled house: in a valley the hall and keep of a castle, elsewhere a priory, abbey, charterhouse, hospice or preceptory; of limestone, sandstone, greystone or basalt; kept, damp or forsaken. Its plan is built from <strong>loops</strong>, not from a tree of rooms with loops added afterwards.</p>
+    <p>That follows Joris Dormans' cyclic generation, the approach behind the game <em>Unexplored</em>: a place is interesting when there are two ways between things, and the relationship between the two ways is the game. A locked door seen early, with its key round the long way; a door you can only open from the far side, which turns a long walk into a shortcut on the way back.</p>
+    <p>The house is laid on a grid of up to six columns by five rows, a metre-thick wall between cells. Passages are 3 to 3.6 metres across, rooms 5.6 to 7.6. One of four loop plans is chosen, sometimes round a cloister court open to the sky:</p>
+  </div>
+  <figure>
+    <div class="fig"><img src="how-it-works/plans.png" width="960" height="960" loading="lazy" alt="Four house plans drawn on parchment: a ring round a court, two rings side by side, two rings one behind the other with a court, and rooms off a central gallery. Stars mark the sanctum, diamonds keys, coloured strokes locked doors; shaded rooms are dark."></div>
+    <figcaption><b>Figure 3.</b> Four seeds, four plans, as the game draws them: a ring round a court, two rings side by side, two rings one behind the other, and rooms off a central gallery. The star is the sanctum, diamonds are keys, coloured strokes are locked doors, shaded rooms are dark, and the green box at the foot is the forecourt where the player arrives. (From the project's documents.)</figcaption>
+  </figure>
+  <div class="prose">
+    <p>A draft is then filled in, each step from a stream of its own (<code>draftSite</code> in <code>src/core/generate.ts</code>):</p>
+    <ol class="steps">
+      <li><b>Rooms and ways.</b> Some neighbouring cells merge into long halls. Rooms are joined by doors, or by wide arches where they open on a court. The first room is the gatehall; the sanctum is added beside the room furthest from it.</li>
+      <li><b>Side chambers and secrets.</b> Up to four dead ends are added, some through an antechamber to a strongroom, reliquary or oubliette. In about three houses in five, one chamber hides behind a stretch of wall that is really a door.</li>
+      <li><b>Caves.</b> In about one house in three a roomy dead end becomes a natural cave, and most caves run on through one to three more chambers by clefts in the rock, each 1.3 to 2.3 metres lower than the last, lit by a hole to the sky or by growths that glow.</li>
+      <li><b>Roofs, uses and light.</b> Rooms get a stone vault or a timber ceiling, and a use by their size: refectory, dormitory or chapter house for the large ones; kitchen, store, workshop or scriptorium for the rest. A castle's first great room is its chapel. A forsaken house has lost a roof. Some rooms are left dark, never two in a row.</li>
+      <li><b>Floors and storeys.</b> Floors rise and fall from room to room, never by more than three steps of 17 centimetres at a doorway. In about half the houses some rooms have a room above or a cellar below, reached by a stone stair of eighteen steps; a castle always has a dungeon under it.</li>
+      <li><b>Locks and keys</b>, and the proof that the house can be finished (next section).</li>
+    </ol>
+    <p>Six drafts are made from six forks of the seed and each is scored: for loops, for how much longer the real route is than the straight one, for keys, bars, levers and secrets, for a court, a cave or a few dark rooms, and against straying from a target size picked for the place. Without that target, the comment in the code notes, "choosing the richest draft always chooses the largest". Only the winner is built.</p>
+  </div>
+</section>
+
+<!-- 4 ------------------------------------------------------------------------------------------------>
+<section id="locks">
+  <span class="sec-num">04</span>
+  <h2>Locks, keys, and the proof it can be finished</h2>
+  <div class="prose">
+    <p>Once a draft has rooms, <code>planMission</code> (<code>src/core/mission.ts</code>) decides what stands in the way:</p>
+    <ul>
+      <li><strong>The sanctum's door takes a gold key.</strong> The key goes where the walk from the start plus the walk on to the sanctum is longest, preferring dead ends and dark rooms.</li>
+      <li><strong>In about half the houses the gold key's room is locked too</strong>, with an iron key hidden somewhere else.</li>
+      <li><strong>A shortcut.</strong> About a third of houses have a door out of the gatehall that can only be opened from beyond: a portcullis with its lever on the far side, or a door barred on the other side. It's only placed on a loop, so everything can still be reached the long way round.</li>
+      <li><strong>Secrets never hold anything needed.</strong> While planning, a secret door counts as locked, so nothing on the way to the end can lie behind one.</li>
+    </ul>
+    <p>Then <code>solve</code> plays the house. It is a breadth-first search over every <em>state</em> the player could be in: which room they're in, which keys they hold, which bars they've lifted and which levers they've thrown. It looks for the shortest sequence of moves that reaches the sanctum. If there is none, the draft is thrown away with the reason "cannot be completed".</p>
+  </div>
+  <figure>
+    <div class="fig">
+      <div class="controls">
+        <button class="btn primary" id="sv-step" type="button">Step</button>
+        <button class="btn" id="sv-run" type="button">Run to the end</button>
+        <button class="btn" id="sv-reset" type="button">Reset</button>
+        <label><input type="checkbox" id="sv-break"> Hide the iron key behind its own door</label>
+      </div>
+      <div class="svg-wrap">
+        <svg id="sv-svg" viewBox="0 0 880 400" role="img" aria-label="A small house plan; the solver's search spreads through it room by room, tracking the keys held."></svg>
+      </div>
+      <p class="readout" id="sv-read" aria-live="polite">&nbsp;</p>
+    </div>
+    <figcaption><b>Figure 4.</b> The solver on a small house of its own, the same search as the game's. Each step widens the search by one move. The dots in a room are the different states it has been reached in: empty for no key, grey for the iron key, gold for both. The door from the hall to the gatehall is barred on the hall's side, a shortcut for the way back. Tick the box to hide the iron key behind the iron door and watch the search run out.</figcaption>
+  </figure>
+  <div class="callout tech"><span class="label">Why one search is enough</span>Nothing in the house can be undone: keys are kept, bars stay lifted, levers stay thrown. So the player can never make the end unreachable by doing something in the wrong order, and a house that can be finished from the start can be finished from anywhere. That is why searching from the start alone proves there are no dead ends to fall into.</div>
+  <div class="prose">
+    <p>The route the solver finds also goes into the exported document. And <code>tools/browser/play.cjs</code> checks the proof against the real program: it walks the player's body through every doorway in both directions, then follows the solver's route to the chest in the sanctum.</p>
+  </div>
+</section>
+
+<!-- 5 ------------------------------------------------------------------------------------------------>
+<section id="kinds">
+  <span class="sec-num">05</span>
+  <h2>Four kinds of place</h2>
+  <div class="prose">
+    <p>The same house, from the same seed, can stand in four kinds of setting. The setting is laid out after the house, each by a function of its own (<code>layOutValley</code>, <code>layOutIsland</code>, <code>layOutMountain</code>, <code>layOutHarbourTown</code>), and everything it puts down goes into the document too.</p>
+  </div>
+  <div class="cards">
+    <div class="card"><span class="tag">Default</span><h4>A valley head</h4><p>You arrive at the foot of a valley, in a forest, and walk up past walled fields and a pasture with sheep, through a village on the slope under it, its lanes grown out from the road along the hillside, with a small stone church in its churchyard and sheds in its yards, to a castle on the high ground over the valley's head, at the brow where the land falls away to the stream: a curtain wall with its gate between two towers, a tower or two more at the back, and inside it the house as the castle's hall and keep. Two or three of standing stones, a pond with a landing stage and a ruin lie along the way, and perhaps a mill, a charcoal burners' camp or a mine. (<code>?settle=</code> still asks for a hamlet, a manor or a street of brick houses.)</p></div>
+    <div class="card"><span class="tag"><code>?place=island</code></span><h4>An island</h4><p>The house as a castle, within its curtain wall with towers, a gate and a keep, on high ground over sea cliffs. You arrive at a cove with a jetty, below a fishing hamlet, with a lighthouse whose stair you can climb; the mainland lies across the water.</p></div>
+    <div class="card"><span class="tag"><code>?place=mountain</code></span><h4>A mountain top</h4><p>The house as a hospice in a saddle under the summit, above a sea of cloud. You come up a ridge out of the cloud, and a path winds on up to the summit's cairn. Summer or winter, even odds.</p></div>
+    <div class="card"><span class="tag"><code>?place=town</code></span><h4>A harbour town</h4><p>The house on a terrace at the head of the market square. You arrive at the harbour, with its quay, moles and light; streets of classical, timber-framed and wooden houses, on a grid of blocks or, in two towns of five, laid out as a medieval city generator lays one out: wards cut about the square and fitted to the coast, streets between them, main streets in from the roads, brick wards and a brick church in some, and a wall with towers and gates, a citadel built as a castle with its keep, parks; shacks and red storehouses along the shore, then fields, woods and an outlook on the headland.</p></div>
+  </div>
+  <div class="prose">
+    <p>Every setting is placed in land, not drawn round the house. In a world (the default, next section), the land is the world's own. With <code>?world=none</code>, a place gets a small country of its own instead, made by noise and worn by water and frost, and is searched for in it: a valley head among the glens of an upland (<code>highlands.ts</code>), an island in a sea full of islands (<code>archipelago.ts</code>), a harbour on a coast (<code>coastland.ts</code>). Only a mountain top on its own is still the other way round, its top drawn first and its country made about it. Either way, only what the game needs is then cut, built or added.</p>
+  </div>
+  <div class="callout analogy"><span class="label">Think of it like this</span>Rather than drawing a valley to fit the house, Dungeons is a location scout: it makes a whole landscape first and then walks it, looking for somewhere the house would fit. That's why the valleys look like they were cut by water. They were.</div>
+</section>
+<!-- 6 ------------------------------------------------------------------------------------------------>
+<section id="world">
+  <span class="sec-num">06</span>
+  <h2>The world: a country made the way land is made</h2>
+  <div class="prose">
+    <p class="lead-in">Every place now stands in a <strong>world</strong>: one stretch of country six kilometres east to west and ten from the sea to the hills, made from a seed of its own (<code>w2</code> unless another is asked for). The sea and its islands lie to the south, then a coast with a great bay, low country of fields and woods, an upland of fells and glens, and a range of mountains to the north.</p>
+    <p>Only the broad plan is decided by rule (<code>planWorld</code> in <code>src/core/world.ts</code>): which way is inland, how broad each zone is, and where the bay comes in. Nothing else is placed: no peak, no island, no valley. Those come out of how the land is made.</p>
+  </div>
+
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:700px">
+      <svg viewBox="0 0 880 300" role="img" aria-labelledby="fwt">
+        <title id="fwt">A section through a world from the open sea in the south to the range in the north, with each zone's breadth, how fast its ground is lifted, and the heights that come of it.</title>
+        <g id="fworld"></g>
+      </svg>
+    </div>
+    <div class="legend"><span><i class="k-world"></i>zone and how fast it rises</span><span><i class="k-core"></i>sea level, after the sea has come up over the shelf</span></div>
+    </div>
+    <figcaption><b>Figure 5.</b> A section through a world ten kilometres deep, south on the left. The zones only say how fast the ground rises; the shapes come from wearing it down. Heights are drawn about three times taller than they are, and the shapes are a sketch, not a real world.</figcaption>
+  </figure>
+
+  <div class="prose">
+    <h3>Lifted, and worn by its rivers</h3>
+    <p>The land is made as real land is: pushed up slowly, and cut down by rivers. On a lattice of points 24 metres apart (251 by 417 of them), each step of the simulation does three things (<code>liftAndErode</code> in <code>src/core/terrain.ts</code>):</p>
+    <ol class="steps">
+      <li><b>Lift.</b> Every point rises at the rate its zone sets: 0.6 to 1.6 millimetres a year under the range, more in some stretches, and about 0.07 in the low country.</li>
+      <li><b>Find where the water goes.</b> Each point drains to a neighbour downhill, chosen afresh each step and the steeper the likelier, so rivers don't all run along the lattice's eight directions.</li>
+      <li><b>Cut.</b> Where at least two and a half hectares drain through a point, a river wears it down in proportion to the water passing and the fall to the next point (the <em>stream power law</em>). Above that, the hillside only creeps.</li>
+    </ol>
+    <p>That repeats in steps of fifty thousand years over some seven million years, solved from the river mouths upward as Braun and Willett showed, so a long step is still stable. Then the heights are scaled so the highest few points stand at 650 metres, the mountains alone are raised until the highest summit reaches 800, and ridged noise gives the high ground sharper crests. Finally the sea comes up over the shelf: valleys drown into inlets, spurs become headlands, and hills become islands.</p>
+  </div>
+
+  <div class="callout analogy"><span class="label">Think of it like this</span>Drawing a river on a map and then shaping the land round it rarely looks right. Here the order is reversed: the rivers are what cut the valleys, so the valleys branch, drain to the sea, and meet each other the way real ones do. The map is a record of what the water did.</div>
+
+  <div class="prose">
+    <p>After that, finer work: detail and wear by water drops and frost on a lattice of 8 metres (751 by 1,251 points); hollows filled until they spill, deep ones kept as lochs and shallow ones breached by an outlet; rivers drawn from where forty hectares drain; and <strong>cover</strong> worked out for every point from its height, slope, wetness and zone: sea, lake, shore, marsh, fields, pasture, forest, heath, rock or snow. Towns, roads, tracks, paths and ferries are laid over the land the way a walker or a cart would go, round a hill rather than over it. Every name, from the sea to each place, comes from a random stream keyed by what it names and where, so a place keeps its name whatever else changes.</p>
+  </div>
+
+  <figure>
+    <div class="fig"><div class="pair">
+      <a href="how-it-works/world-ink.jpg"><img src="how-it-works/world-ink.jpg" width="760" height="1402" loading="lazy" alt="The ink map of the world w2, the Country of Aror: mountains in hachures to the north, a bay in the middle, islands in the sound to the south, places of adventure marked in red."></a>
+      <a href="how-it-works/world-relief.jpg"><img src="how-it-works/world-relief.jpg" width="760" height="1267" loading="lazy" alt="The same world as shaded relief, coloured by cover: grey rock and snow in the mountains, green fells and woods, pale fields by the coast, blue sea and bay."></a>
+    </div></div>
+    <figcaption><b>Figure 6.</b> The default world, <code>w2</code>, the Country of Aror, as the world page draws it from today's code: its ink map, and the same land as shaded relief coloured by cover. Made in 22 seconds in a headless browser, with 2 islands, 4 valley heads, 3 mountain tops and 4 coastal towns found in it.</figcaption>
+  </figure>
+
+  <div class="stats">
+    <div class="stat"><b>6 × 10 km</b><span>a world, by default; the size is a setting</span></div>
+    <div class="stat"><b>800 m</b><span>the highest summit, after the mountains are raised</span></div>
+    <div class="stat"><b>≈ 7 Myr</b><span>of lifting and wearing, in steps of 50,000 years</span></div>
+    <div class="stat"><b>23–41 s</b><span>to make a world, measured without a browser on four cores</span></div>
+  </div>
+</section>
+
+<!-- 7 ------------------------------------------------------------------------------------------------>
+<section id="found">
+  <span class="sec-num">07</span>
+  <h2>Found, not drawn</h2>
+  <div class="prose">
+    <p class="lead-in">Places of adventure are never planted in a world. They are looked for in the land as it came out, up to four of each kind, and if the land only holds two islands, the world has two islands.</p>
+    <p>Each search asks the land for ground a house can stand on and a way to reach it, not for a particular shape:</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Kind</th><th>Where it is looked for</th><th>What it must have</th></tr></thead>
+    <tbody>
+      <tr><td>Island</td><td>The world's own lattice, in the sea</td><td>Land apart from the mainland, 6 to 25 hectares; the house where its ground fits best, well in from the cliffs, facing a landing gentle enough to walk up</td></tr>
+      <tr><td>Valley head</td><td>Tiles of the upland, by the valleys' own search</td><td>A glen whose head can take the house without moving more than three metres of earth on average; none within 700 metres of another</td></tr>
+      <tr><td>Mountain top</td><td>The world's lattice, in the range</td><td>A summit standing alone over the cloud, 180 metres or more above the valleys a kilometre off, with a ridge a way could come up, and a shoulder on it for the hospice</td></tr>
+      <tr><td>Coastal town</td><td>The mainland's shore, by the town's own search</td><td>Open water before a quay, low ground rising gently behind for a square and streets, better still in a bay; 900 metres from the next</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <h3>Fitting the house's ground to the land</h3>
+    <p>Real ground is never quite flat, so the house's ground, 46 metres across by 62 deep, is fitted to whatever was found (<code>src/core/fit.ts</code>). Where the land is near level it is made level. Where it slopes it is cut into one, two or three terraces, each at the middle height of the land beneath it, which moves the least earth, and none more than three metres above the next. Around the edge the land is eased back to its own shape over a bank half again as broad as it is high, so nothing is left standing as a cliff.</p>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:620px">
+      <svg viewBox="0 0 880 250" role="img" aria-labelledby="ffitt">
+        <title id="ffitt">A section through sloping land with a house's ground cut into three level terraces, each at the middle height of the land under it, eased back into the slope by banks at each end.</title>
+        <g id="ffit"></g>
+      </svg>
+    </div>
+    <div class="legend"><span><i class="k-acc"></i>the fitted ground</span><span><i class="k-world"></i>the land as it was found</span></div>
+    </div>
+    <figcaption><b>Figure 7.</b> A ground fitted to a slope as three terraces. Each step sits at the middle height of the land under it, so as much earth is cut as is filled; an extra terrace is counted as costing half a metre of earth, so a gentle slope stays one level. Measured on three worlds, most valley heads needed one level and moved 0.2 to 1 metre of earth on average.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>The world finds each place and fits its ground; the place itself (its house, rooms, caves and what stands about it) is still made from its own seed, the house's seed formed from the world's seed and the place's kind and number. So the same place is the same house however you arrive at it. When a draft of the house won't go on the land (an island's cove won't fit, say), the next draft of the same seed is tried, and if none will, the page says why rather than quietly putting it somewhere else.</p>
+  </div>
+  <figure>
+    <div class="fig shot"><img src="how-it-works/world-ink-detail.jpg" width="1100" height="710" loading="lazy" alt="A detail of the world's ink map: a river through woods past the valley head Strath Yrrin, the town of Arford at the head of the bay, moorland, lakes, and the valley heads Glen Lorden and Strath Ulan marked in red."></div>
+    <figcaption><b>Figure 8.</b> A detail of the same map at full size. Valley heads (red squares) lie in glens of the upland, each reached by a track from the nearest road; Arford is a placeholder town at a river's mouth. Woods are drawn as little trees, the moors as heath marks, the relief as hachures that are heavier where the ground is steeper.</figcaption>
+  </figure>
+</section>
+<!-- 8 ------------------------------------------------------------------------------------------------>
+<section id="build">
+  <span class="sec-num">08</span>
+  <h2>From document to stones</h2>
+  <div class="prose">
+    <p class="lead-in">The mesher (<code>src/render/siteMesher.ts</code>) reads the document and makes geometry from it. It decides nothing about the place: where the house is, what each room holds and what stands in the valley are already written down. It decides only how each thing is shaped.</p>
+    <p>Each place gets a floor, four walls with holes cut for its ways, and a roof of its kind: a stone barrel vault, boards on beams, open sky, or no roof at all because it is a cave in the rock. Each way gets dressed stone round its opening, a threshold, and steps where the floors on either side differ.</p>
+    <h3>Stone by stone</h3>
+    <p>Walls are not flat panels with a stone picture on them. Every block is its own piece of geometry (<code>geom/masonry.ts</code>): a face that stands slightly proud, a bevelled edge, and a recessed strip of mortar. In ashlar, courses are 26 to 38 centimetres high and blocks 0.5 to 1.05 metres long, with joints of 7 millimetres, mortar set back 14, and one corner in seven chipped. A stone is about forty points.</p>
+    <p>Every stone and every timber is a <strong>closed solid</strong>, with no face left open on top or underneath. Leaving out the faces "the player can't see" was tried, and was wrong twice: a gap always shows somewhere, from some angle, or lets light through. Behind the visible skin, the mesher also records the solid mass of each wall and roof, which the light bake and the sun's shadow both use.</p>
+  </div>
+
+  <h3>Rock, carved from a function</h3>
+  <div class="prose">
+    <p>Rock is made the other way round. A function says, for any point in space, whether it is inside rock or out, and how far (<code>geom/rockForms.ts</code>): beds of stone of a given thickness, joints across them, a cliff's face moved sideways so that beds can overhang, boulders as blocks bounded by planes with their corners knocked off, and the slow wear of frost and gravity leaving scree at the foot. Each stone has its own character; limestone lies in beds of 0.8 metres with joints 2.1 apart, basalt in beds of 3.2 with joints only 0.85 apart.</p>
+    <p>A carver then turns that function into triangles (<code>geom/rock.ts</code>), and there are two:</p>
+    <ul>
+      <li><strong>Marching cubes</strong> for caves and the house's chambers, in cells of 0.28 metres. It is smooth, never leaves a hole, and suits rock worn by water.</li>
+      <li><strong>An edge-keeping carver</strong> (dual contouring) for rock in the open: each cell gets one point, put where the surfaces through it come closest to meeting, so a split face keeps a sharp edge instead of being rounded off. Rock in a valley is carved this way, in cells of 0.3 metres.</li>
+    </ul>
+  </div>
+  <figure>
+    <div class="fig">
+      <div class="controls">
+        <div class="seg" id="carve-mode" role="group" aria-label="Carver">
+          <button type="button" data-v="mc" aria-pressed="false">Marching cubes</button><button type="button" data-v="dc" aria-pressed="true">Edge-keeping</button>
+        </div>
+        <label>Cell size <input type="range" id="carve-cell" min="14" max="44" step="1" value="26"></label>
+      </div>
+      <div class="svg-wrap" style="--min:520px">
+        <svg id="carve-svg" viewBox="0 0 880 330" role="img" aria-label="A block of rock with sharp corners carved on a grid of cells, two ways."></svg>
+      </div>
+      <p class="readout" id="carve-read">&nbsp;</p>
+    </div>
+    <figcaption><b>Figure 9.</b> The two carvers in two dimensions, working on the same function: a jointed block of rock (its true outline faint). Marching cubes puts its points on the cell edges, so a corner inside a cell is cut off; the edge-keeping carver puts one point inside each cell where the faces meet, so the corner survives at any cell size. Try a coarse cell to see the difference grow.</figcaption>
+  </figure>
+  <div class="callout tech"><span class="label">Pieces that match to the last bit</span>Rock is carved in pieces, and two neighbouring pieces must agree exactly where they meet. Each piece is sampled one cell past its edge and counts its lattice from the same origin, so the points along a shared edge come out identical to the last bit. When they once didn't, holes a hand or two across showed in the cliffs. Fired at an island's cliffs from the sea, 100,000 sight lines found back faces 84 times before a fix to the carver, and 5 after.</div>
+
+  <div class="prose">
+    <h3>Buildings</h3>
+    <p>Buildings standing free in a valley or a town are made of plain solids rather than masonry, one function to each style (<code>render/buildings.ts</code>): timber-framed, classical, and classical in wood. Brick buildings in the manner of the Baltic towns (<code>render/brick.ts</code>) build their fronts as flat figures, gable outlines, niches and arched openings, made solid in layers, so a niche is really sunk and a portal really steps back. Canal houses are built with the same tools, then their fronts leaned out over the street by up to three centimetres for every metre of height, as the real ones are. Houses that can be entered are planned inside as well (<code>src/core/interior.ts</code>), with rooms, floors on beams, whitewash and a steep stair, and their glass is clear both ways.</p>
+    <p>Edges that would be dead square are rounded in the shading by a centimetre or two (two for dressed stone, 1.2 for timber, 3 for split rock), and where a corner shows against the sky a real bevel is built instead.</p>
+  </div>
+</section>
+
+<!-- 9 ------------------------------------------------------------------------------------------------>
+<section id="growth">
+  <span class="sec-num">09</span>
+  <h2>What grows where</h2>
+  <div class="prose">
+    <p class="lead-in">Nothing is scattered at random. Over the walked ground the mesher keeps four numbers for every point, each from 0 to 1: how <strong>shaded</strong> it is, how <strong>wet</strong>, how <strong>worn</strong> by feet, and how <strong>thin</strong> its soil is. Plants are placed by rules over those numbers.</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>What</th><th>Grows where</th></tr></thead>
+    <tbody>
+      <tr><td>Grass</td><td>Everywhere it can, its height 0.45 + 1.1 × wet, cut down by wear, shade and thin soil: long where nobody walks</td></tr>
+      <tr><td>Ferns</td><td>In shade above 0.45, where shade and wet together pass 0.85</td></tr>
+      <tr><td>Tall herbs</td><td>In the open (shade under 0.3) on damp ground (wet over 0.5)</td></tr>
+      <tr><td>Thicket and bushes</td><td>At the edge of the wood, shade between 0.18 and 0.5</td></tr>
+      <tr><td>Reeds</td><td>From 30 centimetres above a waterline to 60 below it</td></tr>
+      <tr><td>Nettles</td><td>About a ruin</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>Trees are grown, not placed as models (<code>render/planting.ts</code>): oaks and ashes branch up to four levels deep, with lobed and fluted trunks; spruces and pines carry brushes of needles. About one tree in six is old, one in twenty a giant, and three in ten young. The ground itself is drawn by one material that reads the same numbers, so bare ground shows as beaten earth, bare wet ground as shingle, ground under trees as leaf litter, and the track as two ruts a stride apart and a hand deep.</p>
+    <h3>Less detail further off</h3>
+    <p>A valley holds 280,000 to 340,000 vegetation cards, so how much of each is drawn depends on how far off it is:</p>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:660px">
+      <svg viewBox="0 0 880 260" role="img" aria-labelledby="flodt">
+        <title id="flodt">Distance from the eye on a stretched scale from 1 to 3,000 metres, with the range over which each way of drawing plants is used.</title>
+        <g id="flod"></g>
+      </svg>
+    </div></div>
+    <figcaption><b>Figure 10.</b> How plants are drawn by distance, at the high level of detail (grass reaches 40 m at low and 55 at medium). Near trees have their leaves made one by one, 24 to a sprig; further off a leaf card is a painted spray. Grass is real blades near by, painted tufts further out, then one tuft in four, broader, and finally only the colour of the turf. The far land begins 215 metres or more out from the place (beyond the farthest corner of the walked ground, some 266 metres in w2's first valley, and the coarse ground runs thirty metres on under it), so where it starts depends on where you stand; it is drawn here at 215, its woods painted by its own material.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>Everything that grows sways in the wind, worked out on the graphics card for each point of each card: grass a little, leaves less, with a tremble of their own on the near sprigs. Light that passes a leaf's shadow comes through it, so a crown against the sun glows.</p>
+  </div>
+</section>
+
+<!-- 10 ------------------------------------------------------------------------------------------------>
+<section id="light">
+  <span class="sec-num">10</span>
+  <h2>Light, air and one renderer</h2>
+  <div class="prose">
+    <p class="lead-in">The picture is drawn with three.js's WebGPU renderer, which falls back to WebGL 2 by itself where a browser has no WebGPU. So nothing is written twice: every material and every step after the scene is drawn is a node graph in three's shading language (<abbr title="three.js Shading Language">TSL</abbr>), which the renderer turns into whichever shader language it needs.</p>
+    <p>The one exception is the textures. Seventeen recipes (stone, wood, moss, rock, ground, scree, four barks, soil, litter, plaster, thatch, tile and two bricks, and sand, brick, ashlar, talus or a castle's rubble where a place needs them) are short GLSL programs, painted once at start by a small WebGL renderer of their own (<code>render/textures.ts</code>). Each gives three pictures, colour with height, a normal map, and roughness with occlusion, which are read back and the painter thrown away. A picture repeats, and on a long wall the eye finds the repeat: the castle's rubble is painted over four metres at twice the breadth, and its material reads it in patches of a few metres, each from another place in the picture, joined round the stones where they meet. And its walls are not planes: the whole castle is moved by one smooth bend of space, a hand or two at most, so that its walls belly and lean as old walls do and still meet.</p>
+    <h3>Baked light</h3>
+    <p>Once a place is built nothing in it moves, so the light that bounces about inside the house can be worked out once and kept: the <strong>bake</strong> (<code>render/bake/</code>). Direct sunlight and torchlight are drawn live, with shadows; the bake adds everything else, the light of the sky and what bounces off walls and floors.</p>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:600px">
+      <svg viewBox="0 0 880 280" role="img" aria-labelledby="fbaket">
+        <title id="fbaket">A point on the floor of a vaulted room sends rays over its hemisphere: some leave by the door to the sky, others strike the wall and vault and gather the light found there, which was itself gathered the same way on the bounce before.</title>
+        <g id="fbake"></g>
+      </svg>
+    </div>
+    <div class="legend"><span><i class="k-core"></i>a ray that reaches the sky</span><span><i class="k-play"></i>a ray that meets a wall: it takes the light found there</span></div>
+    </div>
+    <figcaption><b>Figure 11.</b> Baking one point. Rays go out over its half of the sky, 32 at the high level of detail, spread evenly and turned differently at each point so that neighbours don't share the same pattern. Two bounces: the first pass gathers sky, the second gathers what the first found on the walls. The result is kept at every point of every stone as a brightness and a direction, so a carved face turned towards the door is lit more than one turned away.</figcaption>
+  </figure>
+  <div class="prose">
+    <p>The bake runs in web workers, as many as the machine has cores less one (up to twelve), each holding the house in a tree of bounding boxes (<code>three-mesh-bvh</code>) to make ray tests quick. Only the face points of each stone are traced, which made it about seven times faster (230 seconds to 33 on the test scene). The picture is shown at once and the light fills in as passes finish. What stands outside the house is not baked: it is lit by the sky, and by light thrown up from sunlit ground.</p>
+    <p>Sun shadows come from a fine map, 2,048 points square, that follows the walker over 128 metres, about six centimetres to a point, drawn afresh when the walker has gone a fifth of the way to its edge; beyond it a coarser map covers the whole place. The four nearest torches cast shadows too.</p>
+    <h3>The air, and the rest of a frame</h3>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:700px">
+      <svg viewBox="0 0 880 150" role="img" aria-labelledby="fframet">
+        <title id="fframet">One frame: the scene drawn with its materials, then ambient occlusion, then mist, haze and clouds, then smoothing over frames, then bloom, eye adaptation and tone mapping to the screen.</title>
+        <g id="fframe"></g>
+      </svg>
+    </div></div>
+    <figcaption><b>Figure 12.</b> The steps of one frame after the scene is drawn, all in <code>render/post.ts</code>. Still water adds a second drawing of the scene, mirrored, at most 384, 512 or 1,080 pixels high depending on the level of detail.</figcaption>
+  </figure>
+  <div class="prose">
+    <ul>
+      <li><strong>Mist and haze.</strong> Near the eye, out to 45 metres, the air is stepped through in 40 steps so that mist lies in hollows and glows towards a low sun; beyond, haze is worked out in one go, thinning with height.</li>
+      <li><strong>Clouds</strong> are real volumes the eye looks through, heaped from about 800 metres up and 700 to 2,100 metres deep, or lying in flat banks, with cirrus at seven kilometres. They cast soft shadows and shafts of light.</li>
+      <li><strong>Smoothing over frames.</strong> Each frame is drawn a fraction of a point aside from the last, over 32 positions, and the frames are blended. That smooths the edges of leaves and fine lines, and averages away the noise of the clouds and mist.</li>
+      <li><strong>Hollows</strong> are darkened from the picture's own depth (ambient occlusion at half size, two metres about each point), which settles grass, trees and walls onto the ground.</li>
+      <li><strong>Exposure</strong> follows the picture a frame or two late, as an eye adjusts, and a film-like curve (ACES) brings bright light into range.</li>
+    </ul>
+    <p>Six hours (morning, midday, evening, sunset, dusk and night) and four seasons are dealt by the seed; one valley or town in five gets winter, with low sun, snow lying, bare broadleaves and frozen ponds. Lamps and windows light up from sunset.</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Level of detail</th><th>Textures</th><th>Bake rays</th><th>Grass to</th><th>Leaves</th><th>Clouds</th><th>Occlusion</th></tr></thead>
+    <tbody>
+      <tr><td>Low</td><td class="num">512 px</td><td class="num">12</td><td class="num">40 m</td><td class="num">half</td><td>painted</td><td>off</td></tr>
+      <tr><td>Medium (touch devices)</td><td class="num">1,024 px</td><td class="num">16</td><td class="num">55 m</td><td class="num">¾</td><td>16 steps</td><td>on</td></tr>
+      <tr><td>High</td><td class="num">1,024 px</td><td class="num">32</td><td class="num">80 m</td><td class="num">all</td><td>28 steps</td><td>on</td></tr>
+      <tr><td>Ultra</td><td class="num">2,048 px</td><td class="num">32</td><td class="num">80 m</td><td class="num">all</td><td>28 steps</td><td>on</td></tr>
+    </tbody>
+  </table></div>
+  <div class="stats">
+    <div class="stat"><b>≈ 12.5 ms</b><span>a frame at 1024 × 768 where you arrive in a castle's valley in summer, in the forest, with leaves thinned with distance (16.6 drawing every leaf)</span></div>
+    <div class="stat"><b>5.3–14 ms</b><span>the same in the village street, in the fields, looking over them at the castle, and over the wooded slope under it</span></div>
+    <div class="stat"><b>1.0–1.15 million</b><span>triangles of ground in a castle's valley, now that it runs down from the castle's seat on the high ground; 440,000 before valleys grew to hold one</span></div>
+    <div class="stat"><b>≈ 1 GB</b><span>of video memory at ultra, whose textures take four times the painting</span></div>
+  </div>
+</section>
+<!-- 11 ------------------------------------------------------------------------------------------------>
+<section id="loading">
+  <span class="sec-num">11</span>
+  <h2>From a link to a walk</h2>
+  <div class="prose">
+    <p class="lead-in">Making a place takes tens of seconds, nearly all of it in the browser's one main thread. A page that holds that thread for long gets a "page unresponsive" prompt, so the build is cut into small steps, and between steps the loader (<code>src/app/loader.ts</code>) hands control back to the browser at least every 40 milliseconds to paint the progress bar.</p>
+    <p>The steps are what you see on the loading screen, in this order (<code>src/app/main.ts</code>):</p>
+    <ol class="steps">
+      <li><b>Lifting the land, and letting the rivers wear it.</b> If the place is in a world, the world is started first, in a web worker, so it is made while everything else goes on. A world once made, and its tiles, are kept in the browser for next time (the last three worlds).</li>
+      <li><b>Starting the renderer.</b> WebGPU, or WebGL 2 where there is none.</li>
+      <li><b>Painting surfaces.</b> One texture recipe at a time: dressed stone, timber, moss, rock, turf, scree, the barks, soil, litter, plaster, thatch, tiles, the bricks.</li>
+      <li><b>Designing the valley and its house</b> (or the island, the mountain, the town): rooms, doors, locks and keys. This is the generator, from section 3, and it waits for the world if it isn't ready yet.</li>
+      <li><b>Surveying the ground, tracing the caves, carving the valley, laying stone.</b> The mesher is written as a generator function (<code>meshSiteSteps</code>) that pauses after each place, so the page breathes between rooms: "Laying stone: place 4 of 11".</li>
+      <li><b>Shaping the stone into meshes; planting grass, leaves and flowers; filling the water.</b></li>
+      <li><b>Preparing collision.</b> Everything solid is merged into one mesh, and an index of bounding boxes is built over it (<code>three-mesh-bvh</code>) so the body can be kept out of the walls quickly.</li>
+      <li><b>Painting the sky; baking the light; compiling shaders.</b> The bake starts in its workers here, and is not waited for. "The first picture takes a moment."</li>
+      <li><b>Ready.</b> You can walk at once, while the bake refines: the picture settles into its final light as passes finish.</li>
+    </ol>
+  </div>
+  <div class="callout tech"><span class="label">Building ahead</span>The world page's <strong>Build every place</strong> lays out every place of a world in a worker beforehand and keeps the layouts in the browser, with the world and its tiles. Going to one of those places then skips both making the world and designing the place: the game only builds what was already laid out. It takes minutes once, and makes moving between a world's places quick after that.</div>
+  <div class="stats">
+    <div class="stat"><b>20–35 s</b><span>to make a world in its worker, in a headless browser</span></div>
+    <div class="stat"><b>1–2 s</b><span>for each 5-metre tile of a world about the place</span></div>
+    <div class="stat"><b>55–78 s</b><span>to build a castle's valley without a browser, measured on three, its valley longer since its castle moved to the high ground and its village fuller; <code>DBG_T=1</code> says where the time goes</span></div>
+    <div class="stat"><b>33–36 s</b><span>to bake the light, measured in the browser on an island and a mountain top</span></div>
+  </div>
+</section>
+
+<!-- 12 ------------------------------------------------------------------------------------------------>
+<section id="play">
+  <span class="sec-num">12</span>
+  <h2>The body and the rules</h2>
+  <div class="prose">
+    <p>You walk as a body, not a floating camera (<code>src/app/player.ts</code>): a capsule 1.8 metres tall and 0.28 in radius, eyes at 1.68, that falls under gravity, slides along whatever it touches and climbs steps up to 34 centimetres. It walks at 3.2 metres a second and runs at 6.5. Each frame it is tested against the one merged mesh of the place, through its index of boxes; shut doors are boxes of their own, taken away as they open. <kbd>V</kbd> lets go of all that and flies.</p>
+    <p>There are no buttons to press. <strong>Everything is done by walking</strong> (<code>src/app/game.ts</code>): coming up to a door tries it, walking up to a key takes it, and reaching the chest in the sanctum ends the run.</p>
+  </div>
+  <figure>
+    <div class="fig"><div class="svg-wrap" style="--min:640px">
+      <svg viewBox="0 0 880 262" role="img" aria-labelledby="freacht">
+        <title id="freacht">To scale: the body's footprint beside the distance at which each thing responds: a door at 1.7 metres, a secret door at 0.85, a key at 1.2, a lever at 1.25 and the sanctum's chest at 2.</title>
+        <g id="freach"></g>
+      </svg>
+    </div></div>
+    <figcaption><b>Figure 13.</b> How close is close enough, drawn to scale. A secret door gives only when it is all but leaned on.</figcaption>
+  </figure>
+  <div class="tbl"><table>
+    <thead><tr><th>You walk up to</th><th>What happens</th></tr></thead>
+    <tbody>
+      <tr><td>A shut door</td><td>It swings open</td></tr>
+      <tr><td>A locked door without its key</td><td>"Locked. The plate on it is gold; it wants a key to match."</td></tr>
+      <tr><td>A barred door, from the wrong side</td><td>"Something bars it from the other side." From the right side: "You lift the bar. The door swings free."</td></tr>
+      <tr><td>A portcullis</td><td>It stays down; you need its lever. At the lever: "Iron grinds, and the portcullis rises."</td></tr>
+      <tr><td>A stretch of wall that is a secret door</td><td>"The wall gives under your hand. A door, faced in stone."</td></tr>
+      <tr><td>A key</td><td>You take it</td></tr>
+      <tr><td>The chest in the sanctum</td><td>The end</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>The <strong>map</strong> fills in as you explore. Rooms you have entered are drawn in full; rooms you have only seen through an open door, an arch or a window are sketched; the rest is left off, and a secret door stays hidden until it opens. <kbd>M</kbd> enlarges it, and in a world, pressed again, shows the world's ink map about the place with you on it.</p>
+    <p><strong>Sound</strong> is made, not recorded: wind, leaves, the tone of a room, footsteps that change with what you walk on (grass, earth, stone, wood, water), and the sounds of doors, keys, the lever and the end, all from noise and oscillators (<code>src/app/sound.ts</code>). Its levels were set by measuring the output in a headless browser. Its author has never heard it.</p>
+    <p>Torches light the rooms with real lights, and four lights that cast shadows are moved among whichever torches are nearest. <kbd>L</kbd> raises the light you carry. On a touch screen, a thumb stick appears wherever the left of the screen is touched; drag on the right to look.</p>
+  </div>
+</section>
+
+<!-- 13 ------------------------------------------------------------------------------------------------>
+<section id="stream">
+  <span class="sec-num">13</span>
+  <h2>The land at a metre, and the world as the game</h2>
+  <div class="prose">
+    <p class="lead-in">Today the game builds one place at a time, whole, and you go from one to another by loading a page. The direction is for the world itself to become the game: walk out of a valley, along a road, and into the next place. That needs the world's land at walking detail, a metre between points, and 6 × 10 kilometres at a metre is sixty million points, far too much to make at once.</p>
+    <p>So the land is made in <strong>squares</strong>, 256 metres on a side, only where they are wanted, nearest first, in web workers (<code>src/core/stream.ts</code>). A square is the world's 5-metre tiles under it, with finer knolls and hollows laid on and a light wear by water and frost at a metre, faded out towards the square's edge. Along its edge a square is a plain function of where each point lies, which its neighbour shares, so the two meet exactly. A square takes about 0.4 seconds.</p>
+    <p>Each square is then meshed only as finely as its distance calls for (<code>src/render/streamMesh.ts</code>): cut into right triangles that are split only where the ground departs from them by more than a tolerance, as Mapbox's Martini does it. Near squares are true to two centimetres; a kilometre off, to 1.6 metres. A skirt hangs from every square's edge to hide the slit where neighbours of different detail meet. Drag the walker below to see the rule at work.</p>
+  </div>
+  <figure>
+    <div class="fig">
+      <div class="controls">
+        <label><input type="checkbox" id="st-fine"> Half-metre ground near the walker</label>
+      </div>
+      <div class="svg-wrap" style="--min:520px">
+        <svg id="st-svg" viewBox="0 0 880 560" role="img" aria-label="A map of 256-metre squares about a walker you can drag; each square is shaded by how finely it is meshed."></svg>
+      </div>
+      <p class="readout" id="st-read" aria-live="off">&nbsp;</p>
+    </div>
+    <figcaption><b>Figure 14.</b> Squares of land about the walker (drag the red dot, or click where it should go), shaded by how finely each is meshed; the dashed red ring is the 700 metres within which squares are made. The rule is the walk page's own: 1.6 millimetres of tolerance for every metre between the walker and the nearest point of the square, rounded up to the next of seven levels, so 2 cm within 12.5 metres, 5 within 31, then 10, 20, 40 and 80 cm out to 62, 125, 250 and 500 metres, and 1.6 m beyond. Beyond the ring the world's coarse lattice stands in. The triangle count uses what was measured: a square's full lattice is 131,072 triangles, of which a mesh true to 2 cm keeps 84%, to 10 cm 53%, to 40 cm 19%, to 160 cm 1%. With the box ticked, squares within 150 metres split into four at half a metre, with tussocks, stones and rills.</figcaption>
+  </figure>
+  <div class="prose">
+    <h3>Ways between places</h3>
+    <p>A way from a town's quay to a valley head is laid as the world's tracks are, round hills and along slopes, its points smoothed four metres apart (<code>src/core/route.ts</code>). Its bed is then graded and cut into the squares (<code>src/core/way.ts</code>): level for 2.4 metres either side of the middle, a shoulder, and a bank back out to the land, half again as broad as it is high. Like the squares' edges, the bed is a function of where a point lies alone, so every square it passes through cuts it the same and they still meet exactly. The ground's material draws it as a cart track with ruts and grass along the verges. The <a href="lab/route.html">route page</a> walks one: in world <code>w0</code>, 0.93 kilometres from Halhaven's quay to the house at Strath Norith.</p>
+    <h3>The world as the game, in six steps</h3>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Step</th><th>What it means</th><th>Where it stands</th></tr></thead>
+    <tbody>
+      <tr><td>1. The game's body in the world</td><td>The walk and route pages move the game's own body over the streamed land, stopped by tree trunks and the sea</td><td><b>Done.</b> Walked from Halhaven to Strath Norith in 141 seconds, never more than 6 cm under the ground</td></tr>
+      <tr><td>2. Places built into the world</td><td>Within 1.5 km, a place is laid out and built in a worker and set into the land, the squares about it brought to meet its edge</td><td><b>Done for valley heads.</b> Islands, towns and mountain tops bring a sea, a coast or cloud the walk doesn't draw yet</td></tr>
+      <tr><td>3. One renderer</td><td>The game's sky, clouds, sea, occlusion, lamps and night used by the world as by a place</td><td>Not yet</td></tr>
+      <tr><td>4. The game in the world</td><td>Each place's locks, keys and goal; the maps; sound; ways joining every place, a boat for the sea</td><td>Not yet</td></tr>
+      <tr><td>5. The world's own light, water and rock</td><td>Sky light for the land between places; lakes and rivers; crags carved near the walker</td><td>Not yet</td></tr>
+      <tr><td>6. The world the default</td><td>The game's page opens on the world; single places stay for making and checking them</td><td>Not yet</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- 14 ------------------------------------------------------------------------------------------------>
+<section id="maps">
+  <span class="sec-num">14</span>
+  <h2>Maps and exports</h2>
+  <div class="prose">
+    <p>Because everything is in the document, a place can leave the tool in forms another game or a tabletop referee can use. <strong>Export</strong> in the game saves them, each named for the seed:</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>File</th><th>What it is</th><th>Made from</th></tr></thead>
+    <tbody>
+      <tr><td><code>&lt;seed&gt;.json</code></td><td>The site document: every place, every way, what locks it and what opens it, and the solver's route through</td><td>The document itself (<code>format: "dungeons-site"</code>, version 2)</td></tr>
+      <tr><td><code>&lt;seed&gt;.glb</code></td><td>The built world as a glTF model, every stone, with its materials; about 50 MB for ten rooms, without the baked light</td><td>The meshes</td></tr>
+      <tr><td><code>&lt;seed&gt;-plan.png</code></td><td>The plan, with a key to the rooms</td><td>The document</td></tr>
+      <tr><td><code>&lt;seed&gt;-map.png</code></td><td>The plan drawn in ink as a referee's map, with hatched walls and numbered rooms, and a second sheet of the whole valley, island or mountain top in hachures</td><td>The document</td></tr>
+      <tr><td><code>&lt;seed&gt;-battlemap.jpg</code></td><td>The built world from straight above with the roofs cut away, ruled in squares of 1.5 metres</td><td>The 3D world, drawn twice from above (cut at head height indoors, whole outdoors) and merged</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>A game that wants its own look can ignore the model and build from the document; one that wants the tool's stonework can load the model and use the document to know what it is looking at. <a href="examples/viewer/">The example viewer</a> does the second: it loads both and shows the building cut open with its rooms named. The <a href="world.html">world page</a> draws a world's ink map the same way, in the hand of a place's own, with its places of adventure in red; the <a href="gallery.html">gallery</a> shows a dozen candidate places at a time as plans; and the <a href="range.html">range report</a> measures 2,000 generated places to show what the generator does and doesn't make.</p>
+  </div>
+</section>
+
+<!-- 15 ------------------------------------------------------------------------------------------------>
+<section id="checks">
+  <span class="sec-num">15</span>
+  <h2>How it is checked</h2>
+  <div class="prose">
+    <p class="lead-in">A generator is only as good as the worst thing it can make, and nobody can look at every seed. So most checks build hundreds of places without a browser and test each one for what must never happen; others drive the real program, with the player's own body, in a headless browser.</p>
+  </div>
+  <div class="cards">
+    <div class="card"><span class="tag">npm run check</span><h4>Sites</h4><p>Generates hundreds of places of every kind and confirms each is connected and can be finished, that no building stands on the track or in another, that no two dark rooms come in a row, and that no doorway rises more than 52 cm.</p></div>
+    <div class="card"><span class="tag">tools/land.ts · island.ts · mountain.ts · town.ts</span><h4>Land and rock</h4><p>Builds each kind's land, rock, buildings and planting for a dozen seeds and reports rock standing in the house's doorway, numbers that are not numbers, build time and triangles.</p></div>
+    <div class="card"><span class="tag">tools/houses.ts</span><h4>Houses</h4><p>Builds canal houses and houses of brick, each alone, and walks the game's body through each: up the stoop, in at the door, up every flight to the top.</p></div>
+    <div class="card"><span class="tag">tools/world.ts · stream.ts · route.ts</span><h4>The world</h4><p>Builds worlds and reports what was found and why the rest was turned down; makes squares at a metre and checks that every shared edge matches exactly, with ways cut in.</p></div>
+    <div class="card"><span class="tag">tools/body.ts · places.ts</span><h4>Walking the world</h4><p>Walks the body along a way end to end and through a wood, then from a town into a valley built into the world, measuring how far it ever stood under or over the ground.</p></div>
+    <div class="card"><span class="tag">tools/browser/*.cjs</span><h4>In the browser</h4><p>Walks every doorway both ways and plays to the end; drives the body at the valley's edges from 36 directions to see if anyone gets out or falls through; climbs the lighthouse; walks out along the jetty.</p></div>
+  </div>
+  <div class="prose">
+    <p><code>npm run typecheck</code> and <code>npm run build</code> must pass before every commit, and every push to the default branch is built by a workflow and published to GitHub Pages, this page with it.</p>
+  </div>
+</section>
+
+<!-- 16 ------------------------------------------------------------------------------------------------>
+<section id="limits">
+  <span class="sec-num">16</span>
+  <h2>What it doesn't do yet</h2>
+  <div class="prose">
+    <p>The design (<a href="https://github.com/klaine/dungeons/blob/HEAD/docs/02-generation.md">document 2</a>) reaches further than what is built. The honest gaps, as of November 2026:</p>
+  </div>
+  <div class="tbl"><table>
+    <thead><tr><th>Not yet</th><th>What there is instead</th></tr></thead>
+    <tbody>
+      <tr><td>A premise and a history for each place: who built it, what happened to it, who is there now</td><td>A setting: stone, hour, season, weather, the kind of house and whether it is kept, damp or forsaken</td></tr>
+      <tr><td>Loop patterns as a general grammar, biomes as data, zones within a site</td><td>Four fixed loop plans, filled in and scored</td></tr>
+      <tr><td>Rooms of any shape</td><td>Every room is a rectangle; caves are irregular hollows inside one</td></tr>
+      <tr><td>Furniture recorded in the document</td><td>Furniture is chosen when the place is built, from each room's use, the one exception to "everything is decided in <code>src/core</code>"</td></tr>
+      <tr><td>Furnished brick and canal houses; the sea cave in an island's mission</td><td>Their rooms are built, and empty; the sea cave can be explored but holds nothing needed</td></tr>
+      <tr><td>A dungeon furnished as one, low walls holding up the village's yards over its road</td><td>The curtain wall, gate, towers and a keep taller than them, on the land's own wooded high ground over the valley, its village set into the slope under it; a bailey with ranges, a well and a stair up to the walk; a chapel with a bell-cote; the dungeon is a room of the house</td></tr>
+      <tr><td>Sound that has been listened to</td><td>Levels measured in a headless browser</td></tr>
+      <tr><td>Frames timed everywhere</td><td>Valleys and towns timed on a desktop graphics card; an island only seen running at the browser's cap in one person's browser; the WebGL 2 fallback not timed; an iPad not tried since the cliffs, trees, clouds and water went in</td></tr>
+      <tr><td>The world as the game</td><td>Steps 1 and 2 of 6 (section 13); places are still entered one page at a time</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+    <p>Within those limits there's a lot to walk. The best way to see how it works is to open <a href="index.html">the tool</a>, press <kbd>V</kbd> and fly up over the place you were given, or open <a href="world.html">the world page</a> and pick one.</p>
+  </div>
+</section>
+
+</article>
+</div>
+
+<footer class="site">
+  Dungeons, places for adventure · this tour written November 2026 · <a href="https://github.com/klaine/dungeons">Source on GitHub</a> ·
+  <a href="index.html">Play</a><a href="world.html">World</a><a href="https://github.com/klaine/dungeons/tree/HEAD/docs">Design documents</a>
+</footer>
+<script>
+// Theme toggle (remembered where storage works), contents highlighting, and small helpers for the figures.
+(function () {
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem("dungeons-tour-theme"); if (saved) root.dataset.theme = saved; } catch (e) {}
+  function dark() { return root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; }
+  var btn = document.querySelector(".theme-btn");
+  if (btn) btn.addEventListener("click", function () {
+    root.dataset.theme = dark() ? "light" : "dark";
+    try { localStorage.setItem("dungeons-tour-theme", root.dataset.theme); } catch (e) {}
+  });
+  var links = Array.prototype.slice.call(document.querySelectorAll(".toc a"));
+  if (!links.length || !("IntersectionObserver" in window)) return;
+  var byId = {};
+  links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      links.forEach(function (a) { a.classList.remove("active"); });
+      var a = byId[en.target.id];
+      if (a) a.classList.add("active");
+    });
+  }, { rootMargin: "-20% 0px -70% 0px" });
+  Object.keys(byId).forEach(function (id) { var el = document.getElementById(id); if (el) obs.observe(el); });
+})();
+
+var NS = "http://www.w3.org/2000/svg";
+// S("rect", {x: 1, class: "box"}, parent): makes an SVG element; a "text" attribute sets its text.
+function S(tag, attrs, parent) {
+  var el = document.createElementNS(NS, tag);
+  for (var k in attrs) {
+    if (k === "text") el.textContent = attrs[k];
+    else el.setAttribute(k, attrs[k]);
+  }
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+// A box with a bold title and lines of smaller text under it.
+function box(g, x, y, w, h, cls, title, lines, opt) {
+  opt = opt || {};
+  S("rect", { x: x, y: y, width: w, height: h, rx: opt.rx || 10, class: cls }, g);
+  var ty = y + (opt.top || 22);
+  if (title) S("text", { x: x + 14, y: ty, class: opt.big ? "t-lg" : "t-b", text: title }, g);
+  (lines || []).forEach(function (t, i) { S("text", { x: x + 14, y: ty + 19 + i * (opt.lh || 17), class: opt.small ? "t-xs" : "t-sm", text: t }, g); });
+}
+function arrow(g, d, cls, marker) { return S("path", { d: d, class: cls, "marker-end": "url(#" + marker + ")" }, g); }
+// Segmented buttons: calls on(value) with the clicked button's data-v and marks it pressed.
+function segmented(el, on) {
+  el.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button");
+    if (!b || !el.contains(b)) return;
+    Array.prototype.forEach.call(el.querySelectorAll("button"), function (x) { x.setAttribute("aria-pressed", x === b); });
+    on(b.dataset.v);
+  });
+}
+// The game's own random streams (src/core/rng.ts), so that the draws shown are the real ones.
+function xmur3(str) {
+  var h = 1779033703 ^ str.length;
+  for (var i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return function () { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return (h ^= h >>> 16) >>> 0; };
+}
+function Rng(seed) {
+  this.seed = seed; var h = xmur3(seed);
+  this.a = h(); this.b = h(); this.c = h(); this.d = h();
+  for (var i = 0; i < 8; i++) this.next();
+}
+Rng.prototype.next = function () {
+  this.a >>>= 0; this.b >>>= 0; this.c >>>= 0; this.d >>>= 0;
+  var t = (this.a + this.b) | 0;
+  this.a = this.b ^ (this.b >>> 9);
+  this.b = (this.c + (this.c << 3)) | 0;
+  this.c = (this.c << 21) | (this.c >>> 11);
+  this.d = (this.d + 1) | 0;
+  t = (t + this.d) | 0;
+  this.c = (this.c + t) | 0;
+  return (t >>> 0) / 4294967296;
+};
+Rng.prototype.fork = function (label) { return new Rng(this.seed + "/" + label); };
+// Where a pointer is, in an SVG's own units.
+function svgPoint(svg, ev) {
+  var p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY;
+  return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+// Figure: one record, many views.
+(function () {
+  var g = document.getElementById("f1"); if (!g) return;
+  box(g, 14, 116, 112, 68, "box", "Seed", ["any text, in the", "address: ink-3"], { lh: 15 });
+  arrow(g, "M126 150 H146", "ln", "ah");
+  box(g, 148, 34, 206, 232, "box-core", "The generator", ["src/core", "", "• the house: rooms in loops", "• locks, keys and the proof", "• the land, found in a world", "• what stands, grows, flows", "• six drafts; the best kept", "", "decides; draws nothing"], { big: true, top: 28, lh: 19 });
+  arrow(g, "M354 150 H374", "ln-core thick", "ah-core");
+  box(g, 376, 92, 150, 116, "box-acc", "Site document", ["JSON, version 2", "places · ways · items", "levers · the route", "the land's shape"], { big: true, top: 28 });
+  var outs = [
+    ["box-draw", "The 3D world", "stone by stone, rock, trees, light · src/render"],
+    ["box-draw", "The plan and the ink map", "a referee's map, with a key · src/maps"],
+    ["box-draw", "The battle map", "the built world from above, ruled in squares"],
+    ["box-draw", "Exports", ".json · .glb model · .png · .jpg"],
+    ["box-play", "The game", "doors, keys, the end, the map · src/app"]
+  ];
+  outs.forEach(function (o, i) {
+    var y = 14 + i * 56;
+    box(g, 578, y, 288, 46, o[0], o[1], [o[2]], { top: 19, lh: 15 });
+    var cls = o[0] === "box-play" ? "ln-play" : "ln-draw", mk = o[0] === "box-play" ? "ah-play" : "ah-draw";
+    arrow(g, "M526 150 C552 150 548 " + (y + 23) + " 574 " + (y + 23), cls, mk);
+  });
+})();
+
+// Figure: forked streams, with their real first draws.
+(function () {
+  var g = document.getElementById("f2"); if (!g) return;
+  function node(x, y, label, path, cls, dashed) {
+    var r = new Rng(path), d = [r.next(), r.next(), r.next()].map(function (v) { return v.toFixed(3); }).join("  ");
+    var w = 172, el = S("rect", { x: x, y: y, width: w, height: 44, rx: 9, class: cls }, g);
+    if (dashed) el.setAttribute("stroke-dasharray", "5 4");
+    S("text", { x: x + 12, y: y + 18, class: "t-b t-mono", "font-size": "12", text: label }, g);
+    S("text", { x: x + 12, y: y + 35, class: "t-xs t-mono", text: d }, g);
+    return { x: x, y: y, w: w };
+  }
+  function link(a, b, dashed) {
+    var p = S("path", { d: "M" + (a.x + a.w) + " " + (a.y + 22) + " C" + (a.x + a.w + 20) + " " + (a.y + 22) + " " + (b.x - 20) + " " + (b.y + 22) + " " + b.x + " " + (b.y + 22), class: dashed ? "ln-acc" : "ln" }, g);
+    if (dashed) p.setAttribute("stroke-dasharray", "5 4");
+  }
+  var root = node(10, 103, "ink-3", "ink-3", "box-acc");
+  var s0 = node(232, 20, "site/0", "ink-3/site/0", "box");
+  var s1 = node(232, 103, "site/1", "ink-3/site/1", "box-core");
+  var s5 = node(232, 186, "site/5", "ink-3/site/5", "box");
+  S("text", { x: 318, y: 82, class: "t-sm", "text-anchor": "middle", text: "⋮" }, g);
+  S("text", { x: 318, y: 165, class: "t-sm", "text-anchor": "middle", text: "⋮" }, g);
+  [s0, s1, s5].forEach(function (n) { link(root, n); });
+  var m = node(456, 4, "…/proportions", "ink-3/site/1/proportions", "box");
+  var h = node(456, 60, "…/halls", "ink-3/site/1/halls", "box");
+  var k = node(456, 116, "…/mission", "ink-3/site/1/mission", "box");
+  var st = node(456, 172, "…/storeys", "ink-3/site/1/storeys", "box");
+  [m, h, k, st].forEach(function (n) { link(s1, n); });
+  var later = node(456, 236, "…/camp", "ink-3/site/1/camp", "box-plain", true);
+  link(s1, later, true);
+  S("text", { x: 646, y: 254, class: "t-xs t-acc", text: "added later, on a fork of its own:" }, g);
+  S("text", { x: 646, y: 269, class: "t-xs", text: "every stream above it is unchanged" }, g);
+  S("text", { x: 646, y: 30, class: "t-xs", text: "each box: its label, and the first" }, g);
+  S("text", { x: 646, y: 44, class: "t-xs", text: "three numbers its stream gives," }, g);
+  S("text", { x: 646, y: 58, class: "t-xs", text: "worked out here by the game's own" }, g);
+  S("text", { x: 646, y: 72, class: "t-xs", text: "generator, ported to this page" }, g);
+})();
+
+// Figure: the solver on a small house.
+(function () {
+  var svg = document.getElementById("sv-svg"); if (!svg) return;
+  var C = 118, R = 84, X0 = 30, Y0 = 18, GAP = 10;
+  // Rooms on a grid: [name, col, row]
+  var rooms = {
+    A: ["Meadow", 1, 3, "start"], E: ["Gatehall", 1, 2], K: ["Court", 0, 2, "court"], P: ["Passage", 2, 2],
+    C: ["Chapel", 0, 1], H: ["Hall", 1, 1], S: ["Store", 2, 1], R: ["Reliquary", 0, 0], G: ["Sanctum", 1, 0, "goal"]
+  };
+  var ids = Object.keys(rooms);
+  var ways = [
+    { a: "A", b: "E" }, { a: "E", b: "K", arch: true }, { a: "E", b: "P" }, { a: "E", b: "H", barredFrom: "H" },
+    { a: "K", b: "C", arch: true }, { a: "C", b: "H" }, { a: "C", b: "R", lock: "iron" }, { a: "H", b: "G", lock: "gold" }, { a: "P", b: "S" }
+  ];
+  var KEY = { iron: 1, gold: 2 };
+  var IRON = "#7d858c", GOLD = "#c9a227";
+  function rect(id) { var r = rooms[id]; return { x: X0 + r[1] * (C + GAP), y: Y0 + r[2] * (R + GAP), w: C, h: R }; }
+  function mid(id) { var r = rect(id); return [r.x + r.w / 2, r.y + r.h / 2]; }
+  var items, state, layer, seen, frontier, found, broken = false, timer = null;
+  var gRooms, gDots, gRoute;
+
+  function draw() {
+    clear(svg);
+    gRooms = S("g", {}, svg);
+    ids.forEach(function (id) {
+      var r = rect(id), kind = rooms[id][3];
+      var el = S("rect", { x: r.x, y: r.y, width: r.w, height: r.h, rx: 3, class: kind === "court" || kind === "start" ? "f-soft-draw" : "f-surface2", stroke: "currentColor", "stroke-width": 3, id: "sv-" + id }, gRooms);
+      el.style.color = "var(--ink)";
+      S("text", { x: r.x + 10, y: r.y + 20, class: "t-sm t-b", text: rooms[id][0], "font-size": (svg.parentNode.clientWidth || 880) < 600 ? 14 : 11.5 }, gRooms);
+      if (kind === "goal") S("text", { x: r.x + r.w - 26, y: r.y + 24, class: "t-acc", "font-size": "20", text: "✦" }, gRooms);
+    });
+    // Doorways: a gap in the wall, marked by what holds it.
+    ways.forEach(function (w) {
+      var ra = rect(w.a), rb = rect(w.b), x, y, horiz;
+      if (Math.abs(ra.x - rb.x) < 1) { horiz = true; x = ra.x + ra.w / 2; y = Math.min(ra.y, rb.y) + R + GAP / 2; }
+      else { horiz = false; y = ra.y + ra.h / 2; x = Math.min(ra.x, rb.x) + C + GAP / 2; }
+      var half = w.arch ? 26 : 14;
+      if (horiz) S("rect", { x: x - half, y: y - 9, width: half * 2, height: 18, class: "f-surface" }, gRooms);
+      else S("rect", { x: x - 9, y: y - half, width: 18, height: half * 2, class: "f-surface" }, gRooms);
+      var col = w.lock === "iron" ? IRON : w.lock === "gold" ? GOLD : w.barredFrom ? "var(--play)" : null;
+      if (col) {
+        var l = horiz ? S("line", { x1: x - half, x2: x + half, y1: y, y2: y }, gRooms) : S("line", { x1: x, x2: x, y1: y - half, y2: y + half }, gRooms);
+        l.setAttribute("stroke", col); l.setAttribute("stroke-width", 5);
+      }
+      if (w.barredFrom) {
+        var hb = rect(w.barredFrom);
+        S("text", { x: x + 18, y: hb.y + hb.h - 8, class: "t-xs", text: "bar" }, gRooms);
+      }
+    });
+    // Keys.
+    items.forEach(function (it) {
+      var m = mid(it.place);
+      S("path", { d: "M" + m[0] + " " + (m[1] - 13) + " l10 13 l-10 13 l-10 -13z", fill: it.key === "gold" ? GOLD : IRON, stroke: "var(--ink)", "stroke-width": 1 }, gRooms);
+      S("text", { x: m[0] + 14, y: m[1] + 4, class: "t-xs", text: it.key }, gRooms);
+    });
+    gDots = S("g", {}, svg); gRoute = S("g", {}, svg);
+    // Key to the dots, and the search's numbers: beside the plan, or under it on a narrow screen.
+    var narrow = (svg.parentNode.clientWidth || 880) < 600;
+    svg.setAttribute("viewBox", narrow ? "0 0 434 690" : "0 0 880 400");
+    var lg = S("g", { transform: narrow ? "translate(-400 370)" : "" }, svg);
+    S("text", { x: 430, y: 40, class: "t-b", text: "The search" }, lg);
+    S("text", { x: 430, y: 62, class: "t-sm", text: "A state is: the room, the keys held," }, lg);
+    S("text", { x: 430, y: 79, class: "t-sm", text: "and whether the bar is lifted." }, lg);
+    [["no key", "var(--surface)"], ["iron key", IRON], ["iron and gold", GOLD]].forEach(function (k, i) {
+      S("circle", { cx: 438, cy: 104 + i * 20, r: 6, fill: k[1], stroke: "var(--ink)", "stroke-width": 1 }, lg);
+      S("text", { x: 452, y: 108 + i * 20, class: "t-sm", text: "reached holding " + k[0] }, lg);
+    });
+    S("text", { x: 430, y: 186, class: "t-xs", text: "the outlined rooms were reached in the last step" }, lg);
+    S("text", { id: "sv-count", x: 430, y: 230, class: "t-lg", text: "" }, lg);
+    S("text", { id: "sv-count2", x: 430, y: 252, class: "t-sm", text: "" }, lg);
+    S("text", { id: "sv-verdict", x: 430, y: 290, class: "t-b", text: "" }, lg);
+    S("text", { id: "sv-verdict2", x: 430, y: 310, class: "t-sm", text: "" }, lg);
+  }
+
+  function pickUp(place, keys) { items.forEach(function (it) { if (it.place === place) keys |= KEY[it.key]; }); return keys; }
+  function code(n) { return n.place + ":" + n.keys + ":" + n.open; }
+  function reset() {
+    stop();
+    items = broken ? [{ key: "gold", place: "R" }, { key: "iron", place: "R" }] : [{ key: "iron", place: "S" }, { key: "gold", place: "R" }];
+    draw();
+    var first = { place: "A", keys: pickUp("A", 0), open: 0 };
+    seen = {}; seen[code(first)] = first; frontier = [first]; layer = 0; found = null;
+    paint([first]);
+    document.getElementById("sv-step").disabled = false; document.getElementById("sv-run").disabled = false;
+    setRead("The player stands in the meadow with nothing. Press Step to widen the search by one move.");
+  }
+  function step() {
+    if (found || !frontier.length) return false;
+    var next = [];
+    frontier.forEach(function (n) {
+      ways.forEach(function (w) {
+        if (w.a !== n.place && w.b !== n.place) return;
+        if (w.lock && !(n.keys & KEY[w.lock])) return;
+        var open = n.open, events = [];
+        if (w.lock) events.push("unlock with the " + w.lock + " key");
+        if (w.barredFrom && !open) { if (n.place !== w.barredFrom) return; open = 1; events.push("lift the bar"); }
+        var to = w.a === n.place ? w.b : w.a, keys = pickUp(to, n.keys);
+        items.forEach(function (it) { if (it.place === to && !(n.keys & KEY[it.key])) events.push("take the " + it.key + " key"); });
+        var m = { place: to, keys: keys, open: open, prev: n, events: events };
+        if (seen[code(m)]) return;
+        seen[code(m)] = m; next.push(m);
+        if (to === "G" && !found) found = m;
+      });
+    });
+    layer++; frontier = next;
+    paint(next);
+    var total = Object.keys(seen).length;
+    if (found) {
+      var route = [], c = found;
+      while (c.prev) { route.unshift(c); c = c.prev; }
+      drawRoute(route);
+      // Each thing done is told once (the game's route says "unlock" again each time a locked door is passed).
+      var told = {}, said = [];
+      route.forEach(function (r) {
+        var ev = r.events.filter(function (e) { if (told[e]) return false; told[e] = true; return true; });
+        if (ev.length) said.push(rooms[r.place][0].toLowerCase() + ": " + ev.join(", "));
+      });
+      verdict("Completable in " + route.length + " moves", "the shortest way through; ignoring locks, 3", "var(--draw)");
+      setRead("Found after " + layer + " steps and " + total + " states. On the way: " + said.join("; ") + ".");
+      done();
+    } else if (!next.length) {
+      verdict("No way through", "this draft would be thrown away", "var(--accent)");
+      setRead("The search ran out after " + total + " states: the iron key is behind the iron door, so the reliquary, the gold key and the sanctum can never be reached. The game never shows such a house.");
+      done();
+    } else {
+      setRead("Step " + layer + ": " + next.length + " new state" + (next.length === 1 ? "" : "s") + " (" + next.map(function (n) { return rooms[n.place][0].toLowerCase() + (n.keys ? " with " + (n.keys === 1 ? "iron" : n.keys === 3 ? "iron and gold" : "gold") : ""); }).join(", ") + ").");
+    }
+    return !found && next.length > 0;
+  }
+  function paint(newOnes) {
+    clear(gDots);
+    var per = {};
+    Object.keys(seen).forEach(function (k) { var n = seen[k]; (per[n.place] = per[n.place] || {})[n.keys] = true; });
+    ids.forEach(function (id) {
+      var el = document.getElementById("sv-" + id);
+      if (el) el.setAttribute("stroke-width", newOnes.some(function (n) { return n.place === id; }) ? 5 : 3);
+      if (el) el.style.color = newOnes.some(function (n) { return n.place === id; }) ? "var(--accent)" : "var(--ink)";
+      var ks = Object.keys(per[id] || {}).map(Number).sort();
+      var r = rect(id);
+      ks.forEach(function (k, i) {
+        S("circle", { cx: r.x + 16 + i * 17, cy: r.y + r.h - 14, r: 6, fill: k === 0 ? "var(--surface)" : k === 1 ? IRON : GOLD, stroke: "var(--ink)", "stroke-width": 1 }, gDots);
+      });
+    });
+    document.getElementById("sv-count").textContent = "Step " + layer;
+    var nseen = Object.keys(seen).length;
+    document.getElementById("sv-count2").textContent = nseen + (nseen === 1 ? " state" : " states") + " found, " + frontier.length + " at the edge";
+  }
+  function drawRoute(route) {
+    var pts = [mid("A")].concat(route.map(function (r) { return mid(r.place); }));
+    var d = "";
+    pts.forEach(function (p, i) { var j = (i % 3 - 1) * 7; d += (i ? "L" : "M") + (p[0] + j) + " " + (p[1] + j + 12); });
+    S("path", { d: d, class: "ln-acc thick", "stroke-linejoin": "round", opacity: 0.85 }, gRoute);
+  }
+  function verdict(a, b, col) {
+    var v = document.getElementById("sv-verdict"); v.textContent = a; v.style.fill = col;
+    document.getElementById("sv-verdict2").textContent = b;
+  }
+  function setRead(t) { document.getElementById("sv-read").textContent = t; }
+  function done() { document.getElementById("sv-step").disabled = true; document.getElementById("sv-run").disabled = true; stop(); }
+  function stop() { if (timer) clearInterval(timer); timer = null; }
+  document.getElementById("sv-step").addEventListener("click", step);
+  document.getElementById("sv-run").addEventListener("click", function () { stop(); timer = setInterval(function () { if (!step()) stop(); }, 450); });
+  document.getElementById("sv-reset").addEventListener("click", reset);
+  document.getElementById("sv-break").addEventListener("change", function (e) { broken = e.target.checked; reset(); });
+  var wasNarrow = null;
+  window.addEventListener("resize", function () { var n = svg.parentNode.clientWidth < 600; if (wasNarrow !== null && n !== wasNarrow) reset(); wasNarrow = n; });
+  reset();
+  wasNarrow = svg.parentNode.clientWidth < 600;
+})();
+
+// Figure: a section through a world.
+(function () {
+  var g = document.getElementById("fworld"); if (!g) return;
+  var L = 20, W = 840, SEA = 250, V = 0.24;           // pixels: left, width, sea level; pixels to a metre of height
+  var X = function (km) { return L + km / 10 * W; }, Y = function (m) { return SEA - m * V; };
+  var zones = [
+    [0, 0.8, "Open sea", "deep water"], [0.8, 2.8, "Shelf", "0.03 mm a year; patches more"], [2.8, 4.0, "Low country", "≈ 0.07"],
+    [4.0, 6.8, "Upland", "≈ 0.3"], [6.8, 10, "Range", "0.6 to 1.6 mm a year"]
+  ];
+  var r = new Rng("how-it-works/section");
+  var bumps = []; for (var i = 0; i < 40; i++) bumps.push([r.next() * 10, 0.08 + r.next() * 0.2, r.next()]);
+  // Each zone's own shape, blended into the next over half a kilometre, as the world's zones blend.
+  var shapes = [
+    [0, 0.8, function (km) { return -70 + km * 15; }],
+    [0.8, 2.8, function (km) { return -48 + (km - 0.8) * 22 + 70 * Math.exp(-Math.pow((km - 1.5) / 0.22, 2)) + 50 * Math.exp(-Math.pow((km - 2.25) / 0.16, 2)); }],
+    [2.8, 4.0, function (km) { return (km - 2.8) * 55 + 10 * Math.sin(km * 9); }],
+    [4.0, 6.8, function (km) { var t = (km - 4) / 2.8; return 70 + t * 160 + 110 * Math.pow(Math.abs(Math.sin(km * 4.1)), 1.4) - 40 * Math.exp(-Math.pow((km - 5.3) / 0.15, 2)); }],
+    [6.8, 10, function (km) { var u = (km - 6.8) / 3.2; return 120 + u * 130 + 520 * Math.pow(Math.abs(Math.sin(km * 3.3 + 0.6)), 1.6); }]
+  ];
+  function h(km) {
+    var v = 0, wsum = 0;
+    shapes.forEach(function (z, i) {
+      var a = i ? Math.min(1, Math.max(0, (km - (z[0] - 0.25)) / 0.5)) : 1, b = i < shapes.length - 1 ? Math.min(1, Math.max(0, ((z[1] + 0.25) - km) / 0.5)) : 1;
+      var w = a * b; if (w > 0) { v += w * z[2](km); wsum += w; }
+    });
+    v /= wsum;
+    bumps.forEach(function (b) { if (km > 2.8) v += (km > 6.8 ? 18 : 6) * b[2] * Math.exp(-Math.pow((km - b[0]) / b[1] * 3, 2)); });
+    return Math.min(800, v);
+  }
+  // Zone bands.
+  zones.forEach(function (z) {
+    S("rect", { x: X(z[0]) + 1, y: 8, width: X(z[1]) - X(z[0]) - 2, height: 36, rx: 6, class: "box-world" }, g);
+    S("text", { x: X(z[0]) + 8, y: 23, class: "t-sm t-b", text: z[2] }, g);
+    S("text", { x: X(z[0]) + 8, y: 38, class: "t-xs", text: z[3] }, g);
+  });
+  // Land and sea.
+  var d = "M" + X(0) + " 280", n = 420;
+  for (var k = 0; k <= n; k++) { var km = k / n * 10; d += " L" + X(km).toFixed(1) + " " + Y(h(km)).toFixed(1); }
+  d += " L" + X(10) + " 280 Z";
+  S("rect", { x: X(0), y: SEA, width: X(2.8) - X(0), height: 30, class: "f-sea" }, g);
+  S("path", { d: d, class: "f-land", stroke: "var(--ink-3)", "stroke-width": 1 }, g);
+  S("line", { x1: X(0), x2: X(2.8), y1: SEA, y2: SEA, class: "ln-core" }, g);
+  [[1.5, "islands", -14], [3.4, "fields, 0 to 80 m", -28], [5.6, "fells, tops 250 to 400 m", -20]].forEach(function (a) {
+    S("text", { x: X(a[0]), y: Y(h(a[0])) + a[2], class: "t-xs", "text-anchor": "middle", text: a[1] }, g);
+  });
+  S("text", { x: X(6.75), y: 62, class: "t-xs", "text-anchor": "end", text: "summits 650 to 800 m →" }, g);
+  S("text", { x: X(0.4), y: SEA - 8, class: "t-xs t-core", "text-anchor": "middle", text: "sea level" }, g);
+  S("text", { x: L, y: 296, class: "t-xs", text: "south: 0 km" }, g);
+  S("text", { x: L + W, y: 296, class: "t-xs", "text-anchor": "end", text: "north: 10 km" }, g);
+})();
+
+// Figure: a ground fitted to a slope.
+(function () {
+  var g = document.getElementById("ffit"); if (!g) return;
+  var X = function (m) { return 40 + m * 7.2; }, Y = function (m) { return 40 + (16 - m) * 11; };
+  function land(m) { return 14.5 - 0.115 * m + 0.6 * Math.sin(m / 7) + 0.4 * Math.sin(m / 3.1 + 1); }
+  var a = 22, b = 84, n = 3, w = (b - a) / n, steps = [];
+  for (var i = 0; i < n; i++) {
+    var s = 0, c = 0;
+    for (var m = a + i * w; m <= a + (i + 1) * w; m += 0.25) { s += land(m); c++; }
+    steps.push(s / c);
+  }
+  // The fitted surface: banks out to the land, half again as broad as they are high (six metres at least).
+  function fitted(m) {
+    if (m >= a && m <= b) return steps[Math.min(n - 1, Math.floor((m - a) / w))];
+    var edge = m < a ? a : b, hgt = m < a ? steps[0] : steps[n - 1], dh = land(edge) - hgt;
+    var reach = Math.max(6, 1.5 * Math.abs(dh)), t = Math.abs(m - edge) / reach;
+    if (t >= 1) return land(m);
+    return hgt + (land(m) - hgt) * t;
+  }
+  var pl = "", pf = "", N = 440;
+  for (var k = 0; k <= N; k++) { var mm = k / N * 108; pl += (k ? "L" : "M") + X(mm).toFixed(1) + " " + Y(land(mm)).toFixed(1); pf += (k ? "L" : "M") + X(mm).toFixed(1) + " " + Y(fitted(mm)).toFixed(1); }
+  S("path", { d: pf + " L" + X(108) + " 240 L" + X(0) + " 240 Z", class: "f-land", opacity: 0.7 }, g);
+  S("path", { d: pl, class: "ln-world dash" }, g);
+  S("path", { d: pf, class: "ln-acc thick", "stroke-linejoin": "round" }, g);
+  steps.forEach(function (hgt, i) {
+    S("text", { x: X(a + (i + 0.5) * w), y: Y(hgt) - 10, class: "t-xs", "text-anchor": "middle", text: "terrace " + (i + 1) }, g);
+    if (i) S("text", { x: X(a + i * w) - 6, y: (Y(hgt) + Y(steps[i - 1])) / 2 + 8, class: "t-xs t-acc", "text-anchor": "end", text: (steps[i - 1] - hgt).toFixed(1) + " m step" }, g);
+  });
+  S("path", { d: "M" + X(a) + " 222 H" + X(b), class: "ln", "marker-start": "url(#ah)", "marker-end": "url(#ah)" }, g);
+  S("text", { x: X((a + b) / 2), y: 238, class: "t-xs", "text-anchor": "middle", text: "the house's ground, 62 m deep" }, g);
+  S("text", { x: X(6), y: Y(land(6)) - 12, class: "t-xs", text: "the land as found" }, g);
+  S("text", { x: X(a) - 8, y: Y(steps[0]) + 26, class: "t-xs", "text-anchor": "end", text: "bank: 1½ across for 1 up" }, g);
+  S("text", { x: X(100), y: Y(fitted(100)) - 14, class: "t-xs", "text-anchor": "middle", text: "eased back" }, g);
+})();
+
+// Figure: two carvers.
+(function () {
+  var svg = document.getElementById("carve-svg"); if (!svg) return;
+  var mode = "dc", cell = 26, W = 880, H = 330;
+  function boxSd(x, y, cx, cy, hx, hy, ang) {
+    var c = Math.cos(ang), s = Math.sin(ang), dx = x - cx, dy = y - cy;
+    var lx = Math.abs(c * dx + s * dy) - hx, ly = Math.abs(-s * dx + c * dy) - hy;
+    return Math.hypot(Math.max(lx, 0), Math.max(ly, 0)) + Math.min(Math.max(lx, ly), 0);
+  }
+  var B = [[330, 172, 196, 92, 0.2], [632, 196, 128, 66, -0.34], [470, 92, 70, 40, 0.62]];
+  function f(x, y) {
+    var d = Infinity; B.forEach(function (b) { d = Math.min(d, boxSd(x, y, b[0], b[1], b[2], b[3], b[4])); });
+    return Math.max(d, -boxSd(x, y, 520, 214, 9, 60, 0.15));   // a joint cut through the rock
+  }
+  function grad(x, y) { var e = 0.5, gx = f(x + e, y) - f(x - e, y), gy = f(x, y + e) - f(x, y - e), l = Math.hypot(gx, gy) || 1; return [gx / l, gy / l]; }
+  function cross(p, q, fp, fq) { var t = fp / (fp - fq); return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]; }
+  function draw() {
+    clear(svg);
+    var nx = Math.ceil(W / cell) + 1, ny = Math.ceil(H / cell) + 1, v = [];
+    for (var j = 0; j <= ny; j++) { v[j] = []; for (var i = 0; i <= nx; i++) v[j][i] = f(i * cell, j * cell); }
+    // The rock as it truly is.
+    var fill = "";
+    var step = 3;
+    for (var yy = 0; yy < H; yy += step) {
+      var run = -1;
+      for (var xx = 0; xx <= W; xx += step) {
+        var inside = xx < W && f(xx + step / 2, yy + step / 2) < 0;
+        if (inside && run < 0) run = xx;
+        if (!inside && run >= 0) { fill += "M" + run + " " + yy + "h" + (xx - run) + "v" + step + "h" + (run - xx) + "z"; run = -1; }
+      }
+    }
+    S("path", { d: fill, class: "f-surface3" }, svg);
+    var grid = "";
+    for (var i2 = 0; i2 <= nx; i2++) grid += "M" + i2 * cell + " 0V" + H;
+    for (var j2 = 0; j2 <= ny; j2++) grid += "M0 " + j2 * cell + "H" + W;
+    S("path", { d: grid, class: "grid", opacity: 0.7 }, svg);
+    var segs = "", dots = [], cells = 0;
+    if (mode === "mc") {
+      for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) {
+        var c = [[i * cell, j * cell], [(i + 1) * cell, j * cell], [(i + 1) * cell, (j + 1) * cell], [i * cell, (j + 1) * cell]];
+        var fv = [v[j][i], v[j][i + 1], v[j + 1][i + 1], v[j + 1][i]], pts = [];
+        for (var e = 0; e < 4; e++) { var a = e, b = (e + 1) % 4; if ((fv[a] < 0) !== (fv[b] < 0)) pts.push(cross(c[a], c[b], fv[a], fv[b])); }
+        if (pts.length) cells++;
+        if (pts.length === 2) segs += "M" + pts[0].join(" ") + "L" + pts[1].join(" ");
+        if (pts.length === 4) {
+          var centre = f((i + .5) * cell, (j + .5) * cell) < 0 === fv[0] < 0;
+          segs += centre ? "M" + pts[0].join(" ") + "L" + pts[1].join(" ") + "M" + pts[2].join(" ") + "L" + pts[3].join(" ") : "M" + pts[0].join(" ") + "L" + pts[3].join(" ") + "M" + pts[1].join(" ") + "L" + pts[2].join(" ");
+        }
+        pts.forEach(function (p) { dots.push(p); });
+      }
+    } else {
+      var vert = {};
+      for (var j = 0; j < ny; j++) for (var i = 0; i < nx; i++) {
+        var c = [[i * cell, j * cell], [(i + 1) * cell, j * cell], [(i + 1) * cell, (j + 1) * cell], [i * cell, (j + 1) * cell]];
+        var fv = [v[j][i], v[j][i + 1], v[j + 1][i + 1], v[j + 1][i]], ps = [];
+        for (var e = 0; e < 4; e++) { var a = e, b = (e + 1) % 4; if ((fv[a] < 0) !== (fv[b] < 0)) ps.push(cross(c[a], c[b], fv[a], fv[b])); }
+        if (!ps.length) continue;
+        cells++;
+        // The point that best fits every face crossing the cell: least squares on the planes, held to the cell.
+        var mx = 0, my = 0; ps.forEach(function (p) { mx += p[0] / ps.length; my += p[1] / ps.length; });
+        var lam = 0.02, a11 = lam, a12 = 0, a22 = lam, b1 = lam * mx, b2 = lam * my;
+        ps.forEach(function (p) { var n = grad(p[0], p[1]), d = n[0] * p[0] + n[1] * p[1]; a11 += n[0] * n[0]; a12 += n[0] * n[1]; a22 += n[1] * n[1]; b1 += n[0] * d; b2 += n[1] * d; });
+        var det = a11 * a22 - a12 * a12, px = (a22 * b1 - a12 * b2) / det, py = (a11 * b2 - a12 * b1) / det;
+        px = Math.min(Math.max(px, i * cell), (i + 1) * cell); py = Math.min(Math.max(py, j * cell), (j + 1) * cell);
+        vert[i + "," + j] = [px, py]; dots.push([px, py]);
+      }
+      // Join the points of the two cells on either side of every cell edge the surface crosses.
+      for (var j = 0; j <= ny; j++) for (var i = 0; i <= nx; i++) {
+        if (i < nx && (v[j][i] < 0) !== (v[j][i + 1] < 0)) { var p = vert[i + "," + (j - 1)], q = vert[i + "," + j]; if (p && q) segs += "M" + p.join(" ") + "L" + q.join(" "); }
+        if (j < ny && (v[j][i] < 0) !== (v[j + 1][i] < 0)) { var p = vert[(i - 1) + "," + j], q = vert[i + "," + j]; if (p && q) segs += "M" + p.join(" ") + "L" + q.join(" "); }
+      }
+    }
+    S("path", { d: segs, class: mode === "mc" ? "ln-core thick" : "ln-acc thick", "stroke-linecap": "round" }, svg);
+    var dg = S("g", {}, svg);
+    dots.forEach(function (p) { S("circle", { cx: p[0].toFixed(1), cy: p[1].toFixed(1), r: 2.6, class: mode === "mc" ? "f-core" : "f-acc" }, dg); });
+    document.getElementById("carve-read").textContent = (mode === "mc" ? "Marching cubes: " + dots.length + " points, each on a cell edge, in " : "Edge-keeping: " + dots.length + " points, one inside each of ") + cells + " cells the surface crosses. Cell: " + cell + " px.";
+  }
+  segmented(document.getElementById("carve-mode"), function (v) { mode = v; draw(); });
+  document.getElementById("carve-cell").addEventListener("input", function (e) { cell = Number(e.target.value); draw(); });
+  draw();
+})();
+
+// Figure: how plants are drawn with distance.
+(function () {
+  var g = document.getElementById("flod"); if (!g) return;
+  var X = function (m) { return 150 + Math.log10(m) / Math.log10(3000) * 710; };
+  var rows = [
+    ["Trees", [[1, 26, "whole, leaves one by one", "box-draw"], [26, 215, "whole, painted leaf cards", "box"], [215, 440, "card trees", "box-plain"], [440, 3000, "woods painted by the far material", "box-plain"]]],
+    ["Grass", [[1, 15, "blades", "box-draw"], [15, 80, "painted tufts", "box"], [80, 200, "1 tuft in 4", "box-plain"], [200, 3000, "the colour of the turf", "box-plain"]]],
+    ["Ground", [[1, 215, "the walked sheet, 1.2 m cells, drawn per pixel", "box-draw"], [215, 3000, "far land, one sheet in rings to 3 km", "box-plain"]]]
+  ];
+  rows.forEach(function (r, i) {
+    var y = 24 + i * 58;
+    S("text", { x: 14, y: y + 25, class: "t-b", text: r[0] }, g);
+    r[1].forEach(function (b) {
+      var x0 = X(b[0]), x1 = X(b[1]);
+      S("rect", { x: x0 + 1, y: y, width: x1 - x0 - 2, height: 40, rx: 6, class: b[3] }, g);
+      var t = S("text", { x: x0 + 8, y: y + 25, class: "t-sm", text: b[2] }, g);
+      if (x1 - x0 < 110) { t.setAttribute("class", "t-xs"); }
+    });
+  });
+  var ay = 210;
+  S("line", { x1: X(1), x2: X(3000), y1: ay, y2: ay, class: "axis" }, g);
+  [1, 3, 10, 30, 100, 300, 1000, 3000].forEach(function (m) {
+    S("line", { x1: X(m), x2: X(m), y1: ay, y2: ay + 5, class: "axis" }, g);
+    S("text", { x: X(m), y: ay + 20, class: "t-xs", "text-anchor": "middle", text: m >= 1000 ? m / 1000 + " km" : m + " m" }, g);
+  });
+  S("text", { x: X(1), y: ay + 40, class: "t-xs", text: "distance from the eye (each step of the scale is ten times the last)" }, g);
+})();
+
+// Figure: baking one point.
+(function () {
+  var g = document.getElementById("fbake"); if (!g) return;
+  var FL = 250, WL = 160, WR = 470, WT = 170, CX = 315, CY = 170, RAD = 155, DOOR = 196;
+  S("rect", { x: WR, y: 30, width: 150, height: 220, class: "f-soft-core" }, g);
+  S("text", { x: WR + 75, y: 56, class: "t-xs t-core", "text-anchor": "middle", text: "sky, beyond the door" }, g);
+  S("path", { d: "M" + WL + " " + FL + " V" + WT + " A" + RAD + " " + RAD + " 0 0 1 " + WR + " " + WT + " V" + DOOR, class: "ln-ink thick" }, g);
+  S("path", { d: "M" + (WL - 20) + " " + FL + " H" + (WR + 150), class: "ln-ink thick" }, g);
+  var P = [370, FL];
+  function hit(ang) {
+    var dx = Math.cos(ang), dy = -Math.sin(ang), best = null;
+    if (dx > 0) { var t = (WR - P[0]) / dx, y = P[1] + dy * t; if (y >= DOOR) return { sky: true, x: P[0] + dx * 290, y: P[1] + dy * 290 }; if (y >= WT) best = { x: WR, y: y }; }
+    if (dx < 0) { var t2 = (WL - P[0]) / dx, y2 = P[1] + dy * t2; if (y2 >= WT) best = { x: WL, y: y2 }; }
+    if (!best) {
+      var ox = P[0] - CX, oy = P[1] - CY, b = ox * dx + oy * dy, c = ox * ox + oy * oy - RAD * RAD, t3 = -b + Math.sqrt(b * b - c);
+      best = { x: P[0] + dx * t3, y: P[1] + dy * t3 };
+    }
+    return best;
+  }
+  var hits = [];
+  for (var i = 0; i < 13; i++) {
+    var ang = (6 + i * 168 / 12) * Math.PI / 180, h = hit(ang);
+    S("line", { x1: P[0], y1: P[1], x2: h.x, y2: h.y, class: h.sky ? "ln-core" : "ln-play", opacity: 0.9 }, g);
+    if (!h.sky) { S("circle", { cx: h.x, cy: h.y, r: 3.4, class: "f-play" }, g); hits.push(h); }
+  }
+  // The bounce before: a hit point gathers in turn.
+  var q = hits[Math.floor(hits.length / 2)];
+  for (var k = 0; k < 7; k++) {
+    var a2 = (200 + k * 20) * Math.PI / 180;
+    S("line", { x1: q.x, y1: q.y, x2: q.x + Math.cos(a2) * 34, y2: q.y - Math.sin(a2) * 34, class: "ln-play", opacity: 0.45, "stroke-dasharray": "3 3" }, g);
+  }
+  S("circle", { cx: P[0], cy: P[1], r: 6, class: "f-acc" }, g);
+  S("text", { x: P[0] - 6, y: FL + 18, class: "t-xs", "text-anchor": "end", text: "a point on the floor" }, g);
+  S("text", { x: q.x + 10, y: q.y - 8, class: "t-xs", text: "the bounce before" }, g);
+  box(g, 650, 70, 220, 128, "box-acc", "Kept at the point", ["per colour: a brightness, and", "the way the light comes from", "(E0 + E1 · n), so a stone's face", "turned to the door is lit more"], { top: 24 });
+})();
+
+// Figure: one frame.
+(function () {
+  var g = document.getElementById("fframe"); if (!g) return;
+  var steps = [
+    ["box-draw", "The scene", "materials, baked", "light, shadows"],
+    ["box", "Hollows", "ambient occlusion", "at half size"],
+    ["box", "The air", "mist, haze, clouds", "and their shadows"],
+    ["box", "Smoothing", "blended over", "jittered frames"],
+    ["box", "Eye and curve", "bloom, exposure,", "ACES tone curve"],
+    ["box-acc", "The screen", "9.5–14 ms a frame", "in a valley"]
+  ];
+  var w = 134, gap = 11;
+  steps.forEach(function (s, i) {
+    var x = 6 + i * (w + gap);
+    box(g, x, 30, w, 86, s[0], s[1], [s[2], s[3]], { top: 26, small: false, lh: 16 });
+    if (i) arrow(g, "M" + (x - gap + 2) + " 73 H" + (x - 3), "ln", "ah");
+  });
+})();
+
+// Figure: how close is close enough.
+(function () {
+  var g = document.getElementById("freach"); if (!g) return;
+  var M = 50, CY = 112;
+  var things = [["a shut door", 1.7, 105], ["a secret door", 0.85, 258], ["a key", 1.2, 392], ["a lever", 1.25, 534], ["the chest", 2.0, 744]];
+  things.forEach(function (t) {
+    var r = t[1] * M;
+    S("circle", { cx: t[2], cy: CY, r: r, class: "f-soft-acc", stroke: "var(--accent)", "stroke-dasharray": "5 4", "stroke-width": 1.4 }, g);
+    S("rect", { x: t[2] - 5, y: CY - 5, width: 10, height: 10, rx: 2, class: "f-ink" }, g);
+    var a = -0.6, bx = t[2] + Math.cos(a) * (r - 0.28 * M), by = CY + Math.sin(a) * (r - 0.28 * M);
+    S("circle", { cx: bx, cy: by, r: 0.28 * M, class: "box-play" }, g);
+    S("text", { x: t[2], y: CY + r + 18, class: "t-sm t-b", "text-anchor": "middle", text: t[0] }, g);
+    S("text", { x: t[2], y: CY + r + 33, class: "t-xs", "text-anchor": "middle", text: t[1] + " m" }, g);
+  });
+  S("path", { d: "M20 250 H" + (20 + M), class: "ln-ink" }, g);
+  S("text", { x: 20 + M + 8, y: 254, class: "t-xs", text: "1 m · the ochre disc is the body, 0.28 m in radius" }, g);
+})();
+
+// Figure: squares of land about the walker.
+(function () {
+  var svg = document.getElementById("st-svg"); if (!svg) return;
+  var SQ = 256, COLS = 13, s = 880 / (COLS * SQ), ROWS = Math.ceil(560 / (SQ * s));
+  var LEVELS = [0.02, 0.05, 0.1, 0.2, 0.4, 0.8, 1.6];
+  var KEEP = [0.84, 0.68, 0.53, 0.36, 0.19, 0.06, 0.01];       // share of a square's 131,072 triangles kept, as measured
+  var FULL = 131072, NEAR = 700, FINE_NEAR = 150;
+  // As the walk page chooses: 1.6 mm for every metre off, rounded up to the next level.
+  function levelFor(d) { var want = Math.max(0.02, d * 0.0016); for (var k = 0; k < LEVELS.length; k++) if (LEVELS[k] >= want) return k; return LEVELS.length - 1; }
+  function distRect(px, pz, x0, z0, size) { var dx = Math.max(x0 - px, 0, px - (x0 + size)), dz = Math.max(z0 - pz, 0, pz - (z0 + size)); return Math.hypot(dx, dz); }
+  var walker = [COLS * SQ / 2 + 40, ROWS * SQ / 2 - 30], fine = false;
+  var gSq = S("g", {}, svg), gRing = S("g", {}, svg), gW = S("g", {}, svg);
+  function shade(k) { return 0.85 - k * 0.12; }
+  function big(n) { return n >= 1e6 ? (n / 1e6).toFixed(2) + " million" : Math.round(n / 1000) + " thousand"; }
+  function draw() {
+    clear(gSq); clear(gRing); clear(gW);
+    var made = 0, tris = 0, split = 0, counts = LEVELS.map(function () { return 0; });
+    for (var j = 0; j < ROWS; j++) for (var i = 0; i < COLS; i++) {
+      var x0 = i * SQ, z0 = j * SQ, d = distRect(walker[0], walker[1], x0, z0, SQ);
+      var px = x0 * s, py = z0 * s, w = SQ * s;
+      if (d > NEAR) { S("rect", { x: px + 1, y: py + 1, width: w - 2, height: w - 2, rx: 3, class: "f-surface2" }, gSq); continue; }
+      made++;
+      if (fine && d <= FINE_NEAR) {
+        split++;
+        for (var q = 0; q < 4; q++) {
+          var qx = x0 + (q % 2) * SQ / 2, qz = z0 + Math.floor(q / 2) * SQ / 2, k2 = levelFor(distRect(walker[0], walker[1], qx, qz, SQ / 2));
+          var r2 = S("rect", { x: qx * s + 1, y: qz * s + 1, width: w / 2 - 2, height: w / 2 - 2, rx: 2, fill: "var(--draw)" }, gSq);
+          r2.setAttribute("fill-opacity", shade(k2));
+          S("text", { x: qx * s + w / 4, y: qz * s + w / 4 + 4, class: "t-xs", "text-anchor": "middle", text: "½ m", fill: "var(--surface)" }, gSq).style.fill = k2 < 3 ? "var(--surface)" : "var(--ink)";
+        }
+        continue;
+      }
+      var k = levelFor(d); counts[k]++; tris += FULL * KEEP[k];
+      var r = S("rect", { x: px + 1, y: py + 1, width: w - 2, height: w - 2, rx: 3, fill: "var(--draw)" }, gSq);
+      r.setAttribute("fill-opacity", shade(k));
+      var t = S("text", { x: px + w / 2, y: py + w / 2 + 4, class: "t-xs", "text-anchor": "middle", text: Math.round(LEVELS[k] * 100) + " cm" }, gSq);
+      t.style.fill = k < 3 ? "var(--surface)" : "var(--ink-2)";
+    }
+    [12.5, 31.25, 62.5, 125, 250, 500, NEAR].forEach(function (rad, i) {
+      S("circle", { cx: walker[0] * s, cy: walker[1] * s, r: rad * s, fill: "none", stroke: i === 6 ? "var(--accent)" : "var(--ink)", "stroke-opacity": i === 6 ? 0.8 : 0.35, "stroke-dasharray": i === 6 ? "6 4" : "2 3" }, gRing);
+    });
+    S("circle", { cx: walker[0] * s, cy: walker[1] * s, r: 30, fill: "transparent", style: "touch-action:none;cursor:grab" }, gW);
+    S("circle", { cx: walker[0] * s, cy: walker[1] * s, r: 9, class: "f-acc", stroke: "var(--surface)", "stroke-width": 2.5, style: "touch-action:none;cursor:grab" }, gW);
+    var tx = "Squares made: " + made + (fine ? " (" + split + " split into quarters at half a metre)" : "") + ". ";
+    tx += fine ? "Half-metre quarters take 0.85–0.98 s each to make; their meshes keep 58% of a quarter's triangles at 2 cm and 3% at 20 cm." : "Triangles kept: about " + big(tris) + ", against " + big(made * FULL) + " in the full lattices; " + counts[0] + " square" + (counts[0] === 1 ? "" : "s") + " at 2 cm.";
+    document.getElementById("st-read").textContent = tx;
+  }
+  var dragging = false;
+  svg.addEventListener("pointerdown", function (ev) {
+    if (ev.pointerType === "touch") { var p = svgPoint(svg, ev); if (Math.hypot(p.x - walker[0] * s, p.y - walker[1] * s) > 34) return; }
+    dragging = true; svg.setPointerCapture(ev.pointerId); move(ev); ev.preventDefault();
+  });
+  svg.addEventListener("pointermove", function (ev) { if (dragging) move(ev); });
+  svg.addEventListener("pointerup", function () { dragging = false; });
+  svg.addEventListener("keydown", function (ev) {
+    var k = { ArrowLeft: [-40, 0], ArrowRight: [40, 0], ArrowUp: [0, -40], ArrowDown: [0, 40] }[ev.key];
+    if (k) { walker[0] = Math.min(COLS * SQ, Math.max(0, walker[0] + k[0])); walker[1] = Math.min(ROWS * SQ, Math.max(0, walker[1] + k[1])); draw(); ev.preventDefault(); }
+  });
+  function move(ev) { var p = svgPoint(svg, ev); walker = [Math.min(COLS * SQ, Math.max(0, p.x / s)), Math.min(560 / s, Math.max(0, p.y / s))]; draw(); }
+  document.getElementById("st-fine").addEventListener("change", function (e) { fine = e.target.checked; draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dungeons: walk the world</title>
+  <style>:root{--sky:#9ab6cf;--panel:#0c0b0aa8;--panel-edge:#e8e2d659;--ink:#e8e2d6;--focus:#e0b070;--pressed:#e0b07073;--text:13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;--lightningcss-light: ;--lightningcss-dark:initial;color-scheme:dark}html,body{overscroll-behavior:none;height:100%;margin:0;overflow:hidden}body{background:var(--sky);color:var(--ink);font:var(--text);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}canvas#view{touch-action:none;width:100vw;height:100vh;display:block}#hud,#hint,#menus select,#menus .box{color:var(--ink);background:var(--panel);border-radius:6px}#hud{left:calc(12px + env(safe-area-inset-left,0px));top:calc(10px + env(safe-area-inset-top,0px));white-space:pre;font-variant-numeric:tabular-nums;pointer-events:none;max-width:calc(100vw - 24px);padding:8px 12px;position:fixed;overflow:hidden}#hint{right:calc(12px + env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px));pointer-events:none;max-width:calc(100vw - 24px);padding:6px 10px;transition:opacity .4s;position:fixed}#hint .touch{display:none}#menus{right:calc(12px + env(safe-area-inset-right,0px));top:calc(10px + env(safe-area-inset-top,0px));flex-wrap:wrap;justify-content:flex-end;align-items:stretch;gap:8px;display:flex;position:fixed}#menus select{font:inherit;border:1px solid var(--panel-edge);max-width:46vw;padding:6px 8px}#menus .box{border:1px solid var(--panel-edge);cursor:pointer;white-space:nowrap;align-items:center;gap:7px;padding:6px 10px;display:inline-flex}#menus .box input{width:16px;height:16px;accent-color:var(--focus);margin:0}#menus a.box{color:var(--focus);text-decoration:none}#menus select:focus-visible,#menus .box:focus-within{outline:2px solid var(--focus);outline-offset:1px}#stick{border:1.5px solid var(--panel-edge);pointer-events:none;opacity:0;background:#0b0a0938;border-radius:50%;width:112px;height:112px;margin:-56px 0 0 -56px;transition:opacity .15s;position:fixed}#stick.on{opacity:1}#knob{background:#e8e2d680;border-radius:50%;width:46px;height:46px;margin:-23px 0 0 -23px;transition:background .15s;position:absolute;top:50%;left:50%}#stick.run #knob{background:var(--focus)}.pad{border:1.5px solid var(--panel-edge);width:56px;height:56px;color:var(--ink);letter-spacing:.08em;text-transform:uppercase;touch-action:none;-webkit-user-select:none;user-select:none;background:#0b0a0952;border-radius:50%;padding:0;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;display:none;position:fixed}.pad:active,.pad[aria-pressed=true]{background:var(--pressed)}#fly{right:calc(22px + env(safe-area-inset-right,0px));bottom:calc(26px + env(safe-area-inset-bottom,0px));width:68px;height:68px;font-size:12px}#up{right:calc(28px + env(safe-area-inset-right,0px));bottom:calc(108px + env(safe-area-inset-bottom,0px))}#down{right:calc(104px + env(safe-area-inset-right,0px));bottom:calc(32px + env(safe-area-inset-bottom,0px))}#next{right:calc(28px + env(safe-area-inset-right,0px));bottom:calc(180px + env(safe-area-inset-bottom,0px))}body.touch #fly,body.touch #next,body.touch.flying #up,body.touch.flying #down{display:block}body.touch #hint{right:auto;left:calc(12px + env(safe-area-inset-left,0px));max-width:calc(100vw - 140px)}body.touch #hint .keys{display:none}body.touch #hint .touch{display:inline}body.touched #hint{opacity:0}@media (max-width:640px){#menus{left:calc(12px + env(safe-area-inset-left,0px));justify-content:flex-start}#menus select{max-width:44vw}#hud{top:calc(98px + env(safe-area-inset-top,0px));padding:6px 9px;font-size:10px}#hint{font-size:11px}}</style>
+  <script type="module" crossorigin src="./assets/modulepreload-polyfill-P2Xu9kJm.js"></script>
+  <script type="module" crossorigin src="./assets/BufferGeometryUtils-BRVHU7iX.js"></script>
+  <script type="module" crossorigin src="./assets/rolldown-runtime-DK3Fl9T5.js"></script>
+  <script type="module" crossorigin src="./assets/MarchingCubes-BuWCeiKJ.js"></script>
+  <script type="module" crossorigin src="./assets/rng-m6Ywe3OL.js"></script>
+  <script type="module" crossorigin src="./assets/canal-azkJBm_1.js"></script>
+  <script type="module" crossorigin src="./assets/town-zmMAcsR1.js"></script>
+  <script type="module" crossorigin src="./assets/three.module-ehfymr6h.js"></script>
+  <script type="module" crossorigin src="./assets/meshBuilder-D-dMrtIl.js"></script>
+  <script type="module" crossorigin src="./assets/castle-Blu0jHGO.js"></script>
+  <script type="module" crossorigin src="./assets/site-B7RFkHrn.js"></script>
+  <script type="module" crossorigin src="./assets/cathedral-BKE3jBHp.js"></script>
+  <script type="module" crossorigin src="./assets/game-DaStkdag.js"></script>
+  <script type="module" crossorigin src="./assets/inkWorld-C7lWc9-2.js"></script>
+  <script type="module" crossorigin src="./assets/player-DQCLLFMG.js"></script>
+  <script type="module" crossorigin src="./assets/main-BNmB2Lzi.js"></script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+  <div id="hud">Starting…</div>
+  <div id="menus">
+    <select id="worlds" aria-label="World"></select>
+    <select id="where" aria-label="Go to"></select>
+    <label class="box" title="Lay the ground near you at half a metre, with tussocks, stones and rills"><input type="checkbox" id="fine"> Half-metre ground</label>
+    <a class="box" id="play" href="./index.html">Build a house here</a>
+  </div>
+  <div id="hint"><span class="keys">Click to look about · W A S D to walk · Shift to run · Space to jump · V to fly (Space up, C down) · P next place · 1 to 4 a valley head, Shift+1 to 4 an island · R ride a way, or the ferry · M the map · T triangles · N sound</span><span class="touch">Left thumb to walk, push far to run · drag on the right to look · Fly, Up and Down · Next place</span></div>
+</body>
+</html>
